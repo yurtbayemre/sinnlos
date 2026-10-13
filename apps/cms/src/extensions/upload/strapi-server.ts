@@ -58,10 +58,16 @@
  * a 5xx for operational failures.
  *
  *  7. File deletes: the upload SERVICE's `remove` is wrapped so that every
- *     delete (Media Library single, bulk and folder deletes; claimAndRemove
- *     in utils/upload-orphans.ts) writes its audit row (utils/delete-audit.ts)
- *     in one transaction with core's delete of the bytes and the row: a
- *     failing audit insert removes nothing.
+ *     delete takes the one reservation of utils/upload-orphans.ts before
+ *     core deletes the bytes and then the row: the file row locked and
+ *     re-read (a file already gone or being removed is skipped, so two
+ *     overlapping deletes remove and record it once), a tombstone and the
+ *     delete's audit row (utils/delete-audit.ts) committed together. A
+ *     failing audit insert removes nothing; a failure after the reservation
+ *     leaves a tombstoned row no attach path takes, retried later. The
+ *     Media Library's single, bulk and folder deletes reserve here, without
+ *     the app's rules (an admin may delete any file); `claimAndRemove`
+ *     reserves with them and calls `remove` inside its reservation.
  *
  * Upgrade tripwire (FX03): the wrapper relies on Strapi internals — the
  * `content-api` controller and the `upload` service being factories, the
@@ -88,7 +94,7 @@ import {
 } from "@sinnlos/domain";
 import { errors } from "@strapi/utils";
 
-import { recordDelete, type DeletedFile } from "../../utils/delete-audit";
+import type { DeletedFile } from "../../utils/delete-audit";
 import {
   MAX_FILES_PER_REQUEST,
   canonicalFilename,
@@ -101,7 +107,7 @@ import {
   toFileArray,
   uploadProfileOf,
 } from "../../utils/upload-guard";
-import { fileLinks } from "../../utils/upload-orphans";
+import { isReservedRemoval, reserveRemoval, runReservedRemoval } from "../../utils/upload-orphans";
 import type { RandomAccessFile } from "../../utils/upload-zip";
 
 const FILE_UID = "plugin::upload.file";
@@ -351,24 +357,22 @@ async function checkFile(
 }
 
 /**
- * Runs the upload service's `remove(file)` with its audit row, in one
- * transaction (7 in the header): the row commits exactly when the file
- * row's delete commits; a failing insert removes nothing.
+ * The upload service's `remove(file)` behind the reservation (7 in the
+ * header). Inside claimAndRemove's own reservation it removes at once;
+ * otherwise (the Media Library) it reserves first, without the app's
+ * rules, and answers null for a file that is gone or being removed.
  */
-async function removeWithDeleteAudit<T>(
+async function reservedRemove<T>(
   strapi: UploadStrapi,
   file: DeletedFile,
-  remove: () => Promise<T>,
-): Promise<T> {
-  const transaction = strapi.db.transaction;
-  if (typeof transaction !== "function") {
-    throw new Error("[upload-extension] strapi.db.transaction is missing (delete-audit tripwire)");
-  }
-  return transaction.call(strapi.db, async ({ trx }) => {
-    const links = typeof file.id === "number" ? await fileLinks(strapi, file.id, trx) : [];
-    await recordDelete(strapi as never, { kind: "file", file, links });
-    return remove();
-  });
+  remove: (row: DeletedFile) => Promise<T>,
+): Promise<T | null> {
+  if (typeof file?.id !== "number") return remove(file);
+  if (isReservedRemoval(file.id)) return remove(file);
+  const reserved = await reserveRemoval(strapi, file.id);
+  if (!("file" in reserved)) return null;
+  const fileId = file.id;
+  return runReservedRemoval(fileId, () => remove(reserved.file as DeletedFile));
 }
 
 /**
@@ -422,7 +426,7 @@ export function createUploadExtension(io: UploadIo = nodeIo) {
           );
         }
         service.remove = (file: DeletedFile) =>
-          removeWithDeleteAudit(deps.strapi, file, () => originalRemove.call(service, file));
+          reservedRemove(deps.strapi, file, (row) => originalRemove.call(service, row));
         return service;
       },
     );

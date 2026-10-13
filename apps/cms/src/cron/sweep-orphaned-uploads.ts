@@ -22,8 +22,10 @@
  * at all, older than 24 h. A form that links a day-old upload at the moment
  * of the sweep therefore either keeps the file or fails `invalid`; it never
  * keeps a link to a removed file. A tombstoned file (a removal that failed
- * after its claim) is retried once its tombstone is TOMBSTONE_RETRY_MS old.
- * Each removal records its audit row with the source `cron`.
+ * after its reservation, an app's or a Media Library delete) is retried once
+ * its tombstone is TOMBSTONE_RETRY_MS old and nothing links it; the retry
+ * records no second audit row. Each new removal records its audit row with
+ * the source `cron`.
  *
  * The candidate filter is a pure function of (rows, now) — see
  * sweep-orphaned-uploads.test.ts — the sweep itself is the thin I/O shell.
@@ -60,12 +62,14 @@ export function selectSweepCandidates(rows: SweepRow[], now: Date): number[] {
   const candidates: number[] = [];
   for (const row of rows) {
     const file = { provider_metadata: row.providerMetadata };
-    if (uploadedByOf(file) === null) continue;
+    // A stale reservation (a removal that failed after it) is retried
+    // whoever took it, a Media Library delete of an unstamped file too.
     const tombstone = tombstoneOf(file);
     if (tombstone) {
       if (now.getTime() - tombstone.getTime() >= TOMBSTONE_RETRY_MS) candidates.push(row.id);
       continue;
     }
+    if (uploadedByOf(file) === null) continue;
     const created = row.createdAt instanceof Date ? row.createdAt : new Date(row.createdAt ?? "");
     if (Number.isNaN(created.getTime())) continue;
     if (now.getTime() - created.getTime() < ORPHAN_MIN_AGE_MS) continue;
@@ -103,10 +107,13 @@ export async function sweepOrphanedUploads(strapi: any, now: Date = new Date()):
     // lock; selectSweepCandidates only narrows.
     const rows: any[] = await strapi.db
       .getConnection("files")
-      .whereRaw("provider_metadata->>'uploadedBy' IS NOT NULL")
       .where((query: any) =>
         query
-          .where("created_at", "<", cutoff)
+          .where((stamped: any) =>
+            stamped
+              .whereRaw("provider_metadata->>'uploadedBy' IS NOT NULL")
+              .where("created_at", "<", cutoff),
+          )
           .orWhereRaw("provider_metadata->>'removing' IS NOT NULL"),
       )
       .orderBy("id", "asc")
@@ -125,11 +132,7 @@ export async function sweepOrphanedUploads(strapi: any, now: Date = new Date()):
     const ids = candidates.filter((id) => !linked.has(id)).slice(0, SWEEP_MAX_PER_RUN);
     await runWithDeleteAudit({ source: "cron" }, async () => {
       for (const id of ids) {
-        const outcome = await claimAndRemove(strapi, id, {
-          minAgeMs: ORPHAN_MIN_AGE_MS,
-          retryTombstoneAfterMs: TOMBSTONE_RETRY_MS,
-          now,
-        });
+        const outcome = await claimAndRemove(strapi, id, { minAgeMs: ORPHAN_MIN_AGE_MS, now });
         if (outcome === "removed") swept += 1;
       }
     });

@@ -123,6 +123,15 @@ function makeStrapi() {
         };
         return builder;
       },
+      queryBuilder: () => {
+        const qb = {
+          select: () => qb,
+          where: () => qb,
+          forUpdate: () => qb,
+          execute: async () => [],
+        };
+        return qb;
+      },
     },
     eventHub: {
       on: (event: string, listener: Listener) => {
@@ -731,7 +740,7 @@ describe("POST /api/upload wrapper — uploadedBy stamping", () => {
   });
 });
 
-describe("the upload service's remove records the delete (delete trail)", () => {
+describe("the upload service's remove takes the reservation (delete trail, Media Library)", () => {
   const serviceOf = (plugin: UploadPlugin, env: Env) =>
     (
       plugin.services?.upload as (deps: { strapi: UploadStrapi }) => {
@@ -740,18 +749,24 @@ describe("the upload service's remove records the delete (delete trail)", () => 
       }
     )({ strapi: env.strapi });
 
-  it("writes the audit row and removes in one transaction", async () => {
+  const fileRow = {
+    id: 9,
+    documentId: "f9",
+    name: "flyer.pdf",
+    mime: "application/pdf",
+    size: 12.3,
+  };
+
+  it("reserves (tombstone and audit row committed) and only then removes the re-read row", async () => {
     const { plugin, env, service } = setup({});
-    env.rows.set(9, { id: 9 });
-    await serviceOf(plugin, env).remove({
-      id: 9,
-      documentId: "f9",
-      name: "flyer.pdf",
-      mime: "application/pdf",
-      size: 12.3,
-    });
+    env.rows.set(9, { ...fileRow });
+    await serviceOf(plugin, env).remove({ id: 9 });
     expect(service.removed).toHaveLength(1);
-    expect(service.inTransaction).toEqual([true]);
+    // Core's delete runs after the reservation's transaction, on the tombstoned row.
+    expect(service.inTransaction).toEqual([false]);
+    expect((service.removed[0].provider_metadata as { removing?: string }).removing).toBeTypeOf(
+      "string",
+    );
     expect(env.audit).toEqual([
       expect.objectContaining({
         action: "delete",
@@ -766,13 +781,24 @@ describe("the upload service's remove records the delete (delete trail)", () => 
     expect(serviceOf(plugin, env).other()).toBe("untouched");
   });
 
-  it("removes nothing when the audit insert fails", async () => {
+  it("removes and records nothing when the audit insert fails", async () => {
     const { plugin, env, service } = setup({});
+    env.rows.set(9, { ...fileRow });
     env.failAudit();
-    await expect(serviceOf(plugin, env).remove({ id: 9, documentId: "f9" })).rejects.toThrow(
-      "audit insert failed",
-    );
+    await expect(serviceOf(plugin, env).remove({ id: 9 })).rejects.toThrow("audit insert failed");
     expect(service.removed).toHaveLength(0);
+  });
+
+  it("skips a file that is gone or being removed: overlapping deletes record once", async () => {
+    const { plugin, env, service } = setup({});
+    expect(await serviceOf(plugin, env).remove({ id: 9 })).toBeNull();
+    env.rows.set(9, {
+      ...fileRow,
+      provider_metadata: { removing: new Date().toISOString() },
+    });
+    expect(await serviceOf(plugin, env).remove({ id: 9 })).toBeNull();
+    expect(service.removed).toHaveLength(0);
+    expect(env.audit).toHaveLength(0);
   });
 });
 
@@ -871,7 +897,37 @@ describe("upload extension — applied twice to one plugin object (two boots in 
         remove(file: Row): Promise<unknown>;
       }
     )({ strapi: env.strapi });
+    env.rows.set(1, { id: 1, documentId: "f1" });
     await removing.remove({ id: 1, documentId: "f1" });
+    expect(env.audit).toHaveLength(1);
+  });
+});
+
+describe("the upload service's remove — a failure after the reservation", () => {
+  it("leaves the tombstoned row (no attach path takes it) and its audit row", async () => {
+    const env = makeStrapi();
+    const core = makeCoreFactory(env);
+    const plugin: UploadPlugin = {
+      controllers: { "content-api": core.factory },
+      services: {
+        upload: () => ({
+          remove: async () => {
+            throw new Error("row delete failed after the bytes");
+          },
+        }),
+      },
+    };
+    createUploadExtension(makeIo({}))(plugin);
+    env.rows.set(9, { id: 9, documentId: "f9" });
+    const service = (
+      plugin.services?.upload as (deps: { strapi: UploadStrapi }) => {
+        remove(file: Row): Promise<unknown>;
+      }
+    )({ strapi: env.strapi });
+    await expect(service.remove({ id: 9 })).rejects.toThrow("row delete failed");
+    expect(
+      (env.rows.get(9)?.provider_metadata as { removing?: string } | undefined)?.removing,
+    ).toBeTypeOf("string");
     expect(env.audit).toHaveLength(1);
   });
 });

@@ -1,52 +1,62 @@
 /**
- * Removing uploaded files: ONE locked removal for every path (deep-dive
+ * Removing uploaded files: ONE reservation for every removal (deep-dive
  * decision 06 §E3-§E5; batch 16 plan item 4, contract K12; issue #13).
  *
- * WHO REMOVES. Every remover goes through `claimAndRemove`:
- *   - the classified delete lifecycle (an ad's images after the ad delete),
- *   - the classified controller's `cleanup-uploads` (the web sweeps its own
- *     just-uploaded ids after a failed create or update),
- *   - the nightly `uploads-janitor` (cron/sweep-orphaned-uploads.ts),
- *   - the media claims (utils/media-claims.ts: a stamped file a document
- *     no longer links after any Document Service action).
- * The admin Media Library deletes through the upload service directly
- * (Strapi's own behaviour); its deletes are recorded like these
- * (utils/delete-audit.ts).
+ * WHO REMOVES.
+ *   - The app's removers go through `claimAndRemove`, which adds the app's
+ *     rules (stamped, by the owner when given, old enough, linked by
+ *     nothing): the classified delete lifecycle (an ad's images after the ad
+ *     delete), the classified controller's `cleanup-uploads` (the web sweeps
+ *     its own just-uploaded ids after a failed create or update), the
+ *     nightly `uploads-janitor` (cron/sweep-orphaned-uploads.ts) and the
+ *     media claims (utils/media-claims.ts).
+ *   - The admin Media Library (single, bulk and folder deletes) calls the
+ *     upload service's `remove` directly; extensions/upload/strapi-server.ts
+ *     wraps it so it takes the same reservation, without the app's rules (an
+ *     admin may delete any file, linked or not, stamped or not).
  *
- * THE INVARIANT shared by all of them: only files stamped with
+ * THE RESERVATION (`reserveRemoval`), one short transaction that commits
+ * on its own:
+ *   1. lock the file row (`FOR UPDATE`; SQLite has one writer) and re-read
+ *      it: a file that is gone, or that another removal reserved less than
+ *      TOMBSTONE_RETRY_MS ago, is skipped (two overlapping deletes remove
+ *      and record it once);
+ *   2. re-check the caller's rules under the lock;
+ *   3. write the TOMBSTONE (`provider_metadata.removing`, an ISO timestamp)
+ *      and the delete's AUDIT ROW (utils/delete-audit.ts), and commit.
+ * Only then does the upload service delete the bytes and the row (in that
+ * order, @strapi/upload 5.57 services/upload.js). A failure in between
+ * leaves a tombstoned row, never an attachable row without bytes: every
+ * attach path refuses a tombstoned file (the media claims, the classified
+ * write lifecycle; 16B's `ownUploadCheck` through `isTombstoned`), the
+ * janitor retries an unlinked tombstoned row once its tombstone is older
+ * than TOMBSTONE_RETRY_MS, and an admin can delete it again after that
+ * (the local provider's delete of missing bytes succeeds,
+ * upload-validation.contract.test.ts). A retry completes the reservation:
+ * it records no second row. The audit row therefore records the decision
+ * to delete, attributed to whoever took it; from then on the file is
+ * unattachable and its removal is retried until done.
+ *
+ * THE INVARIANT of the app's removers: only files stamped with
  * `provider_metadata.uploadedBy` (set exclusively by the hardened
- * POST /api/upload wrapper, extensions/upload/strapi-server.ts) are ever
- * removed, and only when nothing links them (`files_related_mph`, any
- * related type, any field: the same image may hang on two of one author's
- * ads, a document's draft and published rows share their file).
- * Admin-panel uploads carry no stamp and are never touched here.
- *
- * THE PROTOCOL (`claimAndRemove`):
- *   1. a short transaction locks the file row (`FOR UPDATE`; SQLite has one
- *      writer), re-reads it and re-checks under the lock: still there,
- *      stamped (by `ownerId` when given), old enough (`minAgeMs`), linked by
- *      nothing; it then COMMITS A TOMBSTONE (`provider_metadata.removing`,
- *      an ISO timestamp);
- *   2. only then the upload service's `remove` deletes the bytes and the
- *      row (in that order, @strapi/upload 5.57 services/upload.js), with
- *      its audit row in one transaction (strapi-server.ts).
- * A failure in step 2 leaves a tombstoned row, never an attachable row
- * without bytes: every attach path refuses a tombstoned file (the media
- * claims, the classified attachment; 16B's `ownUploadCheck` through
- * `isTombstoned`), and the janitor retries tombstoned rows after
- * TOMBSTONE_RETRY_MS (the local provider's delete of missing bytes
- * succeeds, upload-validation.contract.test.ts). An attach that locks the
- * row first wins, and the claim then sees its link and removes nothing.
+ * POST /api/upload wrapper) are removed, and only when nothing links them
+ * (`files_related_mph`, any related type, any field: the same image may
+ * hang on two of one author's ads, a document's draft and published rows
+ * share their file). Admin-panel uploads carry no stamp and are never
+ * touched by the app. An attach that locks the row first wins, and the
+ * claim then sees its link and removes nothing.
  *
  * Every raw link read joins the caller's transaction (`trx`): a read on
  * the pool would wait for the very transaction it runs in on SQLite (one
  * connection; FX45) and escape it on Postgres.
  */
-import { runWithDeleteAudit } from "./delete-audit";
+import { AsyncLocalStorage } from "node:async_hooks";
+
+import { recordDelete, runWithDeleteAudit } from "./delete-audit";
 
 export const FILE_UID = "plugin::upload.file";
 
-/** How long a tombstone may stand before the janitor retries its removal. */
+/** How long a reservation may stand before another remover may retry it. */
 export const TOMBSTONE_RETRY_MS = 10 * 60 * 1000;
 
 export const UPLOADS_LOG = "[uploads]";
@@ -57,7 +67,7 @@ export function uploadedByOf(file: any): number | null {
   return typeof stamped === "number" ? stamped : null;
 }
 
-/** When the file was claimed for removal (its tombstone), or null. */
+/** When the file was reserved for removal (its tombstone), or null. */
 export function tombstoneOf(file: any): Date | null {
   const removing = (file?.provider_metadata as any)?.removing;
   if (typeof removing !== "string") return null;
@@ -129,49 +139,178 @@ export async function lockFileRow(strapi: any, fileId: number): Promise<void> {
   await strapi.db.queryBuilder(FILE_UID).select(["id"]).where({ id: fileId }).forUpdate().execute();
 }
 
-export interface ClaimOptions {
-  /** Only a file stamped by this user (cleanup-uploads: the caller's own). */
-  ownerId?: number;
-  /** Only a file at least this old (the janitor: 24 h). */
-  minAgeMs?: number;
-  /** Retry a tombstone at least this old (the janitor); otherwise a tombstoned file is skipped. */
-  retryTombstoneAfterMs?: number;
-  /** The document the file belonged to, for the delete trail. */
-  related?: { uid: string; documentId: string };
-  now?: Date;
+/** The media references a value names: row ids and documentIds. */
+export interface MediaReferences {
+  ids: number[];
+  documentIds: string[];
+}
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+/**
+ * Every media reference in a relation value as Strapi 5.57 accepts it: a
+ * row id (number or numeric string), a documentId (any other string),
+ * `{ id }`, `{ documentId }`, lists, and `connect`/`set` lists. Anything else
+ * is ignored.
+ */
+export function mediaReferences(value: unknown): MediaReferences {
+  const ids = new Set<number>();
+  const documentIds = new Set<string>();
+  const visit = (item: unknown, depth: number): void => {
+    if (depth > 4 || item === null || item === undefined) return;
+    if (typeof item === "number" || (typeof item === "string" && /^\d+$/.test(item))) {
+      const id = Number(item);
+      if (Number.isInteger(id) && id > 0 && id <= 2147483647) ids.add(id);
+      return;
+    }
+    if (typeof item === "string") {
+      if (item !== "") documentIds.add(item);
+      return;
+    }
+    if (Array.isArray(item)) {
+      for (const entry of item) visit(entry, depth + 1);
+      return;
+    }
+    if (isRecord(item)) {
+      if ("id" in item) visit(item.id, depth + 1);
+      if (typeof item.documentId === "string" && item.documentId !== "") {
+        documentIds.add(item.documentId);
+      }
+      if ("connect" in item) visit(item.connect, depth + 1);
+      if ("set" in item) visit(item.set, depth + 1);
+    }
+  };
+  visit(value, 0);
+  return { ids: [...ids], documentIds: [...documentIds] };
+}
+
+/** The file row ids `references` name, ascending (documentIds resolved; unknown ones dropped). */
+export async function resolveFileIds(strapi: any, references: MediaReferences): Promise<number[]> {
+  const ids = new Set(references.ids);
+  if (references.documentIds.length > 0) {
+    const rows: Array<{ id: number }> = await strapi.db.query(FILE_UID).findMany({
+      where: { documentId: { $in: references.documentIds } },
+      select: ["id"],
+    });
+    for (const row of rows) ids.add(row.id);
+  }
+  return [...ids].sort((a, b) => a - b);
+}
+
+/**
+ * Locks the files `fileIds` (ascending) and answers whether every one of
+ * them exists and is not tombstoned: the attach paths' check before they
+ * write a link (the media claims, the classified write lifecycle). Inside
+ * the caller's transaction.
+ */
+export async function lockAttachableFiles(strapi: any, fileIds: number[]): Promise<boolean> {
+  let attachable = true;
+  for (const fileId of [...fileIds].sort((a, b) => a - b)) {
+    await lockFileRow(strapi, fileId);
+    const file = await strapi.db.query(FILE_UID).findOne({ where: { id: fileId } });
+    if (!file || isTombstoned(file)) attachable = false;
+  }
+  return attachable;
 }
 
 export type ClaimOutcome =
   "removed" | "missing" | "unstamped" | "foreign" | "young" | "linked" | "removing" | "failed";
 
-/** The decision under the lock (pure; claimAndRemove's re-check). */
+/** A reservation's rules: "claim", or why the file stays. */
+export type ReservationCheck = (
+  file: any,
+  linked: boolean,
+  retrying: boolean,
+) => Exclude<ClaimOutcome, "removed" | "failed"> | "claim";
+
+/** The upload service's `remove(file)` of the reserved row runs inside this. */
+const reservedRemoval = new AsyncLocalStorage<number>();
+
+/** True inside the removal of `fileId` that `reserveRemoval` reserved (strapi-server.ts). */
+export function isReservedRemoval(fileId: unknown): boolean {
+  return reservedRemoval.getStore() === fileId;
+}
+
+/** Runs the upload service's removal of a reserved file. */
+export function runReservedRemoval<T>(fileId: number, fn: () => T): T {
+  return reservedRemoval.run(fileId, fn);
+}
+
+/**
+ * The reservation (see the module comment): locks and re-reads the row,
+ * skips a missing file or a fresh tombstone, applies `check`, writes the
+ * tombstone and the audit row, and commits. Returns the reserved row, or
+ * why the file stays. A stale tombstone (an earlier removal that failed
+ * after its reservation) is taken over without a second audit row.
+ */
+export async function reserveRemoval(
+  strapi: any,
+  fileId: number,
+  check: ReservationCheck = () => "claim",
+  now: Date = new Date(),
+): Promise<{ file: any } | { outcome: Exclude<ClaimOutcome, "removed" | "failed"> }> {
+  return strapi.db.transaction(async ({ trx }: { trx: unknown }) => {
+    await lockFileRow(strapi, fileId);
+    const file = await strapi.db.query(FILE_UID).findOne({ where: { id: fileId } });
+    if (!file) return { outcome: "missing" as const };
+    const tombstone = tombstoneOf(file);
+    if (tombstone && now.getTime() - tombstone.getTime() < TOMBSTONE_RETRY_MS) {
+      return { outcome: "removing" as const };
+    }
+    const linkRows = await fileLinks(strapi, fileId, trx);
+    const verdict = check(file, linkRows.length > 0, tombstone !== null);
+    if (verdict !== "claim") return { outcome: verdict };
+    const provider_metadata = { ...file.provider_metadata, removing: now.toISOString() };
+    await strapi.db.query(FILE_UID).update({ where: { id: fileId }, data: { provider_metadata } });
+    // The delete's audit row commits with the reservation; a retry of a
+    // stale one records nothing new.
+    if (!tombstone) await recordDelete(strapi, { kind: "file", file, links: linkRows });
+    return { file: { ...file, provider_metadata } };
+  });
+}
+
+export interface ClaimOptions {
+  /** Only a file stamped by this user (cleanup-uploads: the caller's own). */
+  ownerId?: number;
+  /** Only a file at least this old (the janitor: 24 h); a retried reservation is exempt. */
+  minAgeMs?: number;
+  /** The document the file belonged to, for the delete trail. */
+  related?: { uid: string; documentId: string };
+  now?: Date;
+}
+
+/**
+ * The app's rules under the lock (pure): stamped, by the owner when given,
+ * old enough, linked by nothing. Retrying a stale reservation (`retrying`)
+ * re-checks only the links.
+ */
 export function claimDecision(
   file: any,
   linked: boolean,
   options: ClaimOptions,
   now: Date,
+  retrying = false,
 ): Exclude<ClaimOutcome, "removed" | "failed"> | "claim" {
   if (!file) return "missing";
-  const owner = uploadedByOf(file);
-  if (owner === null) return "unstamped";
-  if (options.ownerId !== undefined && owner !== options.ownerId) return "foreign";
-  const tombstone = tombstoneOf(file);
-  if (tombstone) {
-    const retry = options.retryTombstoneAfterMs;
-    if (retry === undefined || now.getTime() - tombstone.getTime() < retry) return "removing";
-  } else if (options.minAgeMs !== undefined) {
-    const created = new Date(file.createdAt ?? file.created_at ?? "");
-    if (Number.isNaN(created.getTime())) return "young";
-    if (now.getTime() - created.getTime() < options.minAgeMs) return "young";
+  if (!retrying) {
+    const owner = uploadedByOf(file);
+    if (owner === null) return "unstamped";
+    if (options.ownerId !== undefined && owner !== options.ownerId) return "foreign";
+    if (options.minAgeMs !== undefined) {
+      const created = new Date(file.createdAt ?? file.created_at ?? "");
+      if (Number.isNaN(created.getTime())) return "young";
+      if (now.getTime() - created.getTime() < options.minAgeMs) return "young";
+    }
   }
   if (linked) return "linked";
   return "claim";
 }
 
 /**
- * The one locked removal (see the module comment). Must run outside any
- * transaction (after a commit, in a cron, in a request): its claim commits
- * on its own. Never throws: a failed removal is logged and answers
+ * The app's locked removal (see the module comment). Must run outside any
+ * transaction (after a commit, in a cron, in a request): its reservation
+ * commits on its own. Never throws: a failed removal is logged and answers
  * "failed" (the tombstone stays for the janitor).
  */
 export async function claimAndRemove(
@@ -183,39 +322,32 @@ export async function claimAndRemove(
     throw new Error(`${UPLOADS_LOG} claimAndRemove must run outside a transaction`);
   }
   const now = options.now ?? new Date();
-  let claimed: any;
-  try {
-    const decision = await strapi.db.transaction(async ({ trx }: { trx: unknown }) => {
-      await lockFileRow(strapi, fileId);
-      const file = await strapi.db.query(FILE_UID).findOne({ where: { id: fileId } });
-      const linked = file ? (await linkedFileIds(strapi, [fileId], trx)).has(fileId) : false;
-      const verdict = claimDecision(file, linked, options, now);
-      if (verdict !== "claim") return verdict;
-      if (!tombstoneOf(file)) {
-        const provider_metadata = { ...file.provider_metadata, removing: now.toISOString() };
-        await strapi.db
-          .query(FILE_UID)
-          .update({ where: { id: fileId }, data: { provider_metadata } });
-        claimed = { ...file, provider_metadata };
-      } else {
-        claimed = file;
-      }
-      return "claim";
-    });
-    if (decision !== "claim") return decision;
-  } catch (err) {
-    strapi.log.error(`${UPLOADS_LOG} could not claim file ${fileId}: ${(err as Error).message}`);
-    return "failed";
-  }
-  try {
-    await runWithDeleteAudit(options.related ? { related: options.related } : {}, () =>
-      strapi.plugin("upload").service("upload").remove(claimed),
-    );
-    return "removed";
-  } catch (err) {
-    strapi.log.error(
-      `${UPLOADS_LOG} could not remove file ${fileId} (tombstoned; the janitor retries): ${(err as Error).message}`,
-    );
-    return "failed";
-  }
+  return runWithDeleteAudit(options.related ? { related: options.related } : {}, async () => {
+    let reserved: Awaited<ReturnType<typeof reserveRemoval>>;
+    try {
+      reserved = await reserveRemoval(
+        strapi,
+        fileId,
+        (file, linked, retrying) => claimDecision(file, linked, options, now, retrying),
+        now,
+      );
+    } catch (err) {
+      strapi.log.error(
+        `${UPLOADS_LOG} could not reserve file ${fileId}: ${(err as Error).message}`,
+      );
+      return "failed";
+    }
+    if (!("file" in reserved)) return reserved.outcome;
+    try {
+      await runReservedRemoval(fileId, () =>
+        strapi.plugin("upload").service("upload").remove(reserved.file),
+      );
+      return "removed";
+    } catch (err) {
+      strapi.log.error(
+        `${UPLOADS_LOG} could not remove file ${fileId} (tombstoned; the janitor retries): ${(err as Error).message}`,
+      );
+      return "failed";
+    }
+  });
 }

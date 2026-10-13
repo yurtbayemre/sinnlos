@@ -6,26 +6,33 @@ import {
   claimAndRemove,
   claimDecision,
   classifiedImageFileIds,
+  isReservedRemoval,
   isTombstoned,
   linkedFileIds,
+  mediaReferences,
+  reserveRemoval,
+  resolveFileIds,
   tombstoneOf,
 } from "./upload-orphans";
 
 /**
- * The one locked removal (decision 06 §E3-§E5; batch 16 plan item 4,
- * contract K12): the decision under the lock, the tombstone committed
- * before the bytes go, and every raw read on the caller's transaction.
+ * The one reservation every removal takes (decision 06 §E3-§E5; batch 16
+ * plan item 4, contract K12; Codex round 1): the decision under the lock,
+ * the tombstone and the audit row committed before the bytes go, one
+ * removal per file, and every raw read on the caller's transaction.
  */
 
 const NOW = new Date("2026-10-13T10:00:00Z");
 const DAY = 24 * 60 * 60 * 1000;
 const stamped = (extra: Record<string, unknown> = {}) => ({
   id: 5,
+  documentId: "f5",
+  name: "a.pdf",
   createdAt: new Date(NOW.getTime() - 2 * DAY).toISOString(),
   provider_metadata: { uploadedBy: 7, ...extra },
 });
 
-describe("claimDecision (under the lock)", () => {
+describe("claimDecision (the app's rules under the lock)", () => {
   it("claims a stamped, unlinked file", () => {
     expect(claimDecision(stamped(), false, {}, NOW)).toBe("claim");
   });
@@ -42,19 +49,10 @@ describe("claimDecision (under the lock)", () => {
     ).toBe("young");
   });
 
-  it("skips a tombstoned file unless the caller retries old tombstones", () => {
-    const tombstoned = stamped({
-      removing: new Date(NOW.getTime() - TOMBSTONE_RETRY_MS).toISOString(),
-    });
-    expect(claimDecision(tombstoned, false, {}, NOW)).toBe("removing");
-    expect(
-      claimDecision(tombstoned, false, { retryTombstoneAfterMs: TOMBSTONE_RETRY_MS }, NOW),
-    ).toBe("claim");
-    expect(
-      claimDecision(tombstoned, false, { retryTombstoneAfterMs: TOMBSTONE_RETRY_MS + 1 }, NOW),
-    ).toBe("removing");
-    // A retried tombstone still re-checks its links.
-    expect(claimDecision(tombstoned, true, { retryTombstoneAfterMs: 0 }, NOW)).toBe("linked");
+  it("retrying a stale reservation re-checks only the links", () => {
+    const admins = { id: 5, provider_metadata: { removing: "2026-10-13T00:00:00Z" } };
+    expect(claimDecision(admins, false, { ownerId: 8, minAgeMs: DAY }, NOW, true)).toBe("claim");
+    expect(claimDecision(admins, true, {}, NOW, true)).toBe("linked");
   });
 
   it("reads a tombstone; an unparseable one counts as old", () => {
@@ -66,13 +64,47 @@ describe("claimDecision (under the lock)", () => {
   });
 });
 
-/** A fake strapi.db: one file table, a link table, the lock and transaction log. */
+describe("mediaReferences / resolveFileIds (every shape Strapi 5.57 accepts)", () => {
+  it("reads ids, documentIds, { id }, { documentId }, lists and connect/set", () => {
+    expect(mediaReferences(7)).toEqual({ ids: [7], documentIds: [] });
+    expect(mediaReferences("8")).toEqual({ ids: [8], documentIds: [] });
+    expect(mediaReferences("abc123")).toEqual({ ids: [], documentIds: ["abc123"] });
+    expect(mediaReferences({ connect: [{ id: 2 }, { documentId: "d2" }], set: [3] })).toEqual({
+      ids: [2, 3],
+      documentIds: ["d2"],
+    });
+    expect(mediaReferences([{ id: "4" }, null, { other: 1 }])).toEqual({
+      ids: [4],
+      documentIds: [],
+    });
+    expect(mediaReferences(null)).toEqual({ ids: [], documentIds: [] });
+    expect(mediaReferences(2 ** 40)).toEqual({ ids: [], documentIds: [] });
+  });
+
+  it("resolves documentIds to row ids, ascending, dropping unknown ones", async () => {
+    const strapi = {
+      db: {
+        query: () => ({
+          findMany: async ({ where }: { where: { documentId: { $in: string[] } } }) =>
+            where.documentId.$in.includes("d9") ? [{ id: 9 }] : [],
+        }),
+      },
+    };
+    expect(await resolveFileIds(strapi, { ids: [12, 3], documentIds: ["d9", "gone"] })).toEqual([
+      3, 9, 12,
+    ]);
+  });
+});
+
+/** A fake strapi.db: one file row, its links, the lock, the audit table and the transaction log. */
 function makeStrapi(opts: {
   file: Record<string, any> | null;
   linked?: boolean;
   removeFails?: boolean;
+  auditFails?: boolean;
 }) {
   const log: string[] = [];
+  const audit: Array<Record<string, unknown>> = [];
   let file = opts.file ? { ...opts.file } : null;
   let open = false;
   const linkBuilder = () => {
@@ -84,6 +116,7 @@ function makeStrapi(opts: {
       where: () => builder,
       whereIn: () => builder,
       pluck: async () => (opts.linked ? [5] : []),
+      select: async () => (opts.linked ? [{ related_type: "api::x.x", related_id: 1 }] : []),
     };
     return builder;
   };
@@ -94,10 +127,15 @@ function makeStrapi(opts: {
       transaction: async (cb: (scope: { trx: unknown }) => Promise<unknown>) => {
         open = true;
         log.push("begin");
+        const before = file;
         try {
           const result = await cb({ trx: "trx1" });
           log.push("commit");
           return result;
+        } catch (err) {
+          file = before;
+          log.push("rollback");
+          throw err;
         } finally {
           open = false;
         }
@@ -115,19 +153,28 @@ function makeStrapi(opts: {
         return qb;
       },
       getConnection: () => linkBuilder(),
-      query: () => ({
+      query: (uid: string) => ({
         findOne: async () => file,
         update: async ({ data }: { data: Record<string, unknown> }) => {
           log.push("tombstone");
           file = { ...file, ...data };
           return file;
         },
+        create: async ({ data }: { data: Record<string, unknown> }) => {
+          expect(uid).toBe("api::audit-event.audit-event");
+          if (opts.auditFails) throw new Error("audit insert failed");
+          log.push("audit");
+          audit.push(data);
+          return data;
+        },
       }),
     },
+    requestContext: { get: () => undefined },
     plugin: () => ({
       service: () => ({
         remove: async (row: any) => {
           log.push(`remove:${row.provider_metadata?.removing ? "tombstoned" : "live"}`);
+          log.push(`reserved:${isReservedRemoval(row.id)}`);
           log.push(`context:${JSON.stringify(deleteAuditContext() ?? null)}`);
           if (opts.removeFails) throw new Error("row delete failed after the bytes");
           file = null;
@@ -135,11 +182,47 @@ function makeStrapi(opts: {
       }),
     }),
   };
-  return { strapi, log, current: () => file };
+  return { strapi, log, audit, current: () => file };
 }
 
+describe("reserveRemoval", () => {
+  it("locks, re-reads, writes the tombstone and the audit row in one transaction", async () => {
+    const { strapi, log, audit, current } = makeStrapi({ file: stamped() });
+    const reserved = await reserveRemoval(strapi, 5, undefined, NOW);
+    expect("file" in reserved).toBe(true);
+    expect(log).toEqual(["begin", "lock", "links:trx1", "tombstone", "audit", "commit"]);
+    expect(isTombstoned(current())).toBe(true);
+    expect(audit).toEqual([expect.objectContaining({ action: "delete", targetDocumentId: "f5" })]);
+  });
+
+  it("skips a missing file and a fresh reservation: overlapping deletes record once", async () => {
+    expect(await reserveRemoval(makeStrapi({ file: null }).strapi, 5, undefined, NOW)).toEqual({
+      outcome: "missing",
+    });
+    const { strapi, audit } = makeStrapi({ file: stamped() });
+    await reserveRemoval(strapi, 5, undefined, NOW);
+    expect(await reserveRemoval(strapi, 5, undefined, NOW)).toEqual({ outcome: "removing" });
+    expect(audit).toHaveLength(1);
+  });
+
+  it("takes over a stale reservation without a second audit row", async () => {
+    const stale = stamped({ removing: new Date(NOW.getTime() - TOMBSTONE_RETRY_MS).toISOString() });
+    const { strapi, audit, current } = makeStrapi({ file: stale });
+    expect("file" in (await reserveRemoval(strapi, 5, undefined, NOW))).toBe(true);
+    expect(audit).toEqual([]);
+    expect(tombstoneOf(current())?.getTime()).toBe(NOW.getTime());
+  });
+
+  it("writes nothing when the audit insert fails", async () => {
+    const { strapi, current, log } = makeStrapi({ file: stamped(), auditFails: true });
+    await expect(reserveRemoval(strapi, 5, undefined, NOW)).rejects.toThrow("audit insert failed");
+    expect(isTombstoned(current())).toBe(false);
+    expect(log).toContain("rollback");
+  });
+});
+
 describe("claimAndRemove", () => {
-  it("locks, re-checks, commits the tombstone, and only then removes", async () => {
+  it("reserves under the app's rules, and only then removes, inside its reservation", async () => {
     const { strapi, log } = makeStrapi({ file: stamped() });
     expect(
       await claimAndRemove(strapi, 5, { now: NOW, related: { uid: "api::x.x", documentId: "d1" } }),
@@ -149,16 +232,19 @@ describe("claimAndRemove", () => {
       "lock",
       "links:trx1",
       "tombstone",
+      "audit",
       "commit",
       "remove:tombstoned",
+      "reserved:true",
       'context:{"related":{"uid":"api::x.x","documentId":"d1"}}',
     ]);
   });
 
-  it("removes nothing when the re-check fails under the lock", async () => {
+  it("removes and records nothing when the re-check fails under the lock", async () => {
     const linked = makeStrapi({ file: stamped(), linked: true });
     expect(await claimAndRemove(linked.strapi, 5, { now: NOW })).toBe("linked");
     expect(linked.log).not.toContain("tombstone");
+    expect(linked.audit).toEqual([]);
     const foreign = makeStrapi({ file: stamped() });
     expect(await claimAndRemove(foreign.strapi, 5, { ownerId: 99, now: NOW })).toBe("foreign");
     const unstamped = makeStrapi({ file: { id: 5, provider_metadata: null } });
@@ -166,26 +252,21 @@ describe("claimAndRemove", () => {
     expect(unstamped.log.some((line) => line.startsWith("remove"))).toBe(false);
   });
 
-  it("a failure after the claim leaves a tombstoned row, which attaches refuse and the janitor retries", async () => {
-    const { strapi, current } = makeStrapi({ file: stamped(), removeFails: true });
+  it("a failure after the reservation leaves a tombstoned row; a later retry completes it once", async () => {
+    const { strapi, current, audit } = makeStrapi({ file: stamped(), removeFails: true });
     expect(await claimAndRemove(strapi, 5, { now: NOW })).toBe("failed");
     expect(isTombstoned(current())).toBe(true);
+    expect(audit).toHaveLength(1);
     expect(strapi.log.error).toHaveBeenCalledWith(expect.stringContaining("tombstoned"));
-    // Another remover skips it; the janitor's retry (after 10 minutes) takes it.
-    const later = new Date(NOW.getTime() + TOMBSTONE_RETRY_MS);
+    // Another remover skips it within the window; afterwards it completes it.
     const retry = makeStrapi({ file: current() });
-    expect(await claimAndRemove(retry.strapi, 5, { now: later })).toBe("removing");
-    expect(
-      await claimAndRemove(retry.strapi, 5, {
-        now: later,
-        retryTombstoneAfterMs: TOMBSTONE_RETRY_MS,
-      }),
-    ).toBe("removed");
-    // The retry keeps the first tombstone (no second write).
-    expect(retry.log.filter((line) => line === "tombstone")).toEqual([]);
+    expect(await claimAndRemove(retry.strapi, 5, { now: NOW })).toBe("removing");
+    const later = new Date(NOW.getTime() + TOMBSTONE_RETRY_MS);
+    expect(await claimAndRemove(retry.strapi, 5, { now: later, minAgeMs: DAY })).toBe("removed");
+    expect(retry.audit).toEqual([]);
   });
 
-  it("refuses to run inside a transaction (its claim must commit on its own)", async () => {
+  it("refuses to run inside a transaction (its reservation must commit on its own)", async () => {
     const { strapi } = makeStrapi({ file: stamped() });
     strapi.db.inTransaction = () => true;
     await expect(claimAndRemove(strapi, 5)).rejects.toThrow(/outside a transaction/);

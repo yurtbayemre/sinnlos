@@ -54,7 +54,6 @@ describe("selectSweepCandidates", () => {
       // A stamp that is not a number is no stamp.
       row({ id: 4, providerMetadata: { uploadedBy: "7" } }),
       row({ id: 5, providerMetadata: "not-an-object" }),
-      row({ id: 6, providerMetadata: { removing: "2026-01-01T00:00:00Z" } }),
     ];
     expect(selectSweepCandidates(adminUploads, NOW)).toEqual([]);
   });
@@ -83,9 +82,9 @@ describe("selectSweepCandidates", () => {
     ).toEqual([]);
   });
 
-  it("retries a tombstone once it is 10 minutes old, whatever the file's age", () => {
-    const tombstone = (ms: number) => ({
-      uploadedBy: 7,
+  it("retries a stale reservation once it is 10 minutes old, whoever took it", () => {
+    const tombstone = (ms: number, stamp = true) => ({
+      ...(stamp ? { uploadedBy: 7 } : {}),
       removing: new Date(NOW.getTime() - ms).toISOString(),
     });
     expect(
@@ -97,10 +96,12 @@ describe("selectSweepCandidates", () => {
             providerMetadata: tombstone(TOMBSTONE_RETRY_MS),
           }),
           row({ id: 2, providerMetadata: tombstone(TOMBSTONE_RETRY_MS - 1000) }),
+          // A Media Library delete of an unstamped file that failed after its reservation.
+          row({ id: 3, providerMetadata: tombstone(TOMBSTONE_RETRY_MS, false) }),
         ],
         NOW,
       ),
-    ).toEqual([1]);
+    ).toEqual([1, 3]);
   });
 
   it("pins the scope: document uploads of moderators and department heads are stamped like ad images", () => {
@@ -141,7 +142,7 @@ describe("sweepOrphanedUploads: every candidate through claimAndRemove, as cron"
     ]);
     await sweepOrphanedUploads(strapi, NOW);
     expect(mocks.claimAndRemove.mock.calls.map((call) => [call[1], call[2]])).toEqual([
-      [1, { minAgeMs: ORPHAN_MIN_AGE_MS, retryTombstoneAfterMs: TOMBSTONE_RETRY_MS, now: NOW }],
+      [1, { minAgeMs: ORPHAN_MIN_AGE_MS, now: NOW }],
     ]);
     expect(mocks.contexts).toEqual([{ source: "cron" }]);
     expect(info).toEqual(["[uploads-janitor] swept 1 orphaned upload(s)"]);
