@@ -125,6 +125,19 @@ describe("changesRevisionLinks (issue #81)", () => {
     expect(changesRevisionLinks(undefined)).toBe(false);
     expect(changesRevisionLinks(null)).toBe(false);
   });
+
+  it("lets a new document (create, clone) carry an empty set, nothing more (Codex re-review)", () => {
+    // The Content Manager's clone sets { set: [] } for a role whose create
+    // permission leaves the field out (excludeNotCreatableFields).
+    expect(changesRevisionLinks({ revisions: { set: [] } }, true)).toBe(false);
+    expect(changesRevisionLinks({ revisions: [] }, true)).toBe(false);
+    expect(
+      changesRevisionLinks({ revisions: { set: [], connect: [], disconnect: [] } }, true),
+    ).toBe(false);
+    for (const revisions of [{ set: [{ id: 4 }] }, { connect: [{ id: 4 }] }, [4], null, 4]) {
+      expect(changesRevisionLinks({ revisions }, true), JSON.stringify(revisions)).toBe(true);
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -458,7 +471,8 @@ describe("createWikiChecks", () => {
       for (const revisions of [
         { connect: [{ id: 7 }], disconnect: [] },
         { connect: [], disconnect: [{ id: 7 }] },
-        { set: [] },
+        { set: [{ id: 7 }] },
+        ...(action === "update" ? [{ set: [] }] : []),
       ]) {
         events.length = 0;
         const details = await refusal(

@@ -206,18 +206,26 @@ export function namesSpace(data: unknown): boolean {
 /**
  * Whether a page payload's `revisions` would change any revision link. The
  * admin panel's form sends every relation as `{ connect: [], disconnect:
- * [] }` when it is left alone; that, `{}` and no key change nothing. Every
- * other value (a list, an id, null, `set`, a non-empty connect or
- * disconnect) would set, move or unlink revisions.
+ * [] }` when it is left alone; that, `{}` and no key change nothing. On a
+ * new document (`create`, `clone`) an empty set changes nothing either:
+ * the Content Manager's clone sets `revisions: { set: [] }` for a role
+ * whose create permission leaves the field out (excludeNotCreatableFields,
+ * Codex re-review). Every other value (a list of revisions, an id, null,
+ * an empty set on an update, a non-empty set, connect or disconnect)
+ * would set, move or unlink revisions.
  */
-export function changesRevisionLinks(data: unknown): boolean {
+export function changesRevisionLinks(data: unknown, newDocument = false): boolean {
   if (!isRecord(data) || data.revisions === undefined) return false;
   const value = data.revisions;
-  if (!isRecord(value)) return true;
+  const empty = (entry: unknown) => Array.isArray(entry) && entry.length === 0;
+  if (!isRecord(value)) return !(newDocument && empty(value));
   return Object.entries(value).some(
     ([key, entry]) =>
       entry !== undefined &&
-      !((key === "connect" || key === "disconnect") && Array.isArray(entry) && entry.length === 0),
+      !(
+        ((key === "connect" || key === "disconnect") && empty(entry)) ||
+        (newDocument && key === "set" && empty(entry))
+      ),
   );
 }
 
@@ -369,7 +377,10 @@ export function createWikiChecks(strapi: WikiChecksHost): DocumentActionMiddlewa
     }
 
     if (uid === WIKI_PAGE_UID && MUTATING_ACTIONS.includes(action)) {
-      if (PAYLOAD_ACTIONS.includes(action) && changesRevisionLinks(params.data)) {
+      if (
+        PAYLOAD_ACTIONS.includes(action) &&
+        changesRevisionLinks(params.data, action !== "update")
+      ) {
         throw revisionLinksError();
       }
       if (action === "clone") {

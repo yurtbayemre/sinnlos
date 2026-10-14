@@ -3,6 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   ADMIN_ENV,
   adminRequest,
+  adminToken,
   cmPath,
   contentManager,
   type ContentManager,
@@ -647,8 +648,62 @@ describe.each(testEngines())("wiki revisions are closed on %s", (engine) => {
         { json: { title: "IT Revisions Panel Clone", slug: "it-revisions-panel-clone" } },
       );
       expect(viaPanel.status, viaPanel.text).toBe(200);
+      // An admin role whose create permission on wiki pages leaves
+      // `revisions` out: the Content Manager's clone sets `revisions: {
+      // set: [] }` for it (excludeNotCreatableFields), which changes nothing
+      // on a new document and passes (Codex re-review).
+      const editorRole = await t.strapi.db
+        .query("admin::role")
+        .findOne({ where: { code: "strapi-editor" } });
+      if (!editorRole) throw new Error("fixture: the admin Editor role is missing");
+      const creates = await t.strapi.db.query(ADMIN_PERMISSION).findMany({
+        where: { action: `${EXPLORER}.create`, subject: PAGE, role: { id: editorRole.id } },
+      });
+      expect(creates.length).toBeGreaterThan(0);
+      for (const permission of creates) {
+        const properties = (permission.properties ?? {}) as { fields?: string[] };
+        await t.strapi.db.query(ADMIN_PERMISSION).update({
+          where: { id: permission.id },
+          data: {
+            properties: {
+              ...properties,
+              fields: (properties.fields ?? []).filter((field) => field !== "revisions"),
+            },
+          },
+        });
+      }
+      const email = "it-restricted-editor@integration.test";
+      const password = "ItRestricted12345";
+      await (
+        t.strapi as unknown as {
+          admin: {
+            services: { user: { create(values: Record<string, unknown>): Promise<unknown> } };
+          };
+        }
+      ).admin.services.user.create({
+        email,
+        firstname: "Restricted",
+        lastname: "Editor",
+        password,
+        isActive: true,
+        roles: [editorRole.id],
+      });
+      const restrictedPanel = await adminToken(t, email, password);
+      const restricted = await adminRequest<{ data: { documentId: string } }>(
+        t,
+        restrictedPanel,
+        `/content-manager/collection-types/${PAGE}/clone/${page.documentId}`,
+        {
+          json: { title: "IT Revisions Restricted Clone", slug: "it-revisions-restricted-clone" },
+        },
+      );
+      expect(restricted.status, restricted.text).toBe(200);
       expect(await linkedTo()).toEqual(before);
-      for (const copy of [viaService.documentId, viaPanel.body.data.documentId]) {
+      for (const copy of [
+        viaService.documentId,
+        viaPanel.body.data.documentId,
+        restricted.body.data.documentId,
+      ]) {
         const theirs = await t.strapi.db.query(REVISION).findMany({
           where: { page: { documentId: copy } },
           select: ["pageDocumentId"],
