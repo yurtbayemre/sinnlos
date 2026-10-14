@@ -136,6 +136,9 @@ const OTHER_RAW_WRITERS: Readonly<Record<string, string>> = {
   "utils/upload-orphans.ts":
     "upload files: the removal tombstone (provider_metadata.removing) under the file row's lock",
   "utils/visible-ids.ts": "none (Map.delete); reads only",
+  // Batch 16, lane 16B.
+  "utils/wiki-authoring.ts":
+    "wiki pages only through the Document Service (createDraft, saveDraft, restore inside an authoring scope); the query layer only reads",
 };
 
 const SRC = __dirname;

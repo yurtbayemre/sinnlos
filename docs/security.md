@@ -476,9 +476,10 @@ route in `apps/cms/src/api/*/routes/*.ts`.
 ### Write-side guards
 
 - `can-author` (batch 15, decision 06 §B2): create and update of
-  announcements, events, quick links, documents and polls, and their
-  authoring actions (publish, unpublish, discard-draft, the `/authoring`
-  list and the `/:id/editable` form read), configured per route with
+  announcements, events, quick links, documents, polls and (batch 16) wiki
+  spaces, and their authoring actions (publish, unpublish, discard-draft,
+  the `/authoring` list and the `/:id/editable` form read), configured per
+  route with
   `{ uid }` (and the action's `intent`). `admin_role` and `editor` are the
   `moderator` class: **no bypass**, their payloads go through the
   allowlist below like everyone's. A `department_head` with a
@@ -497,22 +498,33 @@ route in `apps/cms/src/api/*/routes/*.ts`.
   the lock, so a caller whose class went away in between (a moderator
   widened the item, the department was deleted, the head was demoted)
   gets 403/404, never 412, and never the new revision.
-- `is-admin-or-editor`: delete of announcements, events, polls, documents
-  and quick links (with `If-Match`); create, update and delete of wiki
-  spaces; create and delete of departments and teams;
-  wiki page delete; kudos delete; the search-log `summary` route.
+- `is-admin-or-editor`: delete of announcements, events, polls, documents,
+  quick links, wiki spaces and wiki pages (with `If-Match`; a space with
+  pages answers 400 `spaceNotEmpty`); create and delete of departments and
+  teams; kudos delete; the search-log `summary` route.
 - `can-edit-department`: department update only by the `department_head`
   of that department, and only `description` and `color` (`#rrggbb`);
   `admin_role` and `editor` bypass.
 - `can-edit-team`: team update only by the team's lead or the head of its
   department, and only `description`; plain team members get 403;
   `admin_role` and `editor` bypass.
-- `can-edit-wiki`: wiki page create (any non-guest holding the grant, i.e.
-  `department_head` and `team_lead`) only into a space the author can read;
-  update by the page's author, the head of its department or the lead of
-  its team, and only while the page sits in a space the caller can read
-  (403 otherwise); fields limited as described below; `admin_role` and
-  `editor` bypass. A `member` who is not the author gets 403.
+- `can-edit-wiki` (rebuilt in batch 16 on the `can-author` model, kind
+  `row-write-gate`): every wiki-page route but the reads and the delete,
+  configured with `{ uid }` (and the action's `intent`). `admin_role` and
+  `editor` are the `moderator` class: **no bypass** since batch 16, their
+  payloads go through the allowlist's moderator rule. Create (and
+  `createDraft`) by `department_head` and `team_lead` (class `author`)
+  only into a space they can read; every action on a page by its author,
+  the head of its department or the lead of its team, decided on EVERY row
+  of the page (draft and published; `@sinnlos/domain` `classifyWikiEditor`,
+  the rule the web's Edit buttons use) and only while the page sits in a
+  space the caller can read; `unpublish` and the `/authoring` list for
+  moderators only. A refusal is 403 on the generic create/update and the
+  lists, 404 on the page actions. The gate reads the page's revision
+  before its rows and the lock re-classifies on a mismatch, as for
+  `can-author`. A discard of a page without a published row deletes it:
+  only its author or a moderator (404 for the other classes, decided under
+  the lock).
 - `is-classified-author`: ad update and delete only by its author (update:
   `admin_role` bypass only; delete: `admin_role` and `editor` bypass, for
   moderation).
@@ -534,9 +546,9 @@ role class (head, lead, author, moderator, department author, …);
 `apps/cms/src/utils/write-allowlist.ts` decides _what_ that class may send
 (FX07). It is the single place those payload rules live. Since batch 15 it
 also holds the `admin_role`/`editor` payloads on announcements, events,
-quick links, documents and polls (the `moderator` class); the bypass is
-left only on the wiki, department and team gates until batches 16 and 17
-rebuild them.
+quick links, documents and polls (the `moderator` class), since batch 16
+on wiki spaces and wiki pages; the bypass is left only on the department
+and team gates until batch 17 rebuilds them.
 
 The v2 authoring rules (batch 15, decision 06 §B1):
 
@@ -545,10 +557,18 @@ The v2 authoring rules (batch 15, decision 06 §B1):
   Department authors get no `pinned`, `requiresAck`, `ackDeadline`,
   `publishAt` or `unpublishAt`. Never writable by anyone: the targeting
   flags (`audience`, `notifyAudience`, `retargetRequired`), ownership
-  (`author`, `organizer`, `uploadedBy`, `ownerDepartment`), `scheduleError`
-  and, until batch 16, `document.file`. A test walks every schema
-  attribute of the five types: each is a field of some class or listed in
-  `REFUSED_ATTRIBUTES` with its reason.
+  (`author`, `organizer`, `uploadedBy`, `ownerDepartment`, a page's
+  `lastEditor`), `scheduleError`, the derived slugs and the inverse sides
+  (`wiki-space.pages`, `wiki-page.children`, `wiki-page.revisions`). A test
+  walks every schema attribute of the authored types: each is a field of
+  some class or listed in `REFUSED_ATTRIBUTES` with its reason.
+- **Document files** (batch 16): `file` in both document rules, a file row
+  id. A newly attached file must be the caller's own upload (stamped by
+  `POST /api/upload`), carry an allowed stored mime, not be on its way out
+  (tombstoned) and be linked by nothing but this document; keeping the
+  stored file passes unchecked. That check runs in the policy, before the
+  transaction, so it only refuses early: the media claims (Document
+  Service guards, below) check the same under the file row's lock.
 - **Values have codes.** A refused value answers its key in
   `details.keys` and, where the check names a reason, a code in
   `details.codes` (`tooLong`, `invalidInstant`, `invalidUrl`,
@@ -594,13 +614,29 @@ The v2 authoring rules (batch 15, decision 06 §B1):
   revision when stale). A department author's discard of an item without
   a published version answers 400 `neverPublished` instead of deleting it.
 
+The wiki (batch 16, `@sinnlos/domain` `authoring/wiki.ts`):
+
+- Wiki spaces, moderators only: `name`, `icon`, `description`,
+  `visibility` with its target (`visibilityTarget`), `allowedRoles` as role
+  types, `department`, `team`; the slug derived on create; always
+  published.
+- Wiki pages: the author classes write `title`, `body`, `summary`, `tags`,
+  `tocEnabled`, `order` and `parent`, plus `space` on create and the edit
+  note `revisionSummary` on update; moderators also `department`, `team`,
+  `publishAt` and the edit note on create. No class moves a page to
+  another space or edits its slug (both stay in the admin panel). A
+  `parent` must sit in the page's space (for the author classes: a page
+  they can read); a NEW parent below the page answers `parentCycle` early,
+  and the wiki checks refuse every loop a write adds, for every writer.
+- Drafts only through `createDraft`/`saveDraft` (never published) and the
+  history actions with fixed answers; the author classes' generic create
+  and update stay pinned to published.
+
 The FX07 rules of the other gates:
 
 - A department head may write `description` and `color` of their own
   department; a team lead, or the head of the team's department, the
-  team's `description`. Wiki pages: `title`, `body`, `summary`, `tags`,
-  `tocEnabled`, `order` and `parent`, plus `space` on create and
-  `revisionSummary` on update.
+  team's `description`.
 - Everything else (`pages`/`members`/`teams`/`head`/`lead` connects,
   `name`, `slug`, media, `space` on update, `children`, `revisions`,
   `author`, Strapi's own keys) and every refused value answer one generic
@@ -615,10 +651,10 @@ The FX07 rules of the other gates:
   holds on these types, or on any relation into the wiki, skips the
   allowlist, and when a create or update a moderator holds on an authored
   type is not enforced for the `moderator` class (`KNOWN_OPEN_PAYLOADS`
-  lists the wiki, department and team gates that still bypass).
+  lists the department and team gates that still bypass).
 
-The web has no write path for wiki pages, departments or teams; these rules
-govern direct API calls. Department-head and team-lead rights compare
+The web has no write path for departments or teams, and the wiki pages of
+lane 16C arrive after batch 16's cms; these rules govern direct API calls. Department-head and team-lead rights compare
 department and team row ids, which is valid because departments and teams
 have no draft & publish (one row each, stable id). An instance that ran an
 earlier release with org drafts runs the one-time migration first
@@ -820,11 +856,38 @@ writers all pass them, and the cms refuses to boot when
   who kept it gets 412 with the current revision. Raw writes of guarded
   rows are inventoried by `raw-writers.test.ts`: each takes the lock and
   advances the revision, or only raises a targeting flag.
+- **The wiki checks** (`utils/wiki-checks.ts`, batch 16): every mutating
+  wiki-page and wiki-space action takes ONE structure lock (a reserved
+  revision row), whoever writes (a space publish re-creates its published
+  row from the page links it read first: no page write runs in between). A write that adds a parent link closing a loop is refused
+  (`parentCycle`) and rolled back; only added links are judged, so a loop
+  that already exists blocks no other save and can be repaired. A space
+  that any page links can be neither deleted nor unpublished
+  (`spaceNotEmpty`): the admin panel's unpublish used to drop its pages'
+  space links; a discard of a space's draft is refused when it would take
+  an unpublished page out of the space (Strapi re-links only pages with a
+  published version). `infra/diagnostics/wiki-parent-cycles.sql` lists loops,
+  cross-space parents and pages without a space, read-only. The page slug
+  `new` and the space slug `drafts` are refused for every writer (the
+  web's routes use them as words).
 - **Publish readiness** (`utils/publish-readiness.ts`): a publish of a
   scheduled type needs the fields the published validation requires, and
   a lesson's course and a wiki page's parent must be published; a publish
   that would drop that link anyway is refused and rolled back. This binds
   the admin panel and the scheduler too.
+- **The media claims** (`utils/media-claims.ts`, lane 16A, registered in
+  batch 16): every action on a document locks each file its payload names
+  or the action copies (`FOR UPDATE`, ascending ids, after the document's
+  own revision row and the other locks), refuses one that is gone or
+  being removed, and re-checks a newly linked stamped file under that lock
+  (linked by nothing but this document, the caller's own, an allowed
+  mime); two saves that attach one fresh upload serialise and the second
+  answers `invalid`. A stamped file that no row of the document links
+  after the action (a replace, a publish of a replaced draft, a discard, a
+  delete; web, panel or scheduler) is removed after the commit through
+  `claimAndRemove`. Admin-panel uploads (unstamped) are never claimed nor
+  removed. A unit pin keeps every media field the allowlist accepts tied
+  to this registration.
 - **The audit trail** (`utils/audit.ts`, last of the content middlewares):
   one `audit_events` row per change of a guarded document, written in the
   change's transaction (a failing insert rolls the change back): the

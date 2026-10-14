@@ -1,6 +1,8 @@
+import { DOCUMENT_FILE_MIME_TYPES } from "@sinnlos/domain";
+
 import { isRoleType } from "../bootstrap/roles";
 import { DEPARTMENT_UID, TEAM_UID } from "./authoring-uids";
-import { uploadedByOf } from "./upload-orphans";
+import { isTombstoned, uploadedByOf } from "./upload-orphans";
 import type {
   FrozenCheck,
   FrozenCheckName,
@@ -40,10 +42,13 @@ import type {
  *   - role types: resolved to the users-permissions role documentIds; the
  *     allowlist already refused `public`, `authenticated` and anything not
  *     allowed for the class, so the editor needs no `role.find` (C21);
- *   - `ownUpload` (§E2, unused by the batch-15 rules: `document.file` joins
- *     in batch 16): a NEWLY attached file must be stamped
- *     `provider_metadata.uploadedBy = caller`, have a sniffed mime of the
- *     field's list, and be linked by nothing but this document's own rows.
+ *   - `ownUpload` (§E2, `document.file` since batch 16): a NEWLY attached
+ *     file must be stamped `provider_metadata.uploadedBy = caller`, have a
+ *     sniffed mime of the field's list, carry no tombstone (a removal has
+ *     reserved it, utils/upload-orphans.ts) and be linked by nothing but
+ *     this document's own rows. An early refusal before the transaction:
+ *     the media claims (utils/media-claims.ts, document-middlewares slot 7)
+ *     check the same under the file row's lock at the write.
  *     Keeping the stored file is not an attachment: the allowlist passes
  *     it unchecked (the retain rule);
  *   - `pollHasVotes`: a ballot exists for any row of the poll (votes follow
@@ -54,16 +59,8 @@ export const ROLE_UID = "plugin::users-permissions.role";
 export const FILE_UID = "plugin::upload.file";
 export const POLL_VOTE_UID = "api::poll-vote.poll-vote";
 
-/** Mimes a document file may have (§E1, amendment 2): batch 16 uses them. */
-export const DOCUMENT_FILE_MIMES: ReadonlySet<string> = new Set([
-  "application/pdf",
-  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-  "image/jpeg",
-  "image/png",
-  "image/webp",
-]);
+/** Mimes a document file may have (§E1, amendment 2: the upload table's stored mimes). */
+export const DOCUMENT_FILE_MIMES: ReadonlySet<string> = new Set(DOCUMENT_FILE_MIME_TYPES);
 
 interface Row {
   id?: unknown;
@@ -206,6 +203,7 @@ function ownUploadCheck(strapi: AuthoringChecksHost, context: AuthoringCheckCont
       populate: { related: true },
     })) as Row | null;
     if (!isRecord(file) || uploadedByOf(file) !== context.callerId) return null;
+    if (isTombstoned(file)) return null;
     if (typeof file.mime !== "string" || !DOCUMENT_FILE_MIMES.has(file.mime)) return null;
     const related = Array.isArray(file.related) ? (file.related as Row[]) : [];
     const foreign = related.some(

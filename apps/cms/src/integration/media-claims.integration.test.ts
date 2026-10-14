@@ -15,14 +15,13 @@ import { minimalPdf, PNG_1PX, uploadFiles } from "./upload.test.helper";
  * File claims and the one locked removal (deep-dive decision 06 §E3-§E5;
  * batch 16 plan items 3 and 4, contract K12) on SQLite and Postgres 16.
  *
- * TEST-ONLY REGISTRATION. Lane 16A builds `createMediaClaims` but does not
- * wire it (16B registers it in slot 7 of bootstrap/document-middlewares.ts).
- * This suite appends it with `strapi.documents.use` after the whole chain,
- * so it runs inside the transaction the document lock (slot 2) opened, as
- * slot 7 will. `document.file` stays refused by the content API's allowlist
- * until 16B, so attachments here go through the Document Service (as the
- * scheduler and boot writers do) and the Content Manager; a users-
- * permissions caller is simulated with `strapi.requestContext.run`.
+ * The claims run in slot 7 of bootstrap/document-middlewares.ts (wired by
+ * lane 16B), inside the transaction the document lock (slot 2) opened.
+ * Attachments here go through the Document Service (as the scheduler and
+ * boot writers do) and the Content Manager; a users-permissions caller is
+ * simulated with `strapi.requestContext.run`. The content API's own path
+ * (the allowlist's `ownUpload` plus the claims) is
+ * authoring-documents.integration.test.ts.
  *
  * Removals run after the commit; the suite waits for them.
  */
@@ -31,11 +30,6 @@ const D = "api::document.document";
 const FILE = "plugin::upload.file";
 const AUDIT = "api::audit-event.audit-event";
 
-interface ClaimsModule {
-  createMediaClaims(
-    strapi: unknown,
-  ): (context: unknown, next: () => Promise<unknown>) => Promise<unknown>;
-}
 interface OrphansModule {
   claimAndRemove(
     strapi: unknown,
@@ -52,10 +46,6 @@ describe.each(testEngines())("media claims on %s", (engine) => {
   let orphans: OrphansModule;
   beforeAll(async () => {
     t = await createTestStrapi({ engine, env: ADMIN_ENV });
-    const { createMediaClaims } = t.requireBuilt<ClaimsModule>("src/utils/media-claims");
-    (t.strapi.documents as unknown as { use(middleware: unknown): void }).use(
-      createMediaClaims(t.strapi),
-    );
     orphans = t.requireBuilt<OrphansModule>("src/utils/upload-orphans");
   });
   afterAll(async () => {

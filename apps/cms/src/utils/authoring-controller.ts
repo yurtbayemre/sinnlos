@@ -12,6 +12,8 @@ import {
   type AuthoringStatusMode,
   type AuthoringType,
   type OwnerDepartment,
+  type WikiAuthoringType,
+  type WikiSpaceRef,
 } from "@sinnlos/domain";
 import { errors } from "@strapi/utils";
 import {
@@ -20,6 +22,8 @@ import {
   DOCUMENT_UID,
   EVENT_UID,
   QUICK_LINK_UID,
+  WIKI_PAGE_UID,
+  WIKI_SPACE_UID,
 } from "./authoring-uids";
 import { pollHasVotes } from "./authoring-checks";
 import {
@@ -44,15 +48,24 @@ import {
   type AuthoringRows,
   type GateIntent,
 } from "./write-gate";
-import { DEPARTMENT_AUTHOR_CLASS, MODERATOR_CLASS, POLL_UID, refuseKeys } from "./write-allowlist";
+import { wikiEditContext } from "./wiki-edit-context";
+import {
+  DEPARTMENT_AUTHOR_CLASS,
+  MODERATOR_CLASS,
+  POLL_UID,
+  WIKI_SPACE_VISIBILITY_TARGETS,
+  refuseKeys,
+} from "./write-allowlist";
 
 /**
  * The authoring controller (deep-dive decision 06 §B3, §G, §N2; batch 15
  * plan items 1 and 6): create, update, publish, unpublish, discard-draft,
  * delete, the /manage list and the form read of announcement, event,
- * quick-link, document and poll, spread into each type's core controller
- * (api/<type>/controllers/<type>.ts). The HTTP contract is @sinnlos/domain
- * authoring/http.ts.
+ * quick-link, document and poll, and (batch 16) wiki-space and wiki-page,
+ * spread into each type's core controller (api/<type>/controllers/
+ * <type>.ts). The HTTP contract is @sinnlos/domain authoring/http.ts and
+ * authoring/wiki.ts; the wiki pages' draft and history actions are in
+ * utils/wiki-authoring.ts.
  *
  * Every write goes through the Document Service with the payload the write
  * gate checked (global::can-author, utils/write-gate.ts; the allowlist
@@ -85,16 +98,23 @@ import { DEPARTMENT_AUTHOR_CLASS, MODERATOR_CLASS, POLL_UID, refuseKeys } from "
  * 412 and never the new revision. delete keeps global::is-admin-or-editor
  * and compares the token only.
  *
- * DISCARD (§N2, amendment row A1). A discard of a document without a
+ * DISCARD (§N2, amendment row A1; §J2). A discard of a document without a
  * published row deletes it (C20). A moderator gets that (204); a department
  * author gets 400 `_form: neverPublished`, decided under the document's
- * lock, after the token check: department authors never delete.
+ * lock, after the token check: department authors never delete. On a wiki
+ * page only its author and moderators may delete that way; the head of its
+ * department and the lead of its team get 404 there, decided the same way.
+ *
+ * WIKI PAGES (batch 16). Every create and update runs inside
+ * `wikiEditContext` (the editor and the edit note `revisionSummary`, which
+ * the allowlist admits as a controller field and which is stripped here),
+ * so the wiki-page lifecycle records the history with its author.
  */
 
 /** How each type's answers and forms are built. */
 export interface AuthoringSpec {
   uid: string;
-  type: AuthoringType;
+  type: AuthoringType | WikiAuthoringType;
   statusMode: AuthoringStatusMode;
   /** The label field (list `label`, `q` filter). */
   labelField: string;
@@ -106,6 +126,8 @@ export interface AuthoringSpec {
   unpublishScheduled: boolean;
   /** The targeting flag columns the list reads (needsRetarget). */
   flagColumns: readonly string[];
+  /** Further scalar columns the list rows show (the wiki's slug, order, icon, visibility). */
+  listColumns?: readonly string[];
 }
 
 export const AUTHORING_SPECS: Readonly<Record<string, AuthoringSpec>> = {
@@ -159,7 +181,32 @@ export const AUTHORING_SPECS: Readonly<Record<string, AuthoringSpec>> = {
     unpublishScheduled: false,
     flagColumns: ["audience"],
   },
+  // Always published, like polls (§B3): no publish, unpublish or discard.
+  [WIKI_SPACE_UID]: {
+    uid: WIKI_SPACE_UID,
+    type: "wikiSpace",
+    statusMode: "alwaysPublished",
+    labelField: "name",
+    authorField: null,
+    scheduled: false,
+    unpublishScheduled: false,
+    flagColumns: [],
+    listColumns: ["slug", "icon", "visibility"],
+  },
+  [WIKI_PAGE_UID]: {
+    uid: WIKI_PAGE_UID,
+    type: "wikiPage",
+    statusMode: "explicit",
+    labelField: "title",
+    authorField: "author",
+    scheduled: true,
+    unpublishScheduled: false,
+    flagColumns: [],
+    listColumns: ["slug", "order"],
+  },
 };
+
+const isWikiUid = (uid: string) => uid === WIKI_PAGE_UID || uid === WIKI_SPACE_UID;
 
 // ---------------------------------------------------------------------------
 // The Strapi slices and the Koa context the actions use
@@ -216,7 +263,7 @@ export interface AuthoringActions {
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
-const iso = (value: unknown): string | null => {
+export const iso = (value: unknown): string | null => {
   if (value instanceof Date) return value.toISOString();
   if (typeof value === "string" && value !== "") {
     const ms = Date.parse(value);
@@ -224,6 +271,9 @@ const iso = (value: unknown): string | null => {
   }
   return null;
 };
+
+const text = (value: unknown): string | null => (typeof value === "string" ? value : null);
+const bool = (value: unknown): boolean => value === true;
 
 const ms = (value: unknown): number | null => {
   const text = iso(value);
@@ -256,7 +306,7 @@ function sendLockError(ctx: AuthoringContext, error: DocumentLockError): void {
 }
 
 /** Runs `fn`; a lock refusal becomes its answer, anything else propagates. */
-async function answering(ctx: AuthoringContext, fn: () => Promise<void>): Promise<void> {
+export async function answering(ctx: AuthoringContext, fn: () => Promise<void>): Promise<void> {
   try {
     await fn();
   } catch (error) {
@@ -269,7 +319,7 @@ async function answering(ctx: AuthoringContext, fn: () => Promise<void>): Promis
 }
 
 /** The gate's decision for `intent`, or a 403 when the route was wired without it. */
-function gateFor(ctx: AuthoringContext, uid: string, intent: GateIntent): AuthoringGate {
+export function gateFor(ctx: AuthoringContext, uid: string, intent: GateIntent): AuthoringGate {
   const gate = authoringGateOf(ctx.state);
   // A route of this controller without global::can-author is a wiring bug:
   // refuse (fail closed) instead of writing unchecked.
@@ -301,13 +351,13 @@ export function writeStatus(
 }
 
 /** A custom action takes no query at all. */
-function noQuery(query: Record<string, unknown> | undefined): void {
+export function noQuery(query: Record<string, unknown> | undefined): void {
   const keys = Object.keys(query ?? {});
   if (keys.length > 0) refuseKeys(keys);
 }
 
 /** The policy-checked payload (`data`). */
-function payloadOf(ctx: AuthoringContext): Record<string, unknown> {
+export function payloadOf(ctx: AuthoringContext): Record<string, unknown> {
   const body = ctx.request.body;
   const data = isRecord(body) ? body.data : undefined;
   if (!isRecord(data))
@@ -344,13 +394,18 @@ function scheduleFields(spec: AuthoringSpec, draft: Record<string, unknown> | nu
   };
 }
 
-/** The write answer of a document (read inside the write's transaction). */
-async function resultDto(
+/**
+ * The write answer of a document (read inside the write's transaction).
+ * The wiki types add their slug, a wiki page its space's slug (@sinnlos/
+ * domain WikiSpaceResult, WikiPageResult).
+ */
+export async function resultDto(
   strapi: AuthoringControllerHost,
   spec: AuthoringSpec,
   documentId: string,
   version: number,
 ) {
+  const wiki = isWikiUid(spec.uid);
   const rows = (await strapi.db.query(spec.uid).findMany({
     where: { documentId },
     select: [
@@ -360,21 +415,36 @@ async function resultDto(
       "updatedAt",
       ...(spec.scheduled ? ["publishAt", "scheduleError"] : []),
       ...(spec.unpublishScheduled ? ["unpublishAt"] : []),
+      ...(wiki ? ["slug"] : []),
     ],
+    ...(spec.uid === WIKI_PAGE_UID ? { populate: { space: { select: ["slug"] } } } : {}),
   })) as Record<string, unknown>[];
   const draft = rows.find((row) => row.publishedAt == null) ?? null;
   const published = rows.find((row) => row.publishedAt != null) ?? null;
+  const space = isRecord(draft?.space) ? draft.space : null;
   return {
     documentId,
     version: String(version),
     status: documentStatus(draft, published),
     publishedAt: iso(published?.publishedAt),
     ...scheduleFields(spec, draft),
+    ...(wiki ? { slug: text(draft?.slug) ?? "" } : {}),
+    ...(spec.uid === WIKI_PAGE_UID ? { spaceSlug: text(space?.slug) } : {}),
   };
 }
 
-const documentIdOf = (value: unknown): string | null =>
+export const documentIdOf = (value: unknown): string | null =>
   isRecord(value) && typeof value.documentId === "string" ? value.documentId : null;
+
+/** A populated wiki space as a page's form and the drafts list name it, or null. */
+export function wikiSpaceRefOf(value: unknown): WikiSpaceRef | null {
+  if (!isRecord(value) || typeof value.documentId !== "string") return null;
+  return {
+    documentId: value.documentId,
+    slug: text(value.slug) ?? "",
+    name: text(value.name) ?? "",
+  };
+}
 
 const ownerOf = (row: AuthoringRow | null): OwnerDepartment | null => {
   const owner = row?.ownerDepartment;
@@ -393,9 +463,25 @@ const roleTypesOf = (value: unknown): string[] =>
         .filter((type): type is string => typeof type === "string")
     : [];
 
+/**
+ * Whether a wiki space's visibility lost its target (a deleted department
+ * or team, every allowed role gone): only moderators read it then
+ * (utils/visible-ids.ts).
+ */
+export function spaceNeedsRetarget(row: Record<string, unknown> | null): boolean {
+  if (!row) return false;
+  const target = WIKI_SPACE_VISIBILITY_TARGETS[String(row.visibility)];
+  if (!target) return false;
+  const value = row[target];
+  return Array.isArray(value) ? value.length === 0 : !isRecord(value);
+}
+
 /** Whether a row is restricted with no target left (§N9), by type. */
 export function rowNeedsRetarget(uid: string, row: Record<string, unknown> | null): boolean {
   if (!row) return false;
+  if (uid === WIKI_SPACE_UID) return spaceNeedsRetarget(row);
+  // A wiki page has no targeting: its space decides who reads it.
+  if (uid === WIKI_PAGE_UID) return false;
   if (uid === ANNOUNCEMENT_UID) {
     return announcementNeedsRetarget({
       audience: row.audience as string | null,
@@ -414,7 +500,7 @@ export function rowNeedsRetarget(uid: string, row: Record<string, unknown> | nul
 const needsRetarget = (uid: string, rows: AuthoringRows) =>
   rowNeedsRetarget(uid, rows.draft) || rowNeedsRetarget(uid, rows.published);
 
-const displayNameOf = (value: unknown): string | null => {
+export const displayNameOf = (value: unknown): string | null => {
   if (!isRecord(value)) return null;
   if (typeof value.displayName === "string" && value.displayName !== "") return value.displayName;
   return typeof value.username === "string" ? value.username : null;
@@ -422,9 +508,6 @@ const displayNameOf = (value: unknown): string | null => {
 
 // ---------------------------------------------------------------------------
 // The form read (`editable`, §B3): the draft in the write shape
-
-const text = (value: unknown): string | null => (typeof value === "string" ? value : null);
-const bool = (value: unknown): boolean => value === true;
 
 /** The type's editable fields for `roleClass` (department authors: their rule's fields only). */
 export async function editableFields(
@@ -516,6 +599,43 @@ export async function editableFields(
           : {}),
       };
     }
+    case WIKI_SPACE_UID:
+      return {
+        name: text(draft.name) ?? "",
+        slug: text(draft.slug) ?? "",
+        icon: text(draft.icon),
+        description: text(draft.description),
+        visibility: text(draft.visibility) ?? "public",
+        allowedRoles: roleTypesOf(draft.allowedRoles),
+        department: documentIdOf(draft.department),
+        team: documentIdOf(draft.team),
+        needsRetarget: spaceNeedsRetarget(draft),
+        pageCount: (await spacePageCounts(strapi, [rows.documentId])).get(rows.documentId) ?? 0,
+      };
+    case WIKI_PAGE_UID:
+      return {
+        title: text(draft.title) ?? "",
+        slug: text(draft.slug) ?? "",
+        body: text(draft.body),
+        summary: text(draft.summary),
+        tags: Array.isArray(draft.tags)
+          ? (draft.tags as unknown[]).filter((tag): tag is string => typeof tag === "string")
+          : [],
+        // The schema default is true: a NULL column reads as on.
+        tocEnabled: draft.tocEnabled !== false,
+        order: typeof draft.order === "number" ? draft.order : 0,
+        space: wikiSpaceRefOf(draft.space),
+        parent: documentIdOf(draft.parent),
+        canDiscardUnpublished: mayDeleteByDiscard(roleClass),
+        ...(moderator
+          ? {
+              department: documentIdOf(draft.department),
+              team: documentIdOf(draft.team),
+              publishAt: iso(draft.publishAt),
+              scheduleError: text(draft.scheduleError),
+            }
+          : {}),
+      };
     case POLL_UID:
       return {
         question: text(draft.question) ?? "",
@@ -542,7 +662,7 @@ const LIST_STATUSES = ["draft", "published", "modified", "scheduled", "failed"] 
 type ListStatus = (typeof LIST_STATUSES)[number];
 const OWNER_FILTERS = ["department", "moderators"] as const;
 /** documentIds per `$in` (well below every bind limit). */
-const LIST_CHUNK = 200;
+export const LIST_CHUNK = 200;
 /** The highest page the list serves (a bound on `page`, not on the rows). */
 const MAX_PAGE = 10_000;
 
@@ -551,19 +671,46 @@ interface ListQuery {
   q?: string;
   page: number;
   owner?: (typeof OWNER_FILTERS)[number];
+  /** Wiki pages: the space's documentId. */
+  space?: string;
 }
 
-/** The list's query (status, q, page; owner for moderators of the owned types); 400 otherwise. */
+/** Which keys a type's list takes besides `q` and `page`. */
+export interface ListKeys {
+  /** `status` (every type but wiki spaces, which are always published). */
+  status?: boolean;
+  /** `owner` (moderators of the department-authored types). */
+  owner?: boolean;
+  /** `space` (wiki pages). */
+  space?: boolean;
+}
+
+/** A space documentId as the list filter takes it (the documentId shape of entry-id.ts). */
+const SPACE_FILTER = /^[A-Za-z0-9_-]{1,64}$/;
+
+/**
+ * The list's query (status, q, page; owner for moderators of the owned
+ * types; space for wiki pages; wiki spaces without status); 400 otherwise.
+ * A boolean second argument is the batch-15 form: `owner` allowed or not.
+ */
 export function parseListQuery(
   query: Record<string, unknown> | undefined,
-  allowOwner: boolean,
+  keys: boolean | ListKeys,
 ): ListQuery {
-  const allowed = ["status", "q", "page", ...(allowOwner ? ["owner"] : [])];
+  const options: ListKeys = typeof keys === "boolean" ? { status: true, owner: keys } : keys;
+  const allowOwner = options.owner === true;
+  const allowed = [
+    "q",
+    "page",
+    ...(options.status === false ? [] : ["status"]),
+    ...(allowOwner ? ["owner"] : []),
+    ...(options.space ? ["space"] : []),
+  ];
   const raw = query ?? {};
   const refused = Object.keys(raw).filter((key) => !allowed.includes(key));
   const codes: Record<string, string> = {};
   const out: ListQuery = { page: 1 };
-  if (raw.status !== undefined) {
+  if (raw.status !== undefined && allowed.includes("status")) {
     if (
       typeof raw.status === "string" &&
       (LIST_STATUSES as readonly string[]).includes(raw.status)
@@ -585,6 +732,10 @@ export function parseListQuery(
     if (Number.isInteger(page) && page >= 1 && page <= MAX_PAGE) out.page = page;
     else refused.push("page");
   }
+  if (options.space && raw.space !== undefined) {
+    if (typeof raw.space === "string" && SPACE_FILTER.test(raw.space)) out.space = raw.space;
+    else refused.push("space");
+  }
   if (allowOwner && raw.owner !== undefined) {
     if (typeof raw.owner === "string" && (OWNER_FILTERS as readonly string[]).includes(raw.owner)) {
       out.owner = raw.owner as ListQuery["owner"];
@@ -594,7 +745,7 @@ export function parseListQuery(
   return out;
 }
 
-const chunks = <T>(items: readonly T[], size: number): T[][] => {
+export const chunks = <T>(items: readonly T[], size: number): T[][] => {
   const out: T[][] = [];
   for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
   return out;
@@ -610,7 +761,7 @@ const chunks = <T>(items: readonly T[], size: number): T[][] => {
  * saw. A document created in between has no version here: 0, which no
  * stored revision matches.
  */
-async function revisionsOf(
+export async function revisionsOf(
   strapi: AuthoringControllerHost,
   uid: string,
 ): Promise<Map<string, number>> {
@@ -643,6 +794,7 @@ async function listDocuments(
   } else if (query.owner === "moderators") {
     where.ownerDepartment = { id: { $null: true } };
   }
+  if (query.space !== undefined) where.space = { documentId: query.space };
   const populate = AUTHORING_POPULATE[spec.uid] ?? {};
   // The columns a list row needs (never a Markdown body): the label, the
   // state and schedule, and the targeting flags.
@@ -655,6 +807,7 @@ async function listDocuments(
     ...(spec.scheduled ? ["publishAt", "scheduleError"] : []),
     ...(spec.unpublishScheduled ? ["unpublishAt"] : []),
     ...spec.flagColumns,
+    ...(spec.listColumns ?? []),
   ];
   const drafts = (
     (await strapi.db.query(spec.uid).findMany({ where, select, populate })) as unknown[]
@@ -694,7 +847,39 @@ function listStatusMatches(rows: AuthoringRows, status: ListStatus | undefined):
   return documentStatus(rows.draft, rows.published) === status;
 }
 
-function listRow(spec: AuthoringSpec, rows: AuthoringRows, revision: number): AuthoringListRow {
+/** The page documents of each space (any row of a page linking any row of the space). */
+export async function spacePageCounts(
+  strapi: AuthoringControllerHost,
+  spaceDocumentIds: readonly string[],
+): Promise<Map<string, number>> {
+  const counts = new Map<string, number>();
+  if (spaceDocumentIds.length === 0) return counts;
+  const pages = new Map<string, Set<string>>();
+  for (const chunk of chunks(spaceDocumentIds, LIST_CHUNK)) {
+    const rows = (await strapi.db.query(WIKI_PAGE_UID).findMany({
+      where: { space: { documentId: { $in: chunk } } },
+      select: ["documentId"],
+      populate: { space: { select: ["documentId"] } },
+    })) as unknown[];
+    for (const row of rows) {
+      if (!isRecord(row) || typeof row.documentId !== "string") continue;
+      const space = documentIdOf(row.space);
+      if (!space) continue;
+      const set = pages.get(space) ?? new Set<string>();
+      set.add(row.documentId);
+      pages.set(space, set);
+    }
+  }
+  for (const [space, set] of pages) counts.set(space, set.size);
+  return counts;
+}
+
+function listRow(
+  spec: AuthoringSpec,
+  rows: AuthoringRows,
+  revision: number,
+  pageCounts?: ReadonlyMap<string, number>,
+): AuthoringListRow & Record<string, unknown> {
   const draft = rows.draft ?? ({} as AuthoringRow);
   const owned = DEPARTMENT_AUTHORED_UIDS.includes(spec.uid);
   return {
@@ -708,11 +893,36 @@ function listRow(spec: AuthoringSpec, rows: AuthoringRows, revision: number): Au
     authorName: spec.authorField ? displayNameOf(draft[spec.authorField]) : null,
     ...(owned ? { ownerDepartment: ownerOf(draft) } : {}),
     needsRetarget: needsRetarget(spec.uid, rows),
+    ...(spec.uid === WIKI_SPACE_UID
+      ? {
+          slug: text(draft.slug) ?? "",
+          icon: text(draft.icon),
+          visibility: text(draft.visibility) ?? "public",
+          pageCount: pageCounts?.get(rows.documentId) ?? 0,
+        }
+      : {}),
+    ...(spec.uid === WIKI_PAGE_UID
+      ? {
+          slug: text(draft.slug) ?? "",
+          space: documentIdOf(draft.space),
+          parent: documentIdOf(draft.parent),
+          order: typeof draft.order === "number" ? draft.order : 0,
+        }
+      : {}),
   };
 }
 
 // ---------------------------------------------------------------------------
 // The actions
+
+/**
+ * Whether a class may discard a document that has no published row (which
+ * deletes it, C20): moderators, and a wiki page's author (§J2). Department
+ * authors never (§N2); a wiki page's department head and team lead neither.
+ */
+export function mayDeleteByDiscard(roleClass: string | null | undefined): boolean {
+  return roleClass === MODERATOR_CLASS || roleClass === "author";
+}
 
 /** A controller action as Strapi calls it (Koa's context; typed inside as AuthoringContext). */
 export type AuthoringHandler = (ctx: unknown) => Promise<void>;
@@ -731,6 +941,80 @@ export function authoringActions(strapi: unknown, uid: string): Record<string, A
   );
 }
 
+/**
+ * A mutation of an existing document inside an authoring scope and one
+ * transaction (§G): the client's `If-Match`, what the gate saw and its
+ * classifier go into the scope, the document lock compares under the lock,
+ * and the answer is the DTO read inside the transaction (204 when `run`
+ * deleted the document).
+ */
+export async function runDocumentMutation(
+  strapi: AuthoringControllerHost,
+  spec: AuthoringSpec,
+  ctx: AuthoringContext,
+  gate: AuthoringGate,
+  missingClass: 403 | 404,
+  run: (scope: AuthoringScope) => Promise<"deleted" | void>,
+): Promise<void> {
+  const expectedRevision = parseIfMatch(ctx.get("If-Match"));
+  const documentId = gate.documentId as string;
+  const scope: AuthoringScope = {
+    uid: spec.uid,
+    documentId,
+    expectedRevision,
+    observedRevision: gate.observedRevision,
+    classify: gate.classify,
+    roleClass: gate.roleClass,
+    missingClass,
+    source: "content-api",
+  };
+  const answer = await strapi.db.transaction(async () =>
+    runInAuthoringScope(scope, async () => {
+      const outcome = await run(scope);
+      if (outcome === "deleted") return null;
+      return resultDto(strapi, spec, documentId, scope.committedRevision ?? 0);
+    }),
+  );
+  if (answer === null) {
+    ctx.status = 204;
+    ctx.body = null;
+    return;
+  }
+  ctx.set("ETag", etagOf(Number(answer.version)));
+  ctx.status = 200;
+  ctx.body = { data: answer };
+}
+
+/**
+ * Runs a wiki-page write inside `wikiEditContext` (contract K16): the
+ * editor is the caller, the edit note is `data.revisionSummary` (a
+ * controller field the allowlist admitted; it is no attribute, so it leaves
+ * the payload here), `restoredFrom` names a restored revision. Other types
+ * run `fn` as it is.
+ */
+export function withWikiEdit<T>(
+  uid: string,
+  gate: AuthoringGate,
+  data: Record<string, unknown> | null,
+  fn: () => Promise<T>,
+  restoredFrom?: number,
+): Promise<T> {
+  if (uid !== WIKI_PAGE_UID) return fn();
+  let revisionSummary: string | undefined;
+  if (data && "revisionSummary" in data) {
+    if (typeof data.revisionSummary === "string") revisionSummary = data.revisionSummary;
+    delete data.revisionSummary;
+  }
+  return wikiEditContext.run(
+    {
+      editorId: gate.callerId,
+      ...(revisionSummary !== undefined ? { revisionSummary } : {}),
+      ...(restoredFrom !== undefined ? { restoredFrom } : {}),
+    },
+    fn,
+  );
+}
+
 /** The typed actions (authoringActions wraps them for Strapi). */
 export function authoringActionsFor(
   strapi: AuthoringControllerHost,
@@ -743,41 +1027,12 @@ export function authoringActionsFor(
   // rows read afterwards, and `fields` would also narrow the rows the
   // lifecycles see (an afterCreate without `publishedAt` notifies nobody).
 
-  /** A mutation of an existing document inside an authoring scope and one transaction. */
-  const mutate = async (
+  const mutate = (
     ctx: AuthoringContext,
     gate: AuthoringGate,
     missingClass: 403 | 404,
     run: (scope: AuthoringScope) => Promise<"deleted" | void>,
-  ) => {
-    const expectedRevision = parseIfMatch(ctx.get("If-Match"));
-    const documentId = gate.documentId as string;
-    const scope: AuthoringScope = {
-      uid,
-      documentId,
-      expectedRevision,
-      observedRevision: gate.observedRevision,
-      classify: gate.classify,
-      roleClass: gate.roleClass,
-      missingClass,
-      source: "content-api",
-    };
-    const answer = await strapi.db.transaction(async () =>
-      runInAuthoringScope(scope, async () => {
-        const outcome = await run(scope);
-        if (outcome === "deleted") return null;
-        return resultDto(strapi, spec, documentId, scope.committedRevision ?? 0);
-      }),
-    );
-    if (answer === null) {
-      ctx.status = 204;
-      ctx.body = null;
-      return;
-    }
-    ctx.set("ETag", etagOf(Number(answer.version)));
-    ctx.status = 200;
-    ctx.body = { data: answer };
-  };
+  ) => runDocumentMutation(strapi, spec, ctx, gate, missingClass, run);
 
   const actions: AuthoringActions = {
     async create(ctx) {
@@ -788,7 +1043,9 @@ export function authoringActionsFor(
         const scope: AuthoringScope = { uid, roleClass: gate.roleClass, source: "content-api" };
         const answer = await strapi.db.transaction(async () =>
           runInAuthoringScope(scope, async () => {
-            const created = await documents().create({ data, status });
+            const created = await withWikiEdit(uid, gate, data, () =>
+              documents().create({ data, status }),
+            );
             const documentId = documentIdOf(created);
             if (!documentId)
               throw new Error(`authoring controller: ${uid} create returned no document`);
@@ -807,7 +1064,9 @@ export function authoringActionsFor(
         const status = writeStatus(ctx.query, spec.statusMode);
         const data = payloadOf(ctx);
         await mutate(ctx, gate, 403, async (scope) => {
-          await documents().update({ documentId: scope.documentId, data, status });
+          await withWikiEdit(uid, gate, data, () =>
+            documents().update({ documentId: scope.documentId, data, status }),
+          );
         });
       });
     },
@@ -842,7 +1101,11 @@ export function authoringActionsFor(
     async authoringList(ctx) {
       const gate = gateFor(ctx, uid, "authoringList");
       const owned = DEPARTMENT_AUTHORED_UIDS.includes(uid);
-      const query = parseListQuery(ctx.query, owned && gate.roleClass === MODERATOR_CLASS);
+      const query = parseListQuery(ctx.query, {
+        status: uid !== WIKI_SPACE_UID,
+        owner: owned && gate.roleClass === MODERATOR_CLASS,
+        space: uid === WIKI_PAGE_UID,
+      });
       // Versions first, then the rows (see revisionsOf).
       const revisions = await revisionsOf(strapi, uid);
       const documentsList = (await listDocuments(strapi, spec, gate, query)).filter((rows) =>
@@ -855,9 +1118,18 @@ export function authoringActionsFor(
       const total = documentsList.length;
       const pageSize = AUTHORING_LIST_PAGE_SIZE;
       const page = documentsList.slice((query.page - 1) * pageSize, query.page * pageSize);
+      const pageCounts =
+        uid === WIKI_SPACE_UID
+          ? await spacePageCounts(
+              strapi,
+              page.map((rows) => rows.documentId),
+            )
+          : undefined;
       ctx.status = 200;
       ctx.body = {
-        data: page.map((rows) => listRow(spec, rows, revisions.get(rows.documentId) ?? 0)),
+        data: page.map((rows) =>
+          listRow(spec, rows, revisions.get(rows.documentId) ?? 0, pageCounts),
+        ),
         meta: {
           pagination: {
             page: query.page,
@@ -884,6 +1156,9 @@ export function authoringActionsFor(
           publishedAt: iso(rows.published?.publishedAt),
           updatedAt: iso(rows.draft?.updatedAt),
           roleClass: gate.roleClass,
+          // The preview's author (batch 16, S13): the author, organiser or
+          // uploader; null for types without one and panel-made items.
+          authorName: spec.authorField ? displayNameOf(rows.draft?.[spec.authorField]) : null,
           ...(await editableFields(strapi, uid, rows, gate.roleClass)),
         },
       };
@@ -915,13 +1190,14 @@ export function authoringActionsFor(
 
     actions.discardDraft = documentAction("discardDraft", async (scope, gate) => {
       const documentId = scope.documentId as string;
-      if (gate.roleClass === DEPARTMENT_AUTHOR_CLASS) {
+      if (!mayDeleteByDiscard(gate.roleClass)) {
         // Under the document's lock and after the lock's own checks, in
         // its order (amendment row A1; K2 since 15B a3bfd5c: the class
         // on every scoped mutation, then the tokens): a discard without
         // a published row would delete the document, which department
-        // authors never do. A caller who lost the class learns nothing
-        // here, not even with current tokens.
+        // authors never do, and on a wiki page only its author and
+        // moderators may (§J2). A caller who lost the class learns
+        // nothing here, not even with current tokens.
         const locked = await lockDocument(strapi, uid, documentId);
         const roleClass = scope.classify ? await scope.classify({ uid, documentId }) : null;
         if (!roleClass) throw new ClassLost(404);
@@ -931,7 +1207,9 @@ export function authoringActionsFor(
         const published = await strapi.db
           .query(uid)
           .count({ where: { documentId, publishedAt: { $notNull: true } } });
-        if (published === 0) {
+        if (published === 0 && !mayDeleteByDiscard(roleClass)) {
+          // The page's other row classes: like a page they have no class on.
+          if (roleClass !== DEPARTMENT_AUTHOR_CLASS) throw new ClassLost(404);
           throw new errors.ValidationError("There is no published version to return to", {
             keys: [FORM_KEY],
             codes: { [FORM_KEY]: "neverPublished" },

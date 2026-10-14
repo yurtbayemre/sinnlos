@@ -9,6 +9,7 @@ import {
   DOCUMENT,
   EVENT,
   TEAM,
+  WIKI_PAGE,
   deleteHost,
 } from "./targeting-flags.test.helper";
 import {
@@ -415,6 +416,13 @@ describe("delete-hook helpers", () => {
         },
         { id: 2, documentId: "doc-b", audience: "all", departments: [], publishedAt: null },
       ],
+      // Wiki pages (batch 16): the department decides the head's class, the team the lead's.
+      [WIKI_PAGE]: [
+        { id: 1, documentId: "wiki-a", department: { id: ENG }, publishedAt: null },
+        { id: 2, documentId: "wiki-a", department: { id: ENG }, publishedAt: "2026-01-01" },
+        { id: 3, documentId: "wiki-b", team: { id: PLATFORM }, publishedAt: null },
+        { id: 4, documentId: "wiki-c", department: { id: SALES }, publishedAt: null },
+      ],
     };
   }
 
@@ -458,10 +466,12 @@ describe("delete-hook helpers", () => {
       { uid: EVENT, documentId: "ev-a" },
       { uid: EVENT, documentId: "ev-b" },
       { uid: EVENT, documentId: "ev-c" },
+      { uid: WIKI_PAGE, documentId: "wiki-a" },
     ]);
     expect(await documentsLinking(asHost(strapi), TEAM_LINKED_DOCUMENTS, [PLATFORM], "x")).toEqual([
       { uid: ANNOUNCEMENT, documentId: "ann-b" },
       { uid: ANNOUNCEMENT, documentId: "ann-c" },
+      { uid: WIKI_PAGE, documentId: "wiki-b" },
     ]);
     expect(await documentsLinking(asHost(strapi), DEPARTMENT_LINKED_DOCUMENTS, [], "x")).toEqual(
       [],
@@ -475,7 +485,13 @@ describe("delete-hook helpers", () => {
       department: { id: ENG },
       publishedAt: null,
     }));
-    const { strapi } = deleteHost({ ...org(), [ANNOUNCEMENT]: many, [EVENT]: [], [DOCUMENT]: [] });
+    const { strapi } = deleteHost({
+      ...org(),
+      [ANNOUNCEMENT]: many,
+      [EVENT]: [],
+      [DOCUMENT]: [],
+      [WIKI_PAGE]: [],
+    });
     const reads: unknown[] = [];
     const query = strapi.db.query;
     strapi.db.query = (uid: string) => {

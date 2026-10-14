@@ -1,26 +1,24 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { wikiEditContext, type WikiEditContext } from "../../../utils/wiki-edit-context";
-import wikiPageController from "./wiki-page";
+
+import { createStrapiStub } from "../../../test/strapi-stub.test.helper";
+import { wikiEditContext } from "../../../utils/wiki-edit-context";
+import { AUTHORING_STATE_KEY, type AuthoringGate } from "../../../utils/write-gate";
 
 /**
- * wiki-page update controller invariants (docs/architecture.md §5.23), next
- * to the FX07 allowlist that now runs before it in can-edit-wiki:
- *   - `revisionSummary` is not a schema attribute (the core validateInput
- *     would reject it), so the controller strips it and hands it to the
- *     revision lifecycle through wikiEditContext. The allowlist admits it
- *     as controller input for exactly this reason.
- *   - super.update runs INSIDE wikiEditContext.run, so beforeUpdate sees the
- *     editor.
- *   - lastEditor is server-authoritative for every caller (the allowlist
- *     refuses it from non-bypass callers; for admin/editor it is overwritten).
- *
- * `super.update` is a spy on the prototype, where @strapi/core puts the base
- * controller (comment.test.ts pattern); it records the payload and the
- * AsyncLocalStorage store it runs under.
+ * The wiki-page controller (batch 16 lane 16B): the authoring controller's
+ * actions plus the wiki's draft and history actions, every write inside
+ * wikiEditContext (contract K16), so the wiki-page lifecycle records the
+ * history with its editor:
+ *   - `revisionSummary` is no schema attribute: the allowlist admits it as a
+ *     controller field, and it leaves the payload here for the context;
+ *   - the editor is the caller the gate admitted;
+ *   - a restore names the revision it brings back (`restoredFrom`).
+ * The Document Service is a spy that records the payload and the store it
+ * runs under (the Document Service middlewares are not part of this test).
  */
 
 const mocks = vi.hoisted(() => ({
-  seen: [] as { data: unknown; store: unknown }[],
+  seen: [] as { action: string; data: unknown; store: unknown }[],
 }));
 
 vi.mock("@strapi/strapi", () => ({
@@ -28,73 +26,189 @@ vi.mock("@strapi/strapi", () => ({
     createCoreController:
       (_uid: string, cfg: (deps: { strapi: unknown }) => object) =>
       ({ strapi }: { strapi: unknown }) =>
-        Object.setPrototypeOf(cfg({ strapi }), {
-          update: async (ctx: FakeCtx) => {
-            mocks.seen.push({
-              data: structuredClone(ctx.request.body.data),
-              store: structuredClone(wikiEditContext.getStore()),
-            });
-            return { data: {} };
-          },
-        }),
+        cfg({ strapi }),
   },
 }));
 
-interface FakeCtx {
-  request: { body: { data: Record<string, unknown> } };
-  state: { user?: { id: number; role: { type: string } } };
-}
-
-type WikiPageController = { update(ctx: FakeCtx): Promise<unknown> };
-
-function controller(): WikiPageController {
-  return (wikiPageController as unknown as (deps: { strapi: unknown }) => WikiPageController)({
-    strapi: {},
-  });
-}
-
-const AUTHOR = { id: 7, role: { type: "member" } };
+const UID = "api::wiki-page.wiki-page";
+const DOC = "page0000000000000000000a";
 
 beforeEach(() => {
   mocks.seen.length = 0;
 });
 
-describe("wiki-page update controller", () => {
-  it("strips revisionSummary, forces lastEditor and runs super.update in the edit context", async () => {
-    // The shape can-edit-wiki hands over for a non-bypass author.
-    const data = {
-      title: "Neu",
-      parent: { set: [{ documentId: "page-sibling" }] },
-      revisionSummary: "Tippfehler",
+function host() {
+  const stub = createStrapiStub({
+    tables: {
+      [UID]: [
+        {
+          id: 1,
+          documentId: DOC,
+          title: "T",
+          slug: "t-1a2b3c4d",
+          publishedAt: null,
+          updatedAt: "2026-10-01T10:00:00.000Z",
+          publishAt: null,
+          scheduleError: null,
+        },
+      ],
+      "api::wiki-revision.wiki-revision": [
+        {
+          id: 7,
+          pageDocumentId: DOC,
+          title: "Old title",
+          body: "Old body",
+          pageSummary: "Old summary",
+          summary: "an edit",
+          kind: "after",
+          createdAt: "2026-10-01T09:00:00.000Z",
+        },
+      ],
+    },
+  });
+  const record =
+    (action: string) =>
+    async (params: Record<string, unknown>): Promise<unknown> => {
+      mocks.seen.push({
+        action,
+        data: structuredClone(params.data),
+        store: structuredClone(wikiEditContext.getStore()),
+      });
+      return { documentId: (params.documentId as string) ?? DOC };
     };
-    await controller().update({ request: { body: { data } }, state: { user: AUTHOR } });
+  const documents = () => ({
+    create: record("create"),
+    update: record("update"),
+    publish: record("publish"),
+    unpublish: record("unpublish"),
+    discardDraft: record("discardDraft"),
+    delete: record("delete"),
+  });
+  return { ...stub, documents };
+}
+
+const gate = (intent: AuthoringGate["intent"]): AuthoringGate => ({
+  uid: UID,
+  intent,
+  roleClass: "author",
+  callerId: 42,
+  callerDepartment: null,
+  ...(intent === "create" || intent === "createDraft"
+    ? {}
+    : { documentId: DOC, observedRevision: 3, classify: async () => "author" }),
+});
+
+function ctx(
+  intent: AuthoringGate["intent"],
+  options: { query?: Record<string, unknown>; body?: unknown } = {},
+) {
+  return {
+    state: { [AUTHORING_STATE_KEY]: gate(intent) },
+    params: { id: DOC },
+    query: options.query ?? {},
+    request: {
+      body: options.body ?? { data: { title: "New", revisionSummary: "Fixed a typo" } },
+    },
+    get: (name: string) => (name.toLowerCase() === "if-match" ? '"3"' : ""),
+    set: () => undefined,
+    status: 404,
+    body: null as unknown,
+  };
+}
+
+async function controller() {
+  const factory = (await import("./wiki-page")).default as unknown as (deps: {
+    strapi: unknown;
+  }) => Record<string, (ctx: unknown) => Promise<void>>;
+  return factory({ strapi: host() });
+}
+
+describe("wiki-page controller", () => {
+  it("serves the authoring actions and the draft and history actions", async () => {
+    const actions = await controller();
+    for (const name of [
+      "create",
+      "update",
+      "delete",
+      "publish",
+      "unpublish",
+      "discardDraft",
+      "authoringList",
+      "editable",
+      "createDraft",
+      "saveDraft",
+      "myDrafts",
+      "revisions",
+      "revision",
+      "restore",
+    ]) {
+      expect(typeof actions[name], name).toBe("function");
+    }
+  });
+
+  it("runs update inside wikiEditContext, revisionSummary out of the payload", async () => {
+    const actions = await controller();
+    const request = ctx("update", { query: { status: "published" } });
+    await actions.update(request);
+    expect(request.status).toBe(200);
     expect(mocks.seen).toEqual([
       {
-        data: {
-          title: "Neu",
-          parent: { set: [{ documentId: "page-sibling" }] },
-          lastEditor: AUTHOR.id,
-        },
-        store: { editorId: AUTHOR.id, revisionSummary: "Tippfehler" } satisfies WikiEditContext,
+        action: "update",
+        data: { title: "New" },
+        store: { editorId: 42, revisionSummary: "Fixed a typo" },
       },
     ]);
   });
 
-  it("drops a null revisionSummary without passing it on", async () => {
-    await controller().update({
-      request: { body: { data: { body: "x", revisionSummary: null } } },
-      state: { user: AUTHOR },
-    });
-    expect(mocks.seen[0].data).toEqual({ body: "x", lastEditor: AUTHOR.id });
-    expect(mocks.seen[0].store).toEqual({ editorId: AUTHOR.id, revisionSummary: undefined });
+  it("runs create, createDraft and saveDraft inside it too; the draft actions save drafts only", async () => {
+    const actions = await controller();
+    await actions.create(ctx("create", { query: { status: "draft" } }));
+    const created = ctx("createDraft");
+    await actions.createDraft(created);
+    const saved = ctx("saveDraft");
+    await actions.saveDraft(saved);
+    expect(created.status).toBe(201);
+    expect(saved.status).toBe(200);
+    expect(mocks.seen.map(({ action, store }) => ({ action, store }))).toEqual([
+      { action: "create", store: { editorId: 42, revisionSummary: "Fixed a typo" } },
+      { action: "create", store: { editorId: 42, revisionSummary: "Fixed a typo" } },
+      { action: "update", store: { editorId: 42, revisionSummary: "Fixed a typo" } },
+    ]);
+    for (const seen of mocks.seen) expect(seen.data).toEqual({ title: "New" });
   });
 
-  it("overwrites a client lastEditor for bypass callers too", async () => {
-    const editor = { id: 3, role: { type: "editor" } };
-    await controller().update({
-      request: { body: { data: { lastEditor: 99, title: "x" } } },
-      state: { user: editor },
-    });
-    expect(mocks.seen[0].data).toEqual({ title: "x", lastEditor: editor.id });
+  it("refuses any query on the draft actions", async () => {
+    const actions = await controller();
+    await expect(
+      actions.saveDraft(ctx("saveDraft", { query: { status: "published" } })),
+    ).rejects.toThrow();
+    expect(mocks.seen).toEqual([]);
+  });
+
+  it("restores a revision: the draft update and the publish, both recorded with restoredFrom", async () => {
+    const actions = await controller();
+    const request = ctx("restore", { body: { revisionId: 7 } });
+    await actions.restore(request);
+    expect(request.status).toBe(200);
+    expect(mocks.seen).toEqual([
+      {
+        action: "update",
+        data: { title: "Old title", body: "Old body", summary: "Old summary", lastEditor: 42 },
+        store: { editorId: 42, restoredFrom: 7 },
+      },
+      { action: "publish", data: undefined, store: { editorId: 42, restoredFrom: 7 } },
+    ]);
+  });
+
+  it("answers 404 for a revision of another page, and 400 for a body that is not { revisionId }", async () => {
+    const actions = await controller();
+    await expect(actions.restore(ctx("restore", { body: { revisionId: 99 } }))).rejects.toThrow(
+      "Not Found",
+    );
+    await expect(
+      actions.restore(ctx("restore", { body: { revisionId: 7, title: "x" } })),
+    ).rejects.toThrow();
+    await expect(actions.restore(ctx("restore", { body: { revisionId: "7a" } }))).rejects.toThrow();
+    expect(mocks.seen).toEqual([]);
   });
 });

@@ -1,28 +1,18 @@
 import { factories } from "@strapi/strapi";
-import { wikiEditContext } from "../../../utils/wiki-edit-context";
 
-export default factories.createCoreController("api::wiki-page.wiki-page", () => ({
-  async update(ctx) {
-    const user = ctx.state.user;
-    const data = (ctx.request.body as any)?.data;
+import { authoringActions } from "../../../utils/authoring-controller";
+import { wikiPageActions } from "../../../utils/wiki-authoring";
 
-    // For callers without the admin_role/editor bypass, can-edit-wiki has
-    // already reduced the payload to the FX07 write allowlist, which admits
-    // revisionSummary as controller input (utils/write-allowlist.ts).
-    let revisionSummary: string | undefined;
-    if (data && typeof data === "object") {
-      // `revisionSummary` is not a schema attribute — the core input
-      // validation rejects unknown keys — so pull it out of the payload
-      // and hand it to the revision lifecycle via the request-scoped
-      // bridge instead.
-      if (typeof data.revisionSummary === "string") {
-        revisionSummary = data.revisionSummary;
-      }
-      delete data.revisionSummary;
-      // Server-authoritative editor: never trust a client-sent lastEditor.
-      if (user) data.lastEditor = user.id;
-    }
-
-    return wikiEditContext.run({ editorId: user?.id, revisionSummary }, () => super.update(ctx));
-  },
+/**
+ * Wiki pages: the v2 authoring controller (utils/authoring-controller.ts:
+ * create, update, publish, unpublish, discardDraft, delete, authoringList,
+ * editable) and the wiki's draft and history actions (utils/wiki-
+ * authoring.ts: createDraft, saveDraft, myDrafts, revisions, revision,
+ * restore); deep-dive decision 06 §J2, batch 16 lane 16B. Every write runs
+ * inside wikiEditContext, so the history records its editor. find and
+ * findOne stay the core's, behind wiki-visibility.
+ */
+export default factories.createCoreController("api::wiki-page.wiki-page", ({ strapi }) => ({
+  ...authoringActions(strapi, "api::wiki-page.wiki-page"),
+  ...wikiPageActions(strapi),
 }));

@@ -283,11 +283,36 @@ const EVENT = "api::event.event";
 const QUICK_LINK = "api::quick-link.quick-link";
 const DOCUMENT = "api::document.document";
 const POLL = "api::poll.poll";
+const WIKI_SPACE = "api::wiki-space.wiki-space";
+const WIKI_PAGE = "api::wiki-page.wiki-page";
 /** The custom routes of api/<type>/routes/00-authoring.ts, by intent. */
 const authoringRoutes = (uid: string, intents: readonly string[]) =>
   Object.fromEntries(intents.map((intent) => [`${uid}.${intent}`, canAuthorAction(uid, intent)]));
 const DP_INTENTS = ["publish", "unpublish", "discardDraft", "authoringList", "editable"] as const;
 const POLL_INTENTS = ["authoringList", "editable"] as const;
+/** A wiki space is always published, like a poll: the list and the form read. */
+const WIKI_SPACE_INTENTS = POLL_INTENTS;
+/** The rebuilt wiki-page row gate (batch 16): the route's uid and, on a custom action, its intent. */
+const canEditWiki = (intent?: string) => [
+  {
+    name: "global::can-edit-wiki",
+    config: intent ? { uid: WIKI_PAGE, intent } : { uid: WIKI_PAGE },
+  },
+];
+/** The wiki-page actions of api/wiki-page/routes/00-authoring.ts (§J2), and who holds them. */
+const WIKI_PAGE_ACTION_ROLES: Record<string, readonly string[]> = {
+  createDraft: ["admin_role", "editor", "department_head", "team_lead"],
+  myDrafts: ["admin_role", "editor", "department_head", "team_lead", "member"],
+  editable: ["admin_role", "editor", "department_head", "team_lead", "member"],
+  saveDraft: ["admin_role", "editor", "department_head", "team_lead", "member"],
+  publish: ["admin_role", "editor", "department_head", "team_lead", "member"],
+  discardDraft: ["admin_role", "editor", "department_head", "team_lead", "member"],
+  revisions: ["admin_role", "editor", "department_head", "team_lead", "member"],
+  revision: ["admin_role", "editor", "department_head", "team_lead", "member"],
+  restore: ["admin_role", "editor", "department_head", "team_lead", "member"],
+  unpublish: ["admin_role", "editor"],
+  authoringList: ["admin_role", "editor"],
+};
 const wiki = (level: string) => [{ name: "global::wiki-visibility", config: { level } }];
 const training = (level: string) => [{ name: "global::training-visibility", config: { level } }];
 
@@ -414,17 +439,27 @@ const GOLDEN: Record<string, PolicySpec[]> = {
 
   "api::wiki-page.wiki-page.find": wiki("page"),
   "api::wiki-page.wiki-page.findOne": wiki("page"),
-  "api::wiki-page.wiki-page.create": ["global::can-edit-wiki"],
-  "api::wiki-page.wiki-page.update": ["global::can-edit-wiki"],
+  // Batch 16: the rebuilt row gate (moderator class, no bypass), the
+  // authoring controller, and the actions of §J2.
+  "api::wiki-page.wiki-page.create": canEditWiki(),
+  "api::wiki-page.wiki-page.update": canEditWiki(),
   "api::wiki-page.wiki-page.delete": ADMIN_OR_EDITOR,
+  ...Object.fromEntries(
+    Object.keys(WIKI_PAGE_ACTION_ROLES).map((intent) => [
+      `${WIKI_PAGE}.${intent}`,
+      canEditWiki(intent),
+    ]),
+  ),
 
   // api::wiki-revision.wiki-revision: no route (batch 15.1, S01 v2 rule 4).
 
   "api::wiki-space.wiki-space.find": wiki("space"),
   "api::wiki-space.wiki-space.findOne": wiki("space"),
-  "api::wiki-space.wiki-space.create": ADMIN_OR_EDITOR,
-  "api::wiki-space.wiki-space.update": ADMIN_OR_EDITOR,
+  // Batch 16: the v2 write gate, always published.
+  "api::wiki-space.wiki-space.create": canAuthor(WIKI_SPACE),
+  "api::wiki-space.wiki-space.update": canAuthor(WIKI_SPACE),
   "api::wiki-space.wiki-space.delete": ADMIN_OR_EDITOR,
+  ...authoringRoutes(WIKI_SPACE, WIKI_SPACE_INTENTS),
 };
 
 // ---------------------------------------------------------------------------
@@ -557,11 +592,16 @@ const KNOWN_RELATION_LEAKS = new Set<string>([]);
 const WRITE_ALLOWLIST_ENFORCERS: Record<string, { policy: string; classes: readonly string[] }> = {
   "api::department.department.update": { policy: "global::can-edit-department", classes: ["head"] },
   "api::team.team.update": { policy: "global::can-edit-team", classes: ["departmentHead", "lead"] },
-  "api::wiki-page.wiki-page.create": { policy: "global::can-edit-wiki", classes: ["author"] },
+  "api::wiki-page.wiki-page.create": {
+    policy: "global::can-edit-wiki",
+    classes: ["author", "moderator"],
+  },
   "api::wiki-page.wiki-page.update": {
     policy: "global::can-edit-wiki",
-    classes: ["author", "departmentHead", "teamLead"],
+    classes: ["author", "departmentHead", "moderator", "teamLead"],
   },
+  "api::wiki-space.wiki-space.create": { policy: "global::can-author", classes: ["moderator"] },
+  "api::wiki-space.wiki-space.update": { policy: "global::can-author", classes: ["moderator"] },
   "api::announcement.announcement.create": {
     policy: "global::can-author",
     classes: ["departmentAuthor", "moderator"],
@@ -594,27 +634,20 @@ const WRITE_ALLOWLIST_ENFORCERS: Record<string, { policy: string; classes: reado
 
 /**
  * Authored types (decision 06 §A) whose moderator payloads are still open:
- * admin_role/editor bypass their FX07 gate or write them through
- * is-admin-or-editor. Batch 16 rebuilds the wiki gates (wiki-page,
- * wiki-space), batch 17 the department and team gates; the set shrinks to
- * empty. wiki-revision left it in batch 15.1: it has no route at all (rule
- * 4). Every other authored type with a moderator create/update route
- * enforces the `moderator` class (S01 v2 rule 1).
+ * admin_role/editor bypass their FX07 gate. Batch 17 rebuilds the
+ * department and team gates; the set shrinks to empty. wiki-revision left it
+ * in batch 15.1 (no route at all, rule 4), wiki-page and wiki-space in batch
+ * 16 (the rebuilt can-edit-wiki and can-author). Every other authored type
+ * with a moderator create/update route enforces the `moderator` class (S01
+ * v2 rule 1).
  */
-const KNOWN_OPEN_PAYLOADS = new Set<string>([
-  "api::wiki-page.wiki-page",
-  "api::wiki-space.wiki-space",
-  "api::department.department",
-  "api::team.team",
-]);
+const KNOWN_OPEN_PAYLOADS = new Set<string>(["api::department.department", "api::team.team"]);
 
 const WIKI_REVISION = "api::wiki-revision.wiki-revision";
 
 /** The authored types of decision 06 §A (phase 1 through 3). */
 const AUTHORED_TYPES_V2 = [
   ...AUTHORED_UIDS,
-  "api::wiki-space.wiki-space",
-  "api::wiki-page.wiki-page",
   "api::wiki-revision.wiki-revision",
   "api::course.course",
   "api::lesson.lesson",
@@ -792,6 +825,8 @@ describe("route → policy matrix (S01)", async () => {
           "/quick-links/authoring",
           "/documents/authoring",
           "/polls/authoring",
+          "/wiki-spaces/authoring",
+          "/wiki-pages/authoring",
         ]),
       );
       expect(misordered).toEqual([]);
@@ -1010,7 +1045,8 @@ describe("route → policy matrix (S01)", async () => {
       it(`${action} is enforced for [${restrictedHolders(action).join(", ")}] (status pinned or explicit)`, () => {
         expect(action in WRITE_ALLOWLIST_ENFORCERS, `${action} allowlist entry`).toBe(true);
         expect(enforcedBy(action), `${action} policy`).toBe(true);
-        if (WRITE_ALLOWLIST_ENFORCERS[action].policy === "global::can-author") {
+        const policy = WRITE_ALLOWLIST_ENFORCERS[action].policy;
+        if (policy === "global::can-author" || policy === "global::can-edit-wiki") {
           expect(isOverridden(action), `${action} authoring controller`).toBe(true);
         }
       });
@@ -1123,12 +1159,12 @@ describe("route → policy matrix (S01)", async () => {
       expect([...new Set(open)].sort()).toEqual([...KNOWN_OPEN_PAYLOADS].sort());
     });
 
-    it("the bypass ends on the five phase-1 types: no route of theirs is is-admin-or-editor but delete", () => {
+    it("the bypass ends on the authored types: no route of theirs is is-admin-or-editor but delete", () => {
       for (const uid of AUTHORED_UIDS) {
+        // Wiki pages have their own row gate on the same model (batch 16).
+        const gate = uid === WIKI_PAGE ? "global::can-edit-wiki" : "global::can-author";
         for (const write of writes) {
-          expect(policiesOf(`${uid}.${write}`).map(policyName), `${uid}.${write}`).toEqual([
-            "global::can-author",
-          ]);
+          expect(policiesOf(`${uid}.${write}`).map(policyName), `${uid}.${write}`).toEqual([gate]);
         }
         expect(policiesOf(`${uid}.delete`).map(policyName), `${uid}.delete`).toEqual([
           "global::is-admin-or-editor",
@@ -1140,8 +1176,14 @@ describe("route → policy matrix (S01)", async () => {
 
     it("rule 2: every authoring custom action goes to exactly its roles, never guest or authenticated", () => {
       const expected: Record<string, readonly string[]> = {};
+      // The always-published types have no publish, unpublish or discard.
+      const intentsOf: Record<string, readonly string[]> = {
+        [POLL]: POLL_INTENTS,
+        [WIKI_SPACE]: WIKI_SPACE_INTENTS,
+      };
       for (const uid of AUTHORED_UIDS) {
-        const intents = uid === POLL ? POLL_INTENTS : DP_INTENTS;
+        if (uid === WIKI_PAGE) continue; // can-edit-wiki's actions: the next test.
+        const intents = intentsOf[uid] ?? DP_INTENTS;
         const roles = (DEPARTMENT_AUTHORED_UIDS as readonly string[]).includes(uid)
           ? [...MODERATORS, ...DEPARTMENT_AUTHOR_ROLES]
           : [...MODERATORS];
@@ -1161,6 +1203,49 @@ describe("route → policy matrix (S01)", async () => {
         expect([...(grant as readonly string[])].sort(), action).toEqual([...roles].sort());
         for (const role of NEVER)
           expect(effectiveGrants(role).has(action), `${role} ${action}`).toBe(false);
+      }
+    });
+
+    it("rule 2: every wiki-page action of §J2 goes to exactly its roles, never guest or authenticated", () => {
+      const wikiCustom = [...routes.values()].filter(
+        (entry) =>
+          entry.kind === "custom" &&
+          (entry.config.policies ?? []).some(
+            (spec) => policyName(spec) === "global::can-edit-wiki",
+          ),
+      );
+      expect(wikiCustom.map((entry) => entry.action).sort()).toEqual(
+        Object.keys(WIKI_PAGE_ACTION_ROLES)
+          .map((intent) => `${WIKI_PAGE}.${intent}`)
+          .sort(),
+      );
+      // Eleven actions (§J2): the plan's +52 grant rows with the two of wiki-space.
+      expect(wikiCustom).toHaveLength(11);
+      let rows = 0;
+      for (const [intent, roles] of Object.entries(WIKI_PAGE_ACTION_ROLES)) {
+        const action = `${WIKI_PAGE}.${intent}`;
+        const grant = CUSTOM_ACTION_GRANTS[action];
+        expect(grant, action).not.toBe("*");
+        expect([...(grant as readonly string[])].sort(), action).toEqual([...roles].sort());
+        for (const role of NEVER)
+          expect(effectiveGrants(role).has(action), `${role} ${action}`).toBe(false);
+        rows += roles.length;
+      }
+      const spaceRows = WIKI_SPACE_INTENTS.length * MODERATORS.length;
+      expect(rows + spaceRows).toBe(52);
+    });
+
+    it("every global::can-edit-wiki route carries the wiki-page uid (and a custom route its intent)", () => {
+      for (const entry of routes.values()) {
+        for (const spec of entry.config.policies ?? []) {
+          if (policyName(spec) !== "global::can-edit-wiki") continue;
+          const config = typeof spec === "string" ? undefined : spec.config;
+          const [uid, action] = splitAction(entry.action);
+          expect(uid, entry.action).toBe(WIKI_PAGE);
+          expect(config?.uid, entry.action).toBe(WIKI_PAGE);
+          if (entry.kind === "custom") expect(config?.intent, entry.action).toBe(action);
+          else expect(config?.intent, entry.action).toBeUndefined();
+        }
       }
     });
 

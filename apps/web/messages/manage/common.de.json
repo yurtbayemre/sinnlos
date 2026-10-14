@@ -182,6 +182,7 @@
     "optionDuplicate": "Zwei Antworten sind gleich.",
     "fileType": "Laden Sie eine PDF-, Word- (.docx), Excel- (.xlsx) oder PowerPoint-Datei (.pptx) oder ein JPEG-, PNG- oder WebP-Bild hoch. Dateien mit Makros, Vorlagen und Bildschirmpräsentationen werden nicht angenommen.",
     "fileTooLarge": "Diese Datei ist zu groß: höchstens 20 MB für PDF- und Office-Dateien, 5 MB für Bilder.",
+    "parentCycle": "Eine Seite kann nicht unter sich selbst oder einer ihrer Unterseiten stehen. Wählen Sie eine andere übergeordnete Seite.",
     "neverPublished": "Es gibt keine veröffentlichte Fassung, zu der zurückgekehrt werden kann; der Entwurf bleibt. Bitten Sie die Redaktion, ihn zu löschen, wenn er nicht mehr gebraucht wird.",
     "spaceNotEmpty": "Dieser Bereich enthält noch Seiten.",
     "timeRepeated": "Diese Uhrzeit gibt es an diesem Tag wegen der Zeitumstellung zweimal. Wählen Sie eine andere Uhrzeit.",
