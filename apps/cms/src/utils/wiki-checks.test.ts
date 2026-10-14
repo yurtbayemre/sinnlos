@@ -468,6 +468,14 @@ describe("createWikiChecks", () => {
   it("refuses a page write that links or unlinks revisions, from any writer; the panel's no-op passes (issue #81)", async () => {
     const checks = createWikiChecks(fakeHost(world()));
     for (const action of ["create", "update", "clone"]) {
+      const write = (revisions: unknown) =>
+        checks(
+          { uid: PAGE, action, params: { documentId: "a", data: { title: "t", revisions } } },
+          async () => {
+            events.push("action");
+            return { documentId: "a" };
+          },
+        );
       for (const revisions of [
         { connect: [{ id: 7 }], disconnect: [] },
         { connect: [], disconnect: [{ id: 7 }] },
@@ -475,33 +483,12 @@ describe("createWikiChecks", () => {
         ...(action === "update" ? [{ set: [] }] : []),
       ]) {
         events.length = 0;
-        const details = await refusal(
-          checks(
-            { uid: PAGE, action, params: { documentId: "a", data: { title: "t", revisions } } },
-            async () => {
-              events.push("action");
-              return { documentId: "a" };
-            },
-          ),
-        );
+        const details = await refusal(write(revisions));
         expect(details, `${action} ${JSON.stringify(revisions)}`).toEqual({ keys: ["revisions"] });
         expect(events).toEqual([]);
       }
       events.length = 0;
-      await checks(
-        {
-          uid: PAGE,
-          action,
-          params: {
-            documentId: "a",
-            data: { title: "t", revisions: { connect: [], disconnect: [] } },
-          },
-        },
-        async () => {
-          events.push("action");
-          return { documentId: "a" };
-        },
-      );
+      await write({ connect: [], disconnect: [] });
       expect(events, action).toEqual(["lock", "action"]);
     }
   });

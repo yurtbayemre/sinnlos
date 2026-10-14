@@ -641,12 +641,10 @@ describe.each(testEngines())("wiki revisions are closed on %s", (engine) => {
         documentId: page.documentId,
         data: { title: "IT Revisions Clone", slug: "it-revisions-clone" },
       });
-      const viaPanel = await adminRequest<{ data: { documentId: string } }>(
-        t,
-        panel.token,
-        `/content-manager/collection-types/${PAGE}/clone/${page.documentId}`,
-        { json: { title: "IT Revisions Panel Clone", slug: "it-revisions-panel-clone" } },
-      );
+      const viaPanel = await panel.clone(PAGE, page.documentId, {
+        title: "IT Revisions Panel Clone",
+        slug: "it-revisions-panel-clone",
+      });
       expect(viaPanel.status, viaPanel.text).toBe(200);
       // An admin role whose create permission on wiki pages leaves
       // `revisions` out: the Content Manager's clone sets `revisions: {
@@ -688,15 +686,11 @@ describe.each(testEngines())("wiki revisions are closed on %s", (engine) => {
         isActive: true,
         roles: [editorRole.id],
       });
-      const restrictedPanel = await adminToken(t, email, password);
-      const restricted = await adminRequest<{ data: { documentId: string } }>(
-        t,
-        restrictedPanel,
-        `/content-manager/collection-types/${PAGE}/clone/${page.documentId}`,
-        {
-          json: { title: "IT Revisions Restricted Clone", slug: "it-revisions-restricted-clone" },
-        },
-      );
+      const restrictedPanel = await contentManager(t, await adminToken(t, email, password));
+      const restricted = await restrictedPanel.clone(PAGE, page.documentId, {
+        title: "IT Revisions Restricted Clone",
+        slug: "it-revisions-restricted-clone",
+      });
       expect(restricted.status, restricted.text).toBe(200);
       expect(await linkedTo()).toEqual(before);
       for (const copy of [

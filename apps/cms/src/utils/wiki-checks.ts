@@ -219,13 +219,9 @@ export function changesRevisionLinks(data: unknown, newDocument = false): boolea
   const value = data.revisions;
   const empty = (entry: unknown) => Array.isArray(entry) && entry.length === 0;
   if (!isRecord(value)) return !(newDocument && empty(value));
+  const inertWhenEmpty = newDocument ? ["connect", "disconnect", "set"] : ["connect", "disconnect"];
   return Object.entries(value).some(
-    ([key, entry]) =>
-      entry !== undefined &&
-      !(
-        ((key === "connect" || key === "disconnect") && empty(entry)) ||
-        (newDocument && key === "set" && empty(entry))
-      ),
+    ([key, entry]) => entry !== undefined && !(inertWhenEmpty.includes(key) && empty(entry)),
   );
 }
 
