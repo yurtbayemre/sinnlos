@@ -64,7 +64,7 @@ function liveRegion(): HTMLElement {
   region.setAttribute("role", "status");
   region.setAttribute("aria-live", "polite");
   region.className =
-    "pointer-events-none fixed inset-x-4 bottom-24 z-50 flex justify-center md:inset-x-auto md:bottom-6 md:right-6";
+    "pointer-events-none fixed inset-x-4 bottom-[calc(6rem_+_env(safe-area-inset-bottom))] z-50 flex justify-center md:inset-x-auto md:bottom-6 md:right-6";
   document.body.appendChild(region);
   return region;
 }

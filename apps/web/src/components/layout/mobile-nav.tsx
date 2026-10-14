@@ -11,8 +11,9 @@ import { isNavActive, type NavItem } from "@/lib/nav-config";
 import { cn } from "@/lib/utils";
 import { LinkPendingIndicator } from "./nav-link";
 
+/** min-h-11: Apple's 44 pt touch target at the least (issue #71; the tabs measure 56 px). */
 const TAB_CLASS = cn(
-  "flex min-w-0 flex-1 flex-col items-center gap-1 py-2 text-[11px] outline-none transition-colors",
+  "flex min-h-11 min-w-0 flex-1 flex-col items-center gap-1 py-2 text-[11px] outline-none transition-colors",
   "focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
 );
 
@@ -55,6 +56,10 @@ export function sheetStaysOpen(openedOn: string | null, pathname: string, deskto
  * current page is in the sheet, the More tab carries aria-current="true"
  * and its accessible name names that entry ("More: Training"), as the tabs
  * carry aria-current="page".
+ *
+ * The bar sits above the home indicator (issue #71): it pads by the bottom
+ * safe-area inset, which iOS reports since the page sets viewport-fit=cover
+ * (app/layout.tsx), and by the side insets; all 0 on other devices.
  */
 export function MobileNav({ items }: { items: readonly NavItem[] }) {
   const pathname = usePathname();
@@ -81,7 +86,11 @@ export function MobileNav({ items }: { items: readonly NavItem[] }) {
     <nav
       aria-label={tCommon("bottomNav")}
       className="fixed inset-x-0 bottom-0 z-40 border-t bg-background/90 backdrop-blur md:hidden"
-      style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
+      style={{
+        paddingBottom: "env(safe-area-inset-bottom)",
+        paddingLeft: "env(safe-area-inset-left)",
+        paddingRight: "env(safe-area-inset-right)",
+      }}
     >
       <div className="flex">
         {primary.map((item) => {

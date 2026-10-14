@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Inter } from "next/font/google";
 import { NextIntlClientProvider } from "next-intl";
 import { getLocale, getMessages } from "next-intl/server";
@@ -14,6 +14,20 @@ export const metadata: Metadata = {
     template: "%s · Sinnlos",
   },
   description: "Self-hosted company intranet",
+};
+
+/**
+ * `viewport-fit=cover` (issue #71): without it iOS reports every
+ * env(safe-area-inset-*) as 0, so the phone tab bar's bottom inset never
+ * applied and its entries sat on the home indicator. With it the page
+ * draws edge to edge: the tab bar, the main column and the bottom-anchored
+ * messages add the bottom inset, and the body the side insets of a
+ * landscape notch (globals.css). Every inset is 0 on a device without one.
+ */
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
 };
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {

@@ -90,6 +90,10 @@
     font-feature-settings:
       "rlig" 1,
       "calt" 1;
+    /* viewport-fit=cover (app/layout.tsx, issue #71): the side insets of a
+       landscape notch keep the content where the letterboxing kept it. */
+    padding-left: env(safe-area-inset-left);
+    padding-right: env(safe-area-inset-right);
   }
 
   /* Chrome paints autofilled inputs with an opaque yellow/blue fill that

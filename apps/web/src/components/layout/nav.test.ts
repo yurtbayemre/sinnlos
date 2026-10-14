@@ -134,6 +134,18 @@ describe("MobileNav", () => {
     expect(html).not.toContain(`>${en.nav.more}<`);
   });
 
+  it("sits above the home indicator: the safe-area insets pad the bar (#71)", () => {
+    const html = render(createElement(MobileNav, { items: navItemsFor("member") }));
+    const style = /<nav [^>]*style="([^"]*)"/.exec(html)?.[1] ?? "";
+    expect(style).toContain("padding-bottom:env(safe-area-inset-bottom)");
+    expect(style).toContain("padding-left:env(safe-area-inset-left)");
+    expect(style).toContain("padding-right:env(safe-area-inset-right)");
+    // Every tab keeps Apple's 44 pt touch target at the least.
+    const tabs = html.match(/<(a|button) [^>]*class="[^"]*flex-1[^"]*"/g) ?? [];
+    expect(tabs.length).toBeGreaterThan(1);
+    for (const tab of tabs) expect(tab).toContain("min-h-11");
+  });
+
   it("labels the bar in the UI language", () => {
     const html = render(createElement(MobileNav, { items: navItemsFor("member") }), "de");
     expect(html).toContain(`aria-label="${de.common.bottomNav}"`);
