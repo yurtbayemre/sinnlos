@@ -222,7 +222,7 @@ export default async function ManagePage() {
                                   {href ? (
                                     <Link
                                       href={href}
-                                      className="outline-none after:absolute after:-inset-1 after:rounded-md hover:text-foreground hover:underline focus-visible:after:ring-2 focus-visible:after:ring-ring"
+                                      className="outline-none after:absolute after:-inset-x-1 after:-inset-y-0.5 after:rounded-md hover:text-foreground hover:underline focus-visible:after:ring-2 focus-visible:after:ring-ring"
                                     >
                                       {label}
                                     </Link>
