@@ -332,6 +332,14 @@ describe.each(testEngines())("media claims on %s", (engine) => {
         },
       },
     });
+    // A disconnect of another file keeps the tombstoned one: still refused.
+    await expect(
+      docs().update({
+        documentId: doc.documentId,
+        data: { file: { disconnect: [{ id: file + 100000 }] } },
+        status: "published",
+      }),
+    ).rejects.toMatchObject({ details: { keys: ["file"] } });
     const fresh = await upload();
     await docs().update({ documentId: doc.documentId, data: { file: fresh }, status: "published" });
     const published = await docs().findOne({
@@ -354,7 +362,8 @@ describe.each(testEngines())("media claims on %s", (engine) => {
     });
     expect(await orphans.removeReserved(t.strapi, file)).toBe("linked");
     const row = await t.strapi.db.query(FILE).findOne({ where: { id: file } });
-    expect(row?.provider_metadata).toEqual({ uploadedBy: t.fixtures.users.editor.id });
+    // Kept as it is: a retry may follow a removal that already took the bytes.
+    expect(row?.provider_metadata).toMatchObject({ removing: expect.any(String) });
     const linked = await t.strapi.documents(DEPARTMENT).findOne({
       documentId: department,
       populate: { headerImage: true },

@@ -336,8 +336,8 @@ export function claimDecision(
  * under the row lock and while nothing links the file: a link's INSERT
  * takes `FOR KEY SHARE` on the file row (files_related_mph's foreign key),
  * so it committed before this check, or it waits for the delete and then
- * fails on the key. A file linked again keeps its bytes and loses the
- * tombstone ("linked"; the reservation's audit row stays, its removal
+ * fails on the key. A file linked again is kept as it is, tombstone
+ * included ("linked"; the reservation's audit row stays, its removal
  * decision was overtaken).
  */
 export async function removeReserved(
@@ -347,14 +347,10 @@ export async function removeReserved(
   return strapi.db.transaction(async ({ trx }: { trx: unknown }) => {
     const file = await lockAndReadFile(strapi, fileId);
     if (!file) return "missing";
-    if ((await fileLinks(strapi, fileId, trx)).length > 0) {
-      const provider_metadata = { ...file.provider_metadata };
-      delete provider_metadata.removing;
-      await strapi.db
-        .query(FILE_UID)
-        .update({ where: { id: fileId }, data: { provider_metadata } });
-      return "linked";
-    }
+    // Linked again: nothing is removed, and the tombstone stays (a retry
+    // may follow a removal that already deleted the bytes, so the row must
+    // not look healthy; the janitor retries it once nothing links it).
+    if ((await fileLinks(strapi, fileId, trx)).length > 0) return "linked";
     await runReservedRemoval(fileId, () => strapi.plugin("upload").service("upload").remove(file));
     return "removed";
   });

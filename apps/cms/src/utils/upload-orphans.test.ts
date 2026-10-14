@@ -259,13 +259,13 @@ describe("claimAndRemove", () => {
     ]);
   });
 
-  it("keeps a file another writer linked after the reservation: no removal, the tombstone cleared", async () => {
+  it("keeps a file another writer linked after the reservation: no removal, still tombstoned", async () => {
     const { strapi, log, current } = makeStrapi({ file: stamped(), relinkedAfterTombstone: true });
     strapi.log.warn = vi.fn();
     expect(await claimAndRemove(strapi, 5, { now: NOW })).toBe("linked");
     expect(log.some((line) => line.startsWith("remove"))).toBe(false);
-    expect(log.slice(-5)).toEqual(["begin", "lock", "links:trx1", "untombstone", "commit"]);
-    expect(isTombstoned(current())).toBe(false);
+    expect(log.slice(-4)).toEqual(["begin", "lock", "links:trx1", "commit"]);
+    expect(isTombstoned(current())).toBe(true);
     expect(strapi.log.warn).toHaveBeenCalledWith(
       expect.stringContaining("kept file 5: linked again before its removal"),
     );

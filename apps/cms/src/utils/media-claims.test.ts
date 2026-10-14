@@ -458,6 +458,15 @@ describe("files an action copies (Codex round 2)", () => {
     expect(copiedFiles("update", { status: "published", data: { title: "x" } }, before)).toEqual([
       11,
     ]);
+    expect(
+      copiedFiles("update", { status: "published", data: { file: { set: [12] } } }, before),
+    ).toEqual([]);
+    // connect and disconnect edit the field: the stored file may survive.
+    for (const edit of [{ disconnect: [12] }, { connect: [12] }]) {
+      expect(copiedFiles("update", { status: "published", data: { file: edit } }, before)).toEqual([
+        11,
+      ]);
+    }
     expect(copiedFiles("discardDraft", {}, before)).toEqual([10]);
     expect(copiedFiles("update", {}, before)).toEqual([]);
     expect(copiedFiles("unpublish", {}, before)).toEqual([]);
