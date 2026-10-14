@@ -33,7 +33,6 @@ SELECT to_regclass('wiki_revisions') IS NOT NULL AS has_revisions \gset
 \if :has_revisions
 
 \echo '== R0 draft rows (FAST PATH when draft_rows = 0)'
-\echo '   draft_rows | published_rows | documents'
 SELECT count(*) FILTER (WHERE published_at IS NULL) AS draft_rows,
        count(*) FILTER (WHERE published_at IS NOT NULL) AS published_rows,
        count(DISTINCT document_id) AS documents
@@ -43,7 +42,6 @@ SELECT count(*) FILTER (WHERE published_at IS NULL) AS draft_rows,
 \echo '   identical twin: a draft whose published row of the same document_id has the same body and summary,'
 \echo '   links the same page documents and the same editor, and whose batch-16 columns are NULL. A rollback'
 \echo '   to batch 15.1 (or older) makes one for every revision; anything else is divergent.'
-\echo '   class | rows'
 WITH page_docs AS (
   SELECT l.wiki_revision_id AS rev, string_agg(DISTINCT p.document_id, ',' ORDER BY p.document_id) AS docs
     FROM wiki_revisions_page_lnk l JOIN wiki_pages p ON p.id = l.wiki_page_id
@@ -80,7 +78,6 @@ SELECT CASE WHEN pub_id IS NULL THEN 'draft-only'
   FROM classified GROUP BY 1 ORDER BY 1;
 
 \echo '== R1 divergent twins (must be 0: resolve each per the README, then rerun) and draft-only rows'
-\echo '   class | id | document_id | differs in | body (first 60 characters)'
 WITH page_docs AS (
   SELECT l.wiki_revision_id AS rev, string_agg(DISTINCT p.document_id, ',' ORDER BY p.document_id) AS docs
     FROM wiki_revisions_page_lnk l JOIN wiki_pages p ON p.id = l.wiki_page_id
@@ -120,7 +117,6 @@ SELECT CASE WHEN pub_id IS NULL THEN 'draft-only' ELSE 'divergent twin' END AS c
 \echo '== R2 page anchors per revision document (conflicts must be 0; orphans keep a NULL anchor, no history reaches them)'
 \echo '   A document anchored by page_document_id (batch 16) keeps it; any other is anchored by the page'
 \echo '   documents its link rows reach (two link rows per revision, one document, is normal).'
-\echo '   anchor | documents'
 WITH anchors AS (
   SELECT r.document_id,
          count(DISTINCT to_jsonb(r) ->> 'page_document_id') AS set_anchors,
@@ -139,7 +135,6 @@ SELECT CASE
   FROM anchors GROUP BY 1 ORDER BY 1;
 
 \echo '== R2 conflicts (must be 0): revision documents anchored to more than one page document'
-\echo '   revision document_id | page document_ids'
 WITH anchors AS (
   SELECT r.document_id,
          string_agg(DISTINCT to_jsonb(r) ->> 'page_document_id', ',') AS set_anchors,
@@ -157,7 +152,6 @@ SELECT document_id, CASE WHEN n_set > 0 THEN set_anchors ELSE linked END AS page
  ORDER BY 1;
 
 \echo '== R3 revisions per page (revision documents; save this list: the verification after the deploy compares with it)'
-\echo '   page document_id | page title | revisions'
 WITH anchored AS (
   SELECT r.document_id,
          coalesce(max(to_jsonb(r) ->> 'page_document_id'),
@@ -175,7 +169,6 @@ SELECT coalesce(a.page, '(no anchor)') AS page,
 
 \echo '== R4 anomalies (must be 0 lines): two published or two draft rows of one revision document,'
 \echo '   a row without document_id, a locale (wiki-revision is not localized)'
-\echo '   problem | document_id | rows'
 SELECT 'more than one published row' AS problem, document_id, count(*) AS rows
   FROM wiki_revisions WHERE published_at IS NOT NULL GROUP BY document_id HAVING count(*) > 1
 UNION ALL
