@@ -1966,7 +1966,7 @@ What changes for users:
   home indicator the bar grows by the inset (34 px) and its labels sit
   above the indicator instead of on it. The page's bottom room, the
   `/manage` flash and the live-news hint add the inset too; in landscape
-  the body keeps the content out of the notch. Android and desktop are
+  the page keeps its content out of the notch. Android and desktop are
   unchanged (every inset is 0 there).
 
 Deploy notes: **cms and web in the same `infra/deploy.sh` run** (the web
