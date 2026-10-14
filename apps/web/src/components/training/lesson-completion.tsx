@@ -8,15 +8,19 @@ import { useTranslations } from "next-intl";
 
 import { CompleteLessonButton } from "@/components/training/complete-lesson-button";
 import { QuizBlock } from "@/components/training/quiz-block";
-import type { CompletionMode, QuizQuestion } from "@/lib/training-shared";
+import { quizGatesCompletion, type CompletionMode, type QuizQuestion } from "@/lib/training-shared";
 
 /**
- * Client wrapper tying the quiz to the completion button (issue #29,
- * quizGate flow): on quizGate courses the button stays locked until the
- * batch check reports all answers correct. Already-completed lessons
- * show the quiz in instant mode for review and are never re-locked.
- * quizGate lessons WITHOUT a quiz pass trivially (fail-open for content
- * gaps — a gate must never dead-lock a lesson, see evaluateQuiz).
+ * Client wrapper tying the quiz to the completion button (issue #29; issue
+ * #70): on every course the button of a lesson with questions stays locked
+ * until all answers are correct, and the completion sends them, so the cms
+ * can check them too. The course's completionMode picks the feedback only:
+ * per answer ("confirm") or one batch check ("quizGate"). Already-completed
+ * lessons show the quiz in instant mode for review and are never re-locked.
+ * Lessons WITHOUT a quiz pass trivially (fail-open for content gaps — a
+ * gate must never dead-lock a lesson, see evaluateQuiz). When the cms
+ * refuses the answers anyway (the quiz changed since the page loaded), the
+ * quiz starts over.
  */
 export function LessonCompletion({
   quiz,
@@ -32,25 +36,34 @@ export function LessonCompletion({
   nextHref: Route | null;
 }) {
   const t = useTranslations("training");
-  const alreadyCompleted = completedAtLabel !== null;
-  const gated = completionMode === "quizGate" && !alreadyCompleted && quiz.length > 0;
-  const [passed, setPassed] = useState(!gated);
+  const gated = quizGatesCompletion(quiz, completedAtLabel !== null);
+  // The answers that passed the quiz, sent with the completion; null until then.
+  const [answers, setAnswers] = useState<number[] | null>(null);
+  // Bumped when the cms refuses the answers: a new QuizBlock, empty.
+  const [attempt, setAttempt] = useState(0);
+  const locked = gated && answers === null;
 
   return (
     <>
       <QuizBlock
+        key={attempt}
         quiz={quiz}
-        mode={gated ? "check" : "instant"}
-        onPassedChange={gated ? setPassed : undefined}
+        mode={gated && completionMode === "quizGate" ? "check" : "instant"}
+        onPassedChange={gated ? setAnswers : undefined}
       />
       <footer className="flex flex-wrap items-center justify-between gap-4 border-t pt-6">
         <div className="space-y-1.5">
           <CompleteLessonButton
             lessonDocumentId={lessonDocumentId}
             completedAtLabel={completedAtLabel}
-            disabled={!passed}
+            answers={gated ? answers : null}
+            disabled={locked}
+            onQuizRefused={() => {
+              setAnswers(null);
+              setAttempt((n) => n + 1);
+            }}
           />
-          {!passed && <p className="text-xs text-muted-foreground">{t("completeLocked")}</p>}
+          {locked && <p className="text-xs text-muted-foreground">{t("completeLocked")}</p>}
         </div>
         {nextHref && (
           <Link

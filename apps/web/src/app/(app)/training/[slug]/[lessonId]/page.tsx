@@ -20,7 +20,8 @@ import { getViewer } from "@/lib/viewer";
  * Lesson player (issue #29): markdown body (the shared renderer of the
  * wiki, components/markdown.tsx — react-markdown + gfm, NO rehype-raw ⇒ no
  * raw HTML/XSS, unsafe URL schemes dropped), the YouTube render gate, the
- * client-only self-check quiz and the completion button. PDFs/documents
+ * quiz and the completion button, which a quiz locks until every answer
+ * is right (issue #70; the cms checks the answers too). PDFs/documents
  * are linked inside the markdown (documents module decision) — no
  * attachment UI.
  */

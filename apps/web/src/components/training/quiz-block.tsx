@@ -4,24 +4,26 @@ import { useState } from "react";
 import { CheckCircle2, XCircle } from "lucide-react";
 import { useTranslations } from "next-intl";
 
-import { evaluateQuiz, type QuizQuestion } from "@/lib/training-shared";
+import { evaluateQuiz, passingAnswers, type QuizQuestion } from "@/lib/training-shared";
 
 /**
  * Lesson quiz (issue #29). Two modes, chosen by the course's
  * completionMode:
  *
- *  - "instant" (confirm courses): pick an option → immediate right/
- *    wrong feedback, retry allowed. Pure self-check, never gates.
+ *  - "instant" (confirm courses, and every completed lesson for review):
+ *    pick an option → immediate right/wrong feedback, retry allowed.
  *  - "check" (quizGate courses): answers are collected WITHOUT feedback
  *    and evaluated in one batch via the "check answers" button; wrong
  *    ones get marked, can be changed and re-checked (unlimited retries).
- *    Once everything is correct, `onPassedChange(true)` unlocks the
- *    completion button in the parent.
  *
- * Client-only by design: answers are never persisted and correctIndex
- * ships to the client either way — with unlimited retries a server-side
- * check would gate nothing a curl user couldn't already read (product
- * decision; a real exam mode is a documented v2).
+ * With `onPassedChange` the quiz gates the lesson's completion (issue #70:
+ * every open lesson with questions, in either mode): it hands the parent
+ * the passing answers once all are correct (instant: with the last right
+ * pick; check: with the passed check), which unlock the completion button
+ * and go with the completion; in instant mode null again after a wrong
+ * pick. The cms checks the answers itself (lesson-progress create): this
+ * gate is the feedback, that one holds. Answers are never stored, and
+ * correctIndex ships to the client (a real exam mode is a documented v2).
  */
 export function QuizBlock({
   quiz,
@@ -30,7 +32,7 @@ export function QuizBlock({
 }: {
   quiz: QuizQuestion[];
   mode: "instant" | "check";
-  onPassedChange?: (passed: boolean) => void;
+  onPassedChange?: (answers: number[] | null) => void;
 }) {
   const t = useTranslations("training");
   const [answers, setAnswers] = useState<Record<number, number | undefined>>({});
@@ -40,19 +42,24 @@ export function QuizBlock({
   if (quiz.length === 0) return null;
 
   const evaluation = evaluateQuiz(quiz, answers);
+  const gating = onPassedChange !== undefined;
 
   const pick = (qi: number, oi: number) => {
     if (passed) return;
-    setAnswers((a) => ({ ...a, [qi]: oi }));
+    const next = { ...answers, [qi]: oi };
+    setAnswers(next);
     // A changed answer invalidates the last batch verdict.
     if (mode === "check") setChecked(false);
+    // Instant feedback: the gate opens with the last right pick, closes with a wrong one.
+    else onPassedChange?.(passingAnswers(quiz, next));
   };
 
   const check = () => {
     setChecked(true);
-    if (evaluation.passed) {
+    const passing = passingAnswers(quiz, answers);
+    if (passing) {
       setPassed(true);
-      onPassedChange?.(true);
+      onPassedChange?.(passing);
     }
   };
 
@@ -62,10 +69,13 @@ export function QuizBlock({
   return (
     <section className="space-y-4 rounded-xl border p-4">
       <h2 className="text-sm font-medium text-muted-foreground">
-        {mode === "check" ? t("quizGateTitle") : t("quizTitle")}
+        {mode === "check" || gating ? t("quizGateTitle") : t("quizTitle")}
       </h2>
       {mode === "check" && !passed && (
         <p className="text-xs text-muted-foreground">{t("quizGateHint")}</p>
+      )}
+      {mode === "instant" && gating && !evaluation.passed && (
+        <p className="text-xs text-muted-foreground">{t("quizInstantHint")}</p>
       )}
       {quiz.map((q, qi) => {
         const picked = answers[qi];
@@ -131,6 +141,12 @@ export function QuizBlock({
           </div>
         );
       })}
+      {mode === "instant" && gating && evaluation.passed && (
+        <p className="inline-flex items-center gap-1.5 pt-1 text-sm font-medium text-emerald-700 dark:text-emerald-400">
+          <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
+          {t("quizAllCorrect")}
+        </p>
+      )}
       {mode === "check" && (
         <div className="flex flex-wrap items-center gap-3 pt-1">
           {passed ? (

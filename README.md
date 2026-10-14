@@ -878,8 +878,10 @@ APP_TIME_ZONE …` and no column is left as `timestamp without time zone`
 
 Pages and UI:
 
-- [ ] `/training` lists published courses; on a `quizGate` course the
-      completion button stays locked until every quiz answer is correct;
+- [ ] `/training` lists published courses; on every course a lesson's
+      completion button stays locked until every quiz answer is correct
+      (per answer on a `confirm` course, after "Check answers" on a
+      `quizGate` one), and the cms refuses the completion otherwise;
       `/manage/training` shows the completion report (admin)
 - [ ] After a few ⌘K searches, `/manage/analytics` shows the search section
       (totals, zero-result rate, top terms)
