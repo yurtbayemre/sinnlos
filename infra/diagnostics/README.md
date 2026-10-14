@@ -21,7 +21,7 @@ only when armed, is described at the end.
 From the repository checkout on the host (compose project `infra`):
 
 ```bash
-infra/diagnostics/census.sh
+infra/diagnostics/census.sh          # another compose project: COMPOSE_PROJECT=<project> infra/diagnostics/census.sh
 
 docker exec -i infra-db-1 sh -c 'psql -X -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"' \
   < infra/diagnostics/prod-perm-diff.sql
