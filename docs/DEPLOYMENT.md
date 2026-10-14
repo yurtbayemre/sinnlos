@@ -2060,6 +2060,9 @@ psql_db() { "${COMPOSE[@]}" exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTG
    - **`census.txt`**, sections 4 and 5: the pages with a department or
      team, and the revisions total, with and without editor, and their
      page-link targets: the "revision twins" baseline of a rollback.
+     `census.sh` reads the containers of compose project `infra`; another
+     project (a staging copy) runs it as `COMPOSE_PROJECT=<project>
+     infra/diagnostics/census.sh`.
    - **`wiki-parent-cycles.txt`** (lane 16B): **0** pages on a parent loop,
      **0** pages whose parent sits in another space, **0** pages without a
      space (the demo pages have no parents). A loop found here does not
@@ -2070,7 +2073,8 @@ psql_db() { "${COMPOSE[@]}" exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTG
      **0 janitor candidates** (stamped, unlinked, older than 24 h), no
      shared files, no legacy document files. A candidate here is swept at
      the next 03:30 run, as it would be on 15.2.
-   - **`department-heads.txt`**: the **8 known rows** (2026-10-13): the
+   - **`department-heads.txt`**: on production the **8 known rows**
+     (2026-10-13; another instance has its own count): the
      Finance, HR and Marketing heads hold `department_head` with their
      department and can upload and publish documents for it after the
      deploy; `department_without_head_role` for Design, Digital Process
@@ -2110,7 +2114,9 @@ point should the database ever have to go back. Expected: lock, the clean
 checkout, the CI line, `wiki revisions: no draft rows`, the backup,
 last-known-good `490d82aae7a7` kept, both images built, `up -d
 --no-build`, `Smoke check OK`, live-smoke passed, `Recording
-infra-{web,cms}:<batch 16 sha12>`, exit 0 (the rehearsal: `<N>` s). A
+infra-{web,cms}:<batch 16 sha12>`, exit 0 (the rehearsal: 74 s; the
+web image changes too, so both containers are recreated: the web is out
+about 9 s, the cms about 4 s, its boot 5.0 s). A
 failure prints the rollback to `490d82aae7a7` with **no `MANDATORY`
 step** and the note that **a roll-forward to this release needs
 `migrate.sql` first** (15.2 runs wiki revisions with draft & publish):
@@ -2130,14 +2136,15 @@ report it; running it is the owner's decision (below).
    logs, on this first boot:
    - **no** `[revision-dp]` line;
    - `[document-indexes] created 1 index(es): wiki_revisions_page_document_id_idx`;
-   - once: `[revision-backfill] anchored <N> revision(s) to their page,
-     marked <N> legacy revision(s) 'before', wrote <N> baseline(s); <N>
+   - once: `[revision-backfill] anchored <R> revision(s) to their page,
+     marked <R> legacy revision(s) 'before', wrote <B> baseline(s); <O>
      revision(s) have no page anchor (page deleted, or linked to several
-     pages)`. Both first counts equal census section 5's revisions total
-     (every pre-16 revision gets its anchor and the kind `before`), the
-     last one R2's orphans; the baselines are about one per page, two
-     where a page's draft differs from its published version (the
-     rehearsal: `<N>` for `<N>` pages). Later boots log no such line;
+     pages)`. `<R>` is census section 5's revisions total (every pre-16
+     revision gets its anchor and the kind `before`), `<O>` R2's orphans,
+     and `<B>` about one per page, plus one for each page whose draft
+     differs from its published version (the rehearsal: anchored 10,
+     marked 10, wrote 32 baselines for 31 pages, 0 without an anchor).
+     Later boots log no such line;
    - `[bootstrap] granted 52 permission(s) across intranet roles` and
      `[bootstrap] permission drift: none (report-only check of 155
      managed actions)` (142 before: the 13 wiki custom actions); **no**
@@ -2233,7 +2240,9 @@ report it; running it is the owner's decision (below).
       accepted; setting a wiki page's parent to its own child is refused
       ("A page cannot be placed below itself or one of its subpages");
       unpublishing a space that has pages is refused; Wiki revision is
-      still not listed (since 15.1).
+      still not listed (since 15.1), and the wiki page form keeps its
+      empty _Revisions_ field, which lists nothing and links nothing (as
+      on 15.1 and 15.2).
 
 11. **The /manage log lines:**
     `"${COMPOSE[@]}" logs --since 30m web | grep -E '\[manage-[a-zA-Z]+\]'`.
@@ -2337,7 +2346,8 @@ psql_db -X < infra/diagnostics/wiki-parent-cycles.sql > "$D/wiki-parent-cycles.t
 ```
 
 The preflight's R3 is the per-page baseline of R6; census sections 4
-and 5 the revision-twin baseline.
+and 5 the revision-twin baseline (`COMPOSE_PROJECT=<project>` before
+`census.sh` on another compose project).
 
 R3. **Retag both images** (`B152_TAG` from step 1, `490d82aae7a7`):
 
@@ -2360,11 +2370,15 @@ The revisions stay unreadable through the API (15.1's closure, kept by
 
 R4. **Effective permissions** with 15.2's file:
 `git show "${B152_SHA}":infra/diagnostics/prod-perm-diff.sql | psql_db -X`.
-15.2's users-permissions deletes rows of the wiki custom actions its
-controllers lack, and its file then shows the two informational rows
-plus `<N>` `EXTRA_IN_DB` wiki custom-action rows (the rehearsal records
-the number; no 15.2 route serves them). **Harmless; leave them.** The
-roll-forward re-creates what was deleted.
+15.2's users-permissions sync deletes the rows of the wiki custom
+actions its controllers lack for **one** of the two moderator roles,
+admin_role or editor, whichever its pass meets first (13 rows; Strapi's
+cleanup pages by offset while it deletes, as 15.1 found), so 15.2's file
+then shows the two informational rows plus **39 `EXTRA_IN_DB`** wiki
+custom-action rows (the rehearsal; the other role's 13 and the 26 of
+department_head, team_lead and member). **Harmless; leave them:** they
+name actions 15.2 does not have, and the roll-forward re-grants the 13
+(`granted 13`).
 
 R5. **During the window:** 15.2 removes no stamped file after a save (no
 media claims); the janitor sweeps an unattached one after 24 h, the same
@@ -2381,23 +2395,41 @@ R6. **The roll-forward**, never a plain deploy (`deploy.sh` refuses it
 while the twins exist):
 
 1. `"${COMPOSE[@]}" build cms web`, then `"${COMPOSE[@]}" stop web cms`;
-2. the pre-migration backup (`sudo -n /usr/local/sbin/backup-run --kind
-   predeploy sinnlos`), checked;
+2. the pre-migration backup, checked: on production `sudo -n
+   /usr/local/sbin/backup-run --kind predeploy sinnlos` (what `deploy.sh`
+   runs for project `infra`); on another compose project
+   `infra/backup/pg-backup.sh` with the environment `deploy.sh` gives it
+   (without it the script backs up production's `infra-db-1` and
+   `infra_cms_uploads` into production's backup dir, or fails):
+
+   ```bash
+   SINNLOS_BACKUP_KIND=predeploy \
+     SINNLOS_ENV_FILE="$PWD/infra/.env" \
+     SINNLOS_DB_CONTAINER=<project>-db-1 \
+     SINNLOS_UPLOADS_VOLUME=<project>_cms_uploads \
+     SINNLOS_BACKUP_DIR=<the project's own backup dir> \
+     SINNLOS_LOCAL_ENV_BACKUP="$PWD/.git/sinnlos-deploy/<project>.quick-access.env" \
+     infra/backup/pg-backup.sh
+   ```
+
 3. `psql_db -X < infra/migrations/wiki-revision-dp/preflight.sql`: R1
    shows **one identical twin per revision row that existed at the
    rollback**, the before-images 15.2 wrote as plain published rows,
    divergent twins 0 (the panel cannot make one), R2 conflicts 0, no R4
    line;
 4. `psql_db --single-transaction < infra/migrations/wiki-revision-dp/migrate.sql`
-   → `NOTICE:  revision-dp: OK - promoted=0, twins_deleted=<N>,
-   orphans=<N>` (`twins_deleted` equals the `drafts` count that the
-   query after the retag showed); on a `RAISE` nothing changed: resolve
-   per the README and rerun;
+   → `NOTICE:  revision-dp: OK - promoted=0, twins_deleted=<twins>,
+   orphans=0`, where `<twins>` is the number of revisions at the rollback
+   (the `drafts` count the query after the retag showed); a second run
+   prints `promoted=0, twins_deleted=0, orphans=0`. On a `RAISE` nothing
+   changed: resolve per the README and rerun;
 5. `infra/deploy.sh` (its preflight prints `wiki revisions: no draft
-   rows`); its boot logs a `[revision-backfill]` line (anchors and kinds
-   of the before-images 15.2 wrote, and a baseline for each page edited
-   on 15.2) and `[bootstrap] granted <N> permission(s)` (what R4's sync
-   deleted);
+   rows`; the rehearsal: about 20 s, about 40 s of downtime counted from
+   step 1's stop); its boot logs `[bootstrap] granted 13 permission(s)`
+   (what R4's sync deleted), `permission drift: none` over 155 managed
+   actions, and a `[revision-backfill]` line (anchors and kinds of the
+   before-images 15.2 wrote, and a baseline for each page edited on
+   15.2);
 6. verify: draft rows 0 (step 8's query); revisions per page = the saved
    R3 of R2 plus the before-images 15.2 wrote plus a baseline for each
    page edited on 15.2; `wiki-parent-cycles.sql` (break any new loop in
@@ -2407,8 +2439,26 @@ R7. Writes on 15.2 advance revisions (it has batch 15's document lock),
 so forms open across the window stay safe; nothing else needs
 reconciling.
 
-**Combined staging rehearsal:** pending (it fills in the `<N>` above:
-the deploy time, the backfill's counts, R4's rows, R6's counts).
+**Combined staging rehearsal (2026-10-14, 4f92e70):** passed, in
+Traefik mode on a Postgres 16 stand-in with the demo seed, revisions
+written on batch 15.2 and the two demo PDFs. This section walked as
+written: the fast path (R0 0, the probe line, the boot lines above, the
+permission diff equal to the new snapshot); uploads through the web, a
+20 MB PDF and XLSX through the Server Action; documents as an editor and
+as a department head, file claims in two tabs, a janitor run, a panel
+replace and publish; the wiki as team lead, department head and member,
+two tabs, parent loops from the web and the panel, a space delete raced
+with a page create (it surfaced Strapi's own 400 without `details.keys`
+when the delete won, fixed: the create now answers `invalid` on `space`);
+the scheduler with 2,001 failing withdrawals. **Two full rollback
+cycles** to 15.2 and forward: the 15.2 boot cloned one twin per revision
+(73 and 78), the revision reads stayed closed, `deploy.sh` refused the
+plain roll-forward, `migrate.sql` deleted the twins (a second run
+changed nothing), and the baselines recorded the 15.2 edits; in the
+second cycle a divergent twin made by raw SQL stopped `migrate.sql`, and
+the README's Choice 2 resolved it. Every original revision came through
+both cycles unchanged. **Caddy mode was not run** (the stand-in is
+Traefik-only); the upload checks there are open.
 
 #### Upgrading to the document upload profile, the file claims and the delete trail (batch 16, lane 16A)
 
@@ -2817,10 +2867,26 @@ step 7.
 ```
 
 **4. Back up** with the rule `infra/deploy.sh` uses, and check the
-generation it reports. It is the rollback point:
+generation it reports. It is the rollback point. On production (compose
+project `infra`):
 
 ```bash
 sudo -n /usr/local/sbin/backup-run --kind predeploy sinnlos
+```
+
+On another compose project, `infra/backup/pg-backup.sh` with the
+environment `deploy.sh` gives it (without it the script backs up
+production's `infra-db-1` and `infra_cms_uploads` into production's
+backup dir, or fails):
+
+```bash
+SINNLOS_BACKUP_KIND=predeploy \
+  SINNLOS_ENV_FILE="$PWD/infra/.env" \
+  SINNLOS_DB_CONTAINER=<project>-db-1 \
+  SINNLOS_UPLOADS_VOLUME=<project>_cms_uploads \
+  SINNLOS_BACKUP_DIR=<the project's own backup dir> \
+  SINNLOS_LOCAL_ENV_BACKUP="$PWD/.git/sinnlos-deploy/<project>.quick-access.env" \
+  infra/backup/pg-backup.sh
 ```
 
 **5. Migrate.** It runs as one transaction, so any `RAISE` rolls everything
@@ -2833,6 +2899,9 @@ psql_db --single-transaction < infra/migrations/wiki-revision-dp/migrate.sql
 
 - **Success** ends with
   `NOTICE:  revision-dp: OK - promoted=N, twins_deleted=M, orphans=K`.
+  After a rollback (the staging rehearsal): `promoted=0`, `twins_deleted`
+  = the number of revisions at the rollback, `orphans=0`; a second run
+  prints `0, 0, 0`.
 - **After a `RAISE` nothing has changed.** It lists the divergent twins,
   conflicts or anomalies. Resolve them per the README and rerun (the script
   is idempotent), or give up and start the old containers again with
@@ -2857,6 +2926,8 @@ infra/deploy.sh
 ```
 
 - The preflight of `deploy.sh` prints `wiki revisions: no draft rows`.
+  In the rehearsal the deploy took about 20 s, about 40 s of downtime
+  counted from step 3's stop.
 - The log shows no `[revision-dp]` line, and one `[revision-backfill] …`
   line: the anchors and kinds of the rows the migration kept, and a baseline
   for each page whose content no snapshot holds (after a rollback: each page
