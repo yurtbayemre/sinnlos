@@ -31,11 +31,12 @@
     },
     "wiki": {
       "title": "Wiki",
-      "description": "Spaces, who reads them, and the drafts and schedules of every page. The counts are pages."
+      "description": "Spaces, who reads them, and the drafts, publications and schedules of every page. The counts are pages."
     }
   },
   "counts": {
     "draft": "Drafts",
+    "published": "Published",
     "scheduled": "Scheduled",
     "failed": "Schedule failed"
   },

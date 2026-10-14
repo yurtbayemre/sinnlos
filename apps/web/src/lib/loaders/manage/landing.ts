@@ -1,29 +1,60 @@
+import type { Route } from "next";
 import type { AuthoringListStatusFilter } from "@sinnlos/domain";
 import { fetchAuthoringList } from "@/lib/api/manage/authoring";
 import { fetchWikiPageList } from "@/lib/api/manage/wiki";
-import { AREA_TYPE, hasDrafts, SCHEDULE_FIELDS, type ManageArea } from "@/lib/manage/areas";
+import {
+  AREA_PATH,
+  AREA_TYPE,
+  hasDrafts,
+  SCHEDULE_FIELDS,
+  type ManageArea,
+} from "@/lib/manage/areas";
 import { tryFetch } from "@/lib/safe-fetch";
 import { FAILED_COUNT, type Count } from "../count";
+import { statusTabs } from "./list";
 
 /**
  * The /manage landing tiles (WD03; deep-dive decision 06 §L1: "one tile per
- * area (drafts, scheduled, failed schedules)"). Per area the viewer authors
- * in, the totals of its authoringList filters, each from one page-1 read's
- * `meta.pagination.total`: what needs attention. The cms scopes them per
- * caller (a department author counts their department's items). A failed
- * count is "–" (FAILED_COUNT), never 0, and the page shows the banner.
- * The wiki tile counts the wiki's PAGES (drafts, scheduled, failed; the
- * moderators' wiki-page authoringList), the work that waits there; spaces
- * are always published.
+ * area (drafts, scheduled, failed schedules)"; issue #78 adds the published
+ * items). Per area the viewer authors in, the totals of its authoringList
+ * filters, each from one page-1 read's `meta.pagination.total`: what is
+ * live and what needs attention. The cms scopes them per caller (a
+ * department author counts their department's items). A failed count is
+ * "–" (FAILED_COUNT), never 0, and the page shows the banner.
+ * The wiki tile counts the wiki's PAGES (drafts, published, scheduled,
+ * failed; the moderators' wiki-page authoringList), the work that waits
+ * there; spaces are always published.
  */
 
 /** The filters a landing tile counts. */
-export type CountedFilter = Extract<AuthoringListStatusFilter, "draft" | "scheduled" | "failed">;
+export type CountedFilter = Extract<
+  AuthoringListStatusFilter,
+  "draft" | "published" | "scheduled" | "failed"
+>;
 
-/** The counted filters of an area: drafts and, where it schedules, scheduled and failed. */
+/**
+ * The counted filters of an area, in the order of the list's status tabs:
+ * drafts and the published items, and scheduled and failed where the area
+ * schedules. Polls publish at create (no drafts): their published polls
+ * only. `published` is the list's tab of that name: a published item
+ * whose draft was saved after its publication is "Changes pending" there
+ * (`modified`), and not counted here.
+ */
 export function countedFilters(area: ManageArea): CountedFilter[] {
-  if (area !== "wiki" && !hasDrafts(area)) return [];
-  return SCHEDULE_FIELDS[area].length > 0 ? ["draft", "scheduled", "failed"] : ["draft"];
+  if (area !== "wiki" && !hasDrafts(area)) return ["published"];
+  return SCHEDULE_FIELDS[area].length > 0
+    ? ["draft", "published", "scheduled", "failed"]
+    : ["draft", "published"];
+}
+
+/**
+ * The list a count opens: the area's list filtered to that status tab, or
+ * null where the list has no such tab (polls have none; the wiki's list
+ * holds spaces, not pages) and the tile's own link leads to the list.
+ */
+export function countHref(area: ManageArea, status: CountedFilter): Route | null {
+  if (area === "wiki" || !statusTabs(area).includes(status)) return null;
+  return `${AREA_PATH[area]}?status=${status}` as Route;
 }
 
 /** The page-1 read whose total is the count. */

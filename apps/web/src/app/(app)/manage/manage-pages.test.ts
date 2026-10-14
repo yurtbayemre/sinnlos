@@ -117,7 +117,7 @@ describe("the landing", () => {
     const tree = elements(await ManagePage());
     expect(
       hrefs(tree)
-        .filter((href) => href.startsWith("/manage/"))
+        .filter((href) => href.startsWith("/manage/") && !href.includes("?"))
         .sort(),
     ).toEqual(
       [
@@ -145,21 +145,70 @@ describe("the landing", () => {
   it("a department head: announcements, events and documents only (§L1), never the wiki", async () => {
     viewerRef.current = viewer("department_head", ENG);
     const tree = elements(await ManagePage());
-    const areas = hrefs(tree).filter((href) => href.startsWith("/manage/"));
+    const areas = hrefs(tree).filter((href) => href.startsWith("/manage/") && !href.includes("?"));
     expect(areas.sort()).toEqual(["/manage/announcements", "/manage/documents", "/manage/events"]);
     // Their counts come from their own lists; the wiki's page list is never asked.
     const paths = strapiMock.mock.calls.map(([path]) => String(path));
     expect(paths.some((path) => path.startsWith("/api/documents/authoring"))).toBe(true);
     expect(paths.some((path) => path.startsWith("/api/wiki-"))).toBe(false);
+    // Their published counts, one per area, each opening that list's tab (#78).
+    expect(paths.filter((path) => path.endsWith("?status=published")).sort()).toEqual([
+      "/api/announcements/authoring?status=published",
+      "/api/documents/authoring?status=published",
+      "/api/events/authoring?status=published",
+    ]);
+    expect(
+      hrefs(tree)
+        .filter((href) => href.endsWith("?status=published"))
+        .sort(),
+    ).toEqual([
+      "/manage/announcements?status=published",
+      "/manage/documents?status=published",
+      "/manage/events?status=published",
+    ]);
   });
 
-  it("the wiki tile counts the wiki's pages (drafts, scheduled, failed)", async () => {
+  it("the wiki tile counts the wiki's pages (drafts, published, scheduled, failed)", async () => {
     await ManagePage();
     const paths = strapiMock.mock.calls.map(([path]) => String(path));
-    for (const status of ["draft", "scheduled", "failed"]) {
+    for (const status of ["draft", "published", "scheduled", "failed"]) {
       expect(paths).toContain(`/api/wiki-pages/authoring?status=${status}`);
       expect(paths).toContain(`/api/documents/authoring?status=${status}`);
     }
+  });
+
+  it("an editor: a published count per area; a count with a list tab opens it (#78)", async () => {
+    strapiMock.mockImplementation(async (path: string) =>
+      page([], path.endsWith("?status=published") ? 5 : 1),
+    );
+    const tree = elements(await ManagePage());
+    const paths = strapiMock.mock.calls.map(([path]) => String(path));
+    expect(paths.filter((path) => path.endsWith("?status=published")).sort()).toEqual(
+      [
+        "/api/announcements/authoring?status=published",
+        "/api/documents/authoring?status=published",
+        "/api/events/authoring?status=published",
+        "/api/polls/authoring?status=published",
+        "/api/quick-links/authoring?status=published",
+        "/api/wiki-pages/authoring?status=published",
+      ].sort(),
+    );
+    const counts = tree.filter((el) => el.type === StatCount);
+    expect(counts.filter((el) => (el.props.count as { value: number }).value === 5)).toHaveLength(
+      6,
+    );
+    // Polls have no status tabs and the wiki lists spaces: those counts are no link.
+    const countLinks = hrefs(tree).filter((href) => href.includes("?status="));
+    expect(countLinks.filter((href) => href.endsWith("?status=published")).sort()).toEqual([
+      "/manage/announcements?status=published",
+      "/manage/documents?status=published",
+      "/manage/events?status=published",
+      "/manage/quick-links?status=published",
+    ]);
+    expect(countLinks.some((href) => href.startsWith("/manage/polls"))).toBe(false);
+    expect(countLinks.some((href) => href.startsWith("/manage/wiki"))).toBe(false);
+    expect(countLinks).toContain("/manage/events?status=draft");
+    expect(countLinks).toContain("/manage/documents?status=failed");
   });
 
   it("a department head without a department: the explanation, no request (§N1)", async () => {
