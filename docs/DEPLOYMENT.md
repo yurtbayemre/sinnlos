@@ -2819,8 +2819,11 @@ populate (`populate[pages][sort]=department.name:asc`) answers 500 with a
 SQL error in the cms log for callers that hold the target's `find`; 15.2
 turns it into 400 only where the grant is missing. Nothing leaks, and the
 web sends no such sort; a line from it in step 5's error filter is someone
-sending that request by hand. Batch 16 refuses every relation sort inside a
-populate.
+sending that request by hand. **Closed in batch 16:** every relation or
+media path in a populate's sort answers the core's 400 `Invalid key <key>
+at <path>` for every caller (a media path such as
+`populate[teams][sort]=avatar.name` answered 500 as well); a rollback to
+15.2 brings the 500 back.
 
 **Rehearsal** (2026-10-13, local staging in Traefik mode, from 1d0b117):
 this section walked as written. Before the deploy, populate filters

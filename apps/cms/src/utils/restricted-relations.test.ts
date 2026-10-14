@@ -685,9 +685,10 @@ describe("closed targets bind every caller (CLOSED_RELATION_TARGETS)", () => {
  * Grants inside populate (batch 15.2). At the root the core refuses a filter
  * or sort through a relation whose target the caller holds no `find` on
  * (validateQuery's throwRestrictedRelations); inside a populate it never
- * asks. The walk reports each relation a populate's filters and sort follow
+ * asks. The walk reports each relation a populate's filters follow
  * (`onPopulateQueryRelation`), and assertPopulateQueryGrants refuses the
- * first one the caller may not `find`, with the core's root answer. The
+ * first one the caller may not `find`, with the core's root answer; a
+ * populate's sort may follow no relation or media at all (batch 16). The
  * guard asks `strapi.auth.verify` (wiring: index.register.test.ts); here
  * the grants are the matrix's own.
  */
@@ -739,19 +740,58 @@ describe("relations followed inside populate (batch 15.2)", () => {
     ]);
   });
 
-  it("reports the relations of every sort shape", () => {
-    const sortOn = (sort: unknown) => reported(WIKI_SPACE, { populate: { pages: { sort } } });
-    expect(sortOn("title:asc,department.name:desc")).toEqual([`pages.department → ${DEPARTMENT}`]);
-    expect(sortOn(["team.name:asc", "author.department.name"])).toEqual([
-      `pages.team → ${TEAM}`,
-      `pages.author → ${USER}`,
-      `pages.author.department → ${DEPARTMENT}`,
-    ]);
-    expect(sortOn({ author: { role: { type: "asc" } } })).toEqual([
-      `pages.author → ${USER}`,
-      `pages.author.role → ${ROLE}`,
-    ]);
-    expect(sortOn([{ department: { name: "asc" } }])).toEqual([`pages.department → ${DEPARTMENT}`]);
+  /**
+   * Batch 16: Strapi 5.57 answers 500 (an SQL error) for any relation or
+   * media path in a populate's sort, also for a caller holding the grant,
+   * so the walk refuses every one with the core's 400, under the closed
+   * rules (what admin_role and editor are held to) as well.
+   */
+  it("refuses a relation or media in every sort shape inside a populate, for every caller", () => {
+    const CLOSED = { getModel: OPTIONS.getModel, rules: CLOSED_RELATION_TARGETS };
+    const refused: ReadonlyArray<readonly [string, unknown, string]> = [
+      [
+        WIKI_SPACE,
+        { pages: { sort: "title:asc,department.name:desc" } },
+        "department at pages.department",
+      ],
+      [
+        WIKI_SPACE,
+        { pages: { sort: ["team.name:asc", "author.department.name"] } },
+        "team at pages.team",
+      ],
+      [
+        WIKI_SPACE,
+        { pages: { sort: { author: { role: { type: "asc" } } } } },
+        "author at pages.author",
+      ],
+      [
+        WIKI_SPACE,
+        { pages: { sort: [{ department: { name: "asc" } }] } },
+        "department at pages.department",
+      ],
+      [DEPARTMENT, { teams: { sort: "avatar.name:asc" } }, "avatar at teams.avatar"],
+      [
+        USER,
+        { department: { sort: { headerImage: { name: "desc" } } } },
+        "headerImage at department.headerImage",
+      ],
+      [
+        USER,
+        { teams: { populate: { department: { sort: "head.username" } } } },
+        "head at teams.department.head",
+      ],
+    ];
+    for (const [uid, populate, message] of refused) {
+      for (const options of [OPTIONS, CLOSED]) {
+        expectRejected(uid, { populate }, `Invalid key ${message}`, options);
+      }
+    }
+    // Scalars keep sorting, in every shape; nothing is reported.
+    for (const sort of ["title:asc,slug:desc", ["order:asc"], { title: "desc" }]) {
+      const query = { populate: { pages: { sort } } };
+      expect(guard(WIKI_SPACE, query)).toEqual(query);
+      expect(reported(WIKI_SPACE, query)).toEqual([]);
+    }
   });
 
   it("reports them in nested populates and in the array form, from every root", () => {
@@ -764,7 +804,9 @@ describe("relations followed inside populate (batch 15.2)", () => {
       reported(WIKI_SPACE, { populate: [{ pages: { filters: { team: { id: 1 } } } }] }),
     ).toEqual([`pages.team → ${TEAM}`]);
     expect(
-      reported(USER, { populate: { teams: { populate: { members: { sort: "role.type" } } } } }),
+      reported(USER, {
+        populate: { teams: { populate: { members: { filters: { role: { type: "x" } } } } } },
+      }),
     ).toEqual([`teams.members.role → ${ROLE}`]);
     expect(
       reported(ANNOUNCEMENT, {
@@ -799,7 +841,11 @@ describe("relations followed inside populate (batch 15.2)", () => {
   });
 
   it("carries the key and the path the core's message names", () => {
-    expect(collect(WIKI_SPACE, { populate: { pages: { sort: "author.role.type" } } })).toEqual([
+    expect(
+      collect(WIKI_SPACE, {
+        populate: { pages: { filters: { author: { role: { type: "x" } } } } },
+      }),
+    ).toEqual([
       { target: USER, key: "author", path: "pages.author" },
       { target: ROLE, key: "role", path: "pages.author.role" },
     ]);
@@ -902,16 +948,26 @@ describe("relations followed inside populate (batch 15.2)", () => {
 
     it("guest may not select through departments or teams; every other role may", async () => {
       const filter = { populate: { pages: { filters: { department: { name: "x" } } } } };
-      const sort = { populate: { pages: { sort: "team.name:asc" } } };
+      const byTeam = { populate: { pages: { filters: { team: { name: "x" } } } } };
       for (const role of ROLES) {
         const denied = role === "guest";
         expect([role, await answer(role, WIKI_SPACE, filter)]).toEqual([
           role,
           denied ? "Invalid key department at pages.department" : "ok",
         ]);
-        expect([role, await answer(role, WIKI_SPACE, sort)]).toEqual([
+        expect([role, await answer(role, WIKI_SPACE, byTeam)]).toEqual([
           role,
           denied ? "Invalid key team at pages.team" : "ok",
+        ]);
+      }
+    });
+
+    it("no role may sort through a relation inside a populate, admin_role included (batch 16)", async () => {
+      const sort = { populate: { pages: { sort: "team.name:asc" } } };
+      for (const role of ROLES) {
+        expect([role, await answer(role, WIKI_SPACE, sort)]).toEqual([
+          role,
+          "Invalid key team at pages.team",
         ]);
       }
     });
@@ -944,10 +1000,10 @@ describe("relations followed inside populate (batch 15.2)", () => {
       ).toBe("Invalid key folder at department.headerImage.folder");
     });
 
-    it("every role keeps the nested filters and sorts through what it reads", async () => {
+    it("every role keeps the nested filters through what it reads, and scalar sorts", async () => {
       const kept: ReadonlyArray<readonly [string, Record<string, unknown>]> = [
         [WIKI_SPACE, { populate: { pages: { filters: { author: { username: "x" } } } } }],
-        [WIKI_SPACE, { populate: { pages: { sort: "author.username:asc,title:asc" } } }],
+        [WIKI_SPACE, { populate: { pages: { sort: "title:asc,order:desc" } } }],
         [WIKI_PAGE, { populate: { children: { filters: { space: { slug: "x" } } } } }],
         [WIKI_PAGE, { populate: { children: { filters: { $or: [{ parent: { id: 1 } }] } } } }],
       ];

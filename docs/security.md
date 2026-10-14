@@ -797,7 +797,12 @@ query and output handling, and the other three are global middlewares
   `users-permissions.role` (`author.role`, `space.allowedRoles`,
   `manager.role`), and nobody through `role.permissions`. Relations only,
   as at the root: media, components and scalars are not grant-checked.
-  The web sends no populate filter or sort.
+  **A populate's `sort` follows no relation and no media at all** (batch
+  16): Strapi 5.57 builds such a populate query with a broken alias and
+  answered 500 with an SQL error even for a caller holding the grant, so
+  the guard refuses every one with the same 400, for every caller;
+  scalar sorts inside a populate and root sorts are unchanged. The web
+  sends no populate filter or sort.
 - **Root query-key allowlist** (`utils/rest-query-params.ts`, same wrapper,
   every role): keys outside Strapi's REST parameters (`where`, `orderBy`,
   `select`, `groupBy`, `offset`, …) are dropped before any service sees
