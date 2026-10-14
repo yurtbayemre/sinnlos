@@ -72,6 +72,16 @@ export const SCHEDULE_TRANSIENT_ATTEMPTS = 5;
  */
 export const WITHDRAWAL_BACKOFF_MINUTES: readonly number[] = [5, 15, 60];
 
+/**
+ * Failed withdrawals (`scheduleError` set) each unpublish pass attempts at
+ * most, whatever the healthy ones hold: their reserved share of
+ * SCHEDULE_BATCH (issue #73; cron/scheduled-publish.ts dueUnpublishes).
+ */
+export const WITHDRAWAL_RETRY_QUOTA = 10;
+
+/** Failed withdrawals the retry tier examines per type and run, at most. */
+export const WITHDRAWAL_RETRY_SCAN = 200;
+
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
@@ -280,6 +290,21 @@ export class TransientAttempts {
   /** Forgets a withdrawal's failures (it succeeded, or the deadline was cleared). */
   clearWithdrawal(uid: string, documentId: string): void {
     this.withdrawals.delete(TransientAttempts.documentKey(uid, documentId));
+  }
+
+  // -------------------------------------------------------------------------
+  // The retry tier's keyset cursor (issue #73): per uid, the id of the last
+  // draft row it examined (0: start at the beginning). A restart starts over,
+  // which only adds retries.
+
+  private readonly cursors = new Map<string, number>();
+
+  withdrawalCursor(uid: string): number {
+    return this.cursors.get(uid) ?? 0;
+  }
+
+  setWithdrawalCursor(uid: string, id: number): void {
+    this.cursors.set(uid, id);
   }
 }
 

@@ -38,17 +38,22 @@ const localizedDp = (): DraftTwinModel => ({
 // --- planDraftTwinTypes ------------------------------------------------------
 
 describe("planDraftTwinTypes", () => {
-  it("takes the app's draft & publish types only, without wiki-revision", () => {
-    const plan = planDraftTwinTypes({
+  it("takes the app's draft & publish types only; a skipped uid stays out", () => {
+    const types = {
       [ANNOUNCEMENT]: dp(),
       "api::department.department": { options: { draftAndPublish: false } },
       "api::kudos.kudos": { attributes: {} },
-      [REVISION]: dp(),
+      [REVISION]: { options: { draftAndPublish: false } },
       "plugin::some.thing": dp(),
       "admin::user": dp(),
+    };
+    expect(planDraftTwinTypes(types)).toEqual({ order: [ANNOUNCEMENT], cyclic: [] });
+    // Batch 16: wiki-revision has draft & publish off, so nothing is skipped by name.
+    expect(DRAFT_TWINS_SKIPPED_UIDS).toEqual([]);
+    expect(planDraftTwinTypes({ ...types, [LESSON]: dp() }, [LESSON])).toEqual({
+      order: [ANNOUNCEMENT],
+      cyclic: [],
     });
-    expect(plan).toEqual({ order: [ANNOUNCEMENT], cyclic: [] });
-    expect(DRAFT_TWINS_SKIPPED_UIDS).toEqual([REVISION]);
   });
 
   it("orders alphabetically when no unidirectional relation links two of them", () => {
@@ -95,7 +100,7 @@ describe("planDraftTwinTypes", () => {
         },
       }),
       "api::department.department": { options: { draftAndPublish: false } },
-      [REVISION]: dp(),
+      [REVISION]: { options: { draftAndPublish: false } },
     });
     expect(plan).toEqual({ order: [COURSE, LESSON], cyclic: [] });
   });
@@ -593,9 +598,9 @@ describe("ensureDraftTwins", () => {
     expect(drafts(ANNOUNCEMENT)).toEqual(["a", "b", "c"]);
   });
 
-  it("never touches wiki revisions", async () => {
+  it("never touches wiki revisions (draft & publish off since batch 16)", async () => {
     const { strapi, calls, drafts } = fakeStrapi({
-      contentTypes: { [ANNOUNCEMENT]: dp(), [REVISION]: dp() },
+      contentTypes: { [ANNOUNCEMENT]: dp(), [REVISION]: { options: { draftAndPublish: false } } },
       rows: { [ANNOUNCEMENT]: [published("a")], [REVISION]: [published("r1"), published("r2")] },
     });
     await ensureDraftTwins(strapi);
@@ -790,9 +795,17 @@ describe("ensureDraftTwins and pending drafts of linked documents", () => {
             mappedBy: "page",
           },
         }),
-        [REVISION]: dp({
-          page: { type: "relation", relation: "manyToOne", target: PAGE, inversedBy: "revisions" },
-        }),
+        [REVISION]: {
+          options: { draftAndPublish: false },
+          attributes: {
+            page: {
+              type: "relation",
+              relation: "manyToOne",
+              target: PAGE,
+              inversedBy: "revisions",
+            },
+          },
+        },
       },
       rows: {
         [ANNOUNCEMENT]: [published("news")],

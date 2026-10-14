@@ -600,6 +600,26 @@ describe("@strapi/core: turning draft & publish off deletes drafts in beforeSync
     expect(beforeSync).toBeGreaterThan(-1);
     expect(sync).toBeGreaterThan(beforeSync);
   });
+
+  it("C25: the user register() runs before db.init and the beforeSync hook (the org and revision guards)", () => {
+    const boot = readFileSync(join(coreDir(), "dist/Strapi.js"), "utf8");
+    // load(): register() completes before bootstrap() starts.
+    expect(boot).toMatch(
+      /async load\(\) \{\s*await this\.register\(\);\s*await this\.bootstrap\(\);/,
+    );
+    const register = boot.indexOf("async register() {");
+    const userRegister = boot.indexOf(
+      "await this.runUserLifecycles(lifecycles.LIFECYCLES.REGISTER)",
+    );
+    const bootstrap = boot.indexOf("async bootstrap() {");
+    const init = boot.indexOf("await this.db.init(");
+    const beforeSync = boot.indexOf("hook('strapi::content-types.beforeSync').call(");
+    expect(register).toBeGreaterThan(-1);
+    expect(userRegister).toBeGreaterThan(register);
+    expect(bootstrap).toBeGreaterThan(userRegister);
+    expect(init).toBeGreaterThan(bootstrap);
+    expect(beforeSync).toBeGreaterThan(init);
+  });
 });
 
 describe("@strapi/core document service over @strapi/database (SQLite)", () => {
@@ -1046,6 +1066,122 @@ describe("@strapi/core document service over @strapi/database (SQLite)", () => {
       expect.objectContaining({ title: "Src", body: "keep?" }),
     ]);
   }, 30_000);
+
+  // --- Batch 16, lane 16D (DA03): what the wiki-revision flip, its rollback
+  // and the after-image lifecycle rely on.
+
+  /** A type without draft & publish, as wiki-revision is from batch 16 on. */
+  const LOG = "api::log.log";
+  const LOG_TYPE = {
+    ...NOTE_TYPE,
+    uid: LOG,
+    modelName: "log",
+    globalId: "Log",
+    collectionName: "logs",
+    info: { singularName: "log", pluralName: "logs", displayName: "Log" },
+    options: { draftAndPublish: false },
+  };
+
+  it("C26: turning draft & publish ON clones every PUBLISHED row once, as a draft, through discardDraft (the rollback twins)", async () => {
+    const { service, db } = await documentService([NOTE_TYPE]);
+    const actions: string[] = [];
+    service.use(async (context, next) => {
+      actions.push(`${context.action} ${String(context.params.documentId)}`);
+      return next();
+    });
+    // The rows a draft & publish OFF model wrote: published, one per document.
+    const sources = [
+      ["rev1", "first"],
+      ["rev2", "second"],
+    ] as const;
+    for (const [documentId, title] of sources) {
+      await db.query(NOTE).create({ data: { documentId, title, publishedAt: new Date() } });
+    }
+    // A row without published_at (what the batch-16 guard refuses) is not cloned.
+    await db
+      .query(NOTE)
+      .create({ data: { documentId: "rev3", title: "draft", publishedAt: null } });
+    const { enable } = requirePackageFile<{
+      enable(args: {
+        oldContentTypes: Record<string, unknown>;
+        contentTypes: Record<string, unknown>;
+      }): Promise<void>;
+    }>(coreDir(), "dist/migrations/draft-publish.js");
+    await enable({
+      oldContentTypes: { [NOTE]: { ...NOTE_TYPE, options: { draftAndPublish: false } } },
+      contentTypes: { [NOTE]: NOTE_TYPE },
+    });
+    expect(actions.sort()).toEqual(["discardDraft rev1", "discardDraft rev2"]);
+    for (const [documentId, title] of sources) {
+      const rows = await rowsOf(db, NOTE, documentId);
+      expect(rows.map((row) => [row.title, row.publishedAt === null])).toEqual([
+        [title, false],
+        [title, true],
+      ]);
+    }
+    expect(await rowsOf(db, NOTE, "rev3")).toEqual([
+      expect.objectContaining({ title: "draft", publishedAt: null }),
+    ]);
+    // The enable hook is wired to afterSync (the rollback image's first boot).
+    const registries = readFileSync(join(coreDir(), "dist/providers/registries.js"), "utf8");
+    expect(registries).toMatch(
+      /hook\('strapi::content-types\.afterSync'\)\.register\([\w$]+\.enable\)/,
+    );
+    const batches = readFileSync(
+      join(coreDir(), "dist/migrations/database/5.0.0-discard-drafts.js"),
+      "utf8",
+    );
+    expect(batches).toMatch(
+      /async function\* getBatchToDiscard[\s\S]*?publishedAt: \{\s*\$ne: null\s*\}/,
+    );
+  }, 30_000);
+
+  it("S4: a Document Service write of a type without draft & publish sets publishedAt; a db.query create does not", async () => {
+    const { service, db } = await documentService([LOG_TYPE]);
+    const created = await service(LOG).create({ data: { title: "via documents" } });
+    await service(LOG).update({ documentId: created.documentId, data: { title: "updated" } });
+    const raw = await db.query(LOG).create({ data: { title: "via db.query" } });
+    const rows = (await db
+      .query(LOG)
+      .findMany({ orderBy: { id: "asc" } })) as unknown as DocumentEntry[];
+    expect(rows.map((row) => [row.title, row.publishedAt !== null])).toEqual([
+      ["updated", true],
+      ["via db.query", false],
+    ]);
+    // db.query still gives the row a documentId (the model's default).
+    expect(typeof (raw as unknown as DocumentEntry).documentId).toBe("string");
+  }, 30_000);
+
+  it("the lifecycles the after-image relies on: one event state per update; publish and discard create rows, never update the draft", async () => {
+    const events: string[] = [];
+    const status = (row: unknown) =>
+      (row as DocumentEntry | null)?.publishedAt == null ? "draft" : "published";
+    const lifecycles = {
+      async beforeUpdate(event: { state: Record<string, unknown> }) {
+        event.state.mark = "kept";
+      },
+      async afterUpdate(event: { state: Record<string, unknown>; result: unknown }) {
+        events.push(`afterUpdate ${status(event.result)} state=${String(event.state.mark)}`);
+      },
+      async afterCreate(event: { state: Record<string, unknown>; result: unknown }) {
+        events.push(`afterCreate ${status(event.result)} state=${String(event.state.mark)}`);
+      },
+    };
+    const typeWithLifecycles: { uid: string } = { ...NOTE_TYPE, lifecycles } as { uid: string };
+    const { service } = await documentService([typeWithLifecycles]);
+    const created = await service(NOTE).create({ data: { title: "v1" } });
+    await service(NOTE).update({ documentId: created.documentId, data: { title: "v2" } });
+    await service(NOTE).publish({ documentId: created.documentId });
+    await service(NOTE).update({ documentId: created.documentId, data: { title: "v3" } });
+    await service(NOTE).discardDraft({ documentId: created.documentId });
+    expect(events).toEqual([
+      "afterCreate draft state=undefined",
+      "afterUpdate draft state=kept",
+      "afterCreate published state=undefined",
+      "afterUpdate draft state=kept",
+      "afterCreate draft state=undefined",
+    ]);
+  }, 30_000);
 });
 
 // ---------------------------------------------------------------------------
@@ -1128,6 +1264,21 @@ describe("@strapi/database schema sync (datetime contract, decision 04)", () => 
     } finally {
       await pg.destroy();
     }
+  }, 30_000);
+
+  it("with forceMigration false a sync keeps the column of an attribute the model lost (a rollback keeps the batch-16 revision columns)", async () => {
+    engine = await openSqliteEngine([thingModel({ pageDocumentId: { type: "string" } })], {
+      schema: "sync",
+    });
+    await engine.db.connection.raw(
+      "insert into things (name, page_document_id) values ('x', 'p1')",
+    );
+    const db = await engine.reopen([thingModel()]);
+    expect(await db.schema.sync()).toBe("CHANGED");
+    expect(await db.connection.schema.hasColumn("things", "page_document_id")).toBe(true);
+    expect(await db.connection.raw("select page_document_id from things")).toEqual([
+      { page_document_id: "p1" },
+    ]);
   }, 30_000);
 
   it("re-syncs an unchanged model without touching the column", async () => {

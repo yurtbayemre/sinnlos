@@ -15,11 +15,12 @@ import {
 /**
  * Wiki revisions are not readable through the content API (batch 15.1,
  * decision 06 §J3 "Generic routes", plan 16-0). The wiki-page lifecycle
- * snapshots the page body before every edit; whenever the draft differs
- * from the published version that body is unpublished draft text, and up to
- * batch 15 every staff role and `authenticated` could read it through
- * /api/wiki-revisions, `populate=revisions` and filters through the
- * relation. Every caller is checked, admin_role and editor included:
+ * records the page's draft after every save (before every edit up to batch
+ * 15.1); whenever the draft differs from the published version that is
+ * unpublished draft text, and up to batch 15 every staff role and
+ * `authenticated` could read it through /api/wiki-revisions,
+ * `populate=revisions` and filters through the relation. Every caller is
+ * checked, admin_role and editor included:
  *   - the generic routes are gone (404, or 405 where the path serves other
  *     methods), never a 401/403 that would mean "only the grant is missing";
  *   - a populate of `revisions`, in every shape and from every root that
@@ -103,7 +104,7 @@ describe.each(testEngines())("wiki revisions are closed on %s", (engine) => {
       },
       status: "published",
     });
-    // Each draft save snapshots the body before it: B and D were never
+    // Each draft save records its after-image (batch 16): B and D were never
     // published, and the publish in between links the revisions to the
     // published row too.
     const save = (body: string) =>
@@ -441,8 +442,11 @@ describe.each(testEngines())("wiki revisions are closed on %s", (engine) => {
       const written = await t.strapi.db
         .query(REVISION)
         .findOne({ where: { summary: "closure suite" }, populate: { editor: { select: ["id"] } } });
+      // The after-image of the save (batch 16, DA03).
       expect(written).toMatchObject({
-        body: "ZZDRAFT-E the current draft",
+        body: "ZZDRAFT-F the next draft",
+        kind: "after",
+        pageDocumentId: page.documentId,
         editor: { id: t.fixtures.users.editor.id },
       });
       expect(written?.publishedAt).not.toBeNull();
