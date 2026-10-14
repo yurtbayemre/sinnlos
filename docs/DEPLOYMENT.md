@@ -2009,7 +2009,9 @@ What changes:
   has **no _Revisions_ field** (the wiki-page schema's
   `config.attributes.revisions.hidden`, Strapi's own switch for a field
   the panel neither shows nor writes), and a write that would change a
-  revision link is refused for every writer (the wiki checks); a clone
+  revision link is refused through the content API and in code (400 on
+  `revisions`, the wiki checks), while the admin panel drops the field
+  from a hand-made request, so it answers 200 and changes nothing; a clone
   of a page (the panel's clone route, or code) no longer takes the
   source's revisions over, as it did on batch 16. Admin
   roles that hold Content Manager read on Wiki revision keep it, as since
