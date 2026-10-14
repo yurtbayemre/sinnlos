@@ -24,8 +24,9 @@ import { STRAPI_PUBLIC_URL as STRAPI_URL } from "@/lib/config";
 import { lacksDepartment, manageAreasFor, areaAccess } from "@/lib/manage/access";
 import { AREA_PATH, type ManageArea } from "@/lib/manage/areas";
 import { manageGate } from "@/lib/manage/page-gate";
-import { countedFilters, loadManageLanding } from "@/lib/loaders/manage/landing";
+import { countedFilters, countHref, loadManageLanding } from "@/lib/loaders/manage/landing";
 import { isAdmin } from "@/lib/roles";
+import { cn } from "@/lib/utils";
 import { FetchErrorBanner } from "@/components/fetch-error";
 import { NoDepartmentExplanation } from "@/components/manage/page-parts";
 import { PageHeader } from "@/components/page-header";
@@ -91,9 +92,11 @@ const QUICK_LINK_META = [
 
 /**
  * The /manage landing (deep-dive decision 06 §L1; batch 15 plan, lane 15C
- * item 1): one tile per area the viewer authors in, with what needs
- * attention (drafts, scheduled, failed schedules; lib/loaders/manage/
- * landing.ts). The reports (analytics, read confirmations, training) and
+ * item 1): one tile per area the viewer authors in, with what is live and
+ * what needs attention (drafts, published, scheduled, failed schedules;
+ * lib/loaders/manage/landing.ts; published since issue #78). A count with
+ * a status tab of the area's list opens that list filtered to it. The
+ * reports (analytics, read confirmations, training) and
  * the Strapi admin links and roles stay admin-only. A department author
  * sees announcements, events and documents (§L1, §N7: their three areas;
  * the wiki tile needs `author.wikiSpaces`, moderators only), and without a
@@ -197,27 +200,44 @@ export default async function ManagePage() {
                       </CardTitle>
                       <CardDescription>{t(`areas.${area}.description`)}</CardDescription>
                     </CardHeader>
-                    {countedFilters(area).length > 0 && (
-                      <CardContent>
-                        <dl className="flex flex-wrap gap-x-5 gap-y-1 text-sm">
-                          {countedFilters(area).map((status) => {
-                            const count = counts[status];
-                            return (
-                              <div key={status} className="flex items-baseline gap-1.5">
-                                <dt className="text-muted-foreground">{t(`counts.${status}`)}</dt>
-                                <dd className="font-semibold tabular-nums">
-                                  {count ? (
-                                    <StatCount count={count} unknownLabel={tCommon("unknown")} />
-                                  ) : (
-                                    "–"
-                                  )}
-                                </dd>
-                              </div>
-                            );
-                          })}
-                        </dl>
-                      </CardContent>
-                    )}
+                    <CardContent>
+                      <dl className="flex flex-wrap gap-x-5 gap-y-1 text-sm">
+                        {countedFilters(area).map((status) => {
+                          const count = counts[status];
+                          const href = countHref(area, status);
+                          const label = t(`counts.${status}`);
+                          // A count with a list tab opens the list filtered to it
+                          // (issue #78): the label is the link, stretched over the
+                          // pair and above the card's own link.
+                          return (
+                            <div
+                              key={status}
+                              className={cn("flex items-baseline gap-1.5", href && "relative z-10")}
+                            >
+                              <dt className="text-muted-foreground">
+                                {href ? (
+                                  <Link
+                                    href={href}
+                                    className="outline-none after:absolute after:-inset-x-1 after:-inset-y-0.5 after:rounded-md hover:text-foreground hover:underline focus-visible:after:ring-2 focus-visible:after:ring-ring"
+                                  >
+                                    {label}
+                                  </Link>
+                                ) : (
+                                  label
+                                )}
+                              </dt>
+                              <dd className="font-semibold tabular-nums">
+                                {count ? (
+                                  <StatCount count={count} unknownLabel={tCommon("unknown")} />
+                                ) : (
+                                  "–"
+                                )}
+                              </dd>
+                            </div>
+                          );
+                        })}
+                      </dl>
+                    </CardContent>
                   </Card>
                 );
               })}

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   QUIZ_MAX_QUESTIONS,
   parseQuiz,
+  quizAnswersPass,
   validateQuiz,
   youtubeEmbedUrl,
   youtubeVideoId,
@@ -95,5 +96,54 @@ describe("parseQuiz (read side, lenient)", () => {
     const valid = [{ question: "2+2?", options: ["3", "4"], correctIndex: 1 }];
     const checked = validateQuiz(valid);
     expect("quiz" in checked && parseQuiz(checked.quiz)).toEqual(valid);
+  });
+});
+
+describe("quizAnswersPass (the completion gate, issue #70)", () => {
+  const quiz = parseQuiz([
+    { question: "Q1", options: ["a", "b", "c"], correctIndex: 2 },
+    { question: "Q2", options: ["a", "b"], correctIndex: 0 },
+  ]);
+
+  it("passes exactly one correct answer per question", () => {
+    expect(quizAnswersPass(quiz, [2, 0])).toBe(true);
+  });
+
+  it("refuses a wrong, missing, extra or mistyped answer", () => {
+    for (const answers of [
+      [1, 0],
+      [2, 1],
+      [2],
+      [2, 0, 1],
+      [],
+      ["2", "0"],
+      [2.0000001, 0],
+      [2, null],
+      { 0: 2, 1: 0, length: 2 },
+      "2,0",
+      null,
+      undefined,
+    ]) {
+      expect(quizAnswersPass(quiz, answers), JSON.stringify(answers)).toBe(false);
+    }
+  });
+
+  it("passes a lesson without questions with any answers (it completes by click)", () => {
+    expect(quizAnswersPass([], undefined)).toBe(true);
+    expect(quizAnswersPass([], [0])).toBe(true);
+    // A malformed quiz parseQuiz drops entirely is no quiz: no dead lock.
+    expect(quizAnswersPass(parseQuiz([{ question: "Q", options: ["only"] }]), undefined)).toBe(
+      true,
+    );
+  });
+
+  it("indexes the questions parseQuiz keeps, as the player shows them", () => {
+    const withMalformed = parseQuiz([
+      { question: "Q1", options: ["a", "b"], correctIndex: 1 },
+      { question: "", options: ["a", "b"], correctIndex: 0 },
+      { question: "Q3", options: ["a", "b"], correctIndex: 0 },
+    ]);
+    expect(quizAnswersPass(withMalformed, [1, 0])).toBe(true);
+    expect(quizAnswersPass(withMalformed, [1, 0, 0])).toBe(false);
   });
 });

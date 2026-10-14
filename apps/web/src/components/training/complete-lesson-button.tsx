@@ -12,25 +12,33 @@ import { completeLesson } from "@/lib/training-actions";
  * "Mark lesson as completed" control (ack-button clone, issue #29).
  * Date labels are pre-formatted on the server; after a successful action
  * the server-side refresh() delivers the authoritative state as new
- * props.
+ * props. A quiz lesson's completion carries the passing answers, which
+ * the cms checks (issue #70); its refusal ("quizFailed") says so and hands
+ * the quiz back to the parent.
  */
 export function CompleteLessonButton({
   lessonDocumentId,
   completedAtLabel,
+  answers = null,
   disabled = false,
+  onQuizRefused,
 }: {
   /** Strapi documentId of the lesson (stable across re-publishes). */
   lessonDocumentId: string;
   /** Pre-formatted date of the caller's own completion, or null. */
   completedAtLabel: string | null;
-  /** quizGate lock — the quiz must be passed first (client nudge). */
+  /** The passing answers of the lesson's quiz, or null for a lesson without one. */
+  answers?: number[] | null;
+  /** Quiz lock — the quiz must be passed first (the cms checks it again). */
   disabled?: boolean;
+  /** The cms refused the answers: the parent starts the quiz over. */
+  onQuizRefused?: () => void;
 }) {
   const t = useTranslations("training");
   const tErrors = useTranslations("actionErrors");
   const router = useRouter();
   const [justCompleted, setJustCompleted] = useState(false);
-  const [error, setError] = useState<CommonCode | null>(null);
+  const [error, setError] = useState<CommonCode | "quizFailed" | null>(null);
   const [isPending, startTransition] = useTransition();
 
   const completed = completedAtLabel !== null || justCompleted;
@@ -39,12 +47,14 @@ export function CompleteLessonButton({
     if (completed || isPending || disabled) return;
     setError(null);
     startCmsAction(startTransition, {
-      action: () => completeLesson(lessonDocumentId),
+      action: () => completeLesson(lessonDocumentId, answers),
       onSuccess: () => setJustCompleted(true),
       onFailure: (code) => {
-        // Refused (already completed elsewhere, course unpublished, …) —
-        // surface it and pull the authoritative state from the server.
+        // Refused (already completed elsewhere, course unpublished, the
+        // answers wrong for the current quiz, …) — surface it and pull the
+        // authoritative state from the server.
         setError(code);
+        if (code === "quizFailed") onQuizRefused?.();
         router.refresh();
       },
     });
@@ -64,7 +74,11 @@ export function CompleteLessonButton({
       )}
       {error && (
         <span role="alert" className="text-sm text-destructive">
-          {isSharedErrorCode(error) ? tErrors(error) : t("completeFailed")}
+          {error === "quizFailed"
+            ? t("quizNotPassed")
+            : isSharedErrorCode(error)
+              ? tErrors(error)
+              : t("completeFailed")}
         </span>
       )}
     </div>

@@ -31,11 +31,12 @@
     },
     "wiki": {
       "title": "Wiki",
-      "description": "Bereiche, wer sie liest, und die Entwürfe und Planungen aller Seiten. Gezählt werden Seiten."
+      "description": "Bereiche, wer sie liest, und die Entwürfe, Veröffentlichungen und Planungen aller Seiten. Gezählt werden Seiten."
     }
   },
   "counts": {
     "draft": "Entwürfe",
+    "published": "Veröffentlicht",
     "scheduled": "Geplant",
     "failed": "Planung fehlgeschlagen"
   },

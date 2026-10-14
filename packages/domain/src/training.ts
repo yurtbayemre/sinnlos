@@ -60,7 +60,11 @@ export function youtubeEmbedUrl(videoId: string): string {
   return `https://www.youtube-nocookie.com/embed/${videoId}`;
 }
 
-/** One self-check question of a lesson quiz (no grading, no persistence). */
+/**
+ * One question of a lesson quiz. Answers are never stored; a lesson with
+ * questions completes only with every answer correct (quizAnswersPass,
+ * issue #70).
+ */
 export interface QuizQuestion {
   question: string;
   options: string[];
@@ -149,4 +153,22 @@ export function parseQuiz(raw: unknown): QuizQuestion[] {
     quiz.push({ question: q.question, options, correctIndex: idx });
   }
   return quiz;
+}
+
+/**
+ * Whether `answers` pass `quiz` (issue #70): the completion gate of a quiz
+ * lesson, server-side in the cms lesson-progress create and client-side in
+ * the web player. `quiz` is the quiz as parseQuiz reads it, so the answers
+ * index the questions the player shows; `answers` comes from the caller:
+ * exactly one option index per question, each the correct one. A lesson
+ * without (valid) questions passes with any answers: it completes by click,
+ * and malformed questions parseQuiz drops never dead-lock it.
+ */
+export function quizAnswersPass(quiz: readonly QuizQuestion[], answers: unknown): boolean {
+  if (quiz.length === 0) return true;
+  return (
+    Array.isArray(answers) &&
+    answers.length === quiz.length &&
+    quiz.every((question, i) => answers[i] === question.correctIndex)
+  );
 }
