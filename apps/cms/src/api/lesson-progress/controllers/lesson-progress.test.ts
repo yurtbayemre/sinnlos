@@ -9,7 +9,9 @@ import lessonProgressController from "./lesson-progress";
  *      up by documentId (stable across publishes);
  *   3. "no such lesson", "draft only", "no course" and "course unpublished"
  *      answer the byte-identical 400 (no existence oracle, §5.17);
- *   4. one receipt per user and lesson.
+ *   4. one receipt per user and lesson;
+ *   5. a lesson with a quiz completes only with every answer correct
+ *      (issue #70), checked after the lesson proved available.
  *
  * The db stub evaluates the `where` it receives and resolves the course
  * populate like db.query does.
@@ -32,6 +34,15 @@ const PUBLISHED_LESSON = "k3v9q2m8x7c4b1n6p5z0r2t8";
 const DRAFT_LESSON = "d0d1d2d3d4d5d6d7d8d9e0e1";
 const DRAFT_COURSE_LESSON = "c0c1c2c3c4c5c6c7c8c9d0d1";
 const ORPHAN_LESSON = "o0o1o2o3o4o5o6o7o8o9p0p1";
+const QUIZ_LESSON = "q0q1q2q3q4q5q6q7q8q9r0r1";
+const DRAFT_QUIZ_LESSON = "s0s1s2s3s4s5s6s7s8s9t0t1";
+const BROKEN_QUIZ_LESSON = "u0u1u2u3u4u5u6u7u8u9v0v1";
+const QUIZ_NOT_PASSED = "Quiz not passed";
+/** Two questions; the second's correct answer is the first option. */
+const QUIZ = [
+  { question: "Q1", options: ["a", "b", "c"], correctIndex: 2 },
+  { question: "Q2", options: ["a", "b"], correctIndex: 0 },
+];
 const MEMBER = { id: 5, role: { type: "member" } };
 
 type Row = Record<string, unknown>;
@@ -57,6 +68,30 @@ function lessons(): Row[] {
       course: DRAFT_COURSE,
     },
     { id: 14, documentId: ORPHAN_LESSON, publishedAt: "2026-09-01T00:00:00.000Z", course: null },
+    // The draft row's quiz differs: the published one is what counts.
+    { id: 15, documentId: QUIZ_LESSON, publishedAt: null, quiz: [], course: PUBLISHED_COURSE },
+    {
+      id: 16,
+      documentId: QUIZ_LESSON,
+      publishedAt: "2026-09-01T00:00:00.000Z",
+      quiz: QUIZ,
+      course: PUBLISHED_COURSE,
+    },
+    {
+      id: 17,
+      documentId: DRAFT_QUIZ_LESSON,
+      publishedAt: null,
+      quiz: QUIZ,
+      course: PUBLISHED_COURSE,
+    },
+    {
+      id: 18,
+      documentId: BROKEN_QUIZ_LESSON,
+      publishedAt: "2026-09-01T00:00:00.000Z",
+      // Only malformed questions (a db-level write past the lifecycle): no quiz.
+      quiz: [{ question: "Q", options: ["only one"], correctIndex: 0 }, "garbage"],
+      course: PUBLISHED_COURSE,
+    },
   ];
 }
 
@@ -185,5 +220,59 @@ describe("lesson-progress create: target rules (S09)", () => {
     await s.controller.create(s.ctx);
     expect(s.ctx.unauthorized).toHaveBeenCalled();
     expect(s.calls).toEqual([]);
+  });
+});
+
+describe("lesson-progress create: a quiz lesson needs the correct answers (#70)", () => {
+  it("records a quiz lesson with every answer correct", async () => {
+    const { ctx, calls } = await complete({
+      data: { targetDocumentId: QUIZ_LESSON, answers: [2, 0] },
+    });
+    expect(ctx.badRequest).not.toHaveBeenCalled();
+    // The answers are checked, never stored.
+    expect(calls.filter((c) => c.op === "create").map((c) => c.params)).toEqual([
+      {
+        data: {
+          user: MEMBER.id,
+          targetDocumentId: QUIZ_LESSON,
+          completedAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T.*Z$/),
+        },
+      },
+    ]);
+  });
+
+  it("refuses no, wrong, partial or mistyped answers, before the receipt lookup", async () => {
+    for (const answers of [undefined, [], [2], [0, 0], [2, 1], [2, 0, 1], ["2", "0"], "2,0"]) {
+      const { ctx, calls } = await complete({ data: { targetDocumentId: QUIZ_LESSON, answers } });
+      expect(ctx.badRequest.mock.calls, JSON.stringify(answers)).toEqual([[QUIZ_NOT_PASSED]]);
+      expect(created(calls)).toEqual([]);
+      expect(calls.filter((c) => c.uid === PROGRESS_UID)).toEqual([]);
+    }
+  });
+
+  it("takes the answers from a bare body as well as from `data`", async () => {
+    const { ctx, calls } = await complete({ targetDocumentId: QUIZ_LESSON, answers: [2, 0] });
+    expect(ctx.badRequest).not.toHaveBeenCalled();
+    expect(created(calls)).toHaveLength(1);
+  });
+
+  it("answers an unavailable quiz lesson like any other, whatever the answers", async () => {
+    const { ctx } = await complete({ data: { targetDocumentId: DRAFT_QUIZ_LESSON } });
+    expect(ctx.badRequest.mock.calls).toEqual([[NOT_AVAILABLE]]);
+  });
+
+  it("completes a lesson whose quiz holds no valid question by click (no dead lock)", async () => {
+    const { ctx, calls } = await complete({ data: { targetDocumentId: BROKEN_QUIZ_LESSON } });
+    expect(ctx.badRequest).not.toHaveBeenCalled();
+    expect(created(calls)).toHaveLength(1);
+  });
+
+  it("still answers 'Already completed' for a second, correct completion", async () => {
+    const { ctx, calls } = await complete(
+      { data: { targetDocumentId: QUIZ_LESSON, answers: [2, 0] } },
+      [{ id: 1, user: MEMBER.id, targetDocumentId: QUIZ_LESSON }],
+    );
+    expect(ctx.badRequest).toHaveBeenCalledWith("Already completed");
+    expect(created(calls)).toEqual([]);
   });
 });
