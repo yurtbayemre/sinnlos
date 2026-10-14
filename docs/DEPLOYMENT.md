@@ -1980,7 +1980,11 @@ What changes:
   them against the published lesson's quiz: without them, or with a
   wrong one, 400 `Quiz not passed` and no receipt. Lessons without a quiz
   complete by click as before. Receipts written before 16.1 stay valid
-  (nothing is re-checked or deleted); answers are never stored.
+  (nothing is re-checked or deleted); answers are never stored. The
+  Course schema's description, which the admin panel's Content-Type
+  Builder shows, says so too (it read "confirm = Abschluss per Klick"): a
+  description-only change, no column and no schema sync (the stored
+  database schema and its hash stay the same).
 - **#71, phones:** the page sets `viewport-fit=cover`, so iOS reports the
   safe-area insets the tab bar already padded by: on an iPhone with a
   home indicator the bar grows by the inset (34 px) and its labels sit
@@ -2043,11 +2047,12 @@ ignores the answers a 16.1 web sends (that mix completes as batch 16
 did). `deploy.sh` builds and starts both together; a rollback retags both
 together (below).
 
-No schema change (the schema's `config` adds no column), no env, no edge
-change, **no permission change** (the `lesson-progress.create` grant is
-unchanged), **no `JWT_SECRET` rotation**, nobody is signed out. The first
-cms boot changes one Content Manager setting through Strapi's own layout
-sync: the stored edit view of Wiki Page loses `revisions`
+No schema change (the wiki-page schema's `config` and the course schema's
+description add no column), no env, no edge change, **no permission
+change** (the `lesson-progress.create` grant is unchanged), **no
+`JWT_SECRET` rotation**, nobody is signed out. The first cms boot changes
+one Content Manager setting through Strapi's own layout sync: the stored
+edit view of Wiki Page loses `revisions`
 (`strapi_core_store_settings`, key
 `plugin_content_manager_configuration_content_types::api::wiki-page.wiki-page`);
 it logs no line for it.
@@ -2138,6 +2143,9 @@ rollback to `<B16_TAG>` with no `MANDATORY` step: report it.
      _Wiki-page_, `revision`, `revisions` and `restore` are ticked for
      admin_role, editor, department_head, team_lead and member (the
      page history), not for guest, authenticated or public.
+     Content-Type Builder → Course: the description says that
+     completionMode picks the quiz's feedback only and that both modes
+     need every answer right.
    - **`/manage`, as an editor, then as a department head (#78):** six
      tiles, each with a "Published" count; "Published" on announcements,
      events, quick links and documents opens the list on its Published
