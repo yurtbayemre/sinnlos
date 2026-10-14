@@ -367,3 +367,151 @@ describe.each(testEngines())("authoring documents with files on %s", (engine) =>
     expect(await exists(pdf.id)).toBe(true);
   });
 });
+
+// ---------------------------------------------------------------------------
+// What members read (batch 16.1, issue #80): the web's /documents loader
+// (apps/web/src/lib/api/documents.ts) asks for every document it may see,
+// with the file, the departments and the uploader populated; the document
+// visibility policy decides by the departments and the `audience` flag
+// (utils/policy-factories.ts departmentScopedIds).
+
+/** The web's list request, as lib/api/documents.ts builds it (page 1). */
+const WEB_DOCUMENTS =
+  "/api/documents?populate[file]=true&populate[departments]=true&populate[uploadedBy]=true" +
+  "&sort[0]=updatedAt:desc&sort[1]=id:desc&pagination[page]=1&pagination[pageSize]=100";
+
+interface Scheduler {
+  runScheduledPublishing(strapi: unknown, now?: Date): Promise<{ unpublished: string[] }>;
+}
+
+describe.each(testEngines())("documents members read on %s", (engine) => {
+  let t: TestStrapi;
+  let api: AuthoringApi;
+  let salesJwt: string;
+  beforeAll(async () => {
+    t = await createTestStrapi({ engine });
+    api = authoringApi(t);
+    salesJwt = await signIn(t, await createUser(t, "member", t.fixtures.departments.sales));
+  });
+  afterAll(async () => {
+    await t?.stop();
+  });
+
+  type Listed = { documentId: string; file: { url: string } | null };
+  /** The documentIds a caller's /documents page lists, with their file URLs. */
+  const library = async (jwt: string) => {
+    const res = await t.api<{ data: Listed[] }>({ jwt }, WEB_DOCUMENTS);
+    expect(res.status, res.text).toBe(200);
+    return new Map(res.body.data.map((doc) => [doc.documentId, doc.file?.url ?? null]));
+  };
+
+  /** An editor's /manage document: a fresh PDF, saved as a draft, then published. */
+  const editorDocument = async (title: string, departments: string[]) => {
+    const jwt = await t.loginAs("editor");
+    const upload = await uploadFiles(t, jwt, [{ name: "handbook.pdf", bytes: minimalPdf() }]);
+    expect(upload.status, JSON.stringify(upload.body)).toBe(201);
+    const fileId = (upload.body as { id: number }[])[0].id;
+    // The payload of the web's buildDocumentPayload on a create.
+    const created = await api.create(
+      "editor",
+      P,
+      { title, description: null, category: "other", departments, file: fileId },
+      "draft",
+    );
+    expect(created.status, created.text).toBe(201);
+    const published = await api.action(
+      "editor",
+      P,
+      created.body.data.documentId,
+      "publish",
+      created.body.data.version,
+    );
+    expect(published.status, published.text).toBe(200);
+    return { documentId: created.body.data.documentId, version: published.body.data.version };
+  };
+
+  it("a document published to everyone (no department) is listed for every member, with its file", async () => {
+    const memberJwt = await t.loginAs("member");
+    const { documentId } = await editorDocument("[Test] Dokument", []);
+    const rows = await t.strapi.db.query(D).findMany({
+      where: { documentId },
+      populate: { departments: { select: ["id"] } },
+    });
+    expect(rows.map((row) => [row.audience, (row.departments as unknown[]).length])).toEqual([
+      ["all", 0],
+      ["all", 0],
+    ]);
+    for (const jwt of [memberJwt, salesJwt]) {
+      expect((await library(jwt)).get(documentId)).toMatch(/^\/uploads\//);
+    }
+  });
+
+  it("a document from before the audience flag (NULL, no department) is listed for every member", async () => {
+    const legacy = await t.strapi.documents(D).create({
+      data: { title: "IT Legacy handbook" },
+      status: "published",
+    });
+    await t.strapi.db.query(D).update({
+      where: { documentId: legacy.documentId, publishedAt: { $notNull: true } },
+      data: { audience: null },
+    });
+    const stored = await t.strapi.db.query(D).findOne({
+      where: { documentId: legacy.documentId, publishedAt: { $notNull: true } },
+    });
+    expect(stored?.audience).toBeNull();
+    for (const jwt of [await t.loginAs("member"), salesJwt]) {
+      expect((await library(jwt)).has(legacy.documentId)).toBe(true);
+    }
+  });
+
+  it("a Sales-only document is listed for Sales members only", async () => {
+    const { documentId } = await editorDocument("IT Sales only", [
+      t.fixtures.departments.sales.documentId,
+    ]);
+    expect((await library(salesJwt)).has(documentId)).toBe(true);
+    expect((await library(await t.loginAs("member"))).has(documentId)).toBe(false);
+  });
+
+  it("a scheduled withdrawal takes it out of the library until it is published again; a draft save does not", async () => {
+    const memberJwt = await t.loginAs("member");
+    const doc = await editorDocument("IT Withdrawn", []);
+    const scheduled = await api.update(
+      "editor",
+      P,
+      doc.documentId,
+      { unpublishAt: new Date(Date.now() + 120_000).toISOString() },
+      { status: "published", version: doc.version },
+    );
+    expect(scheduled.status, scheduled.text).toBe(200);
+    const scheduler = t.requireBuilt<Scheduler>("src/cron/scheduled-publish");
+    const run = await scheduler.runScheduledPublishing(t.strapi, new Date(Date.now() + 300_000));
+    expect(run.unpublished.join(" ")).toContain(doc.documentId);
+    expect((await library(memberJwt)).has(doc.documentId)).toBe(false);
+    // The form now shows a draft; saving it as one (the walkthrough's file
+    // replace after the withdrawal) keeps it out of the library.
+    const form = await api.editable<{ status: string; publishedAt: string | null }>(
+      "editor",
+      P,
+      doc.documentId,
+    );
+    expect(form.body.data).toMatchObject({ status: "draft", publishedAt: null });
+    const saved = await api.update(
+      "editor",
+      P,
+      doc.documentId,
+      { title: "IT Withdrawn (edited)" },
+      { status: "draft", version: form.body.data.version },
+    );
+    expect(saved.status, saved.text).toBe(200);
+    expect((await library(memberJwt)).has(doc.documentId)).toBe(false);
+    const republished = await api.action(
+      "editor",
+      P,
+      doc.documentId,
+      "publish",
+      saved.body.data.version,
+    );
+    expect(republished.status, republished.text).toBe(200);
+    expect((await library(memberJwt)).has(doc.documentId)).toBe(true);
+  });
+});
