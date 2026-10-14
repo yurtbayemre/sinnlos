@@ -12,7 +12,6 @@ import {
   type TestDatabase,
   type TestStrapi,
 } from "./harness.test.helper";
-import { untilPoolIdle } from "./pool-idle.test.helper";
 
 /**
  * Wiki revisions without draft & publish (batch 16, lane 16D; decision 06
@@ -88,7 +87,6 @@ describe.each(testEngines())("the wiki revision draft guard on %s", (engine) => 
   beforeAll(async () => {
     database = await createTestDatabase(engine);
     const t = await createTestStrapi({ database, fixtures: false });
-    await untilPoolIdle(t);
     await t.stop();
   });
 
@@ -119,7 +117,6 @@ describe.each(testEngines())("the wiki revision draft guard on %s", (engine) => 
 
       await database.sql("DELETE FROM wiki_revisions WHERE published_at IS NULL");
       const t = await createTestStrapi({ database, fixtures: false });
-      await untilPoolIdle(t);
       await t.stop();
     },
     BOOT_BUDGET,
@@ -366,7 +363,6 @@ describe.skipIf(!PG_URL || !PSQL_READY)(
       return t;
     };
     const stop = async () => {
-      if (t) await untilPoolIdle(t);
       await t?.stop();
       t = null;
     };
@@ -398,7 +394,6 @@ describe.skipIf(!PG_URL || !PSQL_READY)(
       });
       pageOne = one.documentId;
       pageTwo = two.documentId;
-      await untilPoolIdle(first);
       await first.stop();
     }, BOOT_BUDGET);
 

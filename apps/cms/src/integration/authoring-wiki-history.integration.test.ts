@@ -1,5 +1,3 @@
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { storedRevision } from "./authoring.test.helper";
@@ -17,22 +15,14 @@ import { WIKI_PAGE, rowsOf, seedPage, seedSpace, wikiApi, type WikiApi } from ".
  *     entries restore title, body and summary, a legacy `before` entry the
  *     body only; publish readiness applies.
  * The revisions are seeded as rows (the shape lane 16D's lifecycle and
- * backfill write), so these cases do not depend on the lifecycle. Where
- * 16D's after-image lifecycle is in the tree (from the batch integration
- * on, merge order 16A, 16D, 16B), two more cases run: a save through the
- * actions writes the history the actions read and restore, and a restore
- * records `restoredFrom` (Codex review of 16B: without that lifecycle the
- * batch-15 before-images carry no `pageDocumentId`, so the history of a
- * branch without it is empty).
+ * backfill write), so most cases do not depend on the lifecycle. Two run
+ * on 16D's after-image lifecycle end to end: a save through the actions
+ * writes the history the actions read and restore, and a restore records
+ * `restoredFrom` (Codex review of 16B; the lane gated them until the batch
+ * integration brought the lifecycle into the tree).
  */
 
 const REVISION = "api::wiki-revision.wiki-revision";
-
-/** The after-image lifecycle (lane 16D) records `restoredFrom`. */
-const AFTER_IMAGES = readFileSync(
-  join(__dirname, "..", "api", "wiki-page", "content-types", "wiki-page", "lifecycles.ts"),
-  "utf8",
-).includes("restoredFrom");
 
 describe.each(testEngines())("authoring wiki history on %s", (engine) => {
   let t: TestStrapi;
@@ -88,8 +78,8 @@ describe.each(testEngines())("authoring wiki history on %s", (engine) => {
 
   it("lists the history newest first for the page's editors and moderators, without bodies", async () => {
     const { page, before, baseline, after } = await pageWithHistory();
-    // The seeded entries, newest first. With lane 16D's lifecycle in the
-    // tree, the page's create has recorded one more (the oldest).
+    // The seeded entries, newest first; the page's create has recorded one
+    // more through 16D's lifecycle (the oldest).
     const seeded = [after.id, baseline.id, before.id];
     for (const role of ["member", "department_head", "editor", "admin_role"] as const) {
       const res = await wiki.revisions<Record<string, unknown>>(role, page.documentId);
@@ -208,59 +198,53 @@ describe.each(testEngines())("authoring wiki history on %s", (engine) => {
     }
   });
 
-  it.runIf(AFTER_IMAGES)(
-    "records the restore as a new revision naming the restored one",
-    async () => {
-      const { page, baseline } = await pageWithHistory();
-      const res = await wiki.restore(
-        "member",
-        page.documentId,
-        baseline.id,
-        await storedRevision(t, WIKI_PAGE, page.documentId),
-      );
-      expect(res.status, res.text).toBe(200);
-      const list = await wiki.revisions<Record<string, unknown>>("member", page.documentId);
-      expect(list.body.data[0]).toMatchObject({
-        kind: "after",
-        restoredFrom: baseline.id,
-        editor: { id: t.fixtures.users.member.id },
-      });
-    },
-  );
-  it.runIf(AFTER_IMAGES)(
-    "saves through the actions write the history the actions read: save, list, restore (16D's lifecycle)",
-    async () => {
-      const created = await wiki.createDraft("department_head", {
-        title: "IT Lifecycle v1",
-        body: "one",
-        space: space.documentId,
-      });
-      expect(created.status, created.text).toBe(201);
-      const { documentId } = created.body.data;
-      const saved = await wiki.saveDraft(
-        "department_head",
-        documentId,
-        { body: "two", revisionSummary: "second" },
-        created.body.data.version,
-      );
-      expect(saved.status, saved.text).toBe(200);
-      const list = await wiki.revisions<Record<string, unknown>>("department_head", documentId);
-      expect(list.status, list.text).toBe(200);
-      expect(list.body.data.map((entry) => [entry.kind, entry.changeSummary])).toEqual([
-        ["after", "second"],
-        ["after", null],
-      ]);
-      const first = list.body.data[1].id as number;
-      const restored = await wiki.restore(
-        "department_head",
-        documentId,
-        first,
-        saved.body.data.version,
-      );
-      expect(restored.status, restored.text).toBe(200);
-      for (const row of await rowsOf(t, WIKI_PAGE, documentId)) expect(row.body).toBe("one");
-      const after = await wiki.revisions<Record<string, unknown>>("department_head", documentId);
-      expect(after.body.data[0]).toMatchObject({ kind: "after", restoredFrom: first });
-    },
-  );
+  it("records the restore as a new revision naming the restored one", async () => {
+    const { page, baseline } = await pageWithHistory();
+    const res = await wiki.restore(
+      "member",
+      page.documentId,
+      baseline.id,
+      await storedRevision(t, WIKI_PAGE, page.documentId),
+    );
+    expect(res.status, res.text).toBe(200);
+    const list = await wiki.revisions<Record<string, unknown>>("member", page.documentId);
+    expect(list.body.data[0]).toMatchObject({
+      kind: "after",
+      restoredFrom: baseline.id,
+      editor: { id: t.fixtures.users.member.id },
+    });
+  });
+  it("saves through the actions write the history the actions read: save, list, restore (16D's lifecycle)", async () => {
+    const created = await wiki.createDraft("department_head", {
+      title: "IT Lifecycle v1",
+      body: "one",
+      space: space.documentId,
+    });
+    expect(created.status, created.text).toBe(201);
+    const { documentId } = created.body.data;
+    const saved = await wiki.saveDraft(
+      "department_head",
+      documentId,
+      { body: "two", revisionSummary: "second" },
+      created.body.data.version,
+    );
+    expect(saved.status, saved.text).toBe(200);
+    const list = await wiki.revisions<Record<string, unknown>>("department_head", documentId);
+    expect(list.status, list.text).toBe(200);
+    expect(list.body.data.map((entry) => [entry.kind, entry.changeSummary])).toEqual([
+      ["after", "second"],
+      ["after", null],
+    ]);
+    const first = list.body.data[1].id as number;
+    const restored = await wiki.restore(
+      "department_head",
+      documentId,
+      first,
+      saved.body.data.version,
+    );
+    expect(restored.status, restored.text).toBe(200);
+    for (const row of await rowsOf(t, WIKI_PAGE, documentId)) expect(row.body).toBe("one");
+    const after = await wiki.revisions<Record<string, unknown>>("department_head", documentId);
+    expect(after.body.data[0]).toMatchObject({ kind: "after", restoredFrom: first });
+  });
 });

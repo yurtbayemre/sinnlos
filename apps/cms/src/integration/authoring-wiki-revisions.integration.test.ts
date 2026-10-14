@@ -11,7 +11,6 @@ import {
   type TestDatabase,
   type TestStrapi,
 } from "./harness.test.helper";
-import { untilPoolIdle } from "./pool-idle.test.helper";
 
 /**
  * Wiki page history as after-images (decision 06 §J3, DA03; batch 16 lane
@@ -92,7 +91,6 @@ describe.each(testEngines())("wiki revisions as after-images on %s", (engine) =>
   };
   /** Stops the cms once its pool is idle and boots it again on the same database. */
   const restart = async () => {
-    await untilPoolIdle(t);
     await t.stop();
     await boot(false);
   };
@@ -111,7 +109,6 @@ describe.each(testEngines())("wiki revisions as after-images on %s", (engine) =>
   });
 
   afterAll(async () => {
-    if (t) await untilPoolIdle(t);
     await t?.stop();
     await database?.drop();
   });

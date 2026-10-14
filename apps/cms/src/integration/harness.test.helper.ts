@@ -94,7 +94,10 @@
  * which would cut the vitest worker's own IPC and error handlers; stop()
  * puts back the listeners that existed before the boot. A failed boot is
  * cleaned up the same way and rethrows its error (never `process.exit`,
- * which `strapi.start()` would do).
+ * which `strapi.start()` would do). stop() first waits until the cms's
+ * database pool is idle (untilPoolIdle): the Document Service's entry
+ * events run after the commit, unawaited, and a pool destroyed under one
+ * of their reads is an unhandled rejection that fails a green run.
  *
  * Named *.test.helper.ts: not part of the Strapi build, not collected as a
  * suite.
@@ -171,6 +174,8 @@ export interface IntegrationStrapi {
   db: {
     query(uid: string): DbQuery;
     transaction<T>(callback: (scope: TransactionScope) => Promise<T>): Promise<T>;
+    /** knex; its tarn pool is what stop() waits on (untilPoolIdle). */
+    connection: { client: { pool?: { numUsed(): number; numPendingAcquires(): number } } };
   };
   plugin(name: string): { service(name: string): unknown };
   config: {
@@ -617,6 +622,27 @@ let running = false;
  * Boots the cms (see the file header). Resolves once it listens and the
  * fixtures exist; a failed boot is cleaned up and rethrows the boot error.
  */
+/**
+ * Waits until the booted cms's database pool is idle, before stop() destroys
+ * it. The Document Service emits its entry events after the commit and does
+ * not await them: each one re-reads the entry with a deep populate
+ * (@strapi/core 5.57 dist/services/document-service/events.js, `onCommit`).
+ * A suite that stops Strapi right after a write would destroy the pool
+ * under that read, and knex rejects it ("aborted"), an unhandled rejection
+ * that fails the run although every test passed. Three quiet checks 25 ms
+ * apart, at most about 10 s (a test that leaves a query waiting on a lock
+ * it holds elsewhere only costs that time).
+ */
+async function untilPoolIdle(strapi: IntegrationStrapi): Promise<void> {
+  const pool = strapi.db.connection.client.pool;
+  if (!pool) return;
+  let quiet = 0;
+  for (let check = 0; check < 400 && quiet < 3; check += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    quiet = pool.numUsed() === 0 && pool.numPendingAcquires() === 0 ? quiet + 1 : 0;
+  }
+}
+
 export async function createTestStrapi(options: TestStrapiOptions = {}): Promise<TestStrapi> {
   if (running)
     throw new Error("[integration] a Strapi is already running in this process: stop() it first");
@@ -767,6 +793,7 @@ async function boot(options: TestStrapiOptions): Promise<TestStrapi> {
       if (stopped) return;
       stopped = true;
       try {
+        await untilPoolIdle(booted).catch(() => undefined);
         await release();
       } finally {
         running = false;
