@@ -1182,11 +1182,18 @@ the sniffed format>` and the mime the table's (core stores and serves by
   takes one reservation (`reserveRemoval`, `utils/upload-orphans.ts`): it
   locks the file row, re-reads it (a file that is gone or already being
   removed is skipped, so overlapping deletes remove and record it once),
-  and commits a tombstone with the audit row before the bytes go, so a
-  failed removal never leaves an attachable row without bytes; the janitor
+  and commits a tombstone with the audit row before the bytes go; the
+  document and classified writes refuse a tombstoned file, and the janitor
   retries an unlinked tombstoned row after 10 minutes. The app's removers
   (`claimAndRemove`) add their rules under the lock: stamped, linked by
-  nothing, old enough. `cleanupUploads` removes only the
+  nothing, old enough; and they delete the bytes and the row under the
+  lock again, only while nothing links the file (`removeReserved`): a
+  department's header image, a team avatar, a course cover, a user avatar
+  or an admin-panel picker checks no tombstone, so a link made in between
+  keeps the file (a warning, `[uploads] kept file <id>: …`). Known limit:
+  after a removal that failed between the bytes and the row, those
+  pickers can still link the tombstoned row.
+  `cleanupUploads` removes only the
   caller's own files; the nightly uploads janitor (03:30) only stamped files
   older than 24 hours, now including moderators' and department heads'
   unattached document uploads. Admin-panel uploads carry no stamp and are

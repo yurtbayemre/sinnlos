@@ -2153,7 +2153,9 @@ report it; running it is the owner's decision (below).
    audit row fails is rolled back). Report, not stop: `[uploads] could
    not remove file <id> (tombstoned; the janitor retries)` and
    `[media-claims] could not remove the released file(s) …` (the file
-   stays, tombstoned; the next janitor run retries). The error filter
+   stays, tombstoned; the next janitor run retries). Harmless: the warning
+   `[uploads] kept file <id>: linked again before its removal` (someone
+   linked the file elsewhere while it was being removed). The error filter
    prints only the expected lines of [3.8](#38-updates): the pg
    `DeprecationWarning` once per cms process after its first database
    activity (a sign-in and the first page reads are enough), and the
@@ -2455,9 +2457,14 @@ rebuilds both images; the web is unchanged).
   locked and re-read (a file already gone or being removed is skipped, so
   two overlapping deletes remove it once), tombstoned
   (`provider_metadata.removing`) together with its audit row, and only then
-  removed. A removal that fails after its reservation leaves a tombstoned
-  row that nothing can attach; the next janitor run retries it once it is
-  10 minutes old and unlinked, an admin may delete it again after that.
+  removed; the app's removers remove it under the row lock and only while
+  nothing links it, so a header image, avatar or cover picked in the admin
+  panel in between keeps the file (`[uploads] kept file <id>: linked again
+  before its removal`, a warning). A removal that fails after its
+  reservation leaves a tombstoned row that documents and ads cannot attach
+  (the other media fields can: a known limit); the next janitor run
+  retries it once it is 10 minutes old and unlinked, an admin may delete
+  it again after that.
   Every write of an ad (also in the Content Manager) locks its image rows
   and refuses one that is being removed (400, `images`).
 - **The janitor's scope grows** (release note): moderators' and department

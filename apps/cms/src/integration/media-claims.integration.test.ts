@@ -36,7 +36,11 @@ interface OrphansModule {
     fileId: number,
     options?: Record<string, unknown>,
   ): Promise<string>;
+  reserveRemoval(strapi: unknown, fileId: number): Promise<{ file?: unknown }>;
+  removeReserved(strapi: unknown, fileId: number): Promise<string>;
 }
+
+const DEPARTMENT = "api::department.department";
 
 /** A settled promise's error (undefined for a success). */
 const errorOf = (result: unknown): unknown => (result as { error?: unknown } | undefined)?.error;
@@ -316,6 +320,57 @@ describe.each(testEngines())("media claims on %s", (engine) => {
     await docs().publish({ documentId: doc.documentId });
   });
 
+  it("Save and publish replaces a tombstoned file (an update with status published)", async () => {
+    const file = await upload();
+    const doc = await create({ file }, "published");
+    await t.strapi.db.query(FILE).update({
+      where: { id: file },
+      data: {
+        provider_metadata: {
+          uploadedBy: t.fixtures.users.editor.id,
+          removing: new Date().toISOString(),
+        },
+      },
+    });
+    const fresh = await upload();
+    await docs().update({ documentId: doc.documentId, data: { file: fresh }, status: "published" });
+    const published = await docs().findOne({
+      documentId: doc.documentId,
+      status: "published",
+      populate: { file: true },
+    });
+    expect((published?.file as { id: number }).id).toBe(fresh);
+  });
+
+  it("a file another writer links after the reservation is kept (a department's header image)", async () => {
+    const department = t.fixtures.departments.sales.documentId;
+    const file = await upload();
+    const reserved = await orphans.reserveRemoval(t.strapi, file);
+    expect(reserved.file).toBeDefined();
+    // Department writes check no tombstone: the link lands in between.
+    await t.strapi.documents(DEPARTMENT).update({
+      documentId: department,
+      data: { headerImage: file },
+    });
+    expect(await orphans.removeReserved(t.strapi, file)).toBe("linked");
+    const row = await t.strapi.db.query(FILE).findOne({ where: { id: file } });
+    expect(row?.provider_metadata).toEqual({ uploadedBy: t.fixtures.users.editor.id });
+    const linked = await t.strapi.documents(DEPARTMENT).findOne({
+      documentId: department,
+      populate: { headerImage: true },
+    });
+    expect((linked?.headerImage as { id: number } | null)?.id).toBe(file);
+    await t.strapi.documents(DEPARTMENT).update({
+      documentId: department,
+      data: { headerImage: null },
+    });
+    // Without a link the reserved removal goes through.
+    const other = await upload();
+    await orphans.reserveRemoval(t.strapi, other);
+    expect(await orphans.removeReserved(t.strapi, other)).toBe("removed");
+    expect(await exists(other)).toBe(false);
+  });
+
   it("attaches by the file's documentId too; a tombstoned one is refused before any link", async () => {
     const res = await uploadFiles(t, await t.loginAs("editor"), [
       { name: "a.pdf", bytes: minimalPdf() },
@@ -360,6 +415,29 @@ describe.each(testEngines())("media claims on %s", (engine) => {
       await held.commit();
       return Promise.all([a, b]);
     }
+
+    it("a link in flight when a reserved removal starts: the removal waits for it and keeps the file", async () => {
+      const file = await upload();
+      await orphans.reserveRemoval(t.strapi, file);
+      const department = await t.strapi.db
+        .query(DEPARTMENT)
+        .findOne({ where: { documentId: t.fixtures.departments.sales.documentId } });
+      // A writer that checks no tombstone, mid-transaction: its link's
+      // foreign key holds FOR KEY SHARE on the file row.
+      const held = await holdTransaction(t);
+      await held.raw(
+        `INSERT INTO ${qualified(t, "files_related_mph")} (file_id, related_id, related_type, field, "order") VALUES (?, ?, ?, 'headerImage', 1)`,
+        [file, department?.id, DEPARTMENT],
+      );
+      const removal = settle(orphans.removeReserved(t.strapi, file));
+      await waitForLockWait(t);
+      await held.commit();
+      expect(await removal).toMatchObject({ ok: true, value: "linked" });
+      expect(await exists(file)).toBe(true);
+      await t.database.sql(`DELETE FROM ${qualified(t, "files_related_mph")} WHERE file_id = ?`, [
+        file,
+      ]);
+    });
 
     it("two concurrent attaches by documentId: one wins, the other fails invalid (no 40P01)", async () => {
       const res = await uploadFiles(t, await t.loginAs("editor"), [

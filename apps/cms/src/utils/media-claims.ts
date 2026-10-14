@@ -152,7 +152,10 @@ async function documentLinks(
  * draft rows' files, discardDraft the published rows'. They are no
  * attachments (no ownership or exclusivity check), but a file on its way out
  * must not be copied: they are locked and checked for a tombstone like the
- * payload's files.
+ * payload's files. An update with `status: 'published'` writes the payload
+ * to the draft first, so a stored draft file on a field the payload sets is
+ * replaced, not copied (the batch integration's Codex review: replacing a
+ * tombstoned file with Save and publish was refused).
  */
 export function copiedFiles(
   action: string,
@@ -163,7 +166,10 @@ export function copiedFiles(
   const published = [...(before.publishedFiles ?? [])];
   if (action === "publish" || action === "clone") return draft;
   if (action === "discardDraft") return published;
-  if ((action === "update" || action === "create") && params.status === "published") return draft;
+  if ((action === "update" || action === "create") && params.status === "published") {
+    const data = isRecord(params.data) ? params.data : {};
+    return draft.filter((fileId) => data[before.files.get(fileId) ?? ""] === undefined);
+  }
   return [];
 }
 

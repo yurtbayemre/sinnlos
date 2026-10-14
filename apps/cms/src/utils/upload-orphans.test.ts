@@ -109,6 +109,8 @@ describe("mediaReferences / resolveFileIds (every shape Strapi 5.57 accepts)", (
 function makeStrapi(opts: {
   file: Record<string, any> | null;
   linked?: boolean;
+  /** Another writer links the file once the reservation's tombstone is written. */
+  relinkedAfterTombstone?: boolean;
   removeFails?: boolean;
   auditFails?: boolean;
 }) {
@@ -116,6 +118,8 @@ function makeStrapi(opts: {
   const audit: Array<Record<string, unknown>> = [];
   let file = opts.file ? { ...opts.file } : null;
   let open = false;
+  let relinked = false;
+  const isLinked = () => Boolean(opts.linked) || relinked;
   const linkBuilder = () => {
     const builder: any = {
       transacting: (trx: unknown) => {
@@ -124,8 +128,8 @@ function makeStrapi(opts: {
       },
       where: () => builder,
       whereIn: () => builder,
-      pluck: async () => (opts.linked ? [5] : []),
-      select: async () => (opts.linked ? [{ related_type: "api::x.x", related_id: 1 }] : []),
+      pluck: async () => (isLinked() ? [5] : []),
+      select: async () => (isLinked() ? [{ related_type: "api::x.x", related_id: 1 }] : []),
     };
     return builder;
   };
@@ -165,8 +169,10 @@ function makeStrapi(opts: {
       query: (uid: string) => ({
         findOne: async () => file,
         update: async ({ data }: { data: Record<string, unknown> }) => {
-          log.push("tombstone");
+          const removing = (data.provider_metadata as { removing?: string } | null)?.removing;
+          log.push(removing ? "tombstone" : "untombstone");
           file = { ...file, ...data };
+          if (removing && opts.relinkedAfterTombstone) relinked = true;
           return file;
         },
         create: async ({ data }: { data: Record<string, unknown> }) => {
@@ -231,7 +237,7 @@ describe("reserveRemoval", () => {
 });
 
 describe("claimAndRemove", () => {
-  it("reserves under the app's rules, and only then removes, inside its reservation", async () => {
+  it("reserves under the app's rules, and only then removes, under the lock and unlinked", async () => {
     const { strapi, log } = makeStrapi({ file: stamped() });
     expect(
       await claimAndRemove(strapi, 5, { now: NOW, related: { uid: "api::x.x", documentId: "d1" } }),
@@ -243,10 +249,26 @@ describe("claimAndRemove", () => {
       "tombstone",
       "audit",
       "commit",
+      "begin",
+      "lock",
+      "links:trx1",
       "remove:tombstoned",
       "reserved:true",
       'context:{"related":{"uid":"api::x.x","documentId":"d1"}}',
+      "commit",
     ]);
+  });
+
+  it("keeps a file another writer linked after the reservation: no removal, the tombstone cleared", async () => {
+    const { strapi, log, current } = makeStrapi({ file: stamped(), relinkedAfterTombstone: true });
+    strapi.log.warn = vi.fn();
+    expect(await claimAndRemove(strapi, 5, { now: NOW })).toBe("linked");
+    expect(log.some((line) => line.startsWith("remove"))).toBe(false);
+    expect(log.slice(-5)).toEqual(["begin", "lock", "links:trx1", "untombstone", "commit"]);
+    expect(isTombstoned(current())).toBe(false);
+    expect(strapi.log.warn).toHaveBeenCalledWith(
+      expect.stringContaining("kept file 5: linked again before its removal"),
+    );
   });
 
   it("removes and records nothing when the re-check fails under the lock", async () => {

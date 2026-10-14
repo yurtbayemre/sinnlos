@@ -449,6 +449,15 @@ describe("files an action copies (Codex round 2)", () => {
     expect(copiedFiles("publish", {}, before)).toEqual([11]);
     expect(copiedFiles("clone", {}, before)).toEqual([11]);
     expect(copiedFiles("update", { status: "published" }, before)).toEqual([11]);
+    // Save and publish with a new file (or a cleared one) replaces the
+    // stored draft file before the publish: it is not copied.
+    expect(copiedFiles("update", { status: "published", data: { file: 12 } }, before)).toEqual([]);
+    expect(copiedFiles("update", { status: "published", data: { file: null } }, before)).toEqual(
+      [],
+    );
+    expect(copiedFiles("update", { status: "published", data: { title: "x" } }, before)).toEqual([
+      11,
+    ]);
     expect(copiedFiles("discardDraft", {}, before)).toEqual([10]);
     expect(copiedFiles("update", {}, before)).toEqual([]);
     expect(copiedFiles("unpublish", {}, before)).toEqual([]);

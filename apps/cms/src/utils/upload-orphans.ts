@@ -25,10 +25,14 @@
  *   3. write the TOMBSTONE (`provider_metadata.removing`, an ISO timestamp)
  *      and the delete's AUDIT ROW (utils/delete-audit.ts), and commit.
  * Only then does the upload service delete the bytes and the row (in that
- * order, @strapi/upload 5.57 services/upload.js). A failure in between
- * leaves a tombstoned row, never an attachable row without bytes: every
- * attach path refuses a tombstoned file (the media claims, the classified
- * write lifecycle; 16B's `ownUploadCheck` through `isTombstoned`), the
+ * order, @strapi/upload 5.57 services/upload.js); the app's removers do it
+ * under the row lock again and only while nothing links the file
+ * (`removeReserved`: a writer that checks no tombstone may have linked it
+ * meanwhile). A failure in between leaves a tombstoned row: the document
+ * and classified attach paths refuse a tombstoned file (the media claims,
+ * the classified write lifecycle; 16B's `ownUploadCheck` through
+ * `isTombstoned`; the other media fields and the admin panel's pickers do
+ * not, a known limit after a failed removal), the
  * janitor retries an unlinked tombstoned row once its tombstone is older
  * than TOMBSTONE_RETRY_MS, and an admin can delete it again after that
  * (the local provider's delete of missing bytes succeeds,
@@ -324,6 +328,39 @@ export function claimDecision(
 }
 
 /**
+ * The second half of the app's removal, after its reservation committed
+ * the tombstone (the batch integration's Codex review). Only the document
+ * and classified writes refuse a tombstoned file; a department's header
+ * image, a team avatar, a course cover, a user avatar or an admin-panel
+ * picker may still link it in between. So the bytes and the row go only
+ * under the row lock and while nothing links the file: a link's INSERT
+ * takes `FOR KEY SHARE` on the file row (files_related_mph's foreign key),
+ * so it committed before this check, or it waits for the delete and then
+ * fails on the key. A file linked again keeps its bytes and loses the
+ * tombstone ("linked"; the reservation's audit row stays, its removal
+ * decision was overtaken).
+ */
+export async function removeReserved(
+  strapi: any,
+  fileId: number,
+): Promise<"removed" | "linked" | "missing"> {
+  return strapi.db.transaction(async ({ trx }: { trx: unknown }) => {
+    const file = await lockAndReadFile(strapi, fileId);
+    if (!file) return "missing";
+    if ((await fileLinks(strapi, fileId, trx)).length > 0) {
+      const provider_metadata = { ...file.provider_metadata };
+      delete provider_metadata.removing;
+      await strapi.db
+        .query(FILE_UID)
+        .update({ where: { id: fileId }, data: { provider_metadata } });
+      return "linked";
+    }
+    await runReservedRemoval(fileId, () => strapi.plugin("upload").service("upload").remove(file));
+    return "removed";
+  });
+}
+
+/**
  * The app's locked removal (see the module comment). Must run outside any
  * transaction (after a commit, in a cron, in a request): its reservation
  * commits on its own. Never throws: a failed removal is logged and answers
@@ -355,10 +392,11 @@ export async function claimAndRemove(
     }
     if (!("file" in reserved)) return reserved.outcome;
     try {
-      await runReservedRemoval(fileId, () =>
-        strapi.plugin("upload").service("upload").remove(reserved.file),
-      );
-      return "removed";
+      const outcome = await removeReserved(strapi, fileId);
+      if (outcome === "linked") {
+        strapi.log.warn(`${UPLOADS_LOG} kept file ${fileId}: linked again before its removal`);
+      }
+      return outcome;
     } catch (err) {
       strapi.log.error(
         `${UPLOADS_LOG} could not remove file ${fileId} (tombstoned; the janitor retries): ${(err as Error).message}`,
