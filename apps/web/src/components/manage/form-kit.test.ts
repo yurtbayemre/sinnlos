@@ -255,7 +255,7 @@ describe("StatusBadges", () => {
   });
 });
 
-describe("EditorStatus: what readers get (issue #80)", () => {
+describe("EditorStatus: the publication state in words (issue #80)", () => {
   const meta = (status: "draft" | "published" | "modified", publishedAt: string | null) => ({
     documentId: "doc",
     version: "3",
@@ -281,10 +281,14 @@ describe("EditorStatus: what readers get (issue #80)", () => {
     );
   });
 
-  it("says that saved changes of a published item wait for Publish", () => {
+  it("says that saved changes of a published item wait for Publish, promising no readers", () => {
     const html = status(meta("modified", "2026-10-14T09:34:08.000Z"));
     expect(html).toContain(common.detail.changesPending);
     expect(html).not.toContain(common.detail.notPublished);
+    // An expired announcement stays published and is hidden all the same:
+    // the text says nothing about who reads the published version.
+    expect(common.detail.changesPending).not.toMatch(/reader/i);
+    expect(MESSAGES.de.manage.common.detail.changesPending).not.toMatch(/Leser/);
   });
 
   it("says nothing more for a published item, or where the status is hidden", () => {

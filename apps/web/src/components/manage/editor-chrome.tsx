@@ -66,10 +66,12 @@ export function EditorStatus({
       ? t(`scheduleErrors.${meta.scheduleError as (typeof SCHEDULE_ERROR_TEXTS)[number]}`)
       : t("scheduleErrors.other", { code: meta.scheduleError })
     : null;
-  // What readers get, in words (batch 16.1, issue #80): an item without a
-  // published version (never published, unpublished, or withdrawn by its
-  // schedule) is not shown to them, and saved changes of a published item
-  // wait for Publish. The badge alone did not say so.
+  // The publication state in words (batch 16.1, issue #80): an item without
+  // a published version (never published, unpublished, or withdrawn by its
+  // schedule) is not shown to readers, and saved changes of a published
+  // item wait for Publish. The badge alone did not say so. Nothing here
+  // promises who reads the published version: an expired announcement,
+  // for one, stays published and is hidden all the same (Codex review).
   const readers = hideStatus
     ? null
     : meta.status === "draft"

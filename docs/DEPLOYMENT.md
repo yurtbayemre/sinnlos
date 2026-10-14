@@ -1972,10 +1972,10 @@ integration adds their notes here.
   too. In the walkthrough the scheduled withdrawal of step A4 had
   withdrawn the document at 11:45 and the saves after it were draft
   saves, so it was not published when the member looked. The /manage
-  status line now says it in words: "Not published: readers do not see it
-  until it is published." for an item without a published version, and
-  "Readers see the published version until these changes are
-  published." for saved changes of a published one.
+  status line now says it in words: "Not published: readers do not see
+  it." for an item without a published version, and "Changes not
+  published yet: the published version stays as it is until you publish
+  them." for saved changes of a published one.
 - **#79, a department head's wiki draft.** No cms change: a department
   head may create pages in any space they can read, the draft is theirs
   (author; no department), and _My drafts_ lists it and opens it. A space
@@ -2078,13 +2078,13 @@ rollback to `<B16_TAG>` with no `MANDATORY` step: report it.
      page history), not for guest, authenticated or public.
    - **Documents, as an editor, then as a member (`casey.jones`):** _New
      document_ with no department (everyone), a PDF, _Save draft_: the
-     status line says "Not published: readers do not see it until it is
-     published."; _Publish_; the member's `/documents` lists it and its
+     status line says "Not published: readers do not see it."; _Publish_;
+     the member's `/documents` lists it and its
      link starts with `/uploads/`. **Check the member's list before any
      withdrawal**: a withdrawal unpublishes the document. As the editor,
-     _Replace the file_ and _Save draft_: "Readers see the published
-     version until these changes are published.", and the member still
-     gets the old file; _Save and publish_ hands out the new one.
+     _Replace the file_ and _Save draft_: "Changes not published yet: the
+     published version stays as it is until you publish them.", and the
+     member still gets the old file; _Save and publish_ hands out the new one.
      _Schedule…_ a withdrawal a few minutes ahead: once it has run, a
      reload shows _Draft_ with "Not published …", and the member's list
      no longer has it; _Publish_ brings it back.
