@@ -8,6 +8,7 @@
     "description": "A single wiki article"
   },
   "options": { "draftAndPublish": true },
+  "config": { "attributes": { "revisions": { "hidden": true } } },
   "attributes": {
     "title": { "type": "string", "required": true },
     "slug": { "type": "uid", "targetField": "title", "required": true },

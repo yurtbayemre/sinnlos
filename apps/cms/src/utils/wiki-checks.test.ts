@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   addedEdges,
+  changesRevisionLinks,
   createWikiChecks,
   loopThrough,
   namesSpace,
@@ -99,6 +100,30 @@ describe("namesSpace", () => {
   it("is false without the key", () => {
     expect(namesSpace({ title: "x" })).toBe(false);
     expect(namesSpace(undefined)).toBe(false);
+  });
+});
+
+describe("changesRevisionLinks (issue #81)", () => {
+  it.each([
+    ["no key", { title: "x" }, false],
+    ["undefined", { revisions: undefined }, false],
+    ["the panel's untouched value", { revisions: { connect: [], disconnect: [] } }, false],
+    ["an empty object", { revisions: {} }, false],
+    ["a panel connect", { revisions: { connect: [{ id: 4 }], disconnect: [] } }, true],
+    ["a panel disconnect", { revisions: { connect: [], disconnect: [{ id: 4 }] } }, true],
+    ["{ set: [] }", { revisions: { set: [] } }, true],
+    ["{ set: [ref] }", { revisions: { set: [{ documentId: "r" }] } }, true],
+    ["a list", { revisions: [4] }, true],
+    ["an empty list", { revisions: [] }, true],
+    ["null", { revisions: null }, true],
+    ["an id", { revisions: 4 }, true],
+  ] as const)("%s → %s", (_label, data, expected) => {
+    expect(changesRevisionLinks(data)).toBe(expected);
+  });
+
+  it("is false without a payload", () => {
+    expect(changesRevisionLinks(undefined)).toBe(false);
+    expect(changesRevisionLinks(null)).toBe(false);
   });
 });
 
@@ -425,6 +450,46 @@ describe("createWikiChecks", () => {
         async () => null,
       ),
     ).resolves.toBeNull();
+  });
+
+  it("refuses a page write that links or unlinks revisions, from any writer; the panel's no-op passes (issue #81)", async () => {
+    const checks = createWikiChecks(fakeHost(world()));
+    for (const action of ["create", "update", "clone"]) {
+      for (const revisions of [
+        { connect: [{ id: 7 }], disconnect: [] },
+        { connect: [], disconnect: [{ id: 7 }] },
+        { set: [] },
+      ]) {
+        events.length = 0;
+        const details = await refusal(
+          checks(
+            { uid: PAGE, action, params: { documentId: "a", data: { title: "t", revisions } } },
+            async () => {
+              events.push("action");
+              return { documentId: "a" };
+            },
+          ),
+        );
+        expect(details, `${action} ${JSON.stringify(revisions)}`).toEqual({ keys: ["revisions"] });
+        expect(events).toEqual([]);
+      }
+      events.length = 0;
+      await checks(
+        {
+          uid: PAGE,
+          action,
+          params: {
+            documentId: "a",
+            data: { title: "t", revisions: { connect: [], disconnect: [] } },
+          },
+        },
+        async () => {
+          events.push("action");
+          return { documentId: "a" };
+        },
+      );
+      expect(events, action).toEqual(["lock", "action"]);
+    }
   });
 
   it("serialises a space's saves and publishes with the page writes, no emptiness check (Codex re-review)", async () => {

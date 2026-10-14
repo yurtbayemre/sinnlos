@@ -37,6 +37,9 @@ import {
  * nobody can write a revision there, super admins included; an admin role
  * that holds Content Manager read on it keeps reading it (the panel's users
  * are moderators, who read every draft anyway; decision 06 question 9).
+ * Since batch 16.1 (issue #81) the wiki page form has no Revisions field
+ * (revisions lost draft & publish in 16D, so the field listed them), and
+ * no writer links or unlinks a revision through the page.
  */
 
 const PAGE = "api::wiki-page.wiki-page";
@@ -547,6 +550,104 @@ describe.each(testEngines())("wiki revisions are closed on %s", (engine) => {
       expect(one.status).toBe(200);
       const list = await adminRequest(t, panel.token, `${cmPath(REVISION)}?page=1&pageSize=10`);
       expect(list.status).toBe(200);
+    });
+
+    it("the wiki page form offers no Revisions field (batch 16.1, issue #81)", async () => {
+      // Since 16D wiki revisions have no draft & publish, so the panel's
+      // relation field would list them (the draft page's revisions) and its
+      // connect/disconnect would move or unlink them. The schema hides the
+      // field (`config.attributes.revisions.hidden`); the boot's layout sync
+      // takes it out of the stored edit view.
+      const panel = await contentManager(t);
+      const res = await adminRequest<{
+        data: { contentType: { layouts: { edit: { name: string }[][] } } };
+      }>(t, panel.token, `/content-manager/content-types/${PAGE}/configuration`);
+      expect(res.status, res.text).toBe(200);
+      const fields = res.body.data.contentType.layouts.edit.flat().map((field) => field.name);
+      expect(fields).toEqual(expect.arrayContaining(["title", "body", "space", "parent"]));
+      expect(fields).not.toContain("revisions");
+    });
+
+    it("nobody links or unlinks a revision through the page form, super admins included (issue #81)", async () => {
+      const panel = await contentManager(t);
+      const pageOf = async (id: number) => {
+        const row = await t.strapi.db.query(REVISION).findOne({
+          where: { id },
+          populate: { page: { select: ["documentId"] } },
+        });
+        return (row?.page as { documentId: string } | null | undefined)?.documentId ?? null;
+      };
+      expect(await pageOf(revision.id)).toBe(page.documentId);
+      const other = await t.strapi.documents(PAGE).create({
+        data: { title: "IT Revisions Other", slug: "it-revisions-other", body: "other" },
+        status: "draft",
+      });
+      // The panel drops the hidden field from what it writes: the save goes
+      // through, the revision stays where the lifecycle linked it.
+      for (const [documentId, revisions] of [
+        [page.documentId, { connect: [], disconnect: [{ id: revision.id }] }],
+        [other.documentId, { connect: [{ id: revision.id }], disconnect: [] }],
+        [page.documentId, { set: [] }],
+      ] as const) {
+        const res = await panel.update(PAGE, documentId, { revisions });
+        expect(res.status, `${JSON.stringify(revisions)} ${res.text}`).toBe(200);
+        expect(await pageOf(revision.id), JSON.stringify(revisions)).toBe(page.documentId);
+      }
+      // Every other writer meets the wiki checks (Document Service slot 4).
+      for (const revisions of [
+        { connect: [], disconnect: [{ id: revision.id }] },
+        { connect: [{ id: revision.id }] },
+        [],
+      ]) {
+        const refused = await t.strapi
+          .documents(PAGE)
+          .update({ documentId: other.documentId, data: { revisions } })
+          .then(
+            () => null,
+            (error: { details?: unknown }) => error,
+          );
+        expect(refused?.details, JSON.stringify(revisions)).toEqual({ keys: ["revisions"] });
+      }
+      expect(await pageOf(revision.id)).toBe(page.documentId);
+    });
+
+    it("the Users & Permissions roles list no Wiki-revision; the ticked revision actions are the wiki page's history (issue #82)", async () => {
+      // The roles view lists the content-API actions of every API, which
+      // Strapi marks through their routes: wiki-revision has none since
+      // 15.1 (`only: []`), so it has no section at all. The wiki page's
+      // `revisions`, `revision` and `restore` (batch 16) are the web's
+      // history, granted to every role that edits wiki pages (decision 06
+      // question 9).
+      const panel = await contentManager(t);
+      type Actions = Record<string, { enabled: boolean }>;
+      type RoleView = {
+        role: { permissions: Record<string, { controllers: Record<string, Actions> }> };
+      };
+      const roles = await t.strapi.db.query(ROLE).findMany({ select: ["id", "type"] });
+      const EDITORS = ["admin_role", "editor", "department_head", "team_lead", "member"];
+      expect(roles.map((role) => role.type)).toEqual(expect.arrayContaining(EDITORS));
+      for (const role of roles) {
+        const res = await adminRequest<RoleView>(
+          t,
+          panel.token,
+          `/users-permissions/roles/${role.id as number}`,
+        );
+        expect(res.status, res.text).toBe(200);
+        expect(Object.keys(res.body.role.permissions)).not.toContain("api::wiki-revision");
+        const pageActions = res.body.role.permissions["api::wiki-page"].controllers["wiki-page"];
+        const history = Object.fromEntries(
+          ["revision", "revisions", "restore"].map((action) => [
+            action,
+            pageActions[action]?.enabled,
+          ]),
+        );
+        const ticked = EDITORS.includes(String(role.type));
+        expect(history, String(role.type)).toEqual({
+          revision: ticked,
+          revisions: ticked,
+          restore: ticked,
+        });
+      }
     });
 
     // Last: it restarts the cms on this database, without fixtures.
