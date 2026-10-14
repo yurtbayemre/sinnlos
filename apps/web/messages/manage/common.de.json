@@ -55,7 +55,9 @@
     "withdrawsOn": "Wird zurückgezogen am {date}",
     "publishedOn": "Veröffentlicht seit {date}",
     "savedOn": "Zuletzt gespeichert {date}",
-    "scheduleFailed": "Die geplante Veröffentlichung ist fehlgeschlagen: {reason}"
+    "scheduleFailed": "Die geplante Veröffentlichung ist fehlgeschlagen: {reason}",
+    "notPublished": "Nicht veröffentlicht: Leserinnen und Leser sehen den Eintrag erst nach der Veröffentlichung.",
+    "changesPending": "Leserinnen und Leser sehen die veröffentlichte Fassung, bis diese Änderungen veröffentlicht sind."
   },
   "scheduleErrors": {
     "windowExpired": "ihr Zeitfenster war bei Fälligkeit schon abgelaufen",

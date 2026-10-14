@@ -66,6 +66,17 @@ export function EditorStatus({
       ? t(`scheduleErrors.${meta.scheduleError as (typeof SCHEDULE_ERROR_TEXTS)[number]}`)
       : t("scheduleErrors.other", { code: meta.scheduleError })
     : null;
+  // What readers get, in words (batch 16.1, issue #80): an item without a
+  // published version (never published, unpublished, or withdrawn by its
+  // schedule) is not shown to them, and saved changes of a published item
+  // wait for Publish. The badge alone did not say so.
+  const readers = hideStatus
+    ? null
+    : meta.status === "draft"
+      ? t("detail.notPublished")
+      : meta.status === "modified"
+        ? t("detail.changesPending")
+        : null;
   return (
     <div className="space-y-2">
       <div className="flex flex-wrap items-center gap-1.5">
@@ -77,6 +88,7 @@ export function EditorStatus({
         {dirty && <Badge tone="warning">{t("status.unsaved")}</Badge>}
       </div>
       <ul className="space-y-0.5 text-sm text-muted-foreground">
+        {readers && <li>{readers}</li>}
         {publishedAt && !hideStatus && <li>{t("detail.publishedOn", { date: publishedAt })}</li>}
         {publishAt && !meta.scheduleError && (
           <li>{t("detail.publishesOn", { date: publishAt })}</li>

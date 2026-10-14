@@ -55,7 +55,9 @@
     "withdrawsOn": "Withdraws on {date}",
     "publishedOn": "Published since {date}",
     "savedOn": "Last saved {date}",
-    "scheduleFailed": "The scheduled publication failed: {reason}"
+    "scheduleFailed": "The scheduled publication failed: {reason}",
+    "notPublished": "Not published: readers do not see it until it is published.",
+    "changesPending": "Readers see the published version until these changes are published."
   },
   "scheduleErrors": {
     "windowExpired": "its time window had already ended when it was due",
