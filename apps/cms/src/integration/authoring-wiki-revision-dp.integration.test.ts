@@ -480,9 +480,15 @@ describe.skipIf(!PG_URL || !PSQL_READY)(
     it(
       "3a. a rollback to 15.1: its twins make deploy.sh's probe refuse and the boot refuse",
       async () => {
-        // On batch 16, a panel-style clone of Two: Strapi 5.57 moves the page
-        // links of Two's revisions to the copy, their anchors stay (Codex
-        // review, round 2). Their twins then link the copy.
+        // A panel-style clone of Two. On batch 16, Strapi 5.57 moved the page
+        // links of Two's revisions to the copy, their anchors stayed (Codex
+        // review, round 2), and their twins then linked the copy. Since
+        // 16.1 a clone gets no revisions (the wiki checks, issue #81), but a
+        // database that ran batch 16 may hold such links: the move is
+        // replayed in SQL as batch 16 made it (checked with the 16.1 clone
+        // rule taken out: the links on Two's draft row went to the copy's
+        // draft, the copy's only row), each link to the copy's row of the
+        // same status.
         const live = await boot();
         const pages = live.strapi.documents(PAGE) as unknown as {
           clone(params: Record<string, unknown>): Promise<{ documentId: string }>;
@@ -492,14 +498,28 @@ describe.skipIf(!PG_URL || !PSQL_READY)(
           data: { title: "Two (copy)", slug: "it-two-copy" },
         });
         await stop();
-        const [moved] = await sql<{ n: string }>(
-          `SELECT count(*) AS n FROM wiki_revisions r
-             JOIN wiki_revisions_page_lnk l ON l.wiki_revision_id = r.id
-             JOIN wiki_pages p ON p.id = l.wiki_page_id
-            WHERE r.page_document_id = ? AND p.document_id = ?`,
-          [pageTwo, copy.documentId],
+        const linkedToCopy = async () =>
+          Number(
+            (
+              await sql<{ n: string }>(
+                `SELECT count(*) AS n FROM wiki_revisions r
+                   JOIN wiki_revisions_page_lnk l ON l.wiki_revision_id = r.id
+                   JOIN wiki_pages p ON p.id = l.wiki_page_id
+                  WHERE r.page_document_id = ? AND p.document_id = ?`,
+                [pageTwo, copy.documentId],
+              )
+            )[0].n,
+          );
+        expect(await linkedToCopy()).toBe(0);
+        await sql(
+          `UPDATE wiki_revisions_page_lnk l SET wiki_page_id = c.id
+             FROM wiki_revisions r, wiki_pages s, wiki_pages c
+            WHERE r.id = l.wiki_revision_id AND r.page_document_id = ?
+              AND s.id = l.wiki_page_id AND s.document_id = ?
+              AND c.document_id = ? AND (c.published_at IS NULL) = (s.published_at IS NULL)`,
+          [pageTwo, pageTwo, copy.documentId],
         );
-        expect(Number(moved.n)).toBeGreaterThan(0);
+        expect(await linkedToCopy()).toBeGreaterThan(0);
 
         beforeRollback = await snapshot();
         await asBeforeBatch16({ forgetSchema: false });
