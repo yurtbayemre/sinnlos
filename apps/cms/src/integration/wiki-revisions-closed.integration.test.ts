@@ -1,6 +1,12 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { ADMIN_ENV, adminRequest, cmPath, contentManager } from "./admin-api.test.helper";
+import {
+  ADMIN_ENV,
+  adminRequest,
+  cmPath,
+  contentManager,
+  type ContentManager,
+} from "./admin-api.test.helper";
 import { storedRevision } from "./authoring.test.helper";
 import {
   TEST_ROLES,
@@ -515,6 +521,11 @@ describe.each(testEngines())("wiki revisions are closed on %s", (engine) => {
   describe("the admin panel", () => {
     const ADMIN_PERMISSION = "admin::permission";
     const EXPLORER = "plugin::content-manager.explorer";
+    // One admin sign-in per boot: @strapi/admin throttles POST /admin/login
+    // to 5 per 5 minutes per e-mail and IP, in process memory that both
+    // engines of this file share.
+    let signedIn: Promise<ContentManager> | undefined;
+    const panelOf = () => (signedIn ??= contentManager(t));
 
     it("the Content Manager lists no Wiki revision", () => {
       const contentTypes = t.strapi.plugin("content-manager").service("content-types") as {
@@ -526,7 +537,7 @@ describe.each(testEngines())("wiki revisions are closed on %s", (engine) => {
     });
 
     it("nobody writes a revision in the Content Manager, super admins included; read stays", async () => {
-      const panel = await contentManager(t);
+      const panel = await panelOf();
       // Content Manager create, update, delete and publish are registered for
       // displayed types only, and the super admin's permissions are reset to
       // the registered ones at every boot.
@@ -558,7 +569,7 @@ describe.each(testEngines())("wiki revisions are closed on %s", (engine) => {
       // connect/disconnect would move or unlink them. The schema hides the
       // field (`config.attributes.revisions.hidden`); the boot's layout sync
       // takes it out of the stored edit view.
-      const panel = await contentManager(t);
+      const panel = await panelOf();
       const res = await adminRequest<{
         data: { contentType: { layouts: { edit: { name: string }[][] } } };
       }>(t, panel.token, `/content-manager/content-types/${PAGE}/configuration`);
@@ -569,7 +580,7 @@ describe.each(testEngines())("wiki revisions are closed on %s", (engine) => {
     });
 
     it("nobody links or unlinks a revision through the page form, super admins included (issue #81)", async () => {
-      const panel = await contentManager(t);
+      const panel = await panelOf();
       const pageOf = async (id: number) => {
         const row = await t.strapi.db.query(REVISION).findOne({
           where: { id },
@@ -611,6 +622,45 @@ describe.each(testEngines())("wiki revisions are closed on %s", (engine) => {
       expect(await pageOf(revision.id)).toBe(page.documentId);
     });
 
+    it("a clone starts without history and leaves the source's revisions (issue #81, Codex review)", async () => {
+      // Strapi copies every relation a clone's payload leaves out; for the
+      // revisions (owned by the revision side) that moved them to the copy.
+      const panel = await panelOf();
+      const linkedTo = async () =>
+        (
+          await t.strapi.db.query(REVISION).findMany({
+            where: { pageDocumentId: page.documentId },
+            populate: { page: { select: ["documentId"] } },
+          })
+        ).map((row) => (row.page as { documentId: string } | null)?.documentId ?? null);
+      const before = await linkedTo();
+      expect(before.length).toBeGreaterThan(0);
+      expect(new Set(before)).toEqual(new Set([page.documentId]));
+      const viaService = await t.strapi.documents(PAGE).clone({
+        documentId: page.documentId,
+        data: { title: "IT Revisions Clone", slug: "it-revisions-clone" },
+      });
+      const viaPanel = await adminRequest<{ data: { documentId: string } }>(
+        t,
+        panel.token,
+        `/content-manager/collection-types/${PAGE}/clone/${page.documentId}`,
+        { json: { title: "IT Revisions Panel Clone", slug: "it-revisions-panel-clone" } },
+      );
+      expect(viaPanel.status, viaPanel.text).toBe(200);
+      expect(await linkedTo()).toEqual(before);
+      for (const copy of [viaService.documentId, viaPanel.body.data.documentId]) {
+        const theirs = await t.strapi.db.query(REVISION).findMany({
+          where: { page: { documentId: copy } },
+          select: ["pageDocumentId"],
+        });
+        // Only the copy's own first after-image (its create), anchored to it.
+        expect(
+          theirs.map((row) => row.pageDocumentId),
+          copy,
+        ).toEqual([copy]);
+      }
+    });
+
     it("the Users & Permissions roles list no Wiki-revision; the ticked revision actions are the wiki page's history (issue #82)", async () => {
       // The roles view lists the content-API actions of every API, which
       // Strapi marks through their routes: wiki-revision has none since
@@ -618,7 +668,7 @@ describe.each(testEngines())("wiki revisions are closed on %s", (engine) => {
       // `revisions`, `revision` and `restore` (batch 16) are the web's
       // history, granted to every role that edits wiki pages (decision 06
       // question 9).
-      const panel = await contentManager(t);
+      const panel = await panelOf();
       type Actions = Record<string, { enabled: boolean }>;
       type RoleView = {
         role: { permissions: Record<string, { controllers: Record<string, Actions> }> };

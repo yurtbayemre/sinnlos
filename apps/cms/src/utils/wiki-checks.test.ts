@@ -492,6 +492,23 @@ describe("createWikiChecks", () => {
     }
   });
 
+  it("gives a clone no revisions, so the source keeps its history (Codex review of 16.1)", async () => {
+    const checks = createWikiChecks(fakeHost(world()));
+    for (const data of [{ title: "copy" }, undefined]) {
+      const params: Record<string, unknown> = { documentId: "a", ...(data ? { data } : {}) };
+      let seen: unknown;
+      await checks({ uid: PAGE, action: "clone", params }, async () => {
+        seen = params.data;
+        return { documentId: "z" };
+      });
+      expect(seen).toEqual({ ...(data ?? {}), revisions: { set: [] } });
+    }
+    // An update keeps its payload as it is.
+    const params: Record<string, unknown> = { documentId: "a", data: { title: "t" } };
+    await checks({ uid: PAGE, action: "update", params }, async () => ({ documentId: "a" }));
+    expect(params.data).toEqual({ title: "t" });
+  });
+
   it("serialises a space's saves and publishes with the page writes, no emptiness check (Codex re-review)", async () => {
     // A publish re-creates the published row from the page links it loaded
     // before deleting the old one: no page write may run in between.

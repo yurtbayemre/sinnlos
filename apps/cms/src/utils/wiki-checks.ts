@@ -85,7 +85,10 @@ import { parseToOneRelation, refuseKeys } from "./write-allowlist";
  * create, update or clone whose `revisions` would change any link is
  * refused here (`details.keys: ["revisions"]`), for every source. The
  * panel's untouched relation value `{ connect: [], disconnect: [] }`
- * passes. The content API refuses the key earlier (the allowlist).
+ * passes. The content API refuses the key earlier (the allowlist). A
+ * clone gets `revisions: { set: [] }`: Strapi copies every relation a
+ * clone's payload leaves out, which would move the source's revisions to
+ * the copy.
  *
  * LOCK ORDER (K21): the document's own version row (slot 2) first, then the
  * structure row; nothing here locks a document row afterwards.
@@ -368,6 +371,13 @@ export function createWikiChecks(strapi: WikiChecksHost): DocumentActionMiddlewa
     if (uid === WIKI_PAGE_UID && MUTATING_ACTIONS.includes(action)) {
       if (PAYLOAD_ACTIONS.includes(action) && changesRevisionLinks(params.data)) {
         throw revisionLinksError();
+      }
+      if (action === "clone") {
+        // A clone copies every relation its payload leaves out; the
+        // revisions' owning side is the revision, so the copy would take
+        // them over from the source (Codex review of 16.1, reproduced).
+        // The copy starts without history.
+        params.data = { ...(isRecord(params.data) ? params.data : {}), revisions: { set: [] } };
       }
       return strapi.db.transaction(async () => {
         await lockWikiStructure(strapi);
