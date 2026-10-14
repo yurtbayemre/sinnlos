@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { useFieldErrorText } from "./error-text";
 import { CheckboxField, CheckboxList, Field, inputClass } from "./form-controls";
 import { DateTimeField, DayField } from "./date-fields";
+import { EditorStatus } from "./editor-chrome";
 import { MarkdownEditor } from "./markdown-editor";
 import { NoDepartmentExplanation } from "./page-parts";
 import { SinglePicker } from "./pickers";
@@ -251,6 +252,53 @@ describe("StatusBadges", () => {
     expect(html).toContain(common.status.scheduleFailed);
     expect(html).not.toContain(`${common.status.scheduled}: `);
     expect(html).not.toContain("Engineering");
+  });
+});
+
+describe("EditorStatus: the publication state in words (issue #80)", () => {
+  const meta = (status: "draft" | "published" | "modified", publishedAt: string | null) => ({
+    documentId: "doc",
+    version: "3",
+    status,
+    publishedAt,
+    publishAt: null,
+    unpublishAt: null,
+    scheduleError: null,
+  });
+  const status = (item: ReturnType<typeof meta>, locale: "en" | "de" = "en", hideStatus = false) =>
+    render(
+      createElement(EditorStatus, { meta: item, dirty: false, showOwner: false, hideStatus }),
+      locale,
+    );
+
+  it("says that an item without a published version is not shown to readers", () => {
+    // Never published, unpublished, or withdrawn by its schedule: one state.
+    const html = status(meta("draft", null));
+    expect(html).toContain(common.detail.notPublished);
+    expect(html).not.toContain(common.detail.changesPending);
+    expect(status(meta("draft", null), "de")).toContain(
+      MESSAGES.de.manage.common.detail.notPublished,
+    );
+  });
+
+  it("says that saved changes of a published item wait for Publish, promising no readers", () => {
+    const html = status(meta("modified", "2026-10-14T09:34:08.000Z"));
+    expect(html).toContain(common.detail.changesPending);
+    expect(html).not.toContain(common.detail.notPublished);
+    // An expired announcement stays published and is hidden all the same:
+    // the text says nothing about who reads the published version.
+    expect(common.detail.changesPending).not.toMatch(/reader/i);
+    expect(MESSAGES.de.manage.common.detail.changesPending).not.toMatch(/Leser/);
+  });
+
+  it("says nothing more for a published item, or where the status is hidden", () => {
+    for (const html of [
+      status(meta("published", "2026-10-14T09:34:08.000Z")),
+      status(meta("draft", null), "en", true),
+    ]) {
+      expect(html).not.toContain(common.detail.notPublished);
+      expect(html).not.toContain(common.detail.changesPending);
+    }
   });
 });
 

@@ -1,11 +1,11 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, FileText, Plus, Settings } from "lucide-react";
+import { ArrowLeft, FilePen, FileText, Plus, Settings } from "lucide-react";
 import { getTranslations } from "next-intl/server";
 import { buttonVariants } from "@/components/ui/button";
 import { areaAccess } from "@/lib/manage/access";
 import { areaItemPath } from "@/lib/manage/areas";
-import { wikiNewPagePath } from "@/lib/manage/wiki-paths";
+import { WIKI_DRAFTS_PATH, wikiNewPagePath } from "@/lib/manage/wiki-paths";
 import { capabilitiesFor } from "@/lib/roles";
 import { api } from "@/lib/strapi";
 import { getViewer } from "@/lib/viewer";
@@ -30,7 +30,11 @@ export default async function WikiSpacePage({ params }: Props) {
   // Writing (batch 16): a new page for department heads, team leads and
   // moderators (the cms also requires that they read this space, which
   // they do on this page); the space's tree in /manage for moderators.
+  // The pages below are the published ones, so every role that edits wiki
+  // pages also gets its drafts from here: a draft saved in this space is
+  // listed there, not below (batch 16.1, issue #79).
   const capabilities = capabilitiesFor(viewer.role);
+  const drafts = capabilities.wikiPages.edit !== "none";
   const manageSpace = areaAccess(capabilities, "wiki") !== null && !!entry.documentId;
   // DA02: the author-set order, ties by title (lib/wiki-content.ts).
   const pages = sortWikiPages(entry.pages ?? []);
@@ -58,7 +62,7 @@ export default async function WikiSpacePage({ params }: Props) {
         {entry.description ? (
           <p className="mt-1 text-muted-foreground">{entry.description}</p>
         ) : null}
-        {capabilities.wikiPages.create || manageSpace ? (
+        {capabilities.wikiPages.create || drafts || manageSpace ? (
           <div role="group" aria-label={t("spaceActions")} className="mt-4 flex flex-wrap gap-2">
             {capabilities.wikiPages.create && (
               <Link
@@ -67,6 +71,15 @@ export default async function WikiSpacePage({ params }: Props) {
               >
                 <Plus className="h-4 w-4" aria-hidden="true" />
                 {t("newPage")}
+              </Link>
+            )}
+            {drafts && (
+              <Link
+                href={WIKI_DRAFTS_PATH}
+                className={buttonVariants({ variant: "outline", size: "sm" })}
+              >
+                <FilePen className="h-4 w-4" aria-hidden="true" />
+                {t("myDrafts")}
               </Link>
             )}
             {manageSpace && (

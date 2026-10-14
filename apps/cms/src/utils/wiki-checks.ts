@@ -75,6 +75,21 @@ import { parseToOneRelation, refuseKeys } from "./write-allowlist";
  * RESERVED SLUGS: a page slug `new` and a space slug `drafts` are refused
  * (`invalid` on `slug`): the web's routes use them as words.
  *
+ * REVISION LINKS (batch 16.1, issue #81): a page's history is written by
+ * the wiki-page lifecycle alone (the revision's `page` link and its
+ * `pageDocumentId` anchor, utils/wiki-revisions.ts). Since wiki revisions
+ * lost draft & publish (batch 16 lane 16D) the admin panel's relation
+ * field on the page form lists them, and its connect and disconnect would
+ * move or unlink revisions; the form no longer shows the field
+ * (wiki-page schema `config.attributes.revisions.hidden`), and a
+ * create, update or clone whose `revisions` would change any link is
+ * refused here (`details.keys: ["revisions"]`), for every source. The
+ * panel's untouched relation value `{ connect: [], disconnect: [] }`
+ * passes. The content API refuses the key earlier (the allowlist). A
+ * clone gets `revisions: { set: [] }`: Strapi copies every relation a
+ * clone's payload leaves out, which would move the source's revisions to
+ * the copy.
+ *
  * LOCK ORDER (K21): the document's own version row (slot 2) first, then the
  * structure row; nothing here locks a document row afterwards.
  */
@@ -82,7 +97,7 @@ import { parseToOneRelation, refuseKeys } from "./write-allowlist";
 /** The wiki-space actions that can remove the space's rows (the emptiness checks). */
 const SPACE_REMOVAL_ACTIONS: readonly string[] = ["delete", "unpublish", "discardDraft"];
 
-/** The actions whose payload the checks read (a reserved slug; a page's space). */
+/** The actions whose payload the checks read (a reserved slug; a page's space and revisions). */
 const PAYLOAD_ACTIONS: readonly string[] = ["create", "update", "clone"];
 
 /**
@@ -188,8 +203,38 @@ export function namesSpace(data: unknown): boolean {
   return named(value.set) || named(value.connect);
 }
 
+/**
+ * Whether a page payload's `revisions` would change any revision link. The
+ * admin panel's form sends every relation as `{ connect: [], disconnect:
+ * [] }` when it is left alone; that, `{}` and no key change nothing. On a
+ * new document (`create`, `clone`) an empty set changes nothing either:
+ * the Content Manager's clone sets `revisions: { set: [] }` for a role
+ * whose create permission leaves the field out (excludeNotCreatableFields,
+ * Codex re-review). Every other value (a list of revisions, an id, null,
+ * an empty set on an update, a non-empty set, connect or disconnect)
+ * would set, move or unlink revisions.
+ */
+export function changesRevisionLinks(data: unknown, newDocument = false): boolean {
+  if (!isRecord(data) || data.revisions === undefined) return false;
+  const value = data.revisions;
+  const empty = (entry: unknown) => Array.isArray(entry) && entry.length === 0;
+  if (!isRecord(value)) return !(newDocument && empty(value));
+  const inertWhenEmpty = newDocument ? ["connect", "disconnect", "set"] : ["connect", "disconnect"];
+  return Object.entries(value).some(
+    ([key, entry]) => entry !== undefined && !(inertWhenEmpty.includes(key) && empty(entry)),
+  );
+}
+
 // ---------------------------------------------------------------------------
 // The refusals.
+
+/** The refusal of a page write that would link or unlink revisions (key `revisions`). */
+export function revisionLinksError(): InstanceType<typeof errors.ValidationError> {
+  return new errors.ValidationError(
+    "A page's history is recorded by the wiki: its revisions cannot be linked or unlinked",
+    { keys: ["revisions"] },
+  );
+}
 
 /** The `parentCycle` refusal (key `parent`). */
 export function parentCycleError(): InstanceType<typeof errors.ValidationError> {
@@ -328,6 +373,19 @@ export function createWikiChecks(strapi: WikiChecksHost): DocumentActionMiddlewa
     }
 
     if (uid === WIKI_PAGE_UID && MUTATING_ACTIONS.includes(action)) {
+      if (
+        PAYLOAD_ACTIONS.includes(action) &&
+        changesRevisionLinks(params.data, action !== "update")
+      ) {
+        throw revisionLinksError();
+      }
+      if (action === "clone") {
+        // A clone copies every relation its payload leaves out; the
+        // revisions' owning side is the revision, so the copy would take
+        // them over from the source (Codex review of 16.1, reproduced).
+        // The copy starts without history.
+        params.data = { ...(isRecord(params.data) ? params.data : {}), revisions: { set: [] } };
+      }
       return strapi.db.transaction(async () => {
         await lockWikiStructure(strapi);
         const namesItsSpace = PAYLOAD_ACTIONS.includes(action) && namesSpace(params.data);

@@ -135,6 +135,10 @@ export interface DocumentApi {
   publish(params: { documentId: string }): Promise<{ documentId: string; entries: Row[] }>;
   unpublish(params: { documentId: string }): Promise<unknown>;
   discardDraft(params: { documentId: string }): Promise<{ documentId: string; entries: Row[] }>;
+  clone(params: {
+    documentId: string;
+    data?: Params;
+  }): Promise<{ documentId: string; entries: Row[] }>;
   findOne(params: {
     documentId: string;
     status?: "draft" | "published";
