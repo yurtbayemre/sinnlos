@@ -15,7 +15,7 @@ vi.mock("@/lib/strapi/client", () => ({ strapi: (...args: unknown[]) => strapiMo
 const { loadManageList, parseListFilters, statusTabs } = await import("./list");
 const { loadEditable, loadEventYesCount } = await import("./editor");
 const { loadTargetingOptions } = await import("./options");
-const { loadManageLanding, countedFilters } = await import("./landing");
+const { loadManageLanding, countedFilters, countHref } = await import("./landing");
 
 const DOC = "annc00000000000000000001";
 const outage = () => new StrapiError(502, "Bad Gateway", "");
@@ -85,8 +85,25 @@ describe("list filters from the URL", () => {
       "scheduled",
       "failed",
     ]);
-    expect(countedFilters("polls")).toEqual([]);
-    expect(countedFilters("quickLinks")).toEqual(["draft", "scheduled", "failed"]);
+    expect(countedFilters("polls")).toEqual(["published"]);
+    expect(countedFilters("quickLinks")).toEqual(["draft", "published", "scheduled", "failed"]);
+    expect(countedFilters("wiki")).toEqual(["draft", "published", "scheduled", "failed"]);
+  });
+
+  it("a count opens its list's status tab; polls and the wiki have none (#78)", () => {
+    expect(countHref("announcements", "published")).toBe("/manage/announcements?status=published");
+    expect(countHref("quickLinks", "draft")).toBe("/manage/quick-links?status=draft");
+    expect(countHref("documents", "failed")).toBe("/manage/documents?status=failed");
+    // Every count with a tab gets one, and the list keeps the filter it names.
+    for (const area of ["announcements", "events", "quickLinks", "documents"] as const) {
+      for (const status of countedFilters(area)) {
+        const href = countHref(area, status);
+        const params = Object.fromEntries(new URL(String(href), "http://x").searchParams);
+        expect(parseListFilters(area, params, { ownerFilter: false }).status).toBe(status);
+      }
+    }
+    expect(countHref("polls", "published")).toBeNull();
+    expect(countHref("wiki", "published")).toBeNull();
   });
 });
 
@@ -201,9 +218,10 @@ describe("loadTargetingOptions", () => {
 });
 
 describe("loadManageLanding", () => {
-  it("counts drafts, scheduled and failed per area; a failed count is unknown, never 0", async () => {
+  it("counts drafts, published, scheduled and failed per area; a failed count is unknown, never 0", async () => {
     strapiMock.mockImplementation(async (path: string) => {
       if (path.includes("status=failed")) throw outage();
+      if (path.includes("status=published")) return page([], path.includes("/polls/") ? 4 : 7);
       return page([], path.includes("status=draft") ? 3 : 1);
     });
     const view = await loadManageLanding(["announcements", "polls"]);
@@ -213,11 +231,15 @@ describe("loadManageLanding", () => {
         area: "announcements",
         counts: {
           draft: { value: 3, truncated: false },
+          published: { value: 7, truncated: false },
           scheduled: { value: 1, truncated: false },
           failed: { value: null, truncated: false },
         },
       },
-      { area: "polls", counts: {} },
+      { area: "polls", counts: { published: { value: 4, truncated: false } } },
     ]);
+    // The published count is the list's own `published` filter (#78).
+    expect(strapiMock).toHaveBeenCalledWith("/api/announcements/authoring?status=published");
+    expect(strapiMock).toHaveBeenCalledWith("/api/polls/authoring?status=published");
   });
 });

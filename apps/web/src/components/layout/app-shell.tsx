@@ -23,11 +23,12 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
       <Sidebar />
       <div className="flex min-w-0 flex-1 flex-col">
         <Topbar />
-        {/* pb-20 leaves room for the mobile bottom nav on small screens */}
+        {/* Below md, room for the bottom nav: 5rem plus the home indicator's
+            safe-area inset (issue #71; 0 without one). */}
         <main
           id={MAIN_ID}
           tabIndex={-1}
-          className="flex-1 px-4 pb-20 pt-6 outline-none sm:px-6 md:pb-8 md:pt-8"
+          className="flex-1 px-4 pb-[calc(5rem_+_env(safe-area-inset-bottom))] pt-6 outline-none sm:px-6 md:pb-8 md:pt-8"
         >
           <div className="mx-auto w-full max-w-6xl">
             <PageFade>{children}</PageFade>

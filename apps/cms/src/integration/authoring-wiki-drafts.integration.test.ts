@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
+import { createUser, signIn } from "./admin-api.test.helper";
 import { storedRevision } from "./authoring.test.helper";
 import { createTestStrapi, testEngines, type Row, type TestStrapi } from "./harness.test.helper";
 import {
@@ -105,6 +106,61 @@ describe.each(testEngines())("authoring wiki drafts on %s", (engine) => {
     expect((await wiki.editable("member", "wiki-pages", res.body.data.documentId)).status).toBe(
       404,
     );
+  });
+
+  it("a department head's draft in another department's space: theirs to find, open, save and publish (issue #79)", async () => {
+    // The walkthrough: the Finance head drafts in "People and Culture" (the
+    // HR department's public space). Pages are created in any space the
+    // caller reads (decision 06 §A); the draft has no department (a
+    // moderator field), so its author edits it, not the space's head.
+    const sales = t.fixtures.departments.sales;
+    const space = await seedSpace(t, { name: "IT Sales Space", department: sales.documentId });
+    const created = await wiki.createDraft("department_head", {
+      title: "IT Head Draft Elsewhere",
+      body: "draft",
+      space: space.documentId,
+    });
+    expect(created.status, created.text).toBe(201);
+    const { documentId } = created.body.data;
+    const [row] = await t.strapi.db.query(WIKI_PAGE).findMany({
+      where: { documentId },
+      populate: { author: { select: ["id"] }, department: { select: ["id"] } },
+    });
+    expect(row.author).toMatchObject({ id: t.fixtures.users.department_head.id });
+    expect(row.department).toBeNull();
+    const mine = await wiki.myDrafts<{ documentId: string; space: { slug: string } | null }>(
+      "department_head",
+    );
+    expect(mine.body.data).toContainEqual(
+      expect.objectContaining({ documentId, space: expect.objectContaining({ slug: space.slug }) }),
+    );
+    const form = await wiki.editable<Record<string, unknown>>(
+      "department_head",
+      "wiki-pages",
+      documentId,
+    );
+    expect(form.status, form.text).toBe(200);
+    expect(form.body.data).toMatchObject({ roleClass: "author", title: "IT Head Draft Elsewhere" });
+    // The space's own department head has no class on it.
+    const salesHead = await signIn(t, await createUser(t, "department_head", sales));
+    expect((await wiki.editable({ jwt: salesHead }, "wiki-pages", documentId)).status).toBe(404);
+    const saved = await wiki.saveDraft(
+      "department_head",
+      documentId,
+      { body: "second draft" },
+      form.body.data.version,
+    );
+    expect(saved.status, saved.text).toBe(200);
+    const published = await wiki.action(
+      "department_head",
+      documentId,
+      "publish",
+      saved.body.data.version,
+    );
+    expect(published.status, published.text).toBe(200);
+    expect((await readable("member", created.body.data.slug)).map((p) => p.title)).toEqual([
+      "IT Head Draft Elsewhere",
+    ]);
   });
 
   it("S2.2: saveDraft needs If-Match and saves the draft only; publish publishes it", async () => {

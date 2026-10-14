@@ -480,9 +480,17 @@ describe.skipIf(!PG_URL || !PSQL_READY)(
     it(
       "3a. a rollback to 15.1: its twins make deploy.sh's probe refuse and the boot refuse",
       async () => {
-        // On batch 16, a panel-style clone of Two: Strapi 5.57 moves the page
-        // links of Two's revisions to the copy, their anchors stay (Codex
-        // review, round 2). Their twins then link the copy.
+        // A panel-style clone of Two. On batch 16, Strapi 5.57 moved Two's
+        // revisions to the copy, their anchors stayed (Codex review, round
+        // 2), and their twins then linked the copy. Since 16.1 a clone gets
+        // no revisions (the wiki checks, issue #81), but a database that ran
+        // batch 16 may hold such links, so the move is replayed in SQL as
+        // batch 16 made it: every revision linked to Two's draft row loses
+        // its page links, the one to Two's published row included, and
+        // links the copy's draft, the copy's only row. Checked against the
+        // real clone with the 16.1 rule taken out (both of Two's revisions,
+        // one of them linked to both of Two's rows, ended on the copy's
+        // draft alone) and by Codex on Strapi 5.57.
         const live = await boot();
         const pages = live.strapi.documents(PAGE) as unknown as {
           clone(params: Record<string, unknown>): Promise<{ documentId: string }>;
@@ -492,14 +500,43 @@ describe.skipIf(!PG_URL || !PSQL_READY)(
           data: { title: "Two (copy)", slug: "it-two-copy" },
         });
         await stop();
-        const [moved] = await sql<{ n: string }>(
-          `SELECT count(*) AS n FROM wiki_revisions r
-             JOIN wiki_revisions_page_lnk l ON l.wiki_revision_id = r.id
-             JOIN wiki_pages p ON p.id = l.wiki_page_id
-            WHERE r.page_document_id = ? AND p.document_id = ?`,
-          [pageTwo, copy.documentId],
+        // Two's revisions (by anchor), each with the page rows it links.
+        const linksOfTwo = async () =>
+          (
+            await sql<{ id: number; rows: string }>(
+              `SELECT r.id, coalesce(string_agg(
+                        CASE WHEN p.document_id = ? THEN 'copy' ELSE 'two' END || ':' ||
+                        CASE WHEN p.published_at IS NULL THEN 'draft' ELSE 'published' END,
+                        ',' ORDER BY p.document_id = ?, p.published_at IS NOT NULL), '') AS rows
+                 FROM wiki_revisions r
+                 LEFT JOIN wiki_revisions_page_lnk l ON l.wiki_revision_id = r.id
+                 LEFT JOIN wiki_pages p ON p.id = l.wiki_page_id
+                WHERE r.page_document_id = ?
+                GROUP BY r.id ORDER BY r.id`,
+              [copy.documentId, copy.documentId, pageTwo],
+            )
+          ).map((row) => [Number(row.id), row.rows] as const);
+        const cloned = await linksOfTwo();
+        // The 16.1 clone moved nothing.
+        expect(cloned.filter(([, rows]) => rows.includes("copy"))).toEqual([]);
+        const moved = cloned.filter(([, rows]) => rows.split(",").includes("two:draft"));
+        expect(moved.length).toBeGreaterThan(0);
+        // Published Two: a revision links both of its rows, and the replay
+        // must drop the published one too (Codex re-review of 16.1).
+        expect(cloned.map(([, rows]) => rows)).toContain("two:draft,two:published");
+        const ids = moved.map(([id]) => id);
+        const marks = ids.map(() => "?").join(", ");
+        await sql(`DELETE FROM wiki_revisions_page_lnk WHERE wiki_revision_id IN (${marks})`, ids);
+        await sql(
+          `INSERT INTO wiki_revisions_page_lnk (wiki_revision_id, wiki_page_id, wiki_revision_ord)
+           SELECT r.id, c.id, 1 FROM wiki_revisions r, wiki_pages c
+            WHERE r.id IN (${marks}) AND c.document_id = ? AND c.published_at IS NULL`,
+          [...ids, copy.documentId],
         );
-        expect(Number(moved.n)).toBeGreaterThan(0);
+        const replayed = await linksOfTwo();
+        expect(replayed).toEqual(
+          cloned.map(([id, rows]) => [id, ids.includes(id) ? "copy:draft" : rows]),
+        );
 
         beforeRollback = await snapshot();
         await asBeforeBatch16({ forgetSchema: false });

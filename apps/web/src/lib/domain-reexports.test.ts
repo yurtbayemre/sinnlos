@@ -123,7 +123,13 @@ const CASES: Array<{
       youtubeEmbedUrl: "youtubeEmbedUrl",
       youtubeVideoId: "youtubeVideoId",
     },
-    own: ["courseCompletion", "evaluateQuiz", "sortLessons"],
+    own: [
+      "courseCompletion",
+      "evaluateQuiz",
+      "passingAnswers",
+      "quizGatesCompletion",
+      "sortLessons",
+    ],
   },
 ];
 

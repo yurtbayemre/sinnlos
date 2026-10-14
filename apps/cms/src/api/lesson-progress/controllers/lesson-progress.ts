@@ -1,4 +1,5 @@
 import { factories } from "@strapi/strapi";
+import { parseQuiz, quizAnswersPass } from "@sinnlos/domain";
 
 /**
  * Completion receipts follow the acknowledgement integrity pattern
@@ -12,6 +13,11 @@ import { factories } from "@strapi/strapi";
  * user's progress the next time an author hits "Publish" (the exact
  * issue-#11 failure class). The documentId is stable across the whole
  * draft/publish lifecycle.
+ *
+ * Quiz lessons (issue #70): a lesson with questions completes only with
+ * `answers`, one option index per question, every one correct
+ * (quizAnswersPass, whatever the course's completionMode). The web gates
+ * its button on the same answers; this is the gate that holds.
  */
 const LESSON_UID = "api::lesson.lesson";
 const PROGRESS_UID = "api::lesson-progress.lesson-progress";
@@ -38,6 +44,17 @@ export default factories.createCoreController(PROGRESS_UID, ({ strapi }) => ({
     });
     if (!lesson || !lesson.course?.publishedAt) {
       return ctx.badRequest("Target not available for completion");
+    }
+
+    // The published quiz, read as the player reads it (parseQuiz), so the
+    // answers index the questions the caller was shown. Only after the
+    // lesson proved available: the refusal names nothing about a hidden one.
+    // Retries stay unlimited and the questions ship with their correctIndex
+    // (the player checks them in the browser): this proves the caller sent
+    // the right answers, it is no exam.
+    if (!quizAnswersPass(parseQuiz(lesson.quiz), data.answers)) {
+      // The web maps this exact text (lib/training-actions.ts).
+      return ctx.badRequest("Quiz not passed");
     }
 
     // One receipt per user + lesson. Accepted check-then-insert race

@@ -67,6 +67,12 @@ function elements(node: ReactNode): Array<{ type: unknown; props: Record<string,
 }
 const hrefs = (tree: ReturnType<typeof elements>) =>
   tree.map((el) => el.props.href).filter((href): href is string => typeof href === "string");
+/** The tiles' own links: a count's link carries its `?status=` (#78). */
+const tileHrefs = (tree: ReturnType<typeof elements>) =>
+  hrefs(tree).filter((href) => href.startsWith("/manage/") && !href.includes("?"));
+/** The paths or links of the published counts, sorted (#78). */
+const publishedOnly = (paths: string[]) =>
+  paths.filter((path) => path.endsWith("?status=published")).sort();
 
 /** The path of Next's redirect error, or null. */
 async function redirectOf(render: () => unknown): Promise<string | null> {
@@ -115,11 +121,7 @@ describe("the /manage shell", () => {
 describe("the landing", () => {
   it("an editor: the six area tiles, no reports and no Strapi links", async () => {
     const tree = elements(await ManagePage());
-    expect(
-      hrefs(tree)
-        .filter((href) => href.startsWith("/manage/"))
-        .sort(),
-    ).toEqual(
+    expect(tileHrefs(tree).sort()).toEqual(
       [
         "/manage/announcements",
         "/manage/events",
@@ -145,21 +147,69 @@ describe("the landing", () => {
   it("a department head: announcements, events and documents only (§L1), never the wiki", async () => {
     viewerRef.current = viewer("department_head", ENG);
     const tree = elements(await ManagePage());
-    const areas = hrefs(tree).filter((href) => href.startsWith("/manage/"));
-    expect(areas.sort()).toEqual(["/manage/announcements", "/manage/documents", "/manage/events"]);
+    expect(tileHrefs(tree).sort()).toEqual([
+      "/manage/announcements",
+      "/manage/documents",
+      "/manage/events",
+    ]);
     // Their counts come from their own lists; the wiki's page list is never asked.
     const paths = strapiMock.mock.calls.map(([path]) => String(path));
     expect(paths.some((path) => path.startsWith("/api/documents/authoring"))).toBe(true);
     expect(paths.some((path) => path.startsWith("/api/wiki-"))).toBe(false);
+    // Their published counts, one per area, each opening that list's tab (#78).
+    expect(publishedOnly(paths)).toEqual([
+      "/api/announcements/authoring?status=published",
+      "/api/documents/authoring?status=published",
+      "/api/events/authoring?status=published",
+    ]);
+    expect(publishedOnly(hrefs(tree))).toEqual([
+      "/manage/announcements?status=published",
+      "/manage/documents?status=published",
+      "/manage/events?status=published",
+    ]);
   });
 
-  it("the wiki tile counts the wiki's pages (drafts, scheduled, failed)", async () => {
+  it("the wiki tile counts the wiki's pages (drafts, published, scheduled, failed)", async () => {
     await ManagePage();
     const paths = strapiMock.mock.calls.map(([path]) => String(path));
-    for (const status of ["draft", "scheduled", "failed"]) {
+    for (const status of ["draft", "published", "scheduled", "failed"]) {
       expect(paths).toContain(`/api/wiki-pages/authoring?status=${status}`);
       expect(paths).toContain(`/api/documents/authoring?status=${status}`);
     }
+  });
+
+  it("an editor: a published count per area; a count with a list tab opens it (#78)", async () => {
+    strapiMock.mockImplementation(async (path: string) =>
+      page([], path.endsWith("?status=published") ? 5 : 1),
+    );
+    const tree = elements(await ManagePage());
+    const paths = strapiMock.mock.calls.map(([path]) => String(path));
+    expect(publishedOnly(paths)).toEqual(
+      [
+        "/api/announcements/authoring?status=published",
+        "/api/documents/authoring?status=published",
+        "/api/events/authoring?status=published",
+        "/api/polls/authoring?status=published",
+        "/api/quick-links/authoring?status=published",
+        "/api/wiki-pages/authoring?status=published",
+      ].sort(),
+    );
+    const publishedCounts = tree.filter(
+      (el) => el.type === StatCount && (el.props.count as { value: number }).value === 5,
+    );
+    expect(publishedCounts).toHaveLength(6);
+    // Polls have no status tabs and the wiki lists spaces: those counts are no link.
+    const countLinks = hrefs(tree).filter((href) => href.includes("?status="));
+    expect(publishedOnly(countLinks)).toEqual([
+      "/manage/announcements?status=published",
+      "/manage/documents?status=published",
+      "/manage/events?status=published",
+      "/manage/quick-links?status=published",
+    ]);
+    expect(countLinks.some((href) => href.startsWith("/manage/polls"))).toBe(false);
+    expect(countLinks.some((href) => href.startsWith("/manage/wiki"))).toBe(false);
+    expect(countLinks).toContain("/manage/events?status=draft");
+    expect(countLinks).toContain("/manage/documents?status=failed");
   });
 
   it("a department head without a department: the explanation, no request (§N1)", async () => {

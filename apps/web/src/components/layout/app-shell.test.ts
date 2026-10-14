@@ -29,6 +29,16 @@ async function render(): Promise<string> {
   return renderToStaticMarkup(await AppShell({ children: createElement("p", null, "page") }));
 }
 
+describe("AppShell bottom room (#71)", () => {
+  it("leaves the bottom nav and the home indicator's inset free below md", async () => {
+    const html = await render();
+    const main = /<main [^>]*class="([^"]+)"/.exec(html)?.[1] ?? "";
+    expect(main.split(" ")).toEqual(
+      expect.arrayContaining(["pb-[calc(5rem_+_env(safe-area-inset-bottom))]", "md:pb-8"]),
+    );
+  });
+});
+
 describe("AppShell skip link (UI04)", () => {
   it("puts the skip link before the navigation, pointing at <main>", async () => {
     const html = await render();

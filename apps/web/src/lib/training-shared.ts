@@ -71,3 +71,26 @@ export function evaluateQuiz(
   const answeredAll = answered === quiz.length;
   return { wrong, answeredAll, passed: answeredAll && wrong.length === 0 };
 }
+
+/**
+ * Whether a lesson's completion waits for its quiz (issue #70): a lesson
+ * with questions the caller has not completed yet, whatever the course's
+ * completionMode. The mode picks the quiz's feedback only: per answer on
+ * "confirm" courses, one batch check on "quizGate" ones. The cms refuses
+ * the completion without the correct answers (quizAnswersPass).
+ */
+export function quizGatesCompletion(quiz: QuizQuestion[], completed: boolean): boolean {
+  return !completed && quiz.length > 0;
+}
+
+/**
+ * The answers a completion sends (one option index per question, in the
+ * quiz's order) once every one is correct; null before.
+ */
+export function passingAnswers(
+  quiz: QuizQuestion[],
+  answers: Record<number, number | undefined>,
+): number[] | null {
+  if (!evaluateQuiz(quiz, answers).passed) return null;
+  return quiz.map((_, i) => answers[i] as number);
+}

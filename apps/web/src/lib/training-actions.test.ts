@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { redirect } from "next/navigation";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -12,7 +14,10 @@ import { StrapiError } from "@/lib/strapi-error";
  *     lesson, or already completed) is "invalid", without a refresh;
  *   - strapi()'s 401 sign-in redirect propagates as the same NEXT_REDIRECT;
  *   - a network error is "unavailable";
- *   - an argument that is no documentId never reaches the cms.
+ *   - an argument that is no documentId never reaches the cms;
+ *   - a quiz lesson's passing answers go with the POST, and the cms's
+ *     refusal of them ("Quiz not passed", issue #70) is "quizFailed";
+ *     answers that are no list of option indexes never reach the cms.
  */
 
 const strapiMock = vi.fn();
@@ -84,5 +89,42 @@ describe("completeLesson", () => {
       code: "invalid",
     });
     expect(strapiMock).not.toHaveBeenCalled();
+  });
+
+  it("sends a quiz lesson's answers with the lesson", async () => {
+    await expect(completeLesson(LESSON, [2, 0])).resolves.toEqual({ ok: true });
+    const [, init] = strapiMock.mock.calls[0] as [string, { body: string }];
+    expect(JSON.parse(init.body)).toEqual({
+      data: { targetDocumentId: LESSON, answers: [2, 0] },
+    });
+  });
+
+  it("answers the cms's quiz refusal as quizFailed, without a refresh", async () => {
+    strapiMock.mockRejectedValue(
+      new StrapiError(400, "Bad Request", '{"error":{"message":"Quiz not passed"}}'),
+    );
+    await expect(completeLesson(LESSON, [0, 0])).resolves.toEqual({
+      ok: false,
+      code: "quizFailed",
+    });
+    expect(refreshMock).not.toHaveBeenCalled();
+  });
+
+  it("never sends answers that are no list of option indexes", async () => {
+    for (const answers of [[-1], [1.5], ["1"], [null], "1,0", { 0: 1 }, Array(101).fill(0)]) {
+      await expect(
+        completeLesson(LESSON, answers as unknown as number[]),
+        JSON.stringify(answers),
+      ).resolves.toEqual({ ok: false, code: "invalid" });
+    }
+    expect(strapiMock).not.toHaveBeenCalled();
+  });
+
+  it("pins the quiz refusal the cms controller sends", () => {
+    const controller = readFileSync(
+      join(__dirname, "../../../cms/src/api/lesson-progress/controllers/lesson-progress.ts"),
+      "utf8",
+    );
+    expect(controller).toContain('ctx.badRequest("Quiz not passed")');
   });
 });

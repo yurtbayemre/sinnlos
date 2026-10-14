@@ -1390,6 +1390,21 @@ systemctl start docker
 >   after the deploy and fade as people reload; the runbooks' error
 >   filters print them, so count them as expected there.
 
+> **Deploying batch 16.1 (fixes from the batch 16 walkthrough)?** One
+> deploy of cms and web with `infra/deploy.sh`, **once batch 16 runs**
+> (`TAG=02c06fc73487`, the rollback target); cms and web must ship in
+> the same run (a quiz lesson does not complete on a mixed pair until
+> both are 16.1; a reload fixes it). No schema, no env, no permission
+> change, no `JWT_SECRET` rotation, nobody signed out. A quiz lesson
+> completes only with the correct answers, on every course (#70); the
+> iPhone tab bar clears the home indicator (#71); `/manage` counts the
+> published items (#78); the admin panel's wiki page form loses its
+> _Revisions_ field and no writer links revisions (#81); the /manage
+> status line says when readers do not see an item (#80); wiki spaces
+> link _My drafts_ (#79); the Users & Permissions roles view is as
+> designed (#82). A rollback to 16 is a retag. Follow
+> [Deploying batch 16.1](#deploying-batch-161-fixes-from-the-batch-16-walkthrough).
+>
 > **Deploying batch 16 (v2 authoring phase 2)?** Documents with uploads,
 > the wiki with drafts, history and restore, the delete trail and #73
 > (the four lane notes below) ship as **one deploy of cms and web** with
@@ -1937,6 +1952,281 @@ is degraded while the new cms boots. For the manual production-safe sequence
 (and rollback), see the
 [update procedure](#74-update-procedure-production-safe).
 
+#### Deploying batch 16.1 (fixes from the batch 16 walkthrough)
+
+Batch 16.1 (release v0.16.1; branch `batch/16.1`: `main` `02c06fc` plus
+the lanes `fix/16.1-cms` and `fix/16.1-web`) fixes what the owner's
+walkthrough of batch 16 found (2026-10-14): issues #78, #70 and #71 (the
+web lane, with the cms's quiz check) and #79 to #82 (the cms lane). It
+ships in **one deploy of cms and web**, **once batch 16 runs** (production
+since 2026-10-14 10:35 CEST, `TAG=02c06fc73487`, the rollback target).
+
+What changes:
+
+- **#78, `/manage`:** every area tile also counts its **published** items
+  (the list's "Published" tab: an item with unpublished changes counts
+  under "Changes pending" there, not here); polls count their published
+  polls, the wiki its published pages. A count whose list has that status
+  tab opens the list filtered to it (`/manage/<area>?status=<status>`);
+  the polls and wiki counts stay plain (no tabs there). Department heads
+  keep their three tiles, editors six. No cms change: every
+  `authoringList` already takes `status=published`.
+- **#70, training:** a lesson with a quiz completes only with every
+  answer correct, **on every course** (the default `confirm` mode
+  included, which used to leave the button free next to a wrong answer).
+  The course's `completionMode` now picks the feedback only: per answer
+  (`confirm`) or one "Check answers" (`quizGate`). The web sends the
+  answers with the completion, and `POST /api/lesson-progresses` checks
+  them against the published lesson's quiz: without them, or with a
+  wrong one, 400 `Quiz not passed` and no receipt. Lessons without a quiz
+  complete by click as before. Receipts written before 16.1 stay valid
+  (nothing is re-checked or deleted); answers are never stored. The
+  Course schema's description, which the admin panel's Content-Type
+  Builder shows, says so too (it read "confirm = Abschluss per Klick"): a
+  description-only change, no column and no schema sync (the stored
+  database schema and its hash stay the same).
+- **#71, phones:** the page sets `viewport-fit=cover`, so iOS reports the
+  safe-area insets the tab bar already padded by: on an iPhone with a
+  home indicator the bar grows by the inset (34 px) and its labels sit
+  above the indicator instead of on it. The page's bottom room, the
+  `/manage` flash and the live-news hint add the inset too; in landscape
+  `<html>` keeps the content out of the notch. Android and desktop are
+  unchanged (every inset is 0 there).
+- **The top bar on phones** (found in the walkthrough, no issue): below
+  640 px _Sign out_, and the demo's _Demo mode_ badge, show only an icon,
+  square like the bar's other buttons, with the label as the accessible
+  name. With the label the controls needed more than a 360 px phone has:
+  the search button slid under the bell (by 14 px with "Abmelden"), and
+  "Demo-Modus" pushed every page 6 px sideways. The dashboard's news grid
+  sizes its phone column to the screen (a long news title had widened the
+  dashboard to 379 px). From 640 px up nothing changes.
+- **#81, the wiki page form in the admin panel.** Lane 16D turned draft &
+  publish off for wiki revisions. The Content Manager shows a draft
+  page's to-many relations to draft rows only while the target has draft
+  & publish, so the form's _Revisions_ field was empty on 15.1 and 15.2;
+  on batch 16 it lists the page draft's revisions, and its add and remove
+  could move a revision to another page or unlink it. From 16.1 the form
+  has **no _Revisions_ field** (the wiki-page schema's
+  `config.attributes.revisions.hidden`, Strapi's own switch for a field
+  the panel neither shows nor writes), and a write that would change a
+  revision link is refused through the content API and in code (400 on
+  `revisions`, the wiki checks), while the admin panel drops the field
+  from a hand-made request, so it answers 200 and changes nothing; a clone
+  of a page (the panel's clone route, or code) no longer takes the
+  source's revisions over, as it did on batch 16. Admin
+  roles that hold Content Manager read on Wiki revision keep it, as since
+  15.1; page history is read in the web.
+- **#80, a document members did not see.** No cms change: a document
+  published to everyone (no department) is stored with `audience` `all`
+  and reaches every member, and demo documents with `audience` NULL do
+  too. In the walkthrough the scheduled withdrawal of step A4 had
+  withdrawn the document at 11:45 and the saves after it were draft
+  saves, so it was not published when the member looked. The /manage
+  status line now says it in words: "Not published: readers do not see
+  it." for an item without a published version, and "Changes not
+  published yet: the published version stays as it is until you publish
+  them." for saved changes of a published one.
+- **#79, a department head's wiki draft.** No cms change: a department
+  head may create pages in any space they can read, the draft is theirs
+  (author; no department), and _My drafts_ lists it and opens it. A space
+  lists its published pages only, and _My drafts_ was linked from the
+  `/wiki` start page alone; every space now links **_My drafts_** next to
+  _New page_.
+- **#82, Users & Permissions roles.** By design, no change: there is no
+  _Wiki-revision_ section (the roles view lists the actions that have a
+  route, and wiki revisions have none since 15.1). The ticked
+  `revision`, `revisions` and `restore` are the _Wiki-page_ section's
+  history actions of batch 16 (the web's History), granted to admin_role,
+  editor, department_head, team_lead and member.
+
+**cms and web in the same `infra/deploy.sh` run.** The 16.1 cms requires
+the answers that only the 16.1 web sends: on a mixed pair (between the
+cms and the web restart, or from a browser tab still on the batch 16
+build) completing a **quiz lesson** fails ("Could not save completion")
+until both are 16.1, and a reload fixes it. Nothing is written in that
+window. Lessons without a quiz complete either way, and a batch 16 cms
+ignores the answers a 16.1 web sends (that mix completes as batch 16
+did). `deploy.sh` builds and starts both together; a rollback retags both
+together (below).
+
+No schema change (the wiki-page schema's `config` and the course schema's
+description add no column), no env, no edge change, **no permission
+change** (the `lesson-progress.create` grant is unchanged), **no
+`JWT_SECRET` rotation**, nobody is signed out. The first cms boot changes
+one Content Manager setting through Strapi's own layout sync: the stored
+edit view of Wiki Page loses `revisions`
+(`strapi_core_store_settings`, key
+`plugin_content_manager_configuration_content_types::api::wiki-page.wiki-page`);
+it logs no line for it.
+
+Set `COMPOSE` and `psql_db` as in
+[Deploying batch 16](#deploying-batch-16-v2-authoring-phase-2-documents-with-uploads-the-wiki).
+
+**Before the deploy** (read-only)
+
+1. **Batch 16 runs, and its images are the rollback target:**
+
+   ```bash
+   cat .git/sinnlos-deploy/infra.state
+   B16_TAG="$(sed -n 's/^TAG=//p' .git/sinnlos-deploy/infra.state)"
+   echo "${B16_TAG}"
+   docker image inspect --format '{{.Id}}' "infra-cms:${B16_TAG}" "infra-web:${B16_TAG}"
+   ```
+
+   `TAG=02c06fc73487` (batch 16's merge commit), `LIVE_SMOKE=passed`, both
+   images exist. Keep `B16_TAG` in this shell for the rollback.
+
+2. **A clean checkout, fast-forwarded to the batch 16.1 merge:** as step 2
+   of batch 16 (`git status --short` empty, `git merge --ff-only`, the
+   `git clean -n -d` dry run prints nothing).
+
+3. **The preflight and the plan:** `infra/deploy.sh --check` (`Preflight
+   OK`, `wiki revisions: no draft rows`) and `infra/deploy.sh --dry-run`
+   (`lock: free`, the batch 16.1 commit, its CI result, the backup line,
+   `last-known-good: infra-{web,cms}:<B16_TAG>`, `live-smoke: run`, **no**
+   `MANDATORY` line).
+
+4. **The permission diff and the form's layout:**
+
+   ```bash
+   psql_db -X < infra/diagnostics/prod-perm-diff.sql
+   psql_db -X -c "SELECT (value::jsonb -> 'layouts' -> 'edit')::text LIKE '%\"revisions\"%' AS revisions_on_form FROM strapi_core_store_settings WHERE key = 'plugin_content_manager_configuration_content_types::api::wiki-page.wiki-page'"
+   ```
+
+   Only the two informational `authenticated` rows (16.1 changes no
+   grant), and `revisions_on_form` `t`.
+
+**Deploy** (the owner's go in the VPS session): `infra/deploy.sh` as
+`bigemo`: lock, clean checkout, CI line, `wiki revisions: no draft rows`,
+backup, last-known-good `<B16_TAG>` kept, both images built (both change),
+`up -d --no-build`, `Smoke check OK`, live-smoke passed, `Recording
+infra-{web,cms}:<batch 16.1 sha12>`, exit 0. A failure prints the
+rollback to `<B16_TAG>` with no `MANDATORY` step: report it.
+
+**After the deploy** (read-only, then in a browser)
+
+5. **The state and the boot lines:**
+
+   ```bash
+   cat .git/sinnlos-deploy/infra.state
+   "${COMPOSE[@]}" logs --since 30m cms | grep -E '\[(bootstrap|admin-permissions|revision-dp|revision-backfill)\]|Strapi started'
+   ```
+
+   The state names the batch 16.1 commit (`LIVE_SMOKE=passed`).
+   `[bootstrap] permission drift: none (report-only check of 155 managed
+   actions)` as on batch 16; **no** `granted`, `revoked`,
+   `[admin-permissions]`, `[revision-dp]` or `[revision-backfill]` line
+   (the backfill writes nothing on a second boot); `Strapi started
+   successfully`, then the `[cron] scheduled-publisher` line every
+   minute. The error filter of batch 16 step 6 prints only the expected
+   lines (plus, right after the restart, the web's `Failed to find Server
+   Action` lines of tabs opened before it).
+
+6. **The permission diff and the layout** (step 4's two commands): the
+   two informational rows, and `revisions_on_form` `f`.
+
+7. **The viewport (#71):**
+
+   ```bash
+   curl -s https://sinnlos.yurtbay.dev/sign-in | grep -o '<meta name="viewport"[^>]*>'
+   ```
+
+   prints `content="width=device-width, initial-scale=1, viewport-fit=cover"`.
+
+8. **In a browser (the owner):**
+   - **Admin panel, as a super admin (#81, #82):** a wiki page's form has
+     no _Revisions_ field, and _Save_ and _Publish_ work; the Content
+     Manager lists no _Wiki Revision_. Settings → Administration panel →
+     Roles: the role editor does not list Wiki revision (Strapi leaves
+     hidden types out); the Wiki Page row's field list still names
+     `revisions`, the page's relation field, which the panel no longer
+     shows or writes: not a grant on revisions. Settings → Users &
+     Permissions plugin → Roles: no _Wiki-revision_ section; under
+     _Wiki-page_, `revision`, `revisions` and `restore` are ticked for
+     admin_role, editor, department_head, team_lead and member (the
+     page history), not for guest, authenticated or public.
+     Content-Type Builder → Course: the description says that
+     completionMode picks the quiz's feedback only and that both modes
+     need every answer right.
+   - **`/manage`, as an editor, then as a department head (#78):** six
+     tiles, each with a "Published" count; "Published" on announcements,
+     events, quick links and documents opens the list on its Published
+     tab with the same number of rows. As a department head: three
+     tiles, their department's counts.
+   - **Documents, as an editor, then as a member (`casey.jones`) (#80):**
+     _New document_ with no department (everyone), a PDF, _Save draft_:
+     the status line says "Not published: readers do not see it.";
+     _Publish_; the member's `/documents` lists it and its link starts
+     with `/uploads/`. **Check the member's list before any withdrawal**:
+     a withdrawal unpublishes the document. As the editor, _Replace the
+     file_ and _Save draft_: "Changes not published yet: the published
+     version stays as it is until you publish them.", and the member
+     still gets the old file; _Save and publish_ hands out the new one.
+     _Schedule…_ a withdrawal a few minutes ahead: once it has run, a
+     reload shows _Draft_ with "Not published …", and the member's list
+     no longer has it; _Publish_ brings it back.
+   - **Wiki, as the Finance head (`morgan.brooks`) (#79):** open any space
+     you can read (another department's too): _New page_ and _My drafts_
+     are there; a page saved with _Save draft_ is not in the space's list
+     (published pages only) but in _My drafts_, and opens in the editor
+     from there.
+   - **Training, as a test member on a course with a quiz lesson (#70)**
+     (a `confirm` course if there is one): the lesson's "Complete lesson"
+     is locked; a wrong answer says "Not quite — try again" and keeps it
+     locked; all answers right unlocks it, and the completion saves.
+     Lessons completed before the deploy still show as completed.
+   - **On an iPhone (#71)** (Safari, scrolled so the toolbar collapses):
+     the tab labels sit above the home indicator; the end of a long page
+     (the dashboard) stays readable above the bar; landscape shows the
+     sidebar clear of the notch. On an Android phone the bar looks as
+     before.
+   - **The top bar on a phone** (or a window about 360 px wide), signed
+     in, in German: search, bell, theme, language, avatar and a sign-out
+     icon side by side without overlap; the icon signs out. Neither the
+     dashboard nor any other page scrolls sideways. A wide window shows
+     _Abmelden_ as before.
+
+9. **+15 and +60 minutes:** no new error types, no restarts, no 5xx, as
+   for batch 16.
+
+**Release note:** A training lesson with a quiz completes only when every
+answer is right, on every course. On iPhones the bottom tab bar sits above
+the home indicator. `/manage` counts each area's published items and links
+to them. The admin panel's wiki page form no longer shows a Revisions
+field (page history is in the wiki's History). The /manage forms say in
+words when readers do not see an item yet, or still see its published
+version. Every wiki space links _My drafts_. On phones the top bar's Sign
+out is an icon, and the bar fits the screen.
+
+**Rollback** (the owner's decision only; to the batch 16 images,
+`<B16_TAG>` = `02c06fc73487`)
+
+No database step and **no `JWT_SECRET` rotation**. Retag both images
+(`B16_TAG` from step 1) and start them in one command, so no mixed pair
+stays up:
+
+```bash
+docker tag "infra-web:${B16_TAG}" infra-web:latest
+docker tag "infra-cms:${B16_TAG}" infra-cms:latest
+"${COMPOSE[@]}" up -d --no-build web cms
+```
+
+The batch 16 boot logs the same drift line and no `granted`/`revoked`
+line; the permission diff stays at the two informational rows. 16.1 writes
+nothing batch 16 cannot read: receipts keep their shape, and answers are
+never stored. The wiki page form keeps no _Revisions_ field: the stored
+layout stays without the field, because Strapi's layout sync re-adds only
+attributes it has never seen (`@strapi/content-manager` 5.57
+`services/utils/configuration/layouts.js` `syncLayouts`; checked on the
+integration harness), but batch 16 would write revision links again if
+someone put the field back through _Configure the view_. A rollback
+reopens #70 (quiz lessons complete by click again on `confirm` courses,
+and without answers through the API) and puts the iPhone tab bar back on
+the home indicator; the published counts, the status line texts and the
+spaces' _My drafts_ link go away, and the phone top bar shows its labels
+again. The roll-forward is a normal
+`infra/deploy.sh`.
+
 #### Deploying batch 16 (v2 authoring phase 2: documents with uploads, the wiki)
 
 Batch 16 (branch `batch/16`: `main` `490d82a` plus the four lanes of plan
@@ -2240,9 +2530,15 @@ report it; running it is the owner's decision (below).
       accepted; setting a wiki page's parent to its own child is refused
       ("A page cannot be placed below itself or one of its subpages");
       unpublishing a space that has pages is refused; Wiki revision is
-      still not listed (since 15.1), and the wiki page form keeps its
-      empty _Revisions_ field, which lists nothing and links nothing (as
-      on 15.1 and 15.2).
+      still not listed (since 15.1). **Corrected after the deploy (issue
+      #81):** the wiki page form's _Revisions_ field is not empty on batch
+      16. Wiki revisions lost draft & publish (lane 16D), and the field,
+      which on 15.1 and 15.2 showed only a draft page's draft revisions
+      (there were none), now lists the draft's revisions, and its add and
+      remove could move a revision to another page or unlink it. Batch
+      16.1 takes the field out of the form and refuses revision links
+      from every writer: see
+      [Deploying batch 16.1](#deploying-batch-161-fixes-from-the-batch-16-walkthrough).
 
 11. **The /manage log lines:**
     `"${COMPOSE[@]}" logs --since 30m web | grep -E '\[manage-[a-zA-Z]+\]'`.
@@ -3473,9 +3769,12 @@ in two places, both grants: the users-permissions sync deletes the 18
 anyway). Strapi's own admin-permission cleanup deletes most of those; it
 pages while it deletes and can skip rows once there are more than 200, so a
 new boot step (`bootstrap/hidden-type-permissions.ts`) removes the rest. A
-rollback brings the 18 back, not the admin-role rows; nobody needs those. To take read away from an admin
-role as well, untick Wiki revision's Read in Settings → Administration
-panel → Roles (super admins always keep it).
+rollback brings the 18 back, not the admin-role rows; nobody needs those.
+The admin roles keep their read rows (decision 06 question 9). The role
+editor in Settings → Administration panel → Roles cannot take them away:
+Strapi leaves a type the Content Manager hides out of it (`@strapi/admin`
+5.57 `services/permission/sections-builder/handlers.js`), so Wiki
+revision is not listed there at all (corrected 2026-10-14, issue #81).
 
 Set these on the host, in the checkout, for the checks below:
 
@@ -3611,10 +3910,15 @@ it; running it is the owner's decision (below).
 8. **In a browser (the owner):** the admin panel's Content Manager lists
    no _Wiki Revision_; a wiki page still opens and saves there (each body
    change still writes a revision, which nobody reads through the API); in
-   Settings → Administration panel → Roles, the Editor and Author roles
-   show only Read for Wiki revision, if anything; in Settings →
-   Users & Permissions plugin → Roles, no role has a _Wiki-revision_ action
-   ticked. As a member, `/wiki` and a page look as before.
+   Settings → Administration panel → Roles, the role editor lists no Wiki
+   revision (a hidden type; the Editor and Author roles' read rows are
+   what step 6's query shows), while the Wiki Page row's field list keeps
+   `revisions`, the page's relation field, ticked like every other field:
+   that is not a grant on revisions; in Settings → Users & Permissions
+   plugin → Roles, there is no _Wiki-revision_ section (the view lists the
+   actions that have a route, and the type has none). As a member,
+   `/wiki` and a page look as before. (Wording corrected 2026-10-14,
+   issues #81 and #82.)
 
 9. **+15 and +60 minutes:** no new error types in the cms and web logs,
    no restarts (`docker inspect -f '{{.RestartCount}}' infra-cms-1

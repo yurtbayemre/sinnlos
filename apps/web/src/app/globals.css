@@ -85,6 +85,15 @@
   * {
     @apply border-border;
   }
+  /* viewport-fit=cover (app/layout.tsx, issue #71): the side insets of a
+     landscape notch keep the content where the letterboxing kept it. On
+     <html>, not <body>: a Radix dialog's scroll lock rewrites the body's
+     padding while it is open (react-remove-scroll-bar), and the page
+     behind it would slide under the notch. */
+  html {
+    padding-left: env(safe-area-inset-left);
+    padding-right: env(safe-area-inset-right);
+  }
   body {
     @apply bg-background text-foreground antialiased;
     font-feature-settings:

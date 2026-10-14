@@ -54,7 +54,7 @@ export async function LatestNews({ news }: { news: LatestNewsView }) {
           hint={tDashboard("noAnnouncementsHint")}
         />
       ) : (
-        <div className="grid gap-4 lg:grid-cols-5">
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-5">
           <AnnouncementCard
             variant="featured"
             item={featured}
