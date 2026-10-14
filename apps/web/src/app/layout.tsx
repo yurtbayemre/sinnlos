@@ -21,7 +21,7 @@ export const metadata: Metadata = {
  * env(safe-area-inset-*) as 0, so the phone tab bar's bottom inset never
  * applied and its entries sat on the home indicator. With it the page
  * draws edge to edge: the tab bar, the main column and the bottom-anchored
- * messages add the bottom inset, and the body the side insets of a
+ * messages add the bottom inset, and <html> the side insets of a
  * landscape notch (globals.css). Every inset is 0 on a device without one.
  */
 export const viewport: Viewport = {
