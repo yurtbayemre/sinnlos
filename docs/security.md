@@ -413,7 +413,15 @@ letters:
   it deletes and can skip rows). An admin role keeps the read it holds (a
   revision opens read-only by its URL); the panel is the moderators' tool,
   which shows every draft anyway, and decision 06 lets moderators read
-  history. Untick it per admin role to take it away.
+  history. The role editor does not list hidden types (`@strapi/admin`
+  5.57 leaves them out), so it cannot untick that read; the `revisions`
+  it lists under Wiki Page is the page's relation field, not a grant on
+  revisions. Since batch 16.1 (issue #81) the wiki page form has no
+  _Revisions_ field (the schema's `config.attributes.revisions.hidden`:
+  the panel neither shows nor writes it), and the wiki checks refuse a
+  write that would link or unlink a revision, for every writer. Batch
+  16 had made the field list the draft's revisions (draft & publish off,
+  lane 16D), and its add and remove could move one to another page.
 - **Revocations must be listed.** The boot sync only ever adds rows, so
   removing an entry from the matrix revokes nothing on an existing
   database: obsolete pairs go into `REVOKED_PERMISSIONS`, which must stay
@@ -874,7 +882,9 @@ writers all pass them, and the cms refuses to boot when
   published version). `infra/diagnostics/wiki-parent-cycles.sql` lists loops,
   cross-space parents and pages without a space, read-only. The page slug
   `new` and the space slug `drafts` are refused for every writer (the
-  web's routes use them as words).
+  web's routes use them as words). A page write whose `revisions` would
+  change a link is refused (`details.keys: ["revisions"]`, batch 16.1):
+  only the lifecycle links revisions.
 - **Publish readiness** (`utils/publish-readiness.ts`): a publish of a
   scheduled type needs the fields the published validation requires, and
   a lesson's course and a wiki page's parent must be published; a publish
