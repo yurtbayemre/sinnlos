@@ -139,7 +139,7 @@ async function complete(body: unknown, progress?: Row[]) {
   return s;
 }
 
-const created = (calls: { op: string }[]) => calls.filter((c) => c.op === "create");
+const created = <C extends { op: string }>(calls: C[]) => calls.filter((c) => c.op === "create");
 
 describe("lesson-progress create: target rules (S09)", () => {
   it("records a published lesson of a published course, for the caller", async () => {
@@ -230,7 +230,7 @@ describe("lesson-progress create: a quiz lesson needs the correct answers (#70)"
     });
     expect(ctx.badRequest).not.toHaveBeenCalled();
     // The answers are checked, never stored.
-    expect(calls.filter((c) => c.op === "create").map((c) => c.params)).toEqual([
+    expect(created(calls).map((c) => c.params)).toEqual([
       {
         data: {
           user: MEMBER.id,

@@ -200,49 +200,44 @@ export default async function ManagePage() {
                       </CardTitle>
                       <CardDescription>{t(`areas.${area}.description`)}</CardDescription>
                     </CardHeader>
-                    {countedFilters(area).length > 0 && (
-                      <CardContent>
-                        <dl className="flex flex-wrap gap-x-5 gap-y-1 text-sm">
-                          {countedFilters(area).map((status) => {
-                            const count = counts[status];
-                            const href = countHref(area, status);
-                            const label = t(`counts.${status}`);
-                            // A count with a list tab opens the list filtered to it
-                            // (issue #78): the label is the link, stretched over the
-                            // pair and above the card's own link.
-                            return (
-                              <div
-                                key={status}
-                                className={cn(
-                                  "flex items-baseline gap-1.5",
-                                  href && "relative z-10",
+                    <CardContent>
+                      <dl className="flex flex-wrap gap-x-5 gap-y-1 text-sm">
+                        {countedFilters(area).map((status) => {
+                          const count = counts[status];
+                          const href = countHref(area, status);
+                          const label = t(`counts.${status}`);
+                          // A count with a list tab opens the list filtered to it
+                          // (issue #78): the label is the link, stretched over the
+                          // pair and above the card's own link.
+                          return (
+                            <div
+                              key={status}
+                              className={cn("flex items-baseline gap-1.5", href && "relative z-10")}
+                            >
+                              <dt className="text-muted-foreground">
+                                {href ? (
+                                  <Link
+                                    href={href}
+                                    className="outline-none after:absolute after:-inset-x-1 after:-inset-y-0.5 after:rounded-md hover:text-foreground hover:underline focus-visible:after:ring-2 focus-visible:after:ring-ring"
+                                  >
+                                    {label}
+                                  </Link>
+                                ) : (
+                                  label
                                 )}
-                              >
-                                <dt className="text-muted-foreground">
-                                  {href ? (
-                                    <Link
-                                      href={href}
-                                      className="outline-none after:absolute after:-inset-x-1 after:-inset-y-0.5 after:rounded-md hover:text-foreground hover:underline focus-visible:after:ring-2 focus-visible:after:ring-ring"
-                                    >
-                                      {label}
-                                    </Link>
-                                  ) : (
-                                    label
-                                  )}
-                                </dt>
-                                <dd className="font-semibold tabular-nums">
-                                  {count ? (
-                                    <StatCount count={count} unknownLabel={tCommon("unknown")} />
-                                  ) : (
-                                    "–"
-                                  )}
-                                </dd>
-                              </div>
-                            );
-                          })}
-                        </dl>
-                      </CardContent>
-                    )}
+                              </dt>
+                              <dd className="font-semibold tabular-nums">
+                                {count ? (
+                                  <StatCount count={count} unknownLabel={tCommon("unknown")} />
+                                ) : (
+                                  "–"
+                                )}
+                              </dd>
+                            </div>
+                          );
+                        })}
+                      </dl>
+                    </CardContent>
                   </Card>
                 );
               })}

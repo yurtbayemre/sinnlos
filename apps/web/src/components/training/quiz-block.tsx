@@ -43,15 +43,19 @@ export function QuizBlock({
 
   const evaluation = evaluateQuiz(quiz, answers);
   const gating = onPassedChange !== undefined;
+  const instantGate = mode === "instant" && gating;
 
   const pick = (qi: number, oi: number) => {
     if (passed) return;
     const next = { ...answers, [qi]: oi };
     setAnswers(next);
-    // A changed answer invalidates the last batch verdict.
-    if (mode === "check") setChecked(false);
-    // Instant feedback: the gate opens with the last right pick, closes with a wrong one.
-    else onPassedChange?.(passingAnswers(quiz, next));
+    if (mode === "check") {
+      // A changed answer invalidates the last batch verdict.
+      setChecked(false);
+    } else {
+      // Instant feedback: the gate opens with the last right pick, closes with a wrong one.
+      onPassedChange?.(passingAnswers(quiz, next));
+    }
   };
 
   const check = () => {
@@ -74,7 +78,7 @@ export function QuizBlock({
       {mode === "check" && !passed && (
         <p className="text-xs text-muted-foreground">{t("quizGateHint")}</p>
       )}
-      {mode === "instant" && gating && !evaluation.passed && (
+      {instantGate && !evaluation.passed && (
         <p className="text-xs text-muted-foreground">{t("quizInstantHint")}</p>
       )}
       {quiz.map((q, qi) => {
@@ -141,7 +145,7 @@ export function QuizBlock({
           </div>
         );
       })}
-      {mode === "instant" && gating && evaluation.passed && (
+      {instantGate && evaluation.passed && (
         <p className="inline-flex items-center gap-1.5 pt-1 text-sm font-medium text-emerald-700 dark:text-emerald-400">
           <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
           {t("quizAllCorrect")}

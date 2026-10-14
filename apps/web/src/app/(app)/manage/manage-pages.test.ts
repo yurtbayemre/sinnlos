@@ -67,6 +67,12 @@ function elements(node: ReactNode): Array<{ type: unknown; props: Record<string,
 }
 const hrefs = (tree: ReturnType<typeof elements>) =>
   tree.map((el) => el.props.href).filter((href): href is string => typeof href === "string");
+/** The tiles' own links: a count's link carries its `?status=` (#78). */
+const tileHrefs = (tree: ReturnType<typeof elements>) =>
+  hrefs(tree).filter((href) => href.startsWith("/manage/") && !href.includes("?"));
+/** The paths or links of the published counts, sorted (#78). */
+const publishedOnly = (paths: string[]) =>
+  paths.filter((path) => path.endsWith("?status=published")).sort();
 
 /** The path of Next's redirect error, or null. */
 async function redirectOf(render: () => unknown): Promise<string | null> {
@@ -115,11 +121,7 @@ describe("the /manage shell", () => {
 describe("the landing", () => {
   it("an editor: the six area tiles, no reports and no Strapi links", async () => {
     const tree = elements(await ManagePage());
-    expect(
-      hrefs(tree)
-        .filter((href) => href.startsWith("/manage/") && !href.includes("?"))
-        .sort(),
-    ).toEqual(
+    expect(tileHrefs(tree).sort()).toEqual(
       [
         "/manage/announcements",
         "/manage/events",
@@ -145,23 +147,22 @@ describe("the landing", () => {
   it("a department head: announcements, events and documents only (§L1), never the wiki", async () => {
     viewerRef.current = viewer("department_head", ENG);
     const tree = elements(await ManagePage());
-    const areas = hrefs(tree).filter((href) => href.startsWith("/manage/") && !href.includes("?"));
-    expect(areas.sort()).toEqual(["/manage/announcements", "/manage/documents", "/manage/events"]);
+    expect(tileHrefs(tree).sort()).toEqual([
+      "/manage/announcements",
+      "/manage/documents",
+      "/manage/events",
+    ]);
     // Their counts come from their own lists; the wiki's page list is never asked.
     const paths = strapiMock.mock.calls.map(([path]) => String(path));
     expect(paths.some((path) => path.startsWith("/api/documents/authoring"))).toBe(true);
     expect(paths.some((path) => path.startsWith("/api/wiki-"))).toBe(false);
     // Their published counts, one per area, each opening that list's tab (#78).
-    expect(paths.filter((path) => path.endsWith("?status=published")).sort()).toEqual([
+    expect(publishedOnly(paths)).toEqual([
       "/api/announcements/authoring?status=published",
       "/api/documents/authoring?status=published",
       "/api/events/authoring?status=published",
     ]);
-    expect(
-      hrefs(tree)
-        .filter((href) => href.endsWith("?status=published"))
-        .sort(),
-    ).toEqual([
+    expect(publishedOnly(hrefs(tree))).toEqual([
       "/manage/announcements?status=published",
       "/manage/documents?status=published",
       "/manage/events?status=published",
@@ -183,7 +184,7 @@ describe("the landing", () => {
     );
     const tree = elements(await ManagePage());
     const paths = strapiMock.mock.calls.map(([path]) => String(path));
-    expect(paths.filter((path) => path.endsWith("?status=published")).sort()).toEqual(
+    expect(publishedOnly(paths)).toEqual(
       [
         "/api/announcements/authoring?status=published",
         "/api/documents/authoring?status=published",
@@ -193,13 +194,13 @@ describe("the landing", () => {
         "/api/wiki-pages/authoring?status=published",
       ].sort(),
     );
-    const counts = tree.filter((el) => el.type === StatCount);
-    expect(counts.filter((el) => (el.props.count as { value: number }).value === 5)).toHaveLength(
-      6,
+    const publishedCounts = tree.filter(
+      (el) => el.type === StatCount && (el.props.count as { value: number }).value === 5,
     );
+    expect(publishedCounts).toHaveLength(6);
     // Polls have no status tabs and the wiki lists spaces: those counts are no link.
     const countLinks = hrefs(tree).filter((href) => href.includes("?status="));
-    expect(countLinks.filter((href) => href.endsWith("?status=published")).sort()).toEqual([
+    expect(publishedOnly(countLinks)).toEqual([
       "/manage/announcements?status=published",
       "/manage/documents?status=published",
       "/manage/events?status=published",
