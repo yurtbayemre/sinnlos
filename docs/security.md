@@ -883,8 +883,9 @@ writers all pass them, and the cms refuses to boot when
   cross-space parents and pages without a space, read-only. The page slug
   `new` and the space slug `drafts` are refused for every writer (the
   web's routes use them as words). A page write whose `revisions` would
-  change a link is refused (`details.keys: ["revisions"]`, batch 16.1):
-  only the lifecycle links revisions.
+  change a link is refused (`details.keys: ["revisions"]`, batch 16.1),
+  and a clone gets no revisions (Strapi would copy the source's, moving
+  them): only the lifecycle links revisions.
 - **Publish readiness** (`utils/publish-readiness.ts`): a publish of a
   scheduled type needs the fields the published validation requires, and
   a lesson's course and a wiki page's parent must be published; a publish

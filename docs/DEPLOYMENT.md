@@ -1963,7 +1963,9 @@ integration adds their notes here.
   has **no _Revisions_ field** (the wiki-page schema's
   `config.attributes.revisions.hidden`, Strapi's own switch for a field
   the panel neither shows nor writes), and a write that would change a
-  revision link is refused for every writer (the wiki checks). Admin
+  revision link is refused for every writer (the wiki checks); a clone
+  of a page (the panel's clone route, or code) no longer takes the
+  source's revisions over, as it did on batch 16. Admin
   roles that hold Content Manager read on Wiki revision keep it, as since
   15.1; page history is read in the web.
 - **#80, a document members did not see.** No cms change: a document
