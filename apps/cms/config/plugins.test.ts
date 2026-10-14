@@ -1,5 +1,9 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import pluginsConfig, { smtpTransportSecurity } from "./plugins";
+
+import { requireFromPackage, strapiPackageDir } from "../src/test/sqlite-engine.test.helper";
+import pluginsConfig, { OFFICE_MACRO_DENIED_TYPES, smtpTransportSecurity } from "./plugins";
 
 /**
  * The digest mailer's SMTP transport (roadmap B05): port 465 is implicit
@@ -58,5 +62,78 @@ describe("config/plugins.ts SMTP transport (B05)", () => {
       user: "noreply@example.com",
       pass: "app-pass",
     });
+  });
+});
+
+describe("config/plugins.ts upload backstop (decision 06 §E1, amendment 2)", () => {
+  const security = () => pluginsConfig({ env: makeEnv() }).upload.config.security;
+
+  /** @strapi/upload's matchesMimePattern: lower-cased, `*` as `.*` (pinned in upload-validation.contract.test.ts). */
+  const denied = (mime: string) =>
+    security().deniedTypes.some((pattern: string) => {
+      const p = pattern.toLowerCase();
+      return p.includes("*")
+        ? new RegExp(`^${p.replace(/\*/g, ".*")}$`).test(mime.toLowerCase())
+        : p === mime.toLowerCase();
+    });
+
+  const uploadDir = () => strapiPackageDir("@strapi/upload");
+  const mimeTypes = () =>
+    requireFromPackage<{ types: Record<string, string> }>(uploadDir(), "mime-types").types;
+  /** Every Office mime file-type 21.3.4 can answer (core.js's mapping table). */
+  const fileTypeMimes = (): string[] => {
+    const core = readFileSync(join(uploadDir(), "..", "..", "file-type", "core.js"), "utf8");
+    return [
+      ...new Set(
+        core.match(
+          /application\/vnd\.(?:ms-(?:word|excel|powerpoint)|openxmlformats-officedocument)[a-z0-9.+-]*/gi,
+        ) ?? [],
+      ),
+    ];
+  };
+  const OFFICE_EXTENSIONS = [
+    "docx",
+    "docm",
+    "dotx",
+    "dotm",
+    "xlsx",
+    "xlsm",
+    "xlsb",
+    "xltx",
+    "xltm",
+    "xlam",
+    "pptx",
+    "pptm",
+    "potx",
+    "potm",
+    "ppsx",
+    "ppsm",
+    "ppam",
+    "sldm",
+    "sldx",
+  ];
+
+  it("keeps the twelve earlier types and adds the three macro patterns", () => {
+    expect(security().deniedTypes).toHaveLength(15);
+    expect(security().deniedTypes.slice(-3)).toEqual([...OFFICE_MACRO_DENIED_TYPES]);
+    expect(security().deniedTypes).toContain("image/svg+xml");
+  });
+
+  it("matches every macro-enabled Office mime of mime-types and file-type", () => {
+    const macro = [...OFFICE_EXTENSIONS.map((ext) => mimeTypes()[ext]), ...fileTypeMimes()].filter(
+      (mime) => typeof mime === "string" && /macroenabled/i.test(mime),
+    );
+    expect(macro.length).toBeGreaterThanOrEqual(10);
+    for (const mime of macro) expect(denied(mime), mime).toBe(true);
+  });
+
+  it("matches none of the clean Office mimes, PDF or the images", () => {
+    const clean = [...OFFICE_EXTENSIONS.map((ext) => mimeTypes()[ext]), ...fileTypeMimes()].filter(
+      (mime) => typeof mime === "string" && !/macroenabled/i.test(mime),
+    );
+    expect(clean).toContain("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    for (const mime of [...clean, "application/pdf", "image/jpeg", "image/png", "image/webp"]) {
+      expect(denied(mime), mime).toBe(false);
+    }
   });
 });

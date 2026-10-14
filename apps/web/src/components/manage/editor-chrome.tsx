@@ -91,15 +91,18 @@ export function EditorStatus({
 /** The failure of the last action, above the actions; it takes the focus. */
 export function FormAlert({
   area,
+  scope,
   failure,
   alertRef,
 }: {
   area: ManageArea;
+  /** The form's own field texts (useFieldErrorText). */
+  scope?: string;
   failure: FormFailure | null;
   alertRef: RefObject<HTMLDivElement | null>;
 }) {
   const t = useTranslations("manage.common.failure");
-  const fieldText = useFieldErrorText(area);
+  const fieldText = useFieldErrorText(area, scope);
   if (!failure) return null;
   const text = failure.kind === "code" ? fieldText("_form", failure.code) : t(failure.code);
   return (
@@ -232,8 +235,12 @@ function CancelLabel() {
 }
 
 /** The error text under a field, from the editor's field errors. */
-export function useFieldError(area: ManageArea, fieldErrors: Readonly<Record<string, string>>) {
-  const text = useFieldErrorText(area);
+export function useFieldError(
+  area: ManageArea,
+  fieldErrors: Readonly<Record<string, string>>,
+  scope?: string,
+) {
+  const text = useFieldErrorText(area, scope);
   return (field: string): string | undefined => {
     const code = fieldErrors[field];
     return code ? text(field, code) : undefined;

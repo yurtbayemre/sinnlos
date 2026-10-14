@@ -386,9 +386,11 @@ letters:
   `REVOKED_PERMISSIONS`); `routes.matrix.test.ts` pins every content-API
   route to its policies and cross-checks the grants against the routes that
   exist.
-- **Nobody reads wiki revisions** (batch 15.1). A revision is the page
-  body before an edit, so whenever a page's draft differs from its
-  published version it holds unpublished text. Up to batch 15 every staff
+- **Nobody reads wiki revisions** (batch 15.1). Since batch 16 a revision
+  records a page's draft after each save (and a baseline of its content at
+  an upgrade; older rows hold the body before an edit), so whenever a
+  page's draft differs from its published version it holds unpublished
+  text. Up to batch 15 every staff
   role and `authenticated` read them (`/api/wiki-revisions`,
   `populate=revisions`, filters through the relation). Now
   `/api/wiki-revisions` has no route at all (404), no role holds any of its
@@ -398,8 +400,11 @@ letters:
   `wiki-revision.find` grant Strapi drops a populate of it and refuses a
   root filter or sort with 400, and the relation guard refuses the filter
   and sort inside a populate, which Strapi does not check
-  ([Global guards](#global-guards)). The lifecycle still writes revisions;
-  the web reads none. The type is hidden from the Content Manager and the
+  ([Global guards](#global-guards)). The lifecycle writes revisions in the
+  save's transaction; the only reader is `utils/wiki-revisions.ts`, which
+  the wiki-page history actions call (lane 16B: the page's editors and
+  moderators, fixed projections, a revision of another page is a 404).
+  The web reads none otherwise. The type is hidden from the Content Manager and the
   Content-Type Builder, and nobody, super admins included, can create,
   change, publish or delete a revision there: the Content Manager
   registers those actions for displayed types only, and every boot
@@ -471,9 +476,10 @@ route in `apps/cms/src/api/*/routes/*.ts`.
 ### Write-side guards
 
 - `can-author` (batch 15, decision 06 §B2): create and update of
-  announcements, events, quick links, documents and polls, and their
-  authoring actions (publish, unpublish, discard-draft, the `/authoring`
-  list and the `/:id/editable` form read), configured per route with
+  announcements, events, quick links, documents, polls and (batch 16) wiki
+  spaces, and their authoring actions (publish, unpublish, discard-draft,
+  the `/authoring` list and the `/:id/editable` form read), configured per
+  route with
   `{ uid }` (and the action's `intent`). `admin_role` and `editor` are the
   `moderator` class: **no bypass**, their payloads go through the
   allowlist below like everyone's. A `department_head` with a
@@ -492,22 +498,33 @@ route in `apps/cms/src/api/*/routes/*.ts`.
   the lock, so a caller whose class went away in between (a moderator
   widened the item, the department was deleted, the head was demoted)
   gets 403/404, never 412, and never the new revision.
-- `is-admin-or-editor`: delete of announcements, events, polls, documents
-  and quick links (with `If-Match`); create, update and delete of wiki
-  spaces; create and delete of departments and teams;
-  wiki page delete; kudos delete; the search-log `summary` route.
+- `is-admin-or-editor`: delete of announcements, events, polls, documents,
+  quick links, wiki spaces and wiki pages (with `If-Match`; a space with
+  pages answers 400 `spaceNotEmpty`); create and delete of departments and
+  teams; kudos delete; the search-log `summary` route.
 - `can-edit-department`: department update only by the `department_head`
   of that department, and only `description` and `color` (`#rrggbb`);
   `admin_role` and `editor` bypass.
 - `can-edit-team`: team update only by the team's lead or the head of its
   department, and only `description`; plain team members get 403;
   `admin_role` and `editor` bypass.
-- `can-edit-wiki`: wiki page create (any non-guest holding the grant, i.e.
-  `department_head` and `team_lead`) only into a space the author can read;
-  update by the page's author, the head of its department or the lead of
-  its team, and only while the page sits in a space the caller can read
-  (403 otherwise); fields limited as described below; `admin_role` and
-  `editor` bypass. A `member` who is not the author gets 403.
+- `can-edit-wiki` (rebuilt in batch 16 on the `can-author` model, kind
+  `row-write-gate`): every wiki-page route but the reads and the delete,
+  configured with `{ uid }` (and the action's `intent`). `admin_role` and
+  `editor` are the `moderator` class: **no bypass** since batch 16, their
+  payloads go through the allowlist's moderator rule. Create (and
+  `createDraft`) by `department_head` and `team_lead` (class `author`)
+  only into a space they can read; every action on a page by its author,
+  the head of its department or the lead of its team, decided on EVERY row
+  of the page (draft and published; `@sinnlos/domain` `classifyWikiEditor`,
+  the rule the web's Edit buttons use) and only while the page sits in a
+  space the caller can read; `unpublish` and the `/authoring` list for
+  moderators only. A refusal is 403 on the generic create/update and the
+  lists, 404 on the page actions. The gate reads the page's revision
+  before its rows and the lock re-classifies on a mismatch, as for
+  `can-author`. A discard of a page without a published row deletes it:
+  only its author or a moderator (404 for the other classes, decided under
+  the lock).
 - `is-classified-author`: ad update and delete only by its author (update:
   `admin_role` bypass only; delete: `admin_role` and `editor` bypass, for
   moderation).
@@ -529,9 +546,9 @@ role class (head, lead, author, moderator, department author, …);
 `apps/cms/src/utils/write-allowlist.ts` decides _what_ that class may send
 (FX07). It is the single place those payload rules live. Since batch 15 it
 also holds the `admin_role`/`editor` payloads on announcements, events,
-quick links, documents and polls (the `moderator` class); the bypass is
-left only on the wiki, department and team gates until batches 16 and 17
-rebuild them.
+quick links, documents and polls (the `moderator` class), since batch 16
+on wiki spaces and wiki pages; the bypass is left only on the department
+and team gates until batch 17 rebuilds them.
 
 The v2 authoring rules (batch 15, decision 06 §B1):
 
@@ -540,10 +557,18 @@ The v2 authoring rules (batch 15, decision 06 §B1):
   Department authors get no `pinned`, `requiresAck`, `ackDeadline`,
   `publishAt` or `unpublishAt`. Never writable by anyone: the targeting
   flags (`audience`, `notifyAudience`, `retargetRequired`), ownership
-  (`author`, `organizer`, `uploadedBy`, `ownerDepartment`), `scheduleError`
-  and, until batch 16, `document.file`. A test walks every schema
-  attribute of the five types: each is a field of some class or listed in
-  `REFUSED_ATTRIBUTES` with its reason.
+  (`author`, `organizer`, `uploadedBy`, `ownerDepartment`, a page's
+  `lastEditor`), `scheduleError`, the derived slugs and the inverse sides
+  (`wiki-space.pages`, `wiki-page.children`, `wiki-page.revisions`). A test
+  walks every schema attribute of the authored types: each is a field of
+  some class or listed in `REFUSED_ATTRIBUTES` with its reason.
+- **Document files** (batch 16): `file` in both document rules, a file row
+  id. A newly attached file must be the caller's own upload (stamped by
+  `POST /api/upload`), carry an allowed stored mime, not be on its way out
+  (tombstoned) and be linked by nothing but this document; keeping the
+  stored file passes unchecked. That check runs in the policy, before the
+  transaction, so it only refuses early: the media claims (Document
+  Service guards, below) check the same under the file row's lock.
 - **Values have codes.** A refused value answers its key in
   `details.keys` and, where the check names a reason, a code in
   `details.codes` (`tooLong`, `invalidInstant`, `invalidUrl`,
@@ -589,13 +614,29 @@ The v2 authoring rules (batch 15, decision 06 §B1):
   revision when stale). A department author's discard of an item without
   a published version answers 400 `neverPublished` instead of deleting it.
 
+The wiki (batch 16, `@sinnlos/domain` `authoring/wiki.ts`):
+
+- Wiki spaces, moderators only: `name`, `icon`, `description`,
+  `visibility` with its target (`visibilityTarget`), `allowedRoles` as role
+  types, `department`, `team`; the slug derived on create; always
+  published.
+- Wiki pages: the author classes write `title`, `body`, `summary`, `tags`,
+  `tocEnabled`, `order` and `parent`, plus `space` on create and the edit
+  note `revisionSummary` on update; moderators also `department`, `team`,
+  `publishAt` and the edit note on create. No class moves a page to
+  another space or edits its slug (both stay in the admin panel). A
+  `parent` must sit in the page's space (for the author classes: a page
+  they can read); a NEW parent below the page answers `parentCycle` early,
+  and the wiki checks refuse every loop a write adds, for every writer.
+- Drafts only through `createDraft`/`saveDraft` (never published) and the
+  history actions with fixed answers; the author classes' generic create
+  and update stay pinned to published.
+
 The FX07 rules of the other gates:
 
 - A department head may write `description` and `color` of their own
   department; a team lead, or the head of the team's department, the
-  team's `description`. Wiki pages: `title`, `body`, `summary`, `tags`,
-  `tocEnabled`, `order` and `parent`, plus `space` on create and
-  `revisionSummary` on update.
+  team's `description`.
 - Everything else (`pages`/`members`/`teams`/`head`/`lead` connects,
   `name`, `slug`, media, `space` on update, `children`, `revisions`,
   `author`, Strapi's own keys) and every refused value answer one generic
@@ -610,10 +651,10 @@ The FX07 rules of the other gates:
   holds on these types, or on any relation into the wiki, skips the
   allowlist, and when a create or update a moderator holds on an authored
   type is not enforced for the `moderator` class (`KNOWN_OPEN_PAYLOADS`
-  lists the wiki, department and team gates that still bypass).
+  lists the department and team gates that still bypass).
 
-The web has no write path for wiki pages, departments or teams; these rules
-govern direct API calls. Department-head and team-lead rights compare
+The web has no write path for departments or teams, and the wiki pages of
+lane 16C arrive after batch 16's cms; these rules govern direct API calls. Department-head and team-lead rights compare
 department and team row ids, which is valid because departments and teams
 have no draft & publish (one row each, stable id). An instance that ran an
 earlier release with org drafts runs the one-time migration first
@@ -699,9 +740,10 @@ In `apps/cms/src/utils/`:
 - `visible-ids.ts` (`loadUserScope`, read once per request and user;
   `visibleWikiSpaceIds`), `target-visibility.ts` (`visibleTargetAnchors`,
   `isTargetVisible`) and `wiki-edit-context.ts` (carries the authenticated
-  editor from the wiki-page controller into the revision lifecycle, so
-  revisions written through the REST API record who edited; edits in the
-  Strapi admin have no such context).
+  editor, the edit note and a restore's source revision from the wiki-page
+  write paths into the revision lifecycle; a save in the Strapi admin
+  records the admin user from the request's admin strategy instead, never
+  from the payload).
 
 ### Request ids
 
@@ -755,7 +797,12 @@ query and output handling, and the other three are global middlewares
   `users-permissions.role` (`author.role`, `space.allowedRoles`,
   `manager.role`), and nobody through `role.permissions`. Relations only,
   as at the root: media, components and scalars are not grant-checked.
-  The web sends no populate filter or sort.
+  **A populate's `sort` follows no relation and no media at all** (batch
+  16): Strapi 5.57 builds such a populate query with a broken alias and
+  answered 500 with an SQL error even for a caller holding the grant, so
+  the guard refuses every one with the same 400, for every caller;
+  scalar sorts inside a populate and root sorts are unchanged. The web
+  sends no populate filter or sort.
 - **Root query-key allowlist** (`utils/rest-query-params.ts`, same wrapper,
   every role): keys outside Strapi's REST parameters (`where`, `orderBy`,
   `select`, `groupBy`, `offset`, …) are dropped before any service sees
@@ -814,11 +861,38 @@ writers all pass them, and the cms refuses to boot when
   who kept it gets 412 with the current revision. Raw writes of guarded
   rows are inventoried by `raw-writers.test.ts`: each takes the lock and
   advances the revision, or only raises a targeting flag.
+- **The wiki checks** (`utils/wiki-checks.ts`, batch 16): every mutating
+  wiki-page and wiki-space action takes ONE structure lock (a reserved
+  revision row), whoever writes (a space publish re-creates its published
+  row from the page links it read first: no page write runs in between). A write that adds a parent link closing a loop is refused
+  (`parentCycle`) and rolled back; only added links are judged, so a loop
+  that already exists blocks no other save and can be repaired. A space
+  that any page links can be neither deleted nor unpublished
+  (`spaceNotEmpty`): the admin panel's unpublish used to drop its pages'
+  space links; a discard of a space's draft is refused when it would take
+  an unpublished page out of the space (Strapi re-links only pages with a
+  published version). `infra/diagnostics/wiki-parent-cycles.sql` lists loops,
+  cross-space parents and pages without a space, read-only. The page slug
+  `new` and the space slug `drafts` are refused for every writer (the
+  web's routes use them as words).
 - **Publish readiness** (`utils/publish-readiness.ts`): a publish of a
   scheduled type needs the fields the published validation requires, and
   a lesson's course and a wiki page's parent must be published; a publish
   that would drop that link anyway is refused and rolled back. This binds
   the admin panel and the scheduler too.
+- **The media claims** (`utils/media-claims.ts`, lane 16A, registered in
+  batch 16): every action on a document locks each file its payload names
+  or the action copies (`FOR UPDATE`, ascending ids, after the document's
+  own revision row and the other locks), refuses one that is gone or
+  being removed, and re-checks a newly linked stamped file under that lock
+  (linked by nothing but this document, the caller's own, an allowed
+  mime); two saves that attach one fresh upload serialise and the second
+  answers `invalid`. A stamped file that no row of the document links
+  after the action (a replace, a publish of a replaced draft, a discard, a
+  delete; web, panel or scheduler) is removed after the commit through
+  `claimAndRemove`. Admin-panel uploads (unstamped) are never claimed nor
+  removed. A unit pin keeps every media field the allowlist accepts tied
+  to this registration.
 - **The audit trail** (`utils/audit.ts`, last of the content middlewares):
   one `audit_events` row per change of a guarded document, written in the
   change's transaction (a failing insert rolls the change back): the
@@ -860,7 +934,7 @@ this is who sees and changes what, per type.
 | `search-log`      | Anonymous by design (term and result count, no user relation), write-only content API; aggregated, admin-only `/api/search-logs/summary`; 90-day retention (03:35 cron).                                                                                                                                                                                                                                                                                                                         |
 | `wiki-space`      | `visibility`: public, role (`allowedRoles`), department or team. Moderators write.                                                                                                                                                                                                                                                                                                                                                                                                               |
 | `wiki-page`       | Inherits its space's visibility. Written as described under `can-edit-wiki` and the write allowlist.                                                                                                                                                                                                                                                                                                                                                                                             |
-| `wiki-revision`   | No route and no grant for any role, and closed as a relation for every caller (batch 15.1): it can hold unpublished draft text. Written by the page lifecycle when an update changes a non-empty body; the editor is recorded for REST edits only. Hidden in the admin panel.                                                                                                                                                                                                                    |
+| `wiki-revision`   | No route and no grant for any role, and closed as a relation for every caller (batch 15.1): it can hold unpublished draft text. Since batch 16 one published row per revision, anchored by `pageDocumentId`, written in the save's transaction after every content change of a page's draft (web editor or panel admin); the boot and `deploy.sh` refuse revision drafts. Read only through the history actions. Hidden in the admin panel.                                                      |
 | _profile_         | `GET`/`PUT /api/me`, the caller's own record. The output is an allowlist (no password hash or tokens; the manager is a summary). `PUT` takes only the whitelisted fields, trims them, answers 400 above 255 characters and accepts `locale` `en` or `de` only. For a user bound to Entra, display name, job title, phone and office location belong to Entra: `PUT` ignores them and both answers list them in `entraManagedFields`. Guests see no digest options, and `PUT` ignores theirs.     |
 | _entra-auth_      | `POST /api/auth/entra/exchange`, server to server only ([above](#microsoft-entra-id)).                                                                                                                                                                                                                                                                                                                                                                                                           |
 
@@ -1028,40 +1102,128 @@ regular relations. In responses about users, the contact fields `email`,
 
 ## Upload hardening
 
-The only granted content-API upload route, `POST /api/upload`
-(marketplace ad photos), is wrapped by `apps/cms/src/extensions/upload/strapi-server.ts`
-on top of the permission grant, with the pure rules in
-`apps/cms/src/utils/upload-guard.ts`. The admin panel's media library uses
-the separate admin routes and is unaffected.
+The only granted content-API upload route, `POST /api/upload` (marketplace
+ad photos, and since batch 16 document files), is wrapped by
+`apps/cms/src/extensions/upload/strapi-server.ts` on top of the permission
+grant, with the pure rules in `apps/cms/src/utils/upload-guard.ts`,
+`upload-zip.ts` and `upload-ooxml.ts` (deep-dive decision 06 §E1, owner
+amendment 2). The admin panel's media library uses the separate admin
+routes: its uploads are bound only by `deniedTypes` (below).
 
-- **Create-only:** the core action's `?id=` replace/update path is rejected
+- **Create-only:** the core action's `?id=` replace/update path answers 403
   (it would let any uploader overwrite arbitrary existing media).
 - **Body allowlist:** the only accepted multipart text field is `fileInfo`.
   Anything else (`ref`/`refId`/`field`, which core would turn into a link
   on _any_ entry, someone else's ad, an avatar, a document, or `path`) is
-  rejected with 400.
-- **At most 4 files per request, 5 MB per file** (with an `fs.stat`
-  fallback when the reported size is missing; never waved through). The
-  limits come from `@sinnlos/domain`, shared with the web form.
-- **Strict image allowlist by magic bytes** of the temp file, not the
-  client-declared mimetype: JPEG, PNG and WebP only. No SVG (stored XSS)
-  and no GIF (decompression-bomb surface), on purpose.
-- **Canonical filename:** the stored name becomes `<stem>.<extension of
-the sniffed type>` (core stores and serves by extension, so a JPEG named
-  `x.pdf` was served as `application/pdf`). A stem core cannot turn into a
-  slug (CJK, emoji or punctuation only) becomes `image`.
+  refused by key. `fileInfo` is checked against core's schema (a malformed
+  one answers 400 `fileInfo`, not core's 500) and its `name` is dropped:
+  core would prefer it over the canonical name.
+- **Two profiles by role.** Moderators (admin_role, editor) and department
+  heads may upload PDF, DOCX, XLSX and PPTX (20 MB, exactly one per
+  request) and images; every other role JPEG, PNG and WebP only (5 MB, at
+  most 4 per request). Images are capped at 5 MB for every role. The size
+  is checked before any byte is read (`fs.stat` when the reported size is
+  missing; never waved through). The table lives in `@sinnlos/domain`
+  (`uploads.ts`), shared with the web's file input.
+- **The format comes from the content**, read from the temp file through
+  one handle (the head, a PDF's or zip's tail, the zip directory, every
+  local header and data descriptor, and `[Content_Types].xml`; never the
+  whole file):
+  - images by magic bytes; no SVG (stored XSS), no GIF (decompression
+    bombs);
+  - a PDF by `%PDF-` at offset 0 **and no zip archive anywhere in the
+    file**: the whole PDF is scanned in 64 KiB reads for an end record whose
+    central directory stands where it says (also behind padding, which some
+    zip readers skip), so a PDF that is also a zip is refused;
+  - DOCX, XLSX and PPTX by the **Office Open XML rule**: a zip in exactly
+    one layout (no prefix, no gap, no trailing data, one end record at the
+    end, every local header equal to its directory record, methods 0 and
+    8, strict ASCII names, no duplicates under case folding, no Info-ZIP
+    Unicode Path field that would give some readers another name; ZIP64,
+    multi-disk and encrypted entries refused; at most 5 000 entries and
+    1 MiB of directory), `[Content_Types].xml` read by a bounded tokenizer
+    for a fixed XML subset (no DTD, so no entity is ever expanded; no
+    comments, PIs, CDATA, text or prefixes; references decoded before any
+    comparison; at most 64 KiB compressed, 256 KiB inflated, CRC-checked),
+    exactly one main part of the table in its folder, and no macro-enabled
+    content type, VBA part or Excel 4.0 macro sheet. Every macro-enabled,
+    template, slideshow and binary variant is refused, renamed or not.
+- **What the sniff proves, and what not.** Proven: the container format;
+  for Office files one zip layout every reader sees alike and the main
+  part's type; that `[Content_Types].xml` declares none of the macro
+  carriers the rule knows; that no entry carries a conventional VBA part
+  name or lies under `xl/macrosheets/`. Not proven: that the file is valid;
+  that Office finds no code in a part declared under another type; that
+  the other entries decompress to a safe size (the limits protect the
+  scanner, not the reader's machine); that the file is free of other active
+  content (PDF JavaScript, embedded OLE objects, ActiveX, external
+  relationships, DDE fields). An image that is also a zip is stored as the
+  image. Files are served as downloads behind the session gate with
+  `X-Content-Type-Options: nosniff`.
+- **Canonical name and mime:** the stored name becomes `<stem><extension of
+the sniffed format>` and the mime the table's (core stores and serves by
+  extension, so a JPEG named `x.pdf` was served as `application/pdf`). A
+  stem core cannot turn into a slug becomes `image` or `document`.
+- **Refusals** answer 400 `ValidationError` with `details.keys` and
+  `details.codes.file` (`fileType`, `fileTooLarge`, `required`, `invalid`);
+  core's own type, image and size refusals are mapped the same way.
 - **Uploader attribution:** every stored file is stamped with the caller's
   user id in `provider_metadata.uploadedBy`, also the files already stored
-  when a later file of the same request fails (so the orphan janitor can
-  collect them). The classified controller only accepts image ids whose
-  `uploadedBy` matches the caller (admin and editor bypass), so nobody can
-  attach foreign media (avatars, documents, other people's photos) to
-  their own ad. `cleanupUploads` deletes only files stamped with the
-  caller's own id that no entry uses any more, and the nightly uploads
-  janitor (03:30) only ever touches stamped files.
-- **Upgrade tripwire:** the wrapper depends on Strapi internals; if an
-  upgrade changes them, the cms fails at boot instead of silently serving
-  an unhardened endpoint.
+  when a later file of the same request fails. The classified controller
+  only accepts image ids whose `uploadedBy` matches the caller (admin and
+  editor bypass), and every write of an ad, from any source (the Content
+  Manager too), locks its image rows and refuses one that is being removed
+  (the classified lifecycle); the media
+  claims (registered from batch 16, lane 16B) accept a document file only
+  when it is the caller's own upload, of an allowed mime, linked by nothing
+  else, checked under the file row's lock, and no publish, clone or discard
+  copies a file that is being removed.
+- **Removal:** every delete, the app's and the Media Library's, first
+  takes one reservation (`reserveRemoval`, `utils/upload-orphans.ts`): it
+  locks the file row, re-reads it (a file that is gone or already being
+  removed is skipped, so overlapping deletes remove and record it once),
+  and commits a tombstone with the audit row before the bytes go; the
+  document and classified writes refuse a tombstoned file, and the janitor
+  retries an unlinked tombstoned row after 10 minutes. The app's removers
+  (`claimAndRemove`) add their rules under the lock: stamped, linked by
+  nothing, old enough; and they delete the bytes and the row under the
+  lock again, only while nothing links the file (`removeReserved`): a
+  department's header image, a team avatar, a course cover, a user avatar
+  or an admin-panel picker checks no tombstone, so a link made in between
+  keeps the file (a warning, `[uploads] kept file <id>: …`). Known limit:
+  after a removal that failed between the bytes and the row, those
+  pickers can still link the tombstoned row.
+  `cleanupUploads` removes only the
+  caller's own files; the nightly uploads janitor (03:30) only stamped files
+  older than 24 hours, now including moderators' and department heads'
+  unattached document uploads. Admin-panel uploads carry no stamp and are
+  never removed by the app.
+- **The delete trail:** every ad delete (the author, a moderator's
+  takedown, the Content Manager, the classified janitor) and every file
+  delete (the image cleanup, `cleanupUploads`, the uploads janitor, the
+  media claims, the admin Media Library's single, bulk and folder deletes)
+  writes one append-only `audit_events` row (`utils/delete-audit.ts`): the
+  actor (user id, admin id, or system) with batch 15's class (`author` for
+  one's own ad or upload, `moderator` for someone else's, or the v2
+  authoring class; none for admins and janitors), the source
+  (`content-api`, `admin`, `cron`), and in `detail` a user's role type, the
+  ad's title or the file's id, mime, size, related document and name. No IP
+  address, no token, no request data. The insert is never caught: a
+  failing insert fails the delete. For a file the row records the removal
+  decision: it commits with the reservation, right before the bytes go; a
+  failed byte removal is retried by the janitor, not recorded again.
+- **Admin-panel backstop:** `security.deniedTypes` (`config/plugins.ts`)
+  adds `application/vnd.ms-{word,excel,powerpoint}.*macroenabled*`. Strapi
+  matches them against the declared type, the extension's type and
+  file-type's guess from the first 4100 bytes, so the panel refuses
+  macro-enabled Office files by extension and, renamed, when file-type
+  recognises them. A renamed `.xlsb` or `.xlam`, or a renamed macro file
+  whose `[Content_Types].xml` lies beyond those 4100 bytes, passes the
+  panel: the known limit (the content API does not depend on the backstop).
+- **Upgrade tripwire:** the wrapper depends on Strapi internals (the
+  controller and service factories, the `upload` dispatch, `remove(file)`);
+  if an upgrade changes them, the cms fails at boot instead of silently
+  serving an unhardened endpoint or deleting unrecorded.
 
 The grant itself (`plugin::upload.content-api.upload`) goes to the staff
 roles only, never `guest` or `authenticated`, and there are deliberately no
@@ -1173,6 +1335,14 @@ reverse proxy.
   its rollback, the admin-panel guard and the dropped `tokenVersion`;
   `apps/cms/src/utils/deploy-preflight.test.ts` covers the rollback hint's
   rotation step.
+- `apps/cms/src/integration/authoring-wiki-revisions.integration.test.ts`
+  and `authoring-wiki-revision-dp.integration.test.ts` (batch 16): the
+  after-images and who they name (web editor, panel admin), atomicity with
+  the save, no read path for any role, the boot guard against revision
+  drafts on both engines, and the migration rehearsal with the real SQL on
+  Postgres 16; `infra/deploy-flow.test.ts` and
+  `apps/cms/src/utils/deploy-preflight.test.ts` the deploy refused while
+  revision drafts exist.
 - `apps/cms/src/integration/wiki-revisions-closed.integration.test.ts`:
   every caller, `admin_role` and `editor` included, on SQLite and
   Postgres 16: no `/api/wiki-revisions` route, no revision through any

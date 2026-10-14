@@ -3,10 +3,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { FetchErrorBanner } from "@/components/fetch-error";
 import { EmptyState } from "@/components/empty-state";
 import { AnnouncementEditor } from "@/components/manage/announcement-editor";
+import { DocumentEditor } from "@/components/manage/document-editor";
 import { EventEditor } from "@/components/manage/event-editor";
 import { ManageFlashProvider } from "@/components/manage/flash";
 import { ManageListPage } from "@/components/manage/list-page";
-import { NoDepartmentExplanation } from "@/components/manage/page-parts";
+import { ManagePageHeader, NoDepartmentExplanation } from "@/components/manage/page-parts";
 import { StatCount } from "@/components/ui/stat-tile";
 import { StrapiError } from "@/lib/strapi-error";
 import type { Viewer } from "@/lib/viewer";
@@ -42,6 +43,13 @@ const { default: AnnouncementsPage } = await import("./announcements/page");
 const { default: NewEventPage } = await import("./events/new/page");
 const { default: EditAnnouncementPage } = await import("./announcements/[documentId]/page");
 const { default: NewPollRedirect } = await import("../polls/new/page");
+const { default: DocumentsPage } = await import("./documents/page");
+const { default: NewDocumentPage } = await import("./documents/new/page");
+const { default: EditDocumentPage } = await import("./documents/[documentId]/page");
+const { default: ManageWikiPage } = await import("./wiki/page");
+const { default: NewWikiSpacePage } = await import("./wiki/new/page");
+const { default: ManageWikiSpacePage } = await import("./wiki/[space]/page");
+const { default: EditWikiSpacePage } = await import("./wiki/[space]/edit/page");
 
 const ENG = { id: 3, documentId: "deptengineering000000000", name: "Engineering", slug: "eng" };
 const DOC = "annc00000000000000000001";
@@ -105,15 +113,21 @@ describe("the /manage shell", () => {
 });
 
 describe("the landing", () => {
-  it("an editor: the four area tiles, no reports and no Strapi links", async () => {
+  it("an editor: the six area tiles, no reports and no Strapi links", async () => {
     const tree = elements(await ManagePage());
-    expect(hrefs(tree)).toEqual(
-      expect.arrayContaining([
+    expect(
+      hrefs(tree)
+        .filter((href) => href.startsWith("/manage/"))
+        .sort(),
+    ).toEqual(
+      [
         "/manage/announcements",
         "/manage/events",
         "/manage/polls",
         "/manage/quick-links",
-      ]),
+        "/manage/documents",
+        "/manage/wiki",
+      ].sort(),
     );
     expect(hrefs(tree)).not.toContain("/manage/analytics");
     expect(hrefs(tree).some((href) => href.includes("/admin"))).toBe(false);
@@ -128,11 +142,24 @@ describe("the landing", () => {
     expect(hrefs(tree).some((href) => href.includes("/admin/content-manager"))).toBe(true);
   });
 
-  it("a department head: announcements and events only (no documents tile before 16C)", async () => {
+  it("a department head: announcements, events and documents only (§L1), never the wiki", async () => {
     viewerRef.current = viewer("department_head", ENG);
     const tree = elements(await ManagePage());
     const areas = hrefs(tree).filter((href) => href.startsWith("/manage/"));
-    expect(areas.sort()).toEqual(["/manage/announcements", "/manage/events"]);
+    expect(areas.sort()).toEqual(["/manage/announcements", "/manage/documents", "/manage/events"]);
+    // Their counts come from their own lists; the wiki's page list is never asked.
+    const paths = strapiMock.mock.calls.map(([path]) => String(path));
+    expect(paths.some((path) => path.startsWith("/api/documents/authoring"))).toBe(true);
+    expect(paths.some((path) => path.startsWith("/api/wiki-"))).toBe(false);
+  });
+
+  it("the wiki tile counts the wiki's pages (drafts, scheduled, failed)", async () => {
+    await ManagePage();
+    const paths = strapiMock.mock.calls.map(([path]) => String(path));
+    for (const status of ["draft", "scheduled", "failed"]) {
+      expect(paths).toContain(`/api/wiki-pages/authoring?status=${status}`);
+      expect(paths).toContain(`/api/documents/authoring?status=${status}`);
+    }
   });
 
   it("a department head without a department: the explanation, no request (§N1)", async () => {
@@ -244,6 +271,141 @@ describe("create and edit pages", () => {
         .map(([path]) => path)
         .some((p) => String(p).startsWith("/api/departments")),
     ).toBe(false);
+  });
+});
+
+describe("the documents area (batch 16, lane 16C)", () => {
+  const DOCUMENT = "docu00000000000000000001";
+
+  it("is the generic list page", () => {
+    const tree = elements(DocumentsPage({ searchParams: Promise.resolve({}) }));
+    expect(tree[0]?.type).toBe(ManageListPage);
+    expect(tree[0]?.props.area).toBe("documents");
+  });
+
+  it("a moderator's list has the owner filter; a department head's asks the cms for theirs", async () => {
+    await ManageListPage({
+      area: "documents",
+      searchParams: Promise.resolve({ owner: "department" }),
+    });
+    expect(strapiMock).toHaveBeenLastCalledWith("/api/documents/authoring?owner=department");
+    viewerRef.current = viewer("department_head", ENG);
+    await ManageListPage({
+      area: "documents",
+      searchParams: Promise.resolve({ owner: "department" }),
+    });
+    // A department author has no owner filter: the cms scopes the list.
+    expect(strapiMock).toHaveBeenLastCalledWith("/api/documents/authoring");
+  });
+
+  it("a department head's new document: their department pinned, no department list read", async () => {
+    viewerRef.current = viewer("department_head", ENG);
+    const tree = elements(await NewDocumentPage());
+    const editor = tree.find((el) => el.type === DocumentEditor);
+    expect(editor?.props.ownDepartment).toEqual(ENG);
+    expect((editor?.props.access as { roleClass: string }).roleClass).toBe("departmentAuthor");
+    expect(strapiMock).not.toHaveBeenCalled();
+  });
+
+  it("a department head without a department gets the explanation on the new and edit pages", async () => {
+    viewerRef.current = viewer("department_head", null);
+    for (const tree of [
+      elements(await NewDocumentPage()),
+      elements(await EditDocumentPage({ params: Promise.resolve({ documentId: DOCUMENT }) })),
+    ]) {
+      expect(tree.some((el) => el.type === NoDepartmentExplanation)).toBe(true);
+      expect(tree.some((el) => el.type === DocumentEditor)).toBe(false);
+    }
+    expect(strapiMock).not.toHaveBeenCalled();
+  });
+
+  it("a document the cms hides answers the not-found page", async () => {
+    strapiMock.mockRejectedValue(new StrapiError(404, "Not Found", ""));
+    await expect(
+      EditDocumentPage({ params: Promise.resolve({ documentId: DOCUMENT }) }),
+    ).rejects.toMatchObject({ digest: expect.stringContaining("404") });
+  });
+
+  it("members, team leads and guests are sent home; the area itself refuses them", async () => {
+    for (const role of ["member", "team_lead", "guest"]) {
+      viewerRef.current = viewer(role);
+      expect(await redirectOf(() => NewDocumentPage())).toBe("/");
+    }
+  });
+});
+
+describe("the wiki area (batch 16, lane 16C)", () => {
+  const SPACE = "spce00000000000000000001";
+  const searchParams = Promise.resolve({});
+
+  it("department heads go back to /manage; members, team leads and guests home", async () => {
+    viewerRef.current = viewer("department_head", ENG);
+    expect(await redirectOf(() => ManageWikiPage({ searchParams }))).toBe("/manage");
+    expect(await redirectOf(() => NewWikiSpacePage())).toBe("/manage");
+    expect(
+      await redirectOf(() => ManageWikiSpacePage({ params: Promise.resolve({ space: SPACE }) })),
+    ).toBe("/manage");
+    for (const role of ["member", "team_lead", "guest"]) {
+      viewerRef.current = viewer(role);
+      expect(await redirectOf(() => ManageWikiPage({ searchParams }))).toBe("/");
+    }
+    expect(strapiMock).not.toHaveBeenCalled();
+  });
+
+  it("a moderator's list reads the spaces' authoring list; an outage is the banner", async () => {
+    const tree = elements(await ManageWikiPage({ searchParams: Promise.resolve({ q: "hr" }) }));
+    expect(strapiMock).toHaveBeenCalledWith("/api/wiki-spaces/authoring?q=hr");
+    const header = tree.find((el) => el.type === ManagePageHeader);
+    expect((header?.props.action as { href: string }).href).toBe("/manage/wiki/new");
+    strapiMock.mockRejectedValue(new StrapiError(502, "Bad Gateway", ""));
+    const failed = elements(await ManageWikiPage({ searchParams }));
+    expect(failed.some((el) => el.type === FetchErrorBanner)).toBe(true);
+    expect(failed.some((el) => el.type === EmptyState)).toBe(false);
+  });
+
+  it("a space the cms does not know is the not-found page, on the tree and the form", async () => {
+    strapiMock.mockRejectedValue(new StrapiError(404, "Not Found", ""));
+    for (const render of [
+      () => ManageWikiSpacePage({ params: Promise.resolve({ space: SPACE }) }),
+      () => EditWikiSpacePage({ params: Promise.resolve({ space: SPACE }) }),
+    ]) {
+      await expect(render()).rejects.toMatchObject({ digest: expect.stringContaining("404") });
+    }
+  });
+
+  it("a space's tree links a new page in the wiki and the space's form", async () => {
+    strapiMock.mockImplementation(async (path: string) =>
+      path.endsWith("/editable")
+        ? {
+            data: {
+              documentId: SPACE,
+              version: "2",
+              status: "published",
+              publishedAt: null,
+              updatedAt: null,
+              roleClass: "moderator",
+              name: "Handbook",
+              slug: "handbook",
+              icon: null,
+              description: null,
+              visibility: "public",
+              allowedRoles: [],
+              department: null,
+              team: null,
+              needsRetarget: false,
+              pageCount: 0,
+            },
+          }
+        : page([]),
+    );
+    const tree = elements(await ManageWikiSpacePage({ params: Promise.resolve({ space: SPACE }) }));
+    const header = tree.find((el) => el.type === ManagePageHeader);
+    expect((header?.props.action as { href: string }).href).toBe("/wiki/handbook/new?create=1");
+    expect(hrefs(tree)).toEqual(
+      expect.arrayContaining([`/manage/wiki/${SPACE}/edit`, "/wiki/handbook"]),
+    );
+    expect(strapiMock).toHaveBeenCalledWith(`/api/wiki-pages/authoring?space=${SPACE}`);
+    expect(tree.some((el) => el.type === EmptyState)).toBe(true);
   });
 });
 

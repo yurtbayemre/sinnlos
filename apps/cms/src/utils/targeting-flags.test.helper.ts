@@ -33,6 +33,7 @@ export const QUICK_LINK = "api::quick-link.quick-link";
 export const POLL = "api::poll.poll";
 export const DEPARTMENT = "api::department.department";
 export const TEAM = "api::team.team";
+export const WIKI_PAGE = "api::wiki-page.wiki-page";
 
 interface LinkSpec {
   table: string;
@@ -95,6 +96,18 @@ export const LINK_TABLES: Record<string, Record<string, LinkSpec>> = {
       table: "polls_departments_lnk",
       rowColumn: "poll_id",
       targetColumn: "department_id",
+    },
+  },
+  [WIKI_PAGE]: {
+    department: {
+      table: "wiki_pages_department_lnk",
+      rowColumn: "wiki_page_id",
+      targetColumn: "department_id",
+    },
+    team: {
+      table: "wiki_pages_team_lnk",
+      rowColumn: "wiki_page_id",
+      targetColumn: "team_id",
     },
   },
 };

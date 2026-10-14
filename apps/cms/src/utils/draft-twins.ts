@@ -68,18 +68,13 @@
  * re-attaching restores a link that a form-only save (repository.js:373-389)
  * dropped.
  *
- * SKIPPED: api::wiki-revision.wiki-revision. Revisions are append-only
- * snapshots that the wiki-page lifecycle writes as published rows
- * (wiki-page/lifecycles.ts); there is nothing to draft or edit, and every
- * revision in every database is published-only by design (roadmap DA03 plans
- * to turn draft & publish off for it, which would delete any draft rows made
- * here). The lifecycle links a revision to the page row it snapshots, which
- * is the page's draft row in normal operation, so a page's revisions reach
- * its published row on publish. A published-only page only gets revisions
- * from a direct database write to its published row, which nothing in the
- * app does; its new draft has no revision link then (the clone finds no
- * draft revision to point at), and its next publish leaves those revisions
- * without a page link, as an admin publish without this repair does too.
+ * SKIPPED: none since batch 16. wiki-revision, the one type skipped
+ * before, has draft & publish off (DA03, utils/revision-dp-guard.ts), so it
+ * is no candidate. Revisions are anchored by `pageDocumentId`, never by
+ * their `page` link, so a page's new draft needs no revision link either.
+ * The repair's draft create runs the wiki-page lifecycle, which records
+ * nothing when the content equals the page's latest snapshot (the boot
+ * backfill wrote one before this repair runs).
  *
  * SIDE EFFECTS: none of consequence. The only lifecycle that runs is
  * `create` for the new draft row, with `publishedAt` null. Every other write
@@ -131,8 +126,8 @@
 
 export const DRAFT_TWINS_LOG = "[draft-twins]";
 
-/** Draft & publish types that never get a draft twin (see the header). */
-export const DRAFT_TWINS_SKIPPED_UIDS: readonly string[] = ["api::wiki-revision.wiki-revision"];
+/** Draft & publish types that never get a draft twin (none, see the header). */
+export const DRAFT_TWINS_SKIPPED_UIDS: readonly string[] = [];
 
 export const DRAFT_TWINS_BATCH_SIZE = 100;
 export const DRAFT_TWINS_MAX_PER_TYPE = 1000;

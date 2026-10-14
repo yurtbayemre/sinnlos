@@ -80,9 +80,10 @@ const DEPARTMENT_AUTHOR_WRITES: CrudAction[] = ["find", "findOne", "create", "up
  * creates and updates announcements, events and documents, which
  * `global::can-author` scopes to the head's own department (§N).
  *
- * On announcement, event, quick-link, document and poll the moderators'
- * create and update no longer bypass anything: global::can-author holds
- * them to the allowlist's `moderator` rule (FX07, batch 15).
+ * On announcement, event, quick-link, document and poll (batch 15), and on
+ * wiki-space and wiki-page (batch 16), the moderators' create and update no
+ * longer bypass anything: global::can-author and global::can-edit-wiki hold
+ * them to the allowlist's `moderator` rule (FX07).
  *
  * `member` can update wiki pages they authored (gated by
  * `can-edit-wiki`, which also keeps them to pages in spaces they can
@@ -352,6 +353,37 @@ const AUTHORING_ACTIONS = ["publish", "unpublish", "discardDraft", "authoringLis
 const POLL_AUTHORING_ACTIONS = ["authoringList", "editable"];
 const DEPARTMENT_AUTHORS: readonly MatrixRoleType[] = [...MODERATORS, ...DEPARTMENT_AUTHOR_ROLES];
 
+/**
+ * The wiki actions (decision 06 §J2, §B4; batch 16 lane 16B), on the custom
+ * routes of api/wiki-space and api/wiki-page/routes/00-authoring.ts. Wiki
+ * spaces: the list and the form read, moderators only (global::can-author).
+ * Wiki pages (global::can-edit-wiki decides the class and the row):
+ *   - createDraft: the roles that hold the wiki-page create grant;
+ *   - the actions on one page and myDrafts: every role that holds the
+ *     wiki-page update grant (the row classes: a page's author, the head of
+ *     its department, the lead of its team; members author their own);
+ *   - unpublish and the /manage list: moderators.
+ * Never guest or `authenticated` (routes.matrix.test.ts pins it).
+ */
+const WIKI_SPACE_ACTIONS = ["authoringList", "editable"];
+const WIKI_PAGE_ROW_ACTIONS = [
+  "myDrafts",
+  "editable",
+  "saveDraft",
+  "publish",
+  "discardDraft",
+  "revisions",
+  "revision",
+  "restore",
+];
+const WIKI_PAGE_MODERATOR_ACTIONS = ["unpublish", "authoringList"];
+const WIKI_PAGE_CREATORS: readonly MatrixRoleType[] = [
+  ...MODERATORS,
+  "department_head",
+  "team_lead",
+];
+const WIKI_PAGE_UPDATERS: readonly MatrixRoleType[] = [...WIKI_PAGE_CREATORS, "member"];
+
 const authoringGrants = (
   uid: string,
   actions: readonly string[],
@@ -365,6 +397,10 @@ export const AUTHORING_ACTION_GRANTS: Readonly<Record<string, readonly MatrixRol
   ...authoringGrants("api::document.document", AUTHORING_ACTIONS, DEPARTMENT_AUTHORS),
   ...authoringGrants("api::quick-link.quick-link", AUTHORING_ACTIONS, MODERATORS),
   ...authoringGrants("api::poll.poll", POLL_AUTHORING_ACTIONS, MODERATORS),
+  ...authoringGrants("api::wiki-space.wiki-space", WIKI_SPACE_ACTIONS, MODERATORS),
+  ...authoringGrants("api::wiki-page.wiki-page", ["createDraft"], WIKI_PAGE_CREATORS),
+  ...authoringGrants("api::wiki-page.wiki-page", WIKI_PAGE_ROW_ACTIONS, WIKI_PAGE_UPDATERS),
+  ...authoringGrants("api::wiki-page.wiki-page", WIKI_PAGE_MODERATOR_ACTIONS, MODERATORS),
 };
 
 export const CUSTOM_ACTION_GRANTS: Record<string, readonly MatrixRoleType[] | "*"> = {

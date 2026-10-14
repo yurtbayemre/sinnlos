@@ -54,7 +54,7 @@ Workvivo, Sociabble, Simpplr, MangoApps feature guides, June 2026).
 > is no longer needed (GitHub issue #20). The test against a real tenant
 > waits for the owner.
 >
-> **Status update (2026-10-13, batch 15, not deployed yet):** v2 frontend
+> **Status update (2026-10-13, batch 15, deployed 2026-10-13):** v2 frontend
 > authoring, phase 1 (D-V2-AUTHORING). Editors and admins write
 > announcements, events, polls and quick links in the web at `/manage`;
 > department heads write announcements and events for their own
@@ -70,6 +70,20 @@ Workvivo, Sociabble, Simpplr, MangoApps feature guides, June 2026).
 > too: the bypass ends on announcements, events, quick links, documents and
 > polls. Documents with uploads and the wiki editor follow in phase 2
 > (batch 16).
+>
+> **Status update (2026-10-14, batch 16, not deployed yet):** v2 frontend
+> authoring, phase 2. Editors and admins write documents at
+> `/manage/documents` with a file (PDF, Word, Excel, PowerPoint up to
+> 20 MB, images up to 5 MB, accepted by content; macro-enabled Office
+> files refused, in the admin panel too), and department heads their own
+> department's documents (D-V2-DEPT-AUTHORS). Department heads, team leads
+> and moderators write wiki pages in the wiki itself, with drafts, a
+> page history with preview and restore (wiki revisions record the page
+> after each save, DA03), and moderators manage the spaces at
+> `/manage/wiki`. The FX07 wiki bypass for admins and editors ends; parent
+> loops and the deletion of non-empty spaces are refused for every
+> writer, the admin panel included. Every ad and file delete writes an
+> audit row.
 
 ## Why this is cheaper than it looks
 

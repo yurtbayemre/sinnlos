@@ -1,5 +1,6 @@
 import { SCHEDULED_UIDS, UNPUBLISH_SCHEDULED_UIDS } from "../utils/authoring-uids";
 import { CONTENT_VERSION_UID } from "../utils/document-lock";
+import { WIKI_REVISION_UID } from "../utils/wiki-revisions";
 
 /**
  * The database indexes of v2 authoring (decision 06 §D, §G; batch 15 plan
@@ -14,7 +15,10 @@ import { CONTENT_VERSION_UID } from "../utils/document-lock";
  *   - <table>_publish_at_partial_idx on each scheduled table, and
  *     <table>_unpublish_at_partial_idx on documents and quick_links:
  *     `(publish_at) WHERE publish_at IS NOT NULL`, so the scheduler's
- *     every-minute "what is due" reads touch the few scheduled rows only.
+ *     every-minute "what is due" reads touch the few scheduled rows only;
+ *   - wiki_revisions_page_document_id_idx: (page_document_id), the anchor
+ *     every history read and the boot backfill's baseline check go by
+ *     (batch 16, DA03; utils/wiki-revisions.ts). Plain, not unique.
  *
  * `CREATE … INDEX IF NOT EXISTS`, on Postgres and SQLite. Strapi's schema
  * sync never drops an index it did not create (@strapi/database
@@ -111,6 +115,14 @@ export function documentIndexSpecs(strapi: DocumentIndexHost): IndexSpec[] {
   };
   for (const uid of SCHEDULED_UIDS) partial(uid, "publishAt", "publish_at");
   for (const uid of UNPUBLISH_SCHEDULED_UIDS) partial(uid, "unpublishAt", "unpublish_at");
+  const revisions = metaOf(strapi, WIKI_REVISION_UID);
+  const anchor = columnOf(revisions, "pageDocumentId", "page_document_id");
+  specs.push({
+    name: `${revisions.tableName}_${anchor}_idx`,
+    table: revisions.tableName,
+    columns: [anchor],
+    unique: false,
+  });
   return specs;
 }
 
@@ -169,7 +181,8 @@ export async function ensureDocumentIndexes(strapi: DocumentIndexHost): Promise<
       throw new Error(
         `${DOCUMENT_INDEXES_LOG} could not create the index ${spec.name} on ${spec.table}: ` +
           `${(error as Error).message}. The cms does not start without it (the document lock ` +
-          "needs content_versions_target_uq; the scheduler reads through the partial indexes).",
+          "needs content_versions_target_uq; the scheduler reads through the partial indexes; " +
+          "the wiki history through the revision anchor index).",
       );
     }
     created.push(spec.name);

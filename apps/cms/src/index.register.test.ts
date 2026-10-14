@@ -177,9 +177,10 @@ describe("content-api.output sanitizer registration (issue #10 / F6)", () => {
  *   - the output backstop lands via get()+set() (never `.add`),
  *   - admin_role/editor bypass both, except for the closed targets (wiki
  *     revisions, batch 15.1); no request context = guard applies,
- *   - inside a populate, filters and sort follow only relations whose
- *     target the caller may `find`, asked through `strapi.auth.verify` with
- *     the request's `auth` (batch 15.2), for every caller,
+ *   - inside a populate, filters follow only relations whose target the
+ *     caller may `find`, asked through `strapi.auth.verify` with the
+ *     request's `auth` (batch 15.2), for every caller, and a sort follows no
+ *     relation at all (batch 16),
  *   - boot fails when a hook point is gone (no silent re-open),
  *   - register() installs it next to the contact sanitizer.
  */
@@ -318,12 +319,12 @@ describe("relation side-channel guard registration (FX05)", () => {
   });
 
   describe("grants inside populate (batch 15.2)", () => {
-    /** A filter through department, and a sort through author.role, nested in a populate. */
+    /** Filters through department and through author.role, nested in a populate. */
     const throughDepartment = () => ({
       populate: { children: { filters: { department: { name: { $eq: "Eng" } } } } },
     });
     const throughRole = () => ({
-      populate: { children: { sort: "title:asc,author.role.type:desc" } },
+      populate: { children: { filters: { author: { role: { type: { $eq: "x" } } } } } },
     });
     const READS = [`${WIKI_PAGE}.find`, `${USER_UID}.find`];
 
@@ -351,6 +352,30 @@ describe("relation side-channel guard registration (FX05)", () => {
       },
     );
 
+    it.each(["admin_role", "editor", "member", undefined])(
+      "refuses %s a relation or media sort inside a populate, whatever it holds (batch 16)",
+      async (role) => {
+        const { strapi } = host(role);
+        registerRestrictedRelationGuard(strapi);
+        const everything = authWith(...READS, `${DEPARTMENT}.find`, `${ROLE}.find`);
+        const sorted = (sort: unknown) =>
+          strapi.contentAPI.sanitize.query({ populate: { children: { sort } } }, wikiPage, {
+            auth: everything,
+          });
+        await expect(sorted("title:asc,author.username:desc")).rejects.toThrow(
+          "Invalid key author at children.author",
+        );
+        await expect(sorted({ department: { name: "asc" } })).rejects.toBeInstanceOf(
+          errors.ValidationError,
+        );
+        await expect(sorted("title:desc")).resolves.toEqual({
+          populate: { children: { sort: "title:desc" } },
+          locale: "sanitized-by-core",
+        });
+        expect(strapi.auth.verify).not.toHaveBeenCalled();
+      },
+    );
+
     it("asks strapi.auth.verify with the request's auth and `<target>.find`, once per target", async () => {
       const { strapi } = host("member");
       registerRestrictedRelationGuard(strapi);
@@ -359,8 +384,10 @@ describe("relation side-channel guard registration (FX05)", () => {
         {
           populate: {
             children: {
-              filters: { $or: [{ department: { name: "a" } }, { department: { name: "b" } }] },
-              sort: { author: { username: "asc" } },
+              filters: {
+                $or: [{ department: { name: "a" } }, { department: { name: "b" } }],
+                author: { username: "x" },
+              },
             },
           },
         },
@@ -562,6 +589,43 @@ describe("org draft guard in register() (decision 05)", () => {
     const { strapi } = orgHost({ departments: 1 });
     await expect(lifecycle.register({ strapi })).rejects.toThrow(/^\[org-dp\]/);
     expect(strapi.documents.use).not.toHaveBeenCalled();
+  });
+
+  /*
+   * The wiki-revision guard (batch 16, utils/revision-dp-guard.ts) runs right
+   * after the org guard and also before everything else in register():
+   * Strapi deletes revision draft rows in the same beforeSync hook.
+   */
+  const withRevisions = (drafts: Record<string, number>) => {
+    const host = orgHost(drafts);
+    const getModel = host.strapi.getModel;
+    host.strapi.getModel = (uid: string) =>
+      uid === "api::wiki-revision.wiki-revision"
+        ? { collectionName: "wiki_revisions", options: { draftAndPublish: false } }
+        : getModel(uid);
+    return host;
+  };
+
+  it("checks wiki_revisions right after the org tables", async () => {
+    const { strapi, counted } = withRevisions({});
+    await lifecycle.register({ strapi });
+    expect(counted).toEqual(["departments", "teams", "wiki_revisions"]);
+  });
+
+  it("rejects before registering anything while revision draft rows exist", async () => {
+    const { strapi, coreSanitizeQuery } = withRevisions({ wiki_revisions: 3 });
+    await expect(lifecycle.register({ strapi })).rejects.toThrow(
+      /^\[revision-dp\] wiki_revisions still holds 3 draft row\(s\)/,
+    );
+    expect(strapi.sanitizers.store.has("content-api.output")).toBe(false);
+    expect(strapi.contentAPI.sanitize.query).toBe(coreSanitizeQuery);
+    expect(strapi.documents.use).not.toHaveBeenCalled();
+  });
+
+  it("the org guard decides first when both hold draft rows", async () => {
+    const { strapi, counted } = withRevisions({ teams: 1, wiki_revisions: 3 });
+    await expect(lifecycle.register({ strapi })).rejects.toThrow(/^\[org-dp\]/);
+    expect(counted).toEqual(["departments", "teams"]);
   });
 });
 

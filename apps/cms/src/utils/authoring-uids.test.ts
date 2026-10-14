@@ -20,13 +20,15 @@ const SCHEMAS = loadContentTypeSchemas();
 const attributesOf = (uid: string) => SCHEMAS[uid]?.attributes ?? {};
 
 describe("authoring uid lists (K1)", () => {
-  it("names the batch 15 lists exactly", () => {
+  it("names the lists exactly", () => {
     expect(AUTHORED_UIDS).toEqual([
       "api::announcement.announcement",
       "api::event.event",
       "api::quick-link.quick-link",
       "api::document.document",
       "api::poll.poll",
+      "api::wiki-space.wiki-space",
+      "api::wiki-page.wiki-page",
     ]);
     expect(DEPARTMENT_AUTHORED_UIDS).toEqual([
       "api::announcement.announcement",

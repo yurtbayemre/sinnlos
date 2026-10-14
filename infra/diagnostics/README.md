@@ -13,20 +13,22 @@ only when armed, is described at the end.
 | `announcement-retarget.sql`           | Batch 15 and later only: the announcements with `retarget_required` (a department or team they targeted was deleted) and the events restricted only by their flag (`notify_audience = 'departments'` without a department), per row. Save it before a rollback to a batch-14 image; the file's header has the guarded raise-only SQL that re-applies the values after the roll-forward.                                                                                                                                                                                                                                                                                       |
 | `schedule-export.sql`                 | Batch 15 and later only: every pending schedule, the draft rows of the seven scheduled types with `publish_at` and/or `unpublish_at`, `schedule_error`, whether the document is published, `withdraw_by_hand` (published with a deadline batch 14 would miss) and `on_rollback` (`final_withdrawal`: never republished once its deadline passed; `pending_publish`; `none`). Save it before a rollback; the header says how to reconcile on the roll-forward.                                                                                                                                                                                                                 |
 | `department-heads.sql`                | Batch 15 (department authors): per department the display-only `head` and the `department_head` users whose `user.department` it is, then the mismatches: a head without the role, a head of another department or of none, a `department_head` without a department, a department without any `department_head`. Run it before the batch-15 deploy and align the users in the admin panel. The output names users (username, display name), no contact data.                                                                                                                                                                                                                 |
+| `upload-census.sql`                   | Batch 16, lane 16A (uploads): files per stored mime and extension; stamped (POST /api/upload), unstamped (admin panel) and tombstoned files; the uploads-janitor's next candidates (stamped, unlinked, older than 24 h or tombstoned); files linked by more than one document or ad; documents whose file mime is outside the document list. Run it before the batch-16 deploy (expected: the two demo PDFs, unstamped, 0 janitor candidates). The output names files, documents and ads and the uploader's user id, no contact data.                                                                                                                                         |
+| `wiki-parent-cycles.sql`              | Batch 16, lane 16B (the wiki write model): the pages on a loop of the document-level parent graph (with the path), the page rows whose parent sits in another space, the page rows without a space, and the counts. From batch 16 on no writer can add a loop (`parentCycle`); this finds the ones from before. Run it before the batch-16 deploy (expected on the owner's instance: 0, 0, 0) and repair a loop in the admin panel (clear one page's parent, publish). The output names pages and spaces, no user data.                                                                                                                                                       |
 
 ## Running them
 
 From the repository checkout on the host (compose project `infra`):
 
 ```bash
-infra/diagnostics/census.sh
+infra/diagnostics/census.sh          # another compose project: COMPOSE_PROJECT=<project> infra/diagnostics/census.sh
 
 docker exec -i infra-db-1 sh -c 'psql -X -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"' \
   < infra/diagnostics/prod-perm-diff.sql
 ```
 
-The batch-15 files run the same way, one at a time (`<` the file instead
-of `prod-perm-diff.sql`). Each one opens `BEGIN TRANSACTION READ ONLY` and
+The batch-15 and batch-16 files run the same way, one at a time (`<` the
+file instead of `prod-perm-diff.sql`). Each one opens `BEGIN TRANSACTION READ ONLY` and
 ends with `ROLLBACK`, uses no psql meta-commands, and is run against
 Postgres 16 by `apps/cms/src/integration/targeting-fail-closed.integration.test.ts`.
 `announcement-retarget.sql` and `schedule-export.sql` read columns batch 15

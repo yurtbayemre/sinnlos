@@ -33,7 +33,13 @@
  *   8. without a state, a running image that cannot be tagged :rollback
  *      (next to an older :rollback of that service) or a bootstrap marker
  *      that cannot be written stops the run before the build, and a dry run
- *      says it would stop (B10-T2).
+ *      says it would stop (B10-T2);
+ *   9. batch 16 (DA03): a checkout that runs wiki revisions without draft &
+ *      publish is refused before the backup while the database holds
+ *      revision draft rows (a rollback's twins), deploys once migrate.sql
+ *      removed them, and a failed deploy whose target cms runs wiki
+ *      revisions with draft & publish says the roll-forward needs
+ *      migrate.sql.
  * Each sequence runs in one bash process. Git Bash forks slowly (a stubbed
  * deploy costs about 6 s there, both sequences about 100 s), so on Windows
  * the two sequences run only with SINNLOS_SLOW_SHELL_TESTS=1; CI (Linux)
@@ -165,7 +171,7 @@ function deploys(steps: readonly Step[], mode?: ShellMode): StepReport[] {
     // The demo credentials file deploy.sh checks before it runs live-smoke.
     'echo "casey.jones@sinnlos.local pw" > "$T/passwords"',
     'export PASSWORDS_FILE="$T/passwords"',
-    "export T STUB_SMOKE_CODE=200 STUB_LIVE_RC=0 STUB_LIVE_NOFRAME= STUB_BUILD_FAIL= STUB_UP_FAIL= STUB_TAG_FAIL= STUB_LOCK_HELD= STUB_CI= STUB_NO_VOLUMES= STUB_CONTAINERD= STUB_UP_KEEP= STUB_STATE_WRITE_FAIL= STUB_BOOTSTRAP_WRITE_FAIL= STUB_BACKUP_RC=",
+    "export T STUB_SMOKE_CODE=200 STUB_LIVE_RC=0 STUB_LIVE_NOFRAME= STUB_BUILD_FAIL= STUB_UP_FAIL= STUB_TAG_FAIL= STUB_LOCK_HELD= STUB_CI= STUB_NO_VOLUMES= STUB_CONTAINERD= STUB_UP_KEEP= STUB_STATE_WRITE_FAIL= STUB_BOOTSTRAP_WRITE_FAIL= STUB_BACKUP_RC= STUB_REVISION_DRAFTS=0 STUB_REVISION_DP=1",
     // Whether an image id resolves: on containerd only while a tag names it.
     "resolvable() {",
     // (No pipe: under deploy.sh's pipefail, grep -q ending early could fail cat.)
@@ -215,7 +221,8 @@ function deploys(steps: readonly Step[], mode?: ShellMode): StepReport[] {
     '        id="$2"',
     '      else [[ -f "$T/img/${2//:/__}" ]] || return 1; id="$(cat "$T/img/${2//:/__}")"; fi',
     '      echo "$id" > "$T/img/${3//:/__}" ;;',
-    "    exec) cat > /dev/null; echo 0 ;;",
+    // The revision probe's query (wiki_revisions) answers STUB_REVISION_DRAFTS, every other 0.
+    '    exec) if [[ "$(cat)" == *wiki_revisions* ]]; then echo "$STUB_REVISION_DRAFTS"; else echo 0; fi ;;',
     '    volume) [[ -z "$STUB_NO_VOLUMES" ]] ;;',
     // ps -aq --filter label=com.docker.compose.project=<p>: containers <p>-<svc>-1.
     "    ps)",
@@ -223,7 +230,8 @@ function deploys(steps: readonly Step[], mode?: ShellMode): StepReport[] {
     '        ref="${ref##*/}"',
     '        if [[ -e "$T/ctr/$ref" && "$*" == *"com.docker.compose.project=${ref%-*-1}" ]]; then echo "$ref"; fi',
     "      done ;;",
-    "    run) return 0 ;;",
+    // The wiki-revision image check: 1 without draft & publish (batch 16 on), 0 with it.
+    '    run) if [[ "$*" == *draftAndPublish* ]]; then return "$STUB_REVISION_DP"; fi; return 0 ;;',
     "  esac",
     "}",
     "curl() {",
@@ -1383,3 +1391,68 @@ describe("deploy.sh: parameters and state handling, statically (FX35)", () => {
     expect(DEPLOY).not.toMatch(/git [^\n]*config --(global|system|local|add)/);
   });
 });
+
+describe.skipIf(!RUN_SEQUENCES)(
+  "deploy.sh: wiki revision draft rows and the roll-forward (batch 16, DA03)",
+  () => {
+    let r: StepReport[] = [];
+    /** A checkout whose wiki-revision schema has draft & publish off (batch 16 on). */
+    const BATCH_16_SCHEMA = [
+      'S="$REPO/apps/cms/src/api/wiki-revision/content-types/wiki-revision"',
+      'mkdir -p "$S"',
+      `printf '{
+  "options": { "draftAndPublish": false }
+}
+' > "$S/schema.json"`,
+      '"${G[@]}" add -A; "${G[@]}" commit -q -m schema',
+    ].join("; ");
+    beforeAll(() => {
+      r = deploys([
+        /* 0 */ { before: BATCH_16_SCHEMA },
+        // A rollback's boot left a draft twin of every revision: refused before the backup …
+        /* 1 */ { before: "commit; STUB_REVISION_DRAFTS=7" },
+        // … and once migrate.sql removed them, the deploy goes ahead.
+        /* 2 */ { before: "STUB_REVISION_DRAFTS=0" },
+        // A failed deploy whose target cms runs wiki revisions with draft & publish.
+        /* 3 */ { before: "commit; STUB_SMOKE_CODE=502; STUB_REVISION_DP=0" },
+      ]);
+    }, SEQUENCE_BUDGET);
+
+    it("says the database holds no revision draft rows, and deploys", () => {
+      expect(r[0].status, r[0].stderr).toBe(0);
+      expect(r[0].stdout).toContain("  wiki revisions: no draft rows");
+    });
+
+    it("refuses before the backup while revision draft rows exist, naming migrate.sql", () => {
+      const refused = r[1];
+      expect(refused.status).toBe(1);
+      expect(refused.stderr).toContain(
+        "ERROR: the running database holds 7 wiki revision draft row(s), and this release runs",
+      );
+      expect(refused.stderr).toContain("infra/migrations/wiki-revision-dp/migrate.sql");
+      expect(refused.stderr).toContain("Preflight failed. Nothing was changed.");
+      expect(refused.stdout).not.toMatch(BACKED_UP);
+      expect(called(refused, / build$/)).toEqual([]);
+      expect(refused.state).toEqual(r[0].state);
+    });
+
+    it("deploys once migrate.sql removed them", () => {
+      expect(r[2].status, r[2].stderr).toBe(0);
+      expect(r[2].stdout).toContain("  wiki revisions: no draft rows");
+      expect(r[2].state.SHA).not.toBe(r[0].state.SHA);
+    });
+
+    it("a failed deploy to a target with revision draft & publish names migrate.sql for the roll-forward", () => {
+      const failed = r[3];
+      expect(failed.status).toBe(1);
+      expect(failed.stderr).toContain(
+        `A roll-forward to this release needs migrate.sql first: infra-cms:${tagOf(r[2])} runs wiki revisions with`,
+      );
+      expect(failed.stderr).toContain(
+        "migrations/wiki-revision-dp/preflight.sql, then migrate.sql",
+      );
+      // The earlier failures of this file ran with a batch-16 target: no such line.
+      expect(r[1].stderr).not.toContain("A roll-forward to this release");
+    });
+  },
+);

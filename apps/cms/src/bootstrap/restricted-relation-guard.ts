@@ -77,14 +77,16 @@ export interface RestrictedRelationGuardHost {
  * `<target>.find` for every relation a ROOT filter or sort follows, but not
  * for the ones nested in a populate's `filters` or `sort` (@strapi/utils
  * 5.57: validatePopulate passes no auth, and sanitizePopulate's
- * removeRestrictedRelations skips those keys). The walk reports each of them
- * and the wrapper asks the same question the core asks at the root,
- * `strapi.auth.verify(auth, { scope: "<target>.find" })` with the request's
- * `auth` (for users-permissions: the role's ability), and answers the
- * core's `Invalid key` 400 for the first one the caller may not `find`.
- * No bypass: admin_role and editor are held to their own grants. Without
- * `auth` the verify throws, so the check fails closed; every content-API
- * controller passes it.
+ * removeRestrictedRelations skips those keys). The walk reports each one a
+ * populate's `filters` follow, and the wrapper asks the same question the
+ * core asks at the root, `strapi.auth.verify(auth, { scope:
+ * "<target>.find" })` with the request's `auth` (for users-permissions: the
+ * role's ability), and answers the core's `Invalid key` 400 for the first
+ * one the caller may not `find`. No bypass: admin_role and editor are held
+ * to their own grants. Without `auth` the verify throws, so the check fails
+ * closed; every content-API controller passes it. A populate's `sort` may
+ * follow no relation or media at all (batch 16; the walk refuses it with
+ * the same 400 before anything is asked): Strapi 5.57 answers 500 for one.
  *
  * Fails loudly: if a Strapi upgrade moves `contentAPI.sanitize.query` or
  * `auth.verify`, boot throws instead of silently re-opening the side

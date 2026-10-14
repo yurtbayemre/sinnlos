@@ -18,8 +18,13 @@
  * server and re-derived only from an explicit targeting key), `author`,
  * `organizer`, `uploadedBy` (the caller, on create), `ownerDepartment` (the
  * department author's department, on create), `scheduleError` (the
- * scheduler), Strapi's own keys. `document.file` joins both document lists
- * in batch 16, with the upload pipeline.
+ * scheduler), Strapi's own keys.
+ *
+ * `document.file` is in both document lists since batch 16 (lane 16B,
+ * contract K18): a file row id from POST /api/upload (uploads.ts), checked
+ * as the caller's own fresh upload when it is newly attached; the stored
+ * file passes unchecked (keeping is not attaching), and `null` clears it.
+ * The wiki types have their own lists (wiki.ts).
  */
 
 /** The phase-1 authored types, by their web area name. */
@@ -104,6 +109,7 @@ export const DOCUMENT_MODERATOR_FIELDS = [
   "description",
   "category",
   "departments",
+  "file",
   "publishAt",
   "unpublishAt",
 ] as const;
@@ -113,6 +119,7 @@ export const DOCUMENT_DEPARTMENT_AUTHOR_FIELDS = [
   "description",
   "category",
   "departments",
+  "file",
 ] as const;
 
 export const POLL_MODERATOR_FIELDS = [

@@ -72,6 +72,21 @@ export const AUTHORING_FIELD_CODES = [
   "optionCount",
   /** Two poll options equal after trimming. */
   "optionDuplicate",
+  /**
+   * An upload that is not a format of the caller's profile, or not a clean
+   * one (macro-enabled, template, slideshow, binary, a disguise; batch 16,
+   * uploads.ts).
+   */
+  "fileType",
+  /** An upload above its format's cap: 20 MB for PDF and Office, 5 MB for images (batch 16). */
+  "fileTooLarge",
+  /**
+   * A wiki page's `parent` that would put the page below itself: the parent
+   * is the page or one of its subpages (batch 16, key `parent`). Answered
+   * for every writer, the admin panel included, when the write would close
+   * a loop; a loop that existed before never blocks a save.
+   */
+  "parentCycle",
 ] as const;
 
 export type AuthoringFieldCode = (typeof AUTHORING_FIELD_CODES)[number];

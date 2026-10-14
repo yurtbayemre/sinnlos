@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { ADMIN_ENV, adminRequest, cmPath, contentManager } from "./admin-api.test.helper";
+import { storedRevision } from "./authoring.test.helper";
 import {
   TEST_ROLES,
   createTestDatabase,
@@ -15,11 +16,12 @@ import {
 /**
  * Wiki revisions are not readable through the content API (batch 15.1,
  * decision 06 §J3 "Generic routes", plan 16-0). The wiki-page lifecycle
- * snapshots the page body before every edit; whenever the draft differs
- * from the published version that body is unpublished draft text, and up to
- * batch 15 every staff role and `authenticated` could read it through
- * /api/wiki-revisions, `populate=revisions` and filters through the
- * relation. Every caller is checked, admin_role and editor included:
+ * records the page's draft after every save (before every edit up to batch
+ * 15.1); whenever the draft differs from the published version that is
+ * unpublished draft text, and up to batch 15 every staff role and
+ * `authenticated` could read it through /api/wiki-revisions,
+ * `populate=revisions` and filters through the relation. Every caller is
+ * checked, admin_role and editor included:
  *   - the generic routes are gone (404, or 405 where the path serves other
  *     methods), never a 401/403 that would mean "only the grant is missing";
  *   - a populate of `revisions`, in every shape and from every root that
@@ -103,7 +105,7 @@ describe.each(testEngines())("wiki revisions are closed on %s", (engine) => {
       },
       status: "published",
     });
-    // Each draft save snapshots the body before it: B and D were never
+    // Each draft save records its after-image (batch 16): B and D were never
     // published, and the publish in between links the revisions to the
     // published row too.
     const save = (body: string) =>
@@ -372,9 +374,12 @@ describe.each(testEngines())("wiki revisions are closed on %s", (engine) => {
           method: "PUT",
           json: { data: { revisions: { connect: [revision.documentId] } } },
         });
-        // The core's input validation: no `wiki-revision.find`, no relation.
+        // The moderator rule of the wiki-page allowlist (batch 16; before it,
+        // the core's input validation without `wiki-revision.find`).
         expect({ role, status: res.status }).toEqual({ role, status: 400 });
-        expect(res.text).toContain("Invalid key revisions");
+        expect((res.body as { error?: { details?: unknown } }).error?.details).toEqual({
+          keys: ["revisions"],
+        });
       }
       const linked = await t.strapi.db
         .query(REVISION)
@@ -383,13 +388,21 @@ describe.each(testEngines())("wiki revisions are closed on %s", (engine) => {
     });
 
     it("a write response carries no revisions (PUT as admin_role with ?populate=revisions)", async () => {
+      // Since batch 16 a wiki-page write takes no client query at all (the
+      // authoring controller answers a fixed DTO): the populate is refused.
       const res = await t.api<{ data: Record<string, unknown> }>(
         "admin_role",
         `/api/wiki-pages/${page.documentId}?populate=revisions&status=draft`,
-        { method: "PUT", json: { data: { summary: "touched by the closure suite" } } },
+        {
+          method: "PUT",
+          headers: { "If-Match": `"${await storedRevision(t, PAGE, page.documentId)}"` },
+          json: { data: { summary: "touched by the closure suite" } },
+        },
       );
-      expect(res.status).toBe(200);
-      expect(res.body.data).not.toHaveProperty("revisions");
+      expect(res.status).toBe(400);
+      expect((res.body as { error?: { details?: unknown } }).error?.details).toEqual({
+        keys: ["populate"],
+      });
       expect(res.text).not.toContain(SECRET);
     });
   });
@@ -434,6 +447,8 @@ describe.each(testEngines())("wiki revisions are closed on %s", (engine) => {
       const before = await t.strapi.db.query(REVISION).count();
       const res = await t.api("editor", `/api/wiki-pages/${page.documentId}?status=draft`, {
         method: "PUT",
+        // The generic PUT needs If-Match since batch 16.
+        headers: { "If-Match": `"${await storedRevision(t, PAGE, page.documentId)}"` },
         json: { data: { body: "ZZDRAFT-F the next draft", revisionSummary: "closure suite" } },
       });
       expect(res.status).toBe(200);
@@ -441,8 +456,11 @@ describe.each(testEngines())("wiki revisions are closed on %s", (engine) => {
       const written = await t.strapi.db
         .query(REVISION)
         .findOne({ where: { summary: "closure suite" }, populate: { editor: { select: ["id"] } } });
+      // The after-image of the save (batch 16, DA03).
       expect(written).toMatchObject({
-        body: "ZZDRAFT-E the current draft",
+        body: "ZZDRAFT-F the next draft",
+        kind: "after",
+        pageDocumentId: page.documentId,
         editor: { id: t.fixtures.users.editor.id },
       });
       expect(written?.publishedAt).not.toBeNull();
@@ -477,10 +495,11 @@ describe.each(testEngines())("wiki revisions are closed on %s", (engine) => {
 
       // The runbook's expected boot lines (docs/DEPLOYMENT.md, "Deploying
       // batch 15.1"): the five wiki-revision actions stay managed, now as
-      // revocations, so the drift check still covers 142 actions.
+      // revocations, so the drift check covered 142 actions; batch 16 adds
+      // the 13 wiki actions (2 of wiki-space, 11 of wiki-page): 155.
       expect(lines).toEqual([
         "info [bootstrap] revoked 18 obsolete permission(s)",
-        "info [bootstrap] permission drift: none (report-only check of 142 managed actions)",
+        "info [bootstrap] permission drift: none (report-only check of 155 managed actions)",
       ]);
       expect(
         await t.strapi.db

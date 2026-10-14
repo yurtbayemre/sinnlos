@@ -24,6 +24,9 @@ const { calls, step, syncStep, failing } = vi.hoisted(() => {
 });
 
 vi.mock("./utils/org-dp-guard", () => ({ assertNoOrgDrafts: step("assertNoOrgDrafts") }));
+vi.mock("./utils/revision-dp-guard", () => ({
+  assertNoRevisionDrafts: step("assertNoRevisionDrafts"),
+}));
 vi.mock("./database/ensure-timestamptz", () => ({
   prepareDatetimeContract: step("prepareDatetimeContract"),
   registerTimestamptzGuard: step("registerTimestamptzGuard"),
@@ -72,6 +75,7 @@ vi.mock("./utils/department-audience-backfill", () => ({
 vi.mock("./utils/targeting-flags-backfill", () => ({
   backfillTargetingFlags: step("backfillTargetingFlags"),
 }));
+vi.mock("./utils/revision-backfill", () => ({ backfillRevisions: step("backfillRevisions") }));
 vi.mock("./utils/admin-seed", () => ({ seedAdminUser: step("seedAdminUser") }));
 vi.mock("./digest/send-digests", () => ({ reportDigestConfig: step("reportDigestConfig") }));
 vi.mock("./seed-demo", () => ({ seedDemoData: step("seedDemoData") }));
@@ -85,10 +89,11 @@ beforeEach(() => {
 });
 
 describe("src/index.ts lifecycle order (B01)", () => {
-  it("register(): the org draft guard first, the Document Service middlewares last", async () => {
+  it("register(): the org and revision draft guards first, the Document Service middlewares last", async () => {
     await lifecycle.register({ strapi });
     expect(calls).toEqual([
       "assertNoOrgDrafts",
+      "assertNoRevisionDrafts",
       "prepareDatetimeContract",
       "registerTimestamptzGuard",
       "enforceSecretGuard",
@@ -115,6 +120,7 @@ describe("src/index.ts lifecycle order (B01)", () => {
       "backfillPollAudience",
       "backfillDepartmentAudience",
       "backfillTargetingFlags",
+      "backfillRevisions",
       "seedAdminUser",
       "reportDigestConfig",
       "seedDemoData",
@@ -162,5 +168,19 @@ describe("src/index.ts lifecycle order (B01)", () => {
     failing.add("assertNoOrgDrafts");
     await expect(lifecycle.register({ strapi })).rejects.toThrow("assertNoOrgDrafts failed");
     expect(calls).toEqual(["assertNoOrgDrafts"]);
+  });
+
+  it("a failing revision draft guard stops register() before anything after the org guard", async () => {
+    failing.add("assertNoRevisionDrafts");
+    await expect(lifecycle.register({ strapi })).rejects.toThrow("assertNoRevisionDrafts failed");
+    expect(calls).toEqual(["assertNoOrgDrafts", "assertNoRevisionDrafts"]);
+  });
+
+  it("a failing revision backfill stops bootstrap() before the seed and the draft twins", async () => {
+    failing.add("backfillRevisions");
+    await expect(lifecycle.bootstrap({ strapi })).rejects.toThrow("backfillRevisions failed");
+    expect(calls[calls.length - 1]).toBe("backfillRevisions");
+    expect(calls).not.toContain("seedDemoData");
+    expect(calls).not.toContain("ensureDraftTwins");
   });
 });

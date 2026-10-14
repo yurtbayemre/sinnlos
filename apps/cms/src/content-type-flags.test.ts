@@ -20,7 +20,8 @@ import { isLocalizedModel } from "./utils/draft-twins";
  *     (discardDraft per document).
  * So a flip needs a migration plan, not just a schema edit: see the
  * department/team switch (a register() guard that refuses to boot while
- * drafts exist, plus one-time SQL, infra/migrations/org-dp/README.md).
+ * drafts exist, plus one-time SQL, infra/migrations/org-dp/README.md, and
+ * the wiki-revision switch of batch 16, infra/migrations/wiki-revision-dp).
  * Change a flag and its entry here in the same commit.
  */
 
@@ -66,7 +67,10 @@ const DRAFT_AND_PUBLISH: Readonly<Record<string, boolean>> = {
   // Same as department (I-ORG).
   "api::team.team": false,
   "api::wiki-page.wiki-page": true,
-  "api::wiki-revision.wiki-revision": true,
+  // Batch 16 (DA03): one row per revision, written published. Guarded at
+  // boot by utils/revision-dp-guard.ts; existing databases with draft rows
+  // migrate with infra/migrations/wiki-revision-dp/migrate.sql.
+  "api::wiki-revision.wiki-revision": false,
   "api::wiki-space.wiki-space": true,
   [USER_UID]: false,
 };

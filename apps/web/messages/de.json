@@ -175,9 +175,17 @@
     "tags": "Schlagwörter",
     "contents": "Inhalt",
     "emptySpacesTitle": "Noch keine Wiki-Bereiche",
-    "emptySpacesHint": "Erstellen Sie einen Bereich im Strapi-Admin, um Wissen zu sammeln.",
+    "emptySpacesHint": "Redaktion und Admins legen Bereiche unter „Verwaltung“ an.",
     "emptyPagesTitle": "Noch keine Seiten in diesem Bereich",
-    "emptyPagesHint": "Im Strapi-Admin erstellte Seiten erscheinen hier nach der Veröffentlichung."
+    "emptyPagesHint": "Seiten erscheinen hier, sobald sie veröffentlicht sind.",
+    "pageActions": "Seitenaktionen",
+    "spaceActions": "Bereichsaktionen",
+    "edit": "Bearbeiten",
+    "history": "Verlauf",
+    "newPage": "Neue Seite",
+    "myDrafts": "Meine Entwürfe",
+    "manageSpaces": "Bereiche verwalten",
+    "manageSpace": "Diesen Bereich verwalten"
   },
   "departments": {
     "title": "Abteilungen",
@@ -343,7 +351,7 @@
     "guide": "Anleitung",
     "other": "Sonstiges",
     "emptyTitle": "Noch keine Dokumente",
-    "emptyHint": "Admins und Redakteure können Dokumente im Strapi-Admin-Panel hochladen.",
+    "emptyHint": "Redaktion, Admins und Abteilungsleitungen fügen Dokumente unter „Verwaltung“ hinzu.",
     "noFile": "Keine Datei hinterlegt"
   },
   "profile": {

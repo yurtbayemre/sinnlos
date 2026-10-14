@@ -338,6 +338,52 @@ describe.each(testEngines())("targeting fails closed on %s", (engine) => {
     expect(after[2]).toBeGreaterThanOrEqual(before[2] + 1);
   });
 
+  it("batch 16: a team and a department deleted advance their wiki pages; the lead and the head lose the page", async () => {
+    const WIKI_SPACE = "api::wiki-space.wiki-space";
+    const WIKI_PAGE = "api::wiki-page.wiki-page";
+    const unit = await department("FC Wiki Dept");
+    const squad = await team("FC Wiki Squad", unit);
+    const head = await createUser(t, "department_head", unit);
+    const lead = await createUser(t, "team_lead", unit);
+    await t.strapi
+      .documents(TEAM)
+      .update({ documentId: squad.documentId, data: { lead: lead.documentId } });
+    const space = await publish(WIKI_SPACE, { name: "FC Wiki Space", slug: "fc-wiki-space" });
+    const page = await publish(WIKI_PAGE, {
+      title: "FC Wiki Page",
+      slug: "fc-wiki-page",
+      space: space.documentId,
+      department: unit.documentId,
+      team: squad.documentId,
+    });
+    const headCaller: Caller = { jwt: await signIn(t, head) };
+    const leadCaller: Caller = { jwt: await signIn(t, lead) };
+    const form = async (caller: Caller) =>
+      t.api<{ data: { roleClass: string; version: string } }>(
+        caller,
+        `/api/wiki-pages/${page.documentId}/editable`,
+      );
+    expect((await form(leadCaller)).body.data.roleClass).toBe("teamLead");
+    const headForm = await form(headCaller);
+    expect(headForm.body.data.roleClass).toBe("departmentHead");
+
+    const before = await revision(WIKI_PAGE, page.documentId);
+    expect((await panel.delete(TEAM, squad.documentId)).status).toBe(200);
+    expect(await revision(WIKI_PAGE, page.documentId)).toBe(before + 1);
+    expect((await form(leadCaller)).status).toBe(404);
+    // The head's token from before the team delete is stale now.
+    const stale = await t.api(headCaller, `/api/wiki-pages/${page.documentId}/draft`, {
+      method: "PUT",
+      headers: { "If-Match": `"${headForm.body.data.version}"` },
+      json: { data: { title: "FC late save" } },
+    });
+    expect(stale.status).toBe(412);
+
+    expect((await panel.delete(DEPARTMENT, unit.documentId)).status).toBe(200);
+    expect(await revision(WIKI_PAGE, page.documentId)).toBe(before + 2);
+    expect((await form(headCaller)).status).toBe(404);
+  });
+
   it("department plus team (A3): deleting the team keeps the rest of the department out", async () => {
     const unit = await department("FC Team Del Dept");
     const squad = await team("FC Team Del Squad", unit);

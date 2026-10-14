@@ -3,7 +3,7 @@ import { getTranslations } from "next-intl/server";
 import { EmptyState } from "@/components/empty-state";
 import { FetchErrorBanner } from "@/components/fetch-error";
 import { canDo, lacksDepartment } from "@/lib/manage/access";
-import { AREA_NEW_PATH, hasOwnerDepartment, type ManageArea } from "@/lib/manage/areas";
+import { AREA_NEW_PATH, hasOwnerDepartment, type TypedArea } from "@/lib/manage/areas";
 import { areaGate } from "@/lib/manage/page-gate";
 import {
   loadManageList,
@@ -27,7 +27,7 @@ export async function ManageListPage({
   area,
   searchParams,
 }: {
-  area: ManageArea;
+  area: TypedArea;
   searchParams: Promise<ListSearchParams>;
 }) {
   const { viewer, access } = await areaGate(area);

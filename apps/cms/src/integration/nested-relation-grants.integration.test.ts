@@ -26,8 +26,10 @@ import {
  *     array, object): 400 with the core's message, and the answer is the
  *     same for a value that matches and one that does not; a role holding
  *     the grant gets an answer that depends on the value (the control);
- *   - nested filters and sorts through relations the role may read: as
- *     before;
+ *   - nested filters through relations the role may read: as before; a
+ *     sort inside a populate through any relation or media answers the
+ *     core's 400 for every role, the grant held or not (batch 16: Strapi
+ *     5.57 answered 500 with an SQL error there);
  *   - the row-level targets of the batch 15.2 review: comment.parent/replies
  *     (cut below the bypass by this release), department/team.pages (FX05),
  *     the wiki domain's own relations (trusted), wiki-page.revisions (closed,
@@ -418,7 +420,7 @@ describe.each(testEngines())("relations in populate filters and sort need find o
     }
   });
 
-  describe("nested filters and sorts through relations the role reads are unchanged", () => {
+  describe("nested filters through relations the role reads are unchanged; relation sorts are refused", () => {
     const pagesOf = (body: unknown) =>
       ((body as { data: { pages?: { title: string }[] }[] }).data[0]?.pages ?? []).map(
         (page) => page.title,
@@ -427,15 +429,20 @@ describe.each(testEngines())("relations in populate filters and sort need find o
       `/api/wiki-spaces?filters[slug][$eq]=it-nrg-space&populate[pages][fields][0]=title&${populate}`;
 
     /**
-     * A relation path in a populate's sort reaches the core for a role that
-     * may find the target: never the guard's 400. (Strapi 5.57 itself
-     * answers 500 there, `no such column` in the populate query, on any
-     * data, so no caller, the web included, can use one.)
+     * A relation or media path in a populate's sort answers the core's 400
+     * for every caller, also one that may find the target (batch 16).
+     * Strapi 5.57 answered 500 there for such a caller, an SQL error in the
+     * populate query (`no such column`), so nobody, the web included, could
+     * use one.
      */
-    async function expectPassedToCore(role: TestRole, path: string) {
+    async function expectSortRefused(role: TestRole, path: string, key: string) {
       const res = await t.api(role, path);
-      expect({ role, path, status: res.status }).not.toEqual({ role, path, status: 400 });
-      expect(res.text).not.toContain("Invalid key");
+      expect({ role, path, status: res.status }).toEqual({ role, path, status: 400 });
+      expect({ role, path, message: res.text.includes(`Invalid key ${key} at `) }).toEqual({
+        role,
+        path,
+        message: true,
+      });
     }
 
     it("every role: through users and the wiki domain's own relations", async () => {
@@ -464,7 +471,11 @@ describe.each(testEngines())("relations in populate filters and sort need find o
             pages: expected,
           });
         }
-        await expectPassedToCore(role, spaceWith("populate[pages][sort]=author.username:asc"));
+        await expectSortRefused(
+          role,
+          spaceWith("populate[pages][sort]=author.username:asc"),
+          "author",
+        );
 
         const children = await t.api<{ data: { children?: { title: string }[] }[] }>(
           role,
@@ -504,7 +515,17 @@ describe.each(testEngines())("relations in populate filters and sort need find o
           role,
           teams: ["IT Platform"],
         });
-        await expectPassedToCore(role, spaceWith("populate[pages][sort]=team.name:asc"));
+        await expectSortRefused(role, spaceWith("populate[pages][sort]=team.name:asc"), "team");
+        await expectSortRefused(
+          role,
+          `/api/departments?filters[name][$eq]=${q("IT Engineering")}&populate[teams][sort]=avatar.name:asc`,
+          "avatar",
+        );
+        await expectSortRefused(
+          role,
+          `/api/departments?filters[name][$eq]=${q("IT Engineering")}&populate[teams][sort][lead][username]=asc`,
+          "lead",
+        );
       }
     });
 
@@ -518,7 +539,11 @@ describe.each(testEngines())("relations in populate filters and sort need find o
       );
       expect(res.status).toBe(200);
       expect(res.body[0]?.manager?.username).toBe("it-department-head");
-      await expectPassedToCore("admin_role", "/api/users?populate[manager][sort]=role.name:asc");
+      await expectSortRefused(
+        "admin_role",
+        "/api/users?populate[manager][sort]=role.name:asc",
+        "role",
+      );
     });
   });
 

@@ -21,6 +21,8 @@ import {
 import {
   SCHEDULE_BATCH,
   TransientAttempts,
+  WITHDRAWAL_RETRY_QUOTA,
+  WITHDRAWAL_RETRY_SCAN,
   classifyScheduleFailure,
   describeFailure,
   instantOf,
@@ -78,8 +80,22 @@ import {
  * only clears the field (advance + audit `scheduleUnpublish`, "nothing was
  * published"), and only when no publish is pending; a pending publish
  * keeps `unpublishAt`, so the publish pass sees the ended window (rule 4).
- * Such waiting drafts are passed over when the selection is read, so they
- * never fill the batch in front of due withdrawals. An unpublish also
+ * Such waiting drafts are left out when the selection is read, so they
+ * never fill the batch in front of due withdrawals. The selection has two
+ * tiers (issue #73), so a failing withdrawal never hides a healthy one:
+ *   1. the healthy ones: due, `scheduleError` NULL (never failed for good),
+ *      in deadline order, the waiting drafts excluded in the query itself;
+ *   2. the failing ones (`scheduleError` set), up to WITHDRAWAL_RETRY_QUOTA
+ *      attempts per run whatever tier 1 holds: read through a per-process,
+ *      per-type keyset cursor over the draft row ids (after the last row
+ *      examined; at the end it wraps to the start), at most
+ *      WITHDRAWAL_RETRY_SCAN rows examined per run, each filtered by its
+ *      backoff. The cursor moves over every row it examined and stops at
+ *      the last attempted one when the quota is full, so every ready
+ *      failure is attempted within ⌈N / WITHDRAWAL_RETRY_QUOTA⌉ runs even
+ *      while tier 1 stays full. A restart resets the cursor and the
+ *      backoff (it only adds retries).
+ * Tier 1 takes the rest of SCHEDULE_BATCH. An unpublish also
  * cancels a pending publish (schedule-clear). The publish pass never
  * publishes a published document whose withdrawal is due: that is the
  * unpublish pass's, also while it is being retried. Its selection leaves
@@ -209,10 +225,6 @@ const label = (uid: string, documentId: string) => `${uid} ${documentId}`;
 
 const isDocumentId = (value: unknown): value is string =>
   typeof value === "string" && value.length > 0;
-
-/** Rows per page of the unpublish selection, and pages per run. */
-const UNPUBLISH_PAGE = 200;
-const UNPUBLISH_MAX_PAGES = 10;
 
 /** The readiness targets of a type (lesson → course, wiki page → parent page). */
 const READINESS_TARGETS: Readonly<Record<string, { key: string; target: string }>> = {
@@ -355,29 +367,109 @@ async function duePublishes(
 }
 
 /**
- * The due unpublishes (rule 4): draft rows with unpublishAt passed whose
- * document is published, or that have no pending publish (the claim then
- * only clears the field). Passed over, and never filling the page: a draft
- * with a pending publish and no published row (the publish pass's: its
- * window ended), and a failed withdrawal whose backoff is not over (unless
- * the document changed since). Up to UNPUBLISH_MAX_PAGES pages are read
- * until SCHEDULE_BATCH actionable documents are found.
+ * Whether a withdrawal may be attempted now: it never failed in this
+ * process, or its backoff is over, or the document changed since.
  */
-async function dueUnpublishes(
+async function backoffOver(
+  strapi: ScheduledPublishStrapi,
+  uid: string,
+  documentId: string,
+  now: Date,
+  attempts: TransientAttempts,
+): Promise<boolean> {
+  if (attempts.withdrawalFailures(uid, documentId) === 0) return true;
+  const revision = await readRevision(strapi, uid, documentId);
+  return attempts.withdrawalReady(uid, documentId, now, revision);
+}
+
+/**
+ * Tier 1 of the due unpublishes (UNPUBLISHES in the module comment): draft
+ * rows with unpublishAt passed and no `scheduleError`, in deadline order,
+ * at most `limit`. One read query: a draft with a pending publish whose
+ * document has no published row (the publish pass's: its window ended) is
+ * left out in the query, so it never takes a slot. The backoff check stays
+ * as a safeguard (a withdrawal backs off only after recording
+ * `scheduleError`, so it holds here only for a row cleared without a save).
+ */
+async function healthyWithdrawals(
+  strapi: ScheduledPublishStrapi,
+  uid: string,
+  now: Date,
+  attempts: TransientAttempts,
+  limit: number,
+): Promise<string[]> {
+  const own = modelNames(strapi, uid);
+  const id = own.column("id", "id");
+  const documentId = own.column("documentId", "document_id");
+  const publishedAt = own.column("publishedAt", "published_at");
+  const publishAt = own.column("publishAt", "publish_at");
+  const unpublishAt = own.column("unpublishAt", "unpublish_at");
+  const scheduleError = own.column("scheduleError", "schedule_error");
+  const sql = `SELECT d.?? AS document_id FROM ?? AS d
+     WHERE d.?? IS NULL AND d.?? IS NOT NULL AND d.?? <= ? AND d.?? IS NULL
+       AND NOT (d.?? IS NOT NULL
+                AND NOT EXISTS (SELECT 1 FROM ?? AS q WHERE q.?? = d.?? AND q.?? IS NOT NULL))
+     ORDER BY d.?? ASC, d.?? ASC
+     LIMIT ?`;
+  const bindings = [
+    documentId,
+    own.table,
+    publishedAt,
+    unpublishAt,
+    unpublishAt,
+    now,
+    scheduleError,
+    publishAt,
+    own.table,
+    documentId,
+    documentId,
+    publishedAt,
+    unpublishAt,
+    id,
+    limit,
+  ];
+  const rows = rawRows(await strapi.db.connection.raw(sql, bindings));
+  const ready: string[] = [];
+  for (const row of rows) {
+    if (!isDocumentId(row.document_id)) continue;
+    if (await backoffOver(strapi, uid, row.document_id, now, attempts)) ready.push(row.document_id);
+  }
+  return ready;
+}
+
+/**
+ * Tier 2 of the due unpublishes (UNPUBLISHES in the module comment): up to
+ * WITHDRAWAL_RETRY_QUOTA failed withdrawals whose backoff is over, read
+ * from the type's keyset cursor (draft row ids after the last examined
+ * one, wrapping once at the end, never past where the run started), at
+ * most WITHDRAWAL_RETRY_SCAN rows examined. Stores the cursor for the next
+ * run: the last attempted row when the quota is full, else the last
+ * examined one, or the start after a full circle.
+ */
+async function retryWithdrawals(
   strapi: ScheduledPublishStrapi,
   uid: string,
   now: Date,
   attempts: TransientAttempts,
 ): Promise<string[]> {
   const query = strapi.db.query(uid);
-  const actionable: string[] = [];
-  for (let page = 0; page < UNPUBLISH_MAX_PAGES && actionable.length < SCHEDULE_BATCH; page += 1) {
+  const start = attempts.withdrawalCursor(uid);
+  const picked: string[] = [];
+  let cursor = start;
+  let examined = 0;
+  let wrapped = false;
+  while (examined < WITHDRAWAL_RETRY_SCAN && picked.length < WITHDRAWAL_RETRY_QUOTA) {
+    const limit = WITHDRAWAL_RETRY_SCAN - examined;
     const rows = await query.findMany({
-      where: { publishedAt: null, unpublishAt: { $notNull: true, $lte: now } },
-      select: ["id", "documentId", "unpublishAt", "publishAt"],
-      orderBy: [{ unpublishAt: "asc" }, { id: "asc" }],
-      offset: page * UNPUBLISH_PAGE,
-      limit: UNPUBLISH_PAGE,
+      where: {
+        publishedAt: null,
+        unpublishAt: { $notNull: true, $lte: now },
+        scheduleError: { $notNull: true },
+        id: wrapped ? { $gt: cursor, $lte: start } : { $gt: cursor },
+      },
+      select: ["id", "documentId", "publishAt"],
+      orderBy: { id: "asc" },
+      limit,
     });
     const documentIds = rows.map((row) => row.documentId).filter(isDocumentId);
     const published = new Set(
@@ -391,19 +483,46 @@ async function dueUnpublishes(
           ).map((row) => row.documentId),
     );
     for (const row of rows) {
+      examined += 1;
+      cursor = Number(row.id);
       if (!isDocumentId(row.documentId)) continue;
       const pendingPublish = row.publishAt !== null && row.publishAt !== undefined;
       if (!published.has(row.documentId) && pendingPublish) continue;
-      if (attempts.withdrawalFailures(uid, row.documentId) > 0) {
-        const revision = await readRevision(strapi, uid, row.documentId);
-        if (!attempts.withdrawalReady(uid, row.documentId, now, revision)) continue;
-      }
-      actionable.push(row.documentId);
-      if (actionable.length >= SCHEDULE_BATCH) break;
+      if (!(await backoffOver(strapi, uid, row.documentId, now, attempts))) continue;
+      picked.push(row.documentId);
+      if (picked.length >= WITHDRAWAL_RETRY_QUOTA) break;
     }
-    if (rows.length < UNPUBLISH_PAGE) break;
+    if (picked.length >= WITHDRAWAL_RETRY_QUOTA || rows.length === limit) continue;
+    // The end of the rows: back to the start, to wrap once now or, after a
+    // full circle, for the next run.
+    cursor = 0;
+    if (wrapped || start === 0) break;
+    wrapped = true;
   }
-  return actionable;
+  attempts.setWithdrawalCursor(uid, cursor);
+  return picked;
+}
+
+/**
+ * The due unpublishes (rule 4; issue #73): the failing withdrawals' reserved
+ * quota is selected first, the healthy ones fill the rest of SCHEDULE_BATCH
+ * and run first.
+ */
+async function dueUnpublishes(
+  strapi: ScheduledPublishStrapi,
+  uid: string,
+  now: Date,
+  attempts: TransientAttempts,
+): Promise<string[]> {
+  const retries = await retryWithdrawals(strapi, uid, now, attempts);
+  const healthy = await healthyWithdrawals(
+    strapi,
+    uid,
+    now,
+    attempts,
+    SCHEDULE_BATCH - retries.length,
+  );
+  return [...healthy, ...retries];
 }
 
 const draftOf = (strapi: ScheduledPublishStrapi, uid: string, documentId: string) =>

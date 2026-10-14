@@ -50,10 +50,18 @@ import { errors } from "@strapi/utils";
  * [name][$eq]=…` let guest (no `department.find`) select through
  * departments, and `populate[author][filters][role][type][$eq]=admin_role`
  * let every role below admin_role probe users' roles. The walk reports each
- * relation a populate's `filters` or `sort` follow (`onPopulateQueryRelation`,
- * at any depth, through `$and`/`$or`/`$not`), and the guard refuses the first
- * one whose target the caller cannot `find` (assertPopulateQueryGrants),
- * with the core's root answer. Every caller, admin_role and editor included.
+ * relation a populate's `filters` follow (`onPopulateQueryRelation`, at any
+ * depth, through `$and`/`$or`/`$not`), and the guard refuses the first one
+ * whose target the caller cannot `find` (assertPopulateQueryGrants), with
+ * the core's root answer. Every caller, admin_role and editor included.
+ *
+ * Sorts inside a populate (batch 16): a populate's `sort` may not follow
+ * any relation or media attribute, whatever the caller holds. Strapi 5.57
+ * builds such a populate query with a broken alias and answers 500 with an
+ * SQL error (`"t4"."t1"."wiki_space_id"`, `no such column`), on any data
+ * once a row is there; the web sends none. The walk refuses each with the
+ * core's `Invalid key <key> at <path>` 400 instead; scalar sorts pass, and
+ * root sorts stay with the core.
  *
  * What happens to a restricted relation (closed targets for every caller,
  * the rest for non admin_role/editor callers; registerRestrictedRelationGuard
@@ -170,7 +178,7 @@ export const NON_BYPASS_RELATION_TARGETS: RestrictedRelationRules = {
 };
 
 /**
- * A relation that a populate's `filters` or `sort` follow: its target, and
+ * A relation that a populate's `filters` follow: its target, and
  * the key and path that the core's `Invalid key` names.
  */
 export interface PopulateQueryRelation {
@@ -185,9 +193,10 @@ export interface RestrictedRelationOptions {
   rules: RestrictedRelationRules;
   /**
    * Called in walk order for every relation with a static target that a
-   * populate's `filters` or `sort` follow and the rules let through, at any
-   * populate and filter depth. Root filters and sort are not reported: the
-   * core checks their grants itself (validateQuery's throwRestrictedRelations).
+   * populate's `filters` follow and the rules let through, at any populate
+   * and filter depth (a populate's `sort` follows no relation: refused).
+   * Root filters and sort are not reported: the core checks their grants
+   * itself (validateQuery's throwRestrictedRelations).
    */
   onPopulateQueryRelation?: (relation: PopulateQueryRelation) => void;
 }
@@ -228,7 +237,7 @@ export function guardRestrictedRelations(
 ): Record<string, unknown> {
   // Root filters and sort: the core already checked their grants.
   assertFilters(query.filters, model, options, "", undefined);
-  assertSort(query.sort, model, options, "", undefined);
+  assertSort(query.sort, model, options, "", false);
   if (query.populate === undefined) return query;
   return { ...query, populate: stripPopulate(query.populate, model, options, "") };
 }
@@ -249,8 +258,8 @@ export function stripRestrictedRelationsFromOutput<T>(
 }
 
 /**
- * The core's root rule, applied to the relations a populate's filters and
- * sort follow (batch 15.2, collected through `onPopulateQueryRelation`):
+ * The core's root rule, applied to the relations a populate's filters
+ * follow (batch 15.2, collected through `onPopulateQueryRelation`):
  * throws the core's `Invalid key` 400 for the first one, in walk order,
  * whose target the caller holds no `find` on. `canFind` is asked once per
  * target. A 400 rather than a dropped clause, as for the restricted
@@ -325,7 +334,7 @@ function expandWildcard(model: RelationModel | undefined, options: RestrictedRel
 // filters and sort: reject
 // ---------------------------------------------------------------------------
 
-/** Receives the relations a populate's filters and sort follow; absent at the root. */
+/** Receives the relations a populate's filters follow; absent at the root. */
 type RelationVisit = RestrictedRelationOptions["onPopulateQueryRelation"];
 
 /**
@@ -375,22 +384,40 @@ function assertFilters(
   }
 }
 
+/**
+ * One attribute of a sort path. Inside a populate (`inPopulate`) every
+ * relation and media attribute is refused, for every caller (batch 16, see
+ * the header: Strapi 5.57 answers 500 for them); at the root only the
+ * restricted ones are, the core checks the grants.
+ */
+function checkSortKey(
+  model: RelationModel | undefined,
+  attr: RelationAttribute,
+  options: RestrictedRelationOptions,
+  key: string,
+  at: string,
+  inPopulate: boolean,
+): void {
+  if (inPopulate && (attr.type === "relation" || attr.type === "media")) throwInvalidKey(key, at);
+  checkRelation(model, attr, options, key, at, undefined);
+}
+
 function assertSort(
   sort: unknown,
   model: RelationModel | undefined,
   options: RestrictedRelationOptions,
   path: string,
-  visit: RelationVisit,
+  inPopulate: boolean,
 ): void {
   if (typeof sort === "string") {
     // "title:asc,teams.name:desc" — the order suffix is not part of the path.
     for (const token of sort.split(",")) {
-      assertSortPath(token.split(":")[0].trim().split("."), model, options, path, visit);
+      assertSortPath(token.split(":")[0].trim().split("."), model, options, path, inPopulate);
     }
     return;
   }
   if (Array.isArray(sort)) {
-    for (const item of sort) assertSort(item, model, options, path, visit);
+    for (const item of sort) assertSort(item, model, options, path, inPopulate);
     return;
   }
   if (!isPlainObject(sort)) return;
@@ -399,9 +426,9 @@ function assertSort(
     const attr = model?.attributes?.[key];
     if (!attr) continue;
     const at = joinPath(path, key);
-    checkRelation(model, attr, options, key, at, visit);
+    checkSortKey(model, attr, options, key, at, inPopulate);
     const nested = nestedModel(attr, options);
-    if (nested && typeof value !== "string") assertSort(value, nested, options, at, visit);
+    if (nested && typeof value !== "string") assertSort(value, nested, options, at, inPopulate);
   }
 }
 
@@ -410,7 +437,7 @@ function assertSortPath(
   model: RelationModel | undefined,
   options: RestrictedRelationOptions,
   path: string,
-  visit: RelationVisit,
+  inPopulate: boolean,
 ): void {
   let current = model;
   let at = path;
@@ -418,7 +445,7 @@ function assertSortPath(
     const attr = current?.attributes?.[segment];
     if (!attr) return;
     at = joinPath(at, segment);
-    checkRelation(current, attr, options, segment, at, visit);
+    checkSortKey(current, attr, options, segment, at, inPopulate);
     current = nestedModel(attr, options);
   }
 }
@@ -546,10 +573,10 @@ function stripNested(
   if (Array.isArray(sub)) return stripPopulate(sub, nested, options, path);
   if (!isPlainObject(sub)) return sub;
   // populate[teams][filters|sort] run against the NESTED model; the core
-  // checks no grant there, so each relation they follow is reported.
-  const visit = options.onPopulateQueryRelation;
-  assertFilters(sub.filters, nested, options, path, visit);
-  assertSort(sub.sort, nested, options, path, visit);
+  // checks no grant there, so each relation the filters follow is
+  // reported, and the sort may follow none (batch 16).
+  assertFilters(sub.filters, nested, options, path, options.onPopulateQueryRelation);
+  assertSort(sub.sort, nested, options, path, true);
   if (!("populate" in sub)) return sub;
   return { ...sub, populate: stripPopulate(sub.populate, nested, options, path) };
 }

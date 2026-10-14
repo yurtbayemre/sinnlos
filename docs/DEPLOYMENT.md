@@ -1376,9 +1376,10 @@ systemctl start docker
 >   client.query() when the client is already executing a query is
 >   deprecated and will be removed in pg@9.0. …` / ``(Use `node
 >   --trace-deprecation ...` to show where the warning was created)`` on
->   stderr after its first publish or upload (the pg driver under
->   Strapi 5.57). Harmless, once per process; it does not match the
->   runbooks' error filters;
+>   stderr once per cms process, after its first database activity
+>   (a sign-in and the first page reads are enough; the pg driver under
+>   Strapi 5.57). Harmless; it does not match the runbooks' error
+>   filters;
 > - after every web redeploy the web logs `Error: Failed to find Server
 >   Action "<id>". This request might be from an older or newer
 >   deployment.` (with `Read more:
@@ -1389,6 +1390,27 @@ systemctl start docker
 >   after the deploy and fade as people reload; the runbooks' error
 >   filters print them, so count them as expected there.
 
+> **Deploying batch 16 (v2 authoring phase 2)?** Documents with uploads,
+> the wiki with drafts, history and restore, the delete trail and #73
+> (the four lane notes below) ship as **one deploy of cms and web** with
+> `infra/deploy.sh`, **once batch 15.2 runs** (`TAG=490d82aae7a7`, the
+> rollback target). No required env, no edge change, no `JWT_SECRET`
+> rotation, nobody signed out; the first cms boot turns draft & publish
+> off for wiki revisions (the fast path when the revision preflight's R0
+> is 0; otherwise `migrate.sql` first, and `deploy.sh` refuses until
+> then), writes a baseline revision per page, adds one index and grants
+> **52 permission rows**. Read-only checks before it: the 15.2 state, a
+> clean checkout, `--check` and `--dry-run` (`wiki revisions: no draft
+> rows`), the revision preflight, the census, `wiki-parent-cycles.sql`,
+> `upload-census.sql`, `department-heads.sql`, the reserved slugs and the
+> permission diff (52 `MISSING_IN_DB`). After it: the boot lines
+> (`[revision-backfill]`, `granted 52`, drift over 155 managed actions,
+> the revision index), the schema, `/manage` as an editor and a
+> department head, the wiki in the browser. A rollback to 15.2 is a
+> retag, and its roll-forward needs `migrate.sql` before `deploy.sh`.
+> Follow
+> [Deploying batch 16](#deploying-batch-16-v2-authoring-phase-2-documents-with-uploads-the-wiki).
+>
 > **Deploying batch 15.2 (relation grants in populate filters and sort)?**
 > One deploy with `infra/deploy.sh`, **once batch 15.1 runs**. No schema, no
 > env, no permission change, no `JWT_SECRET` rotation, nobody signed out.
@@ -1915,6 +1937,1305 @@ is degraded while the new cms boots. For the manual production-safe sequence
 (and rollback), see the
 [update procedure](#74-update-procedure-production-safe).
 
+#### Deploying batch 16 (v2 authoring phase 2: documents with uploads, the wiki)
+
+Batch 16 (branch `batch/16`: `main` `490d82a` plus the four lanes of plan
+batch 16) ships in one deploy of cms and web, **once batch 15.2 runs**
+(production since 2026-10-13 23:49 CEST, `TAG=490d82aae7a7`) and its watch
+was clean. Batch 15.2 contains batch 15.1's wiki-revision read closure,
+and **15.2 is the rollback target**. The lane notes below explain each
+change in detail; **this section is the one sequence to follow** on the
+owner instance (srv-prod-01, Traefik mode, checkout
+`/home/bigemo/git/sinnlos`, compose project `infra`, `infra/deploy.sh` run
+as `bigemo`):
+
+- [document uploads, file claims and the delete trail](#upgrading-to-the-document-upload-profile-the-file-claims-and-the-delete-trail-batch-16-lane-16a)
+  (lane 16A, cms): moderators and department heads upload PDF, DOCX,
+  XLSX and PPTX up to 20 MB and images up to 5 MB, decided by content
+  (macro-enabled, template, slideshow and binary Office files refused);
+  the admin panel refuses macro-enabled Office files; every removal of an
+  uploaded file goes through one locked path with a tombstone; every ad
+  and file delete writes an audit row;
+- [wiki history as after-images](#upgrading-to-wiki-history-as-after-images-batch-16-lane-16d)
+  (lane 16D, cms and `infra/deploy.sh`): a revision records the page
+  AFTER each save; wiki revisions lose draft & publish (six new columns,
+  a boot guard, a boot backfill with a cutover baseline per page, an
+  index); `deploy.sh` refuses a deploy over revision draft rows; issue
+  #73 (a failing scheduled withdrawal no longer hides a healthy one);
+- [the wiki write model and documents with files](#upgrading-to-the-wiki-write-model-and-documents-with-files-batch-16-lane-16b)
+  (lane 16B, cms): the admin_role/editor write bypass ends on the wiki;
+  eleven wiki-page actions (drafts, publish, history, restore); parent
+  loops refused and non-empty spaces protected for every writer, the
+  admin panel included; documents carry a file under the media claims;
+  reserved slugs; **+52 grant rows**;
+- [documents and the wiki in the web](#upgrading-to-documents-and-the-wiki-in-the-web-batch-16-lane-16c)
+  (lane 16C, web): `/manage/documents`, `/manage/wiki`, the wiki editor,
+  drafts, history and restore in the wiki itself; the Next proxy lets
+  request bodies up to 22 MB through;
+- from the integration: a populate's sort through a relation or a media
+  field answers the core's 400 for every caller (it answered 500 with an
+  SQL error since Strapi 5.57, see
+  [Deploying batch 15.2](#deploying-batch-152-relation-grants-in-populate-filters-and-sort)),
+  and this runbook.
+
+It is **one deploy of cms and web** with `infra/deploy.sh`; the rollback
+below takes both back. No required env, no edge change, no dependency
+change. The first cms boot adds six nullable columns to `wiki_revisions`,
+turns draft & publish off for wiki revisions (the **fast path**: nothing
+to migrate when the preflight's R0 is 0, as expected on production),
+backfills the revision anchors and writes a baseline revision per page,
+creates one index and grants **52 permission rows**. **Nobody is signed
+out** and there is **no `JWT_SECRET` rotation**, neither now nor on a
+rollback to 15.2 (both sides check token versions since batch 13). The
+site is down while the cms boots, as with every deploy.
+
+Set these on the host, in the checkout, for the checks below:
+
+```bash
+cd /home/bigemo/git/sinnlos
+COMPOSE=(docker compose -p infra -f infra/docker-compose.yml -f infra/docker-compose.traefik.yml)
+psql_db() { "${COMPOSE[@]}" exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" "$@"' sh "$@"; }
+```
+
+**Before the deploy** (read-only)
+
+1. **Batch 15.2 runs, and its images are the rollback target:**
+
+   ```bash
+   cat .git/sinnlos-deploy/infra.state
+   B152_TAG="$(sed -n 's/^TAG=//p' .git/sinnlos-deploy/infra.state)"
+   B152_SHA="$(sed -n 's/^SHA=//p' .git/sinnlos-deploy/infra.state)"
+   echo "${B152_TAG} ${B152_SHA}"
+   docker image inspect --format '{{.Id}}' "infra-cms:${B152_TAG}" "infra-web:${B152_TAG}"
+   ```
+
+   `TAG=490d82aae7a7`, `SHA=490d82a…`, `LIVE_SMOKE=passed`, and both
+   images exist. Keep `B152_TAG` and `B152_SHA` in this shell for the
+   rollback. Anything else: stop.
+
+2. **A clean checkout, fast-forwarded to the batch 16 merge:**
+
+   ```bash
+   git status --short        # no modified tracked file
+   git fetch origin && git merge --ff-only <the batch 16 merge commit>
+   git log -1 --oneline      # the batch 16 merge
+   git clean -n -d -- apps packages infra package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json
+   ```
+
+   The `git clean -n` dry run must print nothing.
+
+3. **The preflight, the plan and the backup permission:**
+   `infra/deploy.sh --check` (`Preflight OK`, the Traefik host line, and
+   the new line **`wiki revisions: no draft rows`**) and
+   `infra/deploy.sh --dry-run` (`lock: free`, the clean checkout at the
+   batch 16 commit, its CI result for that exact commit, the backup line,
+   `last-known-good: infra-{web,cms}:490d82aae7a7`, `live-smoke: run`, and
+   **no** `MANDATORY` line). The backup permission as in
+   [Checking the backup permission](#checking-the-backup-permission-production).
+   An `ERROR: the running database holds N wiki revision draft row(s)`
+   instead of the probe line means step 5 first.
+
+4. **The PRE counts** (all read-only; save every output off the host: it
+   is the baseline of the checks after the deploy and of a rollback):
+
+   ```bash
+   D=/home/bigemo/b16-pre-$(date +%Y%m%d-%H%M); mkdir -m 700 "$D"
+   psql_db -X < infra/migrations/wiki-revision-dp/preflight.sql > "$D/revision-preflight.txt"
+   infra/diagnostics/census.sh > "$D/census.txt" 2>&1
+   psql_db -X < infra/diagnostics/wiki-parent-cycles.sql > "$D/wiki-parent-cycles.txt"
+   psql_db -X < infra/diagnostics/upload-census.sql > "$D/upload-census.txt"
+   psql_db -X < infra/diagnostics/department-heads.sql > "$D/department-heads.txt"
+   psql_db -X -c "SELECT 'wiki_page' AS type, document_id, slug FROM wiki_pages WHERE lower(slug) = 'new' UNION ALL SELECT 'wiki_space', document_id, slug FROM wiki_spaces WHERE lower(slug) = 'drafts';" > "$D/reserved-slugs.txt"
+   git show "${B152_SHA}":infra/diagnostics/prod-perm-diff.sql | psql_db -X > "$D/perm-diff-15.2.txt"
+   psql_db -X < infra/diagnostics/prod-perm-diff.sql > "$D/perm-diff-16.txt"
+   ```
+
+   - **`revision-preflight.txt`** (lane 16D): **R0 `draft_rows` 0 is the
+     fast path** (expected: batch 15's lifecycle writes published rows,
+     and 15.1 hid the type from the panel). R1 lists the draft rows by
+     class (identical twin, draft-only, divergent twin): all 0 on the fast
+     path. R2 conflicts must be 0 (orphans, revisions of deleted pages,
+     keep a NULL anchor). **R3 is the revisions per page**: keep it for
+     step 9. Every R4 line must be absent. R0 above 0: step 5.
+   - **`census.txt`**, sections 4 and 5: the pages with a department or
+     team, and the revisions total, with and without editor, and their
+     page-link targets: the "revision twins" baseline of a rollback.
+     `census.sh` reads the containers of compose project `infra`; another
+     project (a staging copy) runs it as `COMPOSE_PROJECT=<project>
+     infra/diagnostics/census.sh`.
+   - **`wiki-parent-cycles.txt`** (lane 16B): **0** pages on a parent loop,
+     **0** pages whose parent sits in another space, **0** pages without a
+     space (the demo pages have no parents). A loop found here does not
+     block the deploy, but a save that adds an edge to it is refused
+     afterwards: break it in the admin panel (clear one page's parent and
+     publish), before or after the deploy.
+   - **`upload-census.txt`** (lane 16A): the two demo PDFs, **unstamped**;
+     **0 janitor candidates** (stamped, unlinked, older than 24 h), no
+     shared files, no legacy document files. A candidate here is swept at
+     the next 03:30 run, as it would be on 15.2.
+   - **`department-heads.txt`**: on production the **8 known rows**
+     (2026-10-13; another instance has its own count): the
+     Finance, HR and Marketing heads hold `department_head` with their
+     department and can upload and publish documents for it after the
+     deploy; `department_without_head_role` for Design, Digital Process
+     Development, Engineering and IT, and `head_without_role` for their
+     heads, who are editors or admin_role, i.e. moderators, and author
+     documents and the wiki as moderators. Another row: report it.
+   - **`reserved-slugs.txt`**: no rows. A page slug `new` or a space slug
+     `drafts` is refused for every writer from this release on; a row
+     that has one keeps it until a panel save sends the slug: rename it in
+     the admin panel.
+   - **The permission diff:** batch 15.2's file is unchanged, only the two
+     informational `authenticated` rows; the checkout's file shows the
+     same plus exactly **52 `MISSING_IN_DB` rows**, all wiki custom
+     actions: wiki-space `authoringList` and `editable` (admin_role,
+     editor); wiki-page `createDraft` (admin_role, editor,
+     department_head, team_lead), `myDrafts`, `editable`, `saveDraft`,
+     `publish`, `discardDraft`, `revisions`, `revision`, `restore`
+     (admin_role, editor, department_head, team_lead, member), `unpublish`
+     and `authoringList` (admin_role, editor). The first boot grants them.
+
+5. **Only when R0 > 0: the migration path** (the cms must not boot on
+   these rows; `deploy.sh` refuses until they are gone). Follow
+   [One-time: wiki revisions draft/publish off](#one-time-wiki-revisions-draftpublish-off-batch-16),
+   steps 1 to 6: the rehearsal on a copy, `"${COMPOSE[@]}" build cms web`,
+   `"${COMPOSE[@]}" stop web cms`, the pre-migration backup
+   (`sudo -n /usr/local/sbin/backup-run --kind predeploy sinnlos`, checked),
+   `psql_db --single-transaction < infra/migrations/wiki-revision-dp/migrate.sql`
+   → `NOTICE:  revision-dp: OK - promoted=N, twins_deleted=M, orphans=K`
+   (a `RAISE` changed nothing: resolve per the README and rerun), the
+   verification; then the deploy below, whose preflight now prints
+   `wiki revisions: no draft rows`.
+
+**Deploy** (the owner's go in the VPS session): `infra/deploy.sh` as
+`bigemo`. Both images rebuild. Note the pre-deploy generation its backup
+step names (`sinnlos/<YYYYMMDD>T<HHMMSS>Z-predeploy`): it is the restore
+point should the database ever have to go back. Expected: lock, the clean
+checkout, the CI line, `wiki revisions: no draft rows`, the backup,
+last-known-good `490d82aae7a7` kept, both images built, `up -d
+--no-build`, `Smoke check OK`, live-smoke passed, `Recording
+infra-{web,cms}:<batch 16 sha12>`, exit 0 (the rehearsal: 74 s; the
+web image changes too, so both containers are recreated: the web is out
+about 9 s, the cms about 4 s, its boot 5.0 s). A
+failure prints the rollback to `490d82aae7a7` with **no `MANDATORY`
+step** and the note that **a roll-forward to this release needs
+`migrate.sql` first** (15.2 runs wiki revisions with draft & publish):
+report it; running it is the owner's decision (below).
+
+**After the deploy** (read-only, then in a browser)
+
+6. **The state and the boot lines:**
+
+   ```bash
+   cat .git/sinnlos-deploy/infra.state
+   "${COMPOSE[@]}" logs --since 30m cms | grep -E '\[(bootstrap|document-indexes|revision-dp|revision-backfill|upload-extension|uploads|media-claims|audit)\]|\[cron\] scheduled-publisher|Strapi started'
+   "${COMPOSE[@]}" logs --since 30m cms web | grep -iE 'error|\[locale\]|\[auth\] (sign-in failed|session update refused)|\[profile\] change password' | grep -vE ' refused: [0-9]{3} |CredentialsSignin'
+   ```
+
+   The state names the batch 16 commit (`LIVE_SMOKE=passed`). The cms
+   logs, on this first boot:
+   - **no** `[revision-dp]` line;
+   - `[document-indexes] created 1 index(es): wiki_revisions_page_document_id_idx`;
+   - once: `[revision-backfill] anchored <R> revision(s) to their page,
+     marked <R> legacy revision(s) 'before', wrote <B> baseline(s); <O>
+     revision(s) have no page anchor (page deleted, or linked to several
+     pages)`. `<R>` is census section 5's revisions total (every pre-16
+     revision gets its anchor and the kind `before`), `<O>` R2's orphans,
+     and `<B>` about one per page, plus one for each page whose draft
+     differs from its published version (the rehearsal: anchored 10,
+     marked 10, wrote 32 baselines for 31 pages, 0 without an anchor).
+     Later boots log no such line;
+   - `[bootstrap] granted 52 permission(s) across intranet roles` and
+     `[bootstrap] permission drift: none (report-only check of 155
+     managed actions)` (142 before: the 13 wiki custom actions); **no**
+     `[bootstrap] revoked …` line;
+   - `Strapi started successfully`, then the `[cron] scheduled-publisher`
+     line every minute as before.
+
+   Stop lines: `[revision-dp] wiki_revisions still holds N draft row(s)`
+   (the cms does not start and nothing was changed: roll back, or stop
+   it and run step 5), `[revision-backfill] could not …` (the same: the
+   backfill rolled back), any `[upload-extension]` tripwire (the Strapi
+   internals moved: roll back) and any `[audit]` error (a write whose
+   audit row fails is rolled back). Report, not stop: `[uploads] could
+   not remove file <id> (tombstoned; the janitor retries)` and
+   `[media-claims] could not remove the released file(s) …` (the file
+   stays, tombstoned; the next janitor run retries). Harmless: the warning
+   `[uploads] kept file <id>: linked again before its removal` (someone
+   linked the file elsewhere while it was being removed). The error filter
+   prints only the expected lines of [3.8](#38-updates): the pg
+   `DeprecationWarning` once per cms process after its first database
+   activity (a sign-in and the first page reads are enough), and the
+   web's `Failed to find Server Action` burst from tabs opened before the
+   restart.
+
+7. **The permission diff** (`psql_db -X < infra/diagnostics/prod-perm-diff.sql`):
+   only the two informational `authenticated` rows; the database equals
+   the new snapshot.
+
+8. **The new schema and the diagnostics:**
+
+   ```bash
+   psql_db -X <<'SQL'
+   SELECT column_name FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'wiki_revisions'
+      AND column_name IN ('page_document_id', 'title', 'page_summary', 'kind', 'admin_editor_id', 'restored_from')
+    ORDER BY 1;
+   SELECT count(*) FILTER (WHERE published_at IS NULL) AS drafts,
+          count(*) FILTER (WHERE page_document_id IS NULL) AS unanchored,
+          count(*) FILTER (WHERE kind IS NULL) AS no_kind,
+          count(*) FILTER (WHERE kind = 'baseline') AS baselines
+     FROM wiki_revisions;
+   SELECT document_id FROM wiki_revisions GROUP BY document_id HAVING count(*) > 1;
+   SQL
+   psql_db -X < infra/diagnostics/wiki-parent-cycles.sql
+   psql_db -X < infra/diagnostics/upload-census.sql
+   ```
+
+   Six columns; `drafts` 0, `no_kind` 0, `unanchored` equal to R2's
+   orphans, `baselines` equal to the backfill line's count; the second
+   query returns no rows. `wiki-parent-cycles.sql` and
+   `upload-census.sql` unchanged from step 4.
+
+9. **The revisions per page:** `psql_db -X < infra/migrations/wiki-revision-dp/preflight.sql`
+   again: R0 0, and R3 per page equals the saved R3 plus that page's
+   baselines (one, or two where draft and published differ).
+
+10. **In a browser (the owner; English and German, a phone at 360 px and
+    a desktop),** the checks of lane 16C:
+    - **As an editor:** `/manage` shows **six tiles** (documents and the
+      wiki join announcements, events, polls and quick links); the Wiki
+      tile counts pages.
+    - **Documents:** _New document_; pick a `.xlsm` (refused at once, no
+      upload); pick a PDF and _Save draft_ (it uploads, the page becomes
+      the document's edit page, the preview names the file and "Uploaded
+      by" you); _Publish_ (asks first). As a member, `/documents` lists it,
+      its download link starts with `/uploads/` and opens the PDF. Back as
+      the editor: _Replace the file_ with an XLSX and _Save and publish_
+      (the old file is removed after the save); _Schedule…_ a withdrawal
+      before the publication (refused in the dialog), then a valid one;
+      _Unpublish_; _Delete_.
+    - **A conflict:** the same document in two tabs; save in one, pick a
+      file and save in the other: "Changed in the meantime"; _Overwrite_
+      saves without uploading again (`[manage-documents]` in the web log
+      shows one upload).
+    - **As the Finance head:** **three tiles** (no wiki); a new document
+      shows Finance read-only, no _Schedule…_, no _Delete_; upload a PPTX,
+      _Publish_; a Finance member lists it, a Marketing member does not.
+      `/manage/wiki` sends the head back to `/manage`.
+    - **Wiki:** as an editor create a space in `/manage/wiki`; as a team
+      lead open it in the wiki, _New page_, _Save draft_ (readers do not
+      see it; _My drafts_ lists it), _Publish_; a member reads it and has
+      no _Edit_; the author edits with a change note; _History_ lists the
+      save with the note; show an older version and _Restore this
+      version_ (asks first; the history gains "Restores version #…"); an
+      existing page's history starts with "State at the upgrade". Deleting
+      the space while it has pages is refused ("This space still has
+      pages…").
+    - **Keyboard:** Tab reaches the file input (its button shows the focus
+      ring), the Markdown tabs follow the arrow keys, the parent picker
+      opens with Enter, every dialog closes with Escape and returns the
+      focus.
+    - **In the admin panel:** an `.xlsm` upload is refused and an `.xlsx`
+      accepted; setting a wiki page's parent to its own child is refused
+      ("A page cannot be placed below itself or one of its subpages");
+      unpublishing a space that has pages is refused; Wiki revision is
+      still not listed (since 15.1), and the wiki page form keeps its
+      empty _Revisions_ field, which lists nothing and links nothing (as
+      on 15.1 and 15.2).
+
+11. **The /manage log lines:**
+    `"${COMPOSE[@]}" logs --since 30m web | grep -E '\[manage-[a-zA-Z]+\]'`.
+    Refusals are warnings (`[manage-documents] upload refused: 400
+    ValidationError → invalid` is a refused file), outages and bugs
+    errors; a `428` is always a web bug and must not appear, and neither
+    may `upload answered … rows, not one file row`.
+
+12. **+15 and +60 minutes:** no new error types in the cms and web logs,
+    no restarts (`docker inspect -f '{{.RestartCount}}' infra-cms-1
+    infra-web-1`), no 5xx, the scheduler line every minute, 401s only from
+    deliberate checks.
+
+13. **The next morning:** `[cron] uploads-janitor` at 03:30 (an
+    `[uploads-janitor] swept N orphaned upload(s)` line only for stamped,
+    unattached uploads older than 24 h: N = the document uploads never
+    saved into a document), `audit-janitor` at 03:50, the nightly
+    backup-run at 04:00, no restarts.
+
+**Release notes** (consolidated; approve before the deploy):
+
+- **Documents in the web.** Editors and admins write documents in
+  `/manage/documents`: title, description, category, the file, the
+  departments that see it, schedule, publish, unpublish, discard, delete.
+  **Department heads** with a department manage their department's
+  documents there (upload, attach, replace, publish, unpublish, discard
+  while a published version exists; no schedule, no delete).
+- **Uploads by content.** Documents accept **PDF, Word (.docx), Excel
+  (.xlsx) and PowerPoint (.pptx) up to 20 MB** and JPEG, PNG and WebP up
+  to 5 MB, decided by the file's content: macro-enabled (`.docm`,
+  `.xlsm`, `.pptm`, …), template (`.dotx`, `.xltx`, `.potx`), slideshow
+  (`.ppsx`) and binary (`.xlsb`) Office files are refused, renamed or
+  not, and a PDF that is also a zip archive. A file uploaded but never
+  saved into a document is removed by the nightly janitor after 24 h.
+  Uploads above 10 MB through the web work (marketplace photos included;
+  the web cut request bodies at 10 MB since the Next 16.4 update).
+- **The admin panel's limits.** The panel refuses macro-enabled Office
+  files by extension, and a renamed one when its type shows in the
+  file's first bytes; **a renamed `.xlsb` or `.xlam` still passes the
+  panel** (known limit, accepted: the panel is for moderators).
+- **The delete trail.** Every ad delete (by its author, a moderator, the
+  admin panel or the expiry janitor) and every file delete writes an
+  audit row: who, from where (web, admin panel, cron) and what; kept 365
+  days (`AUDIT_RETENTION_DAYS`).
+- **Wiki authoring in the wiki.** Department heads, team leads,
+  editors and admins create pages (_New page_); a page's author, its
+  department's head, its team's lead and the moderators edit it; drafts
+  that readers do not see (_My drafts_), publish, and discard. Editors and
+  admins manage the spaces and see each space's page tree in
+  `/manage/wiki`. Editors and admins no longer bypass the wiki's write
+  rules through the API.
+- **Page history.** A page's editors and moderators see its history in
+  the web, with a preview of each version and _Restore this version_
+  (published at once). Revisions written before batch 16 show as "state
+  before an edit (older format)" and restore the text only; each page
+  starts with a snapshot of its content at the upgrade.
+- **Wiki rules for every writer, the admin panel included.** A page
+  cannot be placed below itself or one of its subpages; a space with
+  pages can be neither deleted nor unpublished, and its "Discard changes"
+  is refused while it would take an unpublished page out of the space.
+- **Scripts:** a script that writes wiki pages through the content API
+  needs `If-Match: "<version>"` on `PUT /api/wiki-pages/:id` (428
+  without), and gets a fixed answer.
+- **Reserved slugs:** a wiki page slug `new` and a space slug `drafts` are
+  refused (the web's `/wiki/<space>/new` and `/wiki/drafts`); in the admin
+  panel a page titled "New" needs another slug.
+- **Scheduled withdrawals:** a document or quick link whose scheduled
+  withdrawal keeps failing no longer delays the withdrawal of a healthy
+  one (#73).
+- **Known limits:** discarding a page's draft drops the parent link of
+  its subpages that were never published (they keep their space and
+  author, who sets the parent again); a missing or foreign item's
+  authoring page answers HTTP 200 with the not-found page (question 18's
+  default); a space whose name another space already has answers
+  Strapi's own "This attribute must be unique".
+
+**Rollback** (the owner's decision only; to the batch 15.2 images,
+`490d82aae7a7`)
+
+The 15.2 images keep the new columns and ignore them (`forceMigration` is
+off). **No `JWT_SECRET` rotation** (15.2 checks token versions;
+`deploy.sh`'s printed rollback shows no `MANDATORY` step and names
+`migrate.sql` for the roll-forward). What 15.2 does differently, and the
+steps that cover it:
+
+R1. **Tell authors.** Wiki page edits are fine during the window (15.2
+records before-images again, which no API serves since 15.1); the web
+loses `/manage/documents`, `/manage/wiki` and the wiki editor, and
+department heads cannot upload documents (15.2's wrapper takes images
+only). The admin panel lists no Wiki revision (since 15.1), so nobody
+can edit a revision there.
+
+R2. **Save the lists, then copy them off the host:**
+
+```bash
+D=/home/bigemo/b16-rollback-$(date +%Y%m%d-%H%M); mkdir -m 700 "$D"
+psql_db -X < infra/migrations/wiki-revision-dp/preflight.sql > "$D/revision-preflight.txt"
+infra/diagnostics/census.sh > "$D/census.txt" 2>&1
+psql_db -X < infra/diagnostics/upload-census.sql > "$D/upload-census.txt"
+psql_db -X < infra/diagnostics/wiki-parent-cycles.sql > "$D/wiki-parent-cycles.txt"
+```
+
+The preflight's R3 is the per-page baseline of R6; census sections 4
+and 5 the revision-twin baseline (`COMPOSE_PROJECT=<project>` before
+`census.sh` on another compose project).
+
+R3. **Retag both images** (`B152_TAG` from step 1, `490d82aae7a7`):
+
+```bash
+docker tag "infra-web:${B152_TAG}" infra-web:latest
+docker tag "infra-cms:${B152_TAG}" infra-cms:latest
+"${COMPOSE[@]}" up -d --no-build web cms
+```
+
+The 15.2 boot turns draft & publish back on for wiki revisions and
+clones **one draft twin of every revision row** (Strapi's enable
+migration): the halves are equal.
+
+```bash
+psql_db -X -c "SELECT count(*) FILTER (WHERE published_at IS NULL) AS drafts, count(*) FILTER (WHERE published_at IS NOT NULL) AS published FROM wiki_revisions"
+```
+
+The revisions stay unreadable through the API (15.1's closure, kept by
+15.2).
+
+R4. **Effective permissions** with 15.2's file:
+`git show "${B152_SHA}":infra/diagnostics/prod-perm-diff.sql | psql_db -X`.
+15.2's users-permissions sync deletes the rows of the wiki custom
+actions its controllers lack for **one** of the two moderator roles,
+admin_role or editor, whichever its pass meets first (13 rows; Strapi's
+cleanup pages by offset while it deletes, as 15.1 found), so 15.2's file
+then shows the two informational rows plus **39 `EXTRA_IN_DB`** wiki
+custom-action rows (the rehearsal; the other role's 13 and the 26 of
+department_head, team_lead and member). **Harmless; leave them:** they
+name actions 15.2 does not have, and the roll-forward re-grants the 13
+(`granted 13`).
+
+R5. **During the window:** 15.2 removes no stamped file after a save (no
+media claims); the janitor sweeps an unattached one after 24 h, the same
+end state, and a tombstoned one like any stamped orphan. 15.2 writes no
+delete-trail rows (the rows written so far stay), and the admin panel
+accepts macro-enabled Office files again. The wiki checks are off:
+admin_role and editor write wiki pages without the allowlist again, the
+panel can write parent loops and unpublish non-empty spaces, and
+`document.file` is refused in the content API (files attached on batch
+16 stay attached). Before the roll-forward `wiki-parent-cycles.sql`
+shows any loop made meanwhile.
+
+R6. **The roll-forward**, never a plain deploy (`deploy.sh` refuses it
+while the twins exist):
+
+1. `"${COMPOSE[@]}" build cms web`, then `"${COMPOSE[@]}" stop web cms`;
+2. the pre-migration backup, checked: on production `sudo -n
+   /usr/local/sbin/backup-run --kind predeploy sinnlos` (what `deploy.sh`
+   runs for project `infra`); on another compose project
+   `infra/backup/pg-backup.sh` with the environment `deploy.sh` gives it
+   (without it the script backs up production's `infra-db-1` and
+   `infra_cms_uploads` into production's backup dir, or fails):
+
+   ```bash
+   SINNLOS_BACKUP_KIND=predeploy \
+     SINNLOS_ENV_FILE="$PWD/infra/.env" \
+     SINNLOS_DB_CONTAINER=<project>-db-1 \
+     SINNLOS_UPLOADS_VOLUME=<project>_cms_uploads \
+     SINNLOS_BACKUP_DIR=<the project's own backup dir> \
+     SINNLOS_LOCAL_ENV_BACKUP="$PWD/.git/sinnlos-deploy/<project>.quick-access.env" \
+     infra/backup/pg-backup.sh
+   ```
+
+3. `psql_db -X < infra/migrations/wiki-revision-dp/preflight.sql`: R1
+   shows **one identical twin per revision row that existed at the
+   rollback**, the before-images 15.2 wrote as plain published rows,
+   divergent twins 0 (the panel cannot make one), R2 conflicts 0, no R4
+   line;
+4. `psql_db --single-transaction < infra/migrations/wiki-revision-dp/migrate.sql`
+   → `NOTICE:  revision-dp: OK - promoted=0, twins_deleted=<twins>,
+   orphans=0`, where `<twins>` is the number of revisions at the rollback
+   (the `drafts` count the query after the retag showed); a second run
+   prints `promoted=0, twins_deleted=0, orphans=0`. On a `RAISE` nothing
+   changed: resolve per the README and rerun;
+5. `infra/deploy.sh` (its preflight prints `wiki revisions: no draft
+   rows`; the rehearsal: about 20 s, about 40 s of downtime counted from
+   step 1's stop); its boot logs `[bootstrap] granted 13 permission(s)`
+   (what R4's sync deleted), `permission drift: none` over 155 managed
+   actions, and a `[revision-backfill]` line (anchors and kinds of the
+   before-images 15.2 wrote, and a baseline for each page edited on
+   15.2);
+6. verify: draft rows 0 (step 8's query); revisions per page = the saved
+   R3 of R2 plus the before-images 15.2 wrote plus a baseline for each
+   page edited on 15.2; `wiki-parent-cycles.sql` (break any new loop in
+   the panel); `prod-perm-diff.sql` only the two informational rows.
+
+R7. Writes on 15.2 advance revisions (it has batch 15's document lock),
+so forms open across the window stay safe; nothing else needs
+reconciling.
+
+**Combined staging rehearsal (2026-10-14, 4f92e70):** passed, in
+Traefik mode on a Postgres 16 stand-in with the demo seed, revisions
+written on batch 15.2 and the two demo PDFs. This section walked as
+written: the fast path (R0 0, the probe line, the boot lines above, the
+permission diff equal to the new snapshot); uploads through the web, a
+20 MB PDF and XLSX through the Server Action; documents as an editor and
+as a department head, file claims in two tabs, a janitor run, a panel
+replace and publish; the wiki as team lead, department head and member,
+two tabs, parent loops from the web and the panel, a space delete raced
+with a page create (it surfaced Strapi's own 400 without `details.keys`
+when the delete won, fixed: the create now answers `invalid` on `space`);
+the scheduler with 2,001 failing withdrawals. **Two full rollback
+cycles** to 15.2 and forward: the 15.2 boot cloned one twin per revision
+(73 and 78), the revision reads stayed closed, `deploy.sh` refused the
+plain roll-forward, `migrate.sql` deleted the twins (a second run
+changed nothing), and the baselines recorded the 15.2 edits; in the
+second cycle a divergent twin made by raw SQL stopped `migrate.sql`, and
+the README's Choice 2 resolved it. Every original revision came through
+both cycles unchanged. **Caddy mode was not run** (the stand-in is
+Traefik-only); the upload checks there are open.
+
+#### Upgrading to the document upload profile, the file claims and the delete trail (batch 16, lane 16A)
+
+Lane 16A of batch 16 (deep-dive decision 06 §E1-§E5, owner amendments 1
+and 2; plan `plan-batch-16.md` §3 16A; the owner's delete-audit request of
+2026-10-13) opens `POST /api/upload` to document files, makes every
+removal of an uploaded file go through one locked path, and records every
+ad and file delete. The integration's "Deploying batch 16" runbook carries
+it with the other lanes; on its own it is a cms-only change (`infra/deploy.sh`
+rebuilds both images; the web is unchanged).
+
+**What changes**
+
+- **Document uploads by content** (release note): moderators (admin_role,
+  editor) and department heads may upload **PDF, DOCX, XLSX and PPTX up to
+  20 MB** (one per request) and JPEG, PNG, WebP up to 5 MB; every other
+  role keeps the image profile (JPEG, PNG, WebP, 5 MB, up to 4 per
+  request). The cms decides the format from the bytes: a PDF that is also
+  a zip is refused, and Office files pass one Office Open XML rule that
+  refuses every macro-enabled (`.docm`, `.xlsm`, `.pptm`, …), template
+  (`.dotx`, `.xltx`, `.potx`), slideshow (`.ppsx`) and binary (`.xlsb`)
+  variant, renamed or not. The stored name and mime come from one table,
+  whatever the client sent (`fileInfo.name` is ignored). A document file
+  can only be attached to a document from batch 16's lane 16B on (until
+  then the content API refuses `document.file`), so an upload made in
+  between is swept by the janitor after 24 h, which is intended.
+- **Refusals carry codes** (contract K14): every refusal of
+  `POST /api/upload` is a 400 `ValidationError` with `details.keys` and,
+  for the file, `details.codes.file` (`fileType`, `fileTooLarge`,
+  `required`, `invalid`); a malformed `fileInfo` answers 400 with
+  `details.keys: ["fileInfo"]` (it was a 500); `?id=` stays 403; a body
+  above 50 MB stays 413. The web's marketplace flow is unaffected (it only
+  checks for a non-OK answer).
+- **The admin panel refuses macro-enabled Office files** (release note):
+  `deniedTypes` gains `application/vnd.ms-{word,excel,powerpoint}.*macroenabled*`.
+  The panel refuses `.docm`, `.dotm`, `.xlsm`, `.xltm`, `.xlam`, `.xlsb`,
+  `.pptm`, `.potm`, `.ppsm` by extension, and a renamed macro file when
+  file-type recognises it in the first 4100 bytes. **Known limit**
+  (release note, accepted by the owner: the panel is for moderators only):
+  a renamed `.xlsb` or `.xlam` (and a renamed macro file whose
+  `[Content_Types].xml` lies beyond those bytes) still passes the panel.
+- **One reservation before every removal.** The classified image cleanup,
+  `cleanup-uploads` and the uploads janitor (and, from 16B, the media
+  claims) remove a file only through `claimAndRemove`, and the admin Media
+  Library's deletes go through the same reservation: the file row is
+  locked and re-read (a file already gone or being removed is skipped, so
+  two overlapping deletes remove it once), tombstoned
+  (`provider_metadata.removing`) together with its audit row, and only then
+  removed; the app's removers remove it under the row lock and only while
+  nothing links it, so a header image, avatar or cover picked in the admin
+  panel in between keeps the file (`[uploads] kept file <id>: linked again
+  before its removal`, a warning). A removal that fails after its
+  reservation leaves a tombstoned row that documents and ads cannot attach
+  (the other media fields can: a known limit); the next janitor run
+  retries it once it is 10 minutes old and unlinked, an admin may delete
+  it again after that.
+  Every write of an ad (also in the Content Manager) locks its image rows
+  and refuses one that is being removed (400, `images`).
+- **The janitor's scope grows** (release note): moderators' and department
+  heads' document uploads are stamped like ad images, so the 03:30
+  `uploads-janitor` sweeps them once they are unattached and older than
+  24 h. Admin-panel uploads are still never touched.
+- **The delete trail** (owner request): every ad delete (the author
+  through the web, a moderator's "Delete ad", the Content Manager, the
+  03:45 `classified-janitor`) and every file delete (an ad's images after
+  its delete, `cleanup-uploads`, the uploads janitor, the media claims, the
+  admin Media Library's single, bulk and folder deletes) writes one row in
+  `audit_events` (action `delete`, `target_uid`
+  `api::classified.classified` or `plugin::upload.file`): who (a user's id
+  with batch 15's class in `actor_class`: `author` for their own ad or
+  upload, `moderator` for an admin_role or editor removing someone else's,
+  the v2 authoring class (`moderator`, `departmentAuthor`) for a document
+  save; an admin's id; or `system`, without a class), from where
+  (`content-api`, `admin`, `cron`), and what (`detail`: a user's role type
+  as `role: <type>;`, then the ad's title, or the file's id, mime, size,
+  related ad or document, and name). No IP address, no token. An ad's row
+  commits with its delete. **For a file, the row records the removal
+  decision**: it commits with the reservation, right before the bytes go;
+  a failed byte removal is retried by the janitor, not recorded again. A
+  failing insert fails the delete. The audit-janitor keeps the rows 365
+  days (`AUDIT_RETENTION_DAYS`).
+- **No schema, no grants, no env, no `JWT_SECRET` rotation.** The
+  `media-claims` middleware is built but not registered (lane 16B wires
+  it).
+
+**Before the deploy (read-only)**
+
+```bash
+psql_db -X < infra/diagnostics/upload-census.sql
+```
+
+Expected on the owner's instance: the two demo PDFs, unstamped, **0
+janitor candidates**, no shared files, no legacy document files. A janitor
+candidate here would be swept at the next 03:30 run after the deploy, as
+it would have been before.
+
+**After the deploy**
+
+1. The cms boots without an `[upload-extension]` line (a tripwire there
+   means the Strapi internals changed: roll back).
+2. As an editor (a session token from the web or `POST /api/auth/local`):
+   `curl -F "files=@policy.pdf" -H "Authorization: Bearer <jwt>" <cms>/api/upload`
+   answers 201 with one element; the same with an `.xlsm` (also renamed
+   `.xlsx`) answers 400 with `"codes":{"file":"fileType"}`. As a member, a
+   PDF answers 400 `fileType`, a PNG 201.
+3. In the admin panel, an `.xlsm` upload is refused and an `.xlsx`
+   accepted.
+4. The next morning: `[uploads-janitor] swept N orphaned upload(s)` at
+   03:30 as before (N counts only stamped, unattached files older than
+   24 h); a line `[uploads] could not remove file <id> (tombstoned; the
+   janitor retries)` is a removal that failed after its claim: report it,
+   the next run retries.
+
+**The latest deletes** (read-only; who deleted which ad or file):
+
+```bash
+psql_db -X <<'SQL'
+BEGIN TRANSACTION READ ONLY;
+SELECT e.created_at,
+       e.target_uid,
+       e.target_document_id,
+       e.actor_kind,
+       e.actor_user_id,
+       u.username AS actor_username,
+       e.actor_admin_id,
+       e.actor_class,
+       e.source,
+       e.detail
+  FROM audit_events e
+  LEFT JOIN up_users u ON u.id = e.actor_user_id
+ WHERE e.action = 'delete'
+   AND e.target_uid IN ('api::classified.classified', 'plugin::upload.file')
+ ORDER BY e.created_at DESC, e.id DESC
+ LIMIT 50;
+ROLLBACK;
+SQL
+```
+
+An admin id resolves in `admin_users` (`SELECT id, firstname, lastname
+FROM admin_users WHERE id = …`). The output names users and file names:
+internal operational data, do not post it publicly.
+
+**Rollback** (to the image before 16A; the batch runbook covers the whole
+batch): a plain retag (`--no-build`), no database step, no `JWT_SECRET`
+rotation. The old wrapper refuses non-images for every role again; stored
+files stay. A tombstoned file (a removal that failed after its claim) is
+swept by the old janitor like any stamped orphan. The audit rows stay;
+the old image writes no new delete rows, and the panel accepts
+macro-enabled files again until the roll-forward.
+
+#### Upgrading to wiki history as after-images (batch 16, lane 16D)
+
+Lane 16D of batch 16 (branch `feat/v2-authoring-cms-wiki-revisions`) is the
+data side of the wiki page history (deep-dive decision 06 §J3, §J4, DA03)
+and the fix of issue #73. It changes the **cms** and `infra/deploy.sh`.
+Batch 16 ships it with lanes 16A, 16B and 16C ("Deploying batch 16"); this
+note is the lane's part of it. On its own the lane is deployable after
+batch 15.1.
+
+- **No:** dependency, required env, grant (batch 15.1 revoked the revision
+  rows), route, edge change, or `JWT_SECRET` rotation.
+- **Yes:** a schema change with a one-time data step, which takes the
+  **fast path** on an instance without revision drafts.
+
+**What changes**
+
+- **A wiki revision records the state AFTER each save.** Before, it recorded
+  the body before an edit.
+  - **Recorded:** every content change of a page's draft, whoever writes it
+    (the web from lane 16B on, the admin panel, scripts). Each revision
+    holds the page's title, body and summary at that point, the edit note,
+    and who saved: the web user, or the admin user for a panel save.
+  - **Not recorded:** a save that changes none of title, body and summary
+    (for example only the order or a relation); a publish (it copies the
+    draft).
+  - **Discards and restores:** a "Discard changes" back to content that is
+    not the latest snapshot is recorded. A restore (lane 16B) is always
+    recorded and names the revision it restored.
+  - **Anchor:** revisions belong to their page by `page_document_id`, not by
+    their page link (a publish adds a second link row to each).
+  - **Reads:** nothing reads revisions through the content API (no route
+    since batch 15.1); the history reaches the web only through lane 16B's
+    page actions.
+- **Wiki revisions have no draft & publish any more.** `wiki_revisions` gets
+  six columns: `page_document_id`, `title`, `page_summary`, `kind` (`before`,
+  `after`, `baseline`), `admin_editor_id` and `restored_from`. Every boot
+  ensures the index `wiki_revisions_page_document_id_idx`.
+  - **Boot guard:** a database that still holds revision rows with
+    `published_at IS NULL` would lose them (Strapi deletes drafts when a type
+    leaves draft & publish), so the cms **refuses to start** on one:
+    `[revision-dp] wiki_revisions still holds N draft row(s) …`.
+  - **Deploy check:** `infra/deploy.sh` asks the same question before its
+    backup and refuses the deploy, naming `migrate.sql`. With nothing to
+    migrate, its preflight prints `wiki revisions: no draft rows`.
+  - **Where such rows come from:** production had none at the DA03 audit; a
+    rollback to batch 15.1 makes one twin of every revision (below). The
+    one-time step is
+    [One-time: wiki revisions draft/publish off](#one-time-wiki-revisions-draftpublish-off-batch-16).
+- **The cutover baseline.** At every boot, a page whose draft content, or
+  published content, is in no `after` or `baseline` revision gets a
+  `baseline` revision of it, so it stays restorable. The draft and published
+  states are checked separately, and the published baseline is written
+  first.
+  - **First boot of the release:** every page gets one. Existing revisions
+    get their anchor and `kind = 'before'`.
+  - **After a rollback window:** the boot records whatever batch 15.1 changed
+    in the meantime.
+  - **Later boots:** nothing to do.
+  - **Failure:** the backfill fails closed, so the cms does not start
+    (`[revision-backfill] could not …`, nothing changed).
+- **Issue #73: a failing withdrawal no longer hides a healthy one.** The
+  scheduler's withdrawal pass used to read at most ten pages of 200 rows from
+  the earliest due withdrawal, so more than 2,000 earlier withdrawals that
+  keep failing kept a later healthy one visible. Now:
+  - it first takes the due withdrawals that never failed for good, in
+    deadline order;
+  - it retries at most 10 of the failing ones (those with Schedule error) per
+    run, whose backoff is over, from where the previous run stopped, and wraps
+    around at the end. Every failing one is retried within one run per 10
+    failures, however many healthy ones are due;
+  - the backoff (5, 15, then every 60 minutes) and "never given up" are
+    unchanged.
+
+**Before the deploy** (read only, while batch 15.1 runs):
+
+```bash
+psql_db() { "${COMPOSE[@]}" exec -T db sh -c 'psql -X -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" "$@"' sh "$@"; }
+psql_db < infra/migrations/wiki-revision-dp/preflight.sql
+```
+
+- **R0 `draft_rows` 0 is the fast path:** deploy as usual (`deploy.sh
+  --check` prints `wiki revisions: no draft rows`).
+- **Anything else:** follow the one-time section before the deploy.
+- **Keep R3** (revisions per page): the check after the deploy compares with
+  it.
+
+**After the first boot**
+
+- **Expected log lines** (once):
+  - `[document-indexes] created 1 index(es): wiki_revisions_page_document_id_idx`;
+  - `[revision-backfill] anchored N revision(s) to their page, marked N
+    legacy revision(s) 'before', wrote K baseline(s); 0 revision(s) have no
+    page anchor (page deleted, or linked to several pages)`. K is about one
+    per page, two where a page's draft differs from its published version.
+- **Later boots** log neither line.
+- **Stop lines:** `[revision-dp]` (the cms does not start: run the one-time
+  section, or roll back) and `[revision-backfill] could not …`.
+- **Checks:**
+
+  ```bash
+  psql_db -c "SELECT count(*) FILTER (WHERE published_at IS NULL) AS drafts, count(*) FILTER (WHERE page_document_id IS NULL) AS unanchored, count(*) FILTER (WHERE kind IS NULL) AS no_kind FROM wiki_revisions"
+  psql_db -c "SELECT document_id FROM wiki_revisions GROUP BY document_id HAVING count(*) > 1"
+  ```
+
+  - `drafts` and `no_kind` must be 0.
+  - `unanchored` equals R2's orphans (revisions of deleted pages).
+  - The second query returns no rows.
+  - Revisions per page equal R3 plus the new baselines.
+
+**Release note:** "A page's history (its editors and moderators, in the
+web) shows revisions written before batch 16 as 'state before an edit
+(older format)', and each page starts with a snapshot of its content at the
+upgrade."
+
+**Rollback** to the batch-15.1 images: a retag, as `deploy.sh` prints it.
+No `JWT_SECRET` rotation. The hint adds that a roll-forward needs
+`migrate.sql` first.
+
+- **The 15.1 boot** turns draft & publish back on for wiki revisions and
+  clones **one draft twin of every revision**. The draft count equals the
+  published count:
+
+  ```bash
+  psql_db -c "SELECT count(*) FILTER (WHERE published_at IS NULL) AS drafts, count(*) FILTER (WHERE published_at IS NOT NULL) AS published FROM wiki_revisions"
+  ```
+
+- **The batch-16 columns stay** (`forceMigration` is off); 15.1 ignores
+  them.
+- **What 15.1 shows:** its lifecycle writes before-images again, and nobody
+  reads revisions there either (15.1's closure); the admin panel lists no
+  Wiki revision.
+- **Edits during the window** are fine.
+- **Rolling forward** needs `migrate.sql` before the deploy (the one-time
+  section, steps 0 and 2 to 7). `deploy.sh` refuses the deploy until then.
+  The first boot afterwards records each page batch 15.1 changed as a
+  baseline.
+
+**Tests**
+
+- **Unit:**
+  - the lifecycle;
+  - the guard and its place in `register()`;
+  - the backfill, on Strapi's query engine over SQLite;
+  - the history module;
+  - the index;
+  - the scheduler's two tiers and its cursor;
+  - the deploy preflight and the rollback hint;
+  - the framework pins on 5.57: `register()` before the delete hook, the
+    rollback's twins, `publishedAt` on writes without draft & publish, one
+    event state per update, and columns kept on a sync.
+- **Integration, SQLite and Postgres 16:**
+  - `authoring-wiki-revisions`: the after-images, panel attribution, discard
+    and clone, atomicity, restore, no read path, a restart, and the cutover
+    including a rollback window;
+  - `authoring-wiki-revision-dp`: the guard, and on Postgres the migration
+    rehearsal with the real SQL files;
+  - `scheduled-publish`: #73 with 2,001 failing withdrawals, and a full
+    tier 1.
+- **deploy-flow:** a stubbed deploy refused by a rollback's twins.
+
+#### One-time: wiki revisions draft/publish off (batch 16)
+
+Batch 16 (lane 16D, decision 06 §J4 and Migration §2) turns draft & publish
+**off for wiki revisions**: a revision is one published row, anchored to its
+page by `page_document_id`.
+
+**When you need this section:**
+
+- When the preflight of the upgrade shows draft rows: a revision draft made
+  in the admin panel before batch 15.1 hid the type, or raw SQL. Production
+  had none at the DA03 audit, so its first upgrade takes the fast path.
+- **Every time you roll forward after a rollback** to batch 15.1 or older:
+  that image's first boot clones a draft twin of every revision.
+
+Strapi deletes revision rows with `published_at IS NULL` when a batch-16 cms
+boots, together with their links. So the new cms **refuses to boot while any
+exist**:
+
+- the log shows `[revision-dp] wiki_revisions still holds N draft row(s)`;
+- compose restarts it in a loop, and the data stays untouched;
+- `infra/deploy.sh` refuses such a deploy before its backup.
+
+The SQL in `infra/migrations/wiki-revision-dp/` handles them (see the README
+there):
+
+- it deletes the identical twins a rollback made;
+- it promotes revision drafts that have no published row;
+- it stops on anything it cannot decide.
+
+**A fresh install needs nothing.**
+
+Set these on the host, in the checkout (`/home/bigemo/git/sinnlos`, as
+`bigemo`):
+
+```bash
+cd /home/bigemo/git/sinnlos
+COMPOSE=(docker compose -p infra -f infra/docker-compose.yml -f infra/docker-compose.traefik.yml)
+psql_db() { "${COMPOSE[@]}" exec -T db sh -c 'psql -X -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" "$@"' sh "$@"; }
+```
+
+**0. Preflight** (read only; any time while the current release is live).
+Save its output off the host:
+
+```bash
+psql_db < infra/migrations/wiki-revision-dp/preflight.sql
+```
+
+- **FAST PATH:** R0 `draft_rows` = 0. Deploy as usual and stop here. The
+  guard passes, and Strapi's own switch deletes nothing.
+- **R1 classes the draft rows:**
+  - `identical twin`: a rollback made it, and the migration deletes it.
+    After a rollback there is one per revision that existed at the
+    rollback.
+  - `draft-only`: the migration promotes it (it becomes a plain, legacy
+    revision).
+  - `divergent twin`: it must be resolved by hand first. The second R1 list
+    names what differs; the README has the two choices as SQL. Since batch
+    15.1 the panel cannot make one.
+- **Must be 0 before you continue:** R2 conflicts (a revision linked to two
+  pages; the README has the fix) and every R4 line.
+- **R3** is the count of revisions per page. Keep it for step 6.
+
+**1. Rehearsal** (recommended; the first time, required), on a throwaway copy
+of the live database:
+
+- both `migrate.sql` runs must end with `NOTICE:  revision-dp: OK - …`, and
+  the second changes nothing (`promoted=0, twins_deleted=0`);
+- the final preflight shows R0 `draft_rows` 0.
+
+```bash
+(
+  umask 077; D=$(mktemp -d)
+  trap 'docker rm -f -v revdp-rehearsal >/dev/null 2>&1; rm -rf "$D"' EXIT
+  docker exec infra-db-1 sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc --no-owner' > "$D/live.dump"
+  docker run -d --name revdp-rehearsal -e POSTGRES_USER=sinnlos -e POSTGRES_PASSWORD=rehearsal -e POSTGRES_DB=sinnlos postgres:16-alpine
+  until docker exec revdp-rehearsal pg_isready -q -h 127.0.0.1 -U sinnlos -d sinnlos; do sleep 1; done
+  docker exec -i revdp-rehearsal pg_restore -U sinnlos -d sinnlos --no-owner --no-privileges < "$D/live.dump"
+  for run in 1 2; do
+    docker exec -i revdp-rehearsal psql -X -v ON_ERROR_STOP=1 --single-transaction -U sinnlos -d sinnlos < infra/migrations/wiki-revision-dp/migrate.sql
+  done
+  docker exec -i revdp-rehearsal psql -X -U sinnlos -d sinnlos < infra/migrations/wiki-revision-dp/preflight.sql
+)
+```
+
+**2. Pre-build** the new images; the running site keeps serving:
+
+```bash
+"${COMPOSE[@]}" build cms web
+```
+
+**3. Stop the apps.** No writes after this point; the site is down until
+step 7.
+
+```bash
+"${COMPOSE[@]}" stop web cms
+```
+
+**4. Back up** with the rule `infra/deploy.sh` uses, and check the
+generation it reports. It is the rollback point. On production (compose
+project `infra`):
+
+```bash
+sudo -n /usr/local/sbin/backup-run --kind predeploy sinnlos
+```
+
+On another compose project, `infra/backup/pg-backup.sh` with the
+environment `deploy.sh` gives it (without it the script backs up
+production's `infra-db-1` and `infra_cms_uploads` into production's
+backup dir, or fails):
+
+```bash
+SINNLOS_BACKUP_KIND=predeploy \
+  SINNLOS_ENV_FILE="$PWD/infra/.env" \
+  SINNLOS_DB_CONTAINER=<project>-db-1 \
+  SINNLOS_UPLOADS_VOLUME=<project>_cms_uploads \
+  SINNLOS_BACKUP_DIR=<the project's own backup dir> \
+  SINNLOS_LOCAL_ENV_BACKUP="$PWD/.git/sinnlos-deploy/<project>.quick-access.env" \
+  infra/backup/pg-backup.sh
+```
+
+**5. Migrate.** It runs as one transaction, so any `RAISE` rolls everything
+back. It refuses to run outside one transaction or while another session is
+connected:
+
+```bash
+psql_db --single-transaction < infra/migrations/wiki-revision-dp/migrate.sql
+```
+
+- **Success** ends with
+  `NOTICE:  revision-dp: OK - promoted=N, twins_deleted=M, orphans=K`.
+  After a rollback (the staging rehearsal): `promoted=0`, `twins_deleted`
+  = the number of revisions at the rollback, `orphans=0`; a second run
+  prints `0, 0, 0`.
+- **After a `RAISE` nothing has changed.** It lists the divergent twins,
+  conflicts or anomalies. Resolve them per the README and rerun (the script
+  is idempotent), or give up and start the old containers again with
+  `"${COMPOSE[@]}" start cms web` (`start`, not `up`: step 2 already tagged
+  the new images).
+
+**6. Verify:**
+
+```bash
+psql_db -c "SELECT count(*) FILTER (WHERE published_at IS NULL) AS drafts, count(*) AS rows, count(DISTINCT document_id) AS documents FROM wiki_revisions"
+```
+
+- `drafts` must be 0 and `rows` must equal `documents`.
+- The optional preflight shows the counts per page (R3) minus the deleted
+  twins.
+
+**7. Deploy**, then check the cms log:
+
+```bash
+infra/deploy.sh
+"${COMPOSE[@]}" logs cms | grep -E '\[revision-dp\]|\[revision-backfill\]'
+```
+
+- The preflight of `deploy.sh` prints `wiki revisions: no draft rows`.
+  In the rehearsal the deploy took about 20 s, about 40 s of downtime
+  counted from step 3's stop.
+- The log shows no `[revision-dp]` line, and one `[revision-backfill] …`
+  line: the anchors and kinds of the rows the migration kept, and a baseline
+  for each page whose content no snapshot holds (after a rollback: each page
+  edited on 15.1).
+- Revisions per page now equal R3, minus the deleted twins, plus those
+  baselines.
+
+**Rollback** of the migration itself: there is no reverse script. Restore the
+step-4 backup (`infra/restore-db.sh`) together with the previous images.
+Wiki edits made since are lost. If `migrate.sql` failed, nothing changed:
+`"${COMPOSE[@]}" start cms web`.
+
+**Local SQLite dev:** the guard also blocks a dev database with revision
+drafts. Delete `apps/cms/.tmp/data.db` and reseed (`SEED_DEMO_DATA=1`).
+
+#### Upgrading to the wiki write model and documents with files (batch 16, lane 16B)
+
+Lane 16B of batch 16 (deep-dive decision 06 §J1, §J2, §G2, §K, §N6;
+plan `plan-batch-16.md` §3 16B) ends the admin_role/editor write bypass
+on the wiki, gives wiki authors drafts, history and restore through the
+content API, makes two wiki rules bind every writer (the admin panel and
+the scheduler included), and lets documents carry a file. The
+integration's "Deploying batch 16" runbook carries it with the other
+lanes; on its own it is a cms change plus one web capability value
+(`wikiPages.unpublish`).
+
+**What changes**
+
+- **Wiki spaces** are written through `global::can-author` like the
+  other authored types: moderators only (admin_role, editor), always
+  published, the slug derived from the name on create and fixed
+  afterwards, a visibility needs its target (`visibilityTarget`: a role
+  space its roles, a department space its department, a team space its
+  team), every change needs `If-Match`. New: `GET /api/wiki-spaces/authoring`
+  and `GET /api/wiki-spaces/:id/editable`.
+- **Wiki pages: the bypass ends.** `global::can-edit-wiki` is rebuilt as
+  a row gate: admin_role and editor are the `moderator` class (any page;
+  department, team and the schedule; no space move, no slug edit, both stay
+  in the admin panel), the page's author, the head of its department and
+  the lead of its team edit their pages in spaces they can read, on every
+  row (draft and published). **Scripts that write wiki pages through the
+  content API need `If-Match: "<version>"`** on `PUT /api/wiki-pages/:id`
+  (release note) and get a fixed answer (no `populate`, no client query;
+  400 with the keys otherwise). The author classes' generic create and
+  update still publish whatever `?status=` says.
+- **The eleven wiki-page actions** (§J2): `POST /api/wiki-pages/drafts`
+  (createDraft: department heads, team leads, moderators),
+  `GET /api/wiki-pages/drafts/mine`, `GET …/:id/editable`,
+  `PUT …/:id/draft`, `POST …/:id/publish`, `POST …/:id/discard-draft`
+  (a page without a published row is deleted by it: only its author or a
+  moderator), `POST …/:id/unpublish` and `GET /api/wiki-pages/authoring`
+  (moderators), `GET …/:id/revisions`, `GET …/:id/revisions/:revisionId`
+  and `POST …/:id/restore` (the page's editors and moderators; a restore
+  publishes, in one transaction under one `If-Match`). The web pages
+  arrive with lane 16C; until then nothing calls them.
+- **Parent loops are refused for every writer** (release note): a
+  content-API save, an admin-panel save (also a `connect` across spaces),
+  a publish, a discard, a scheduled publish that would put a page below
+  itself or one of its subpages fails (400 `parentCycle` on `parent`; the
+  panel shows "A page cannot be placed below itself or one of its
+  subpages"). A loop already in the database blocks no other save and can
+  be repaired (clear the parent of one of its pages and publish).
+- **A wiki space with pages can be neither deleted nor unpublished**
+  (release note), in the web and in the admin panel (400
+  `_form: spaceNotEmpty`, "This space still has pages"). A panel unpublish
+  used to delete the published row and drop its pages' space links. The
+  panel's "Discard changes" on a space is refused while it would take an
+  unpublished page out of the space (Strapi re-links only the pages that
+  have a published version). Every space save and publish queues on the
+  structure lock, so a page published at the same moment keeps its space.
+- **Documents carry a file** (K18): `file` (a row id from
+  `POST /api/upload`) in the document rules of moderators and department
+  authors. A new file must be the caller's own upload that nothing else
+  links; the media claims (16A's middleware, now registered) lock the file
+  row in the save's transaction and check it again, and remove the old
+  stamped file after a replace, a publish of a replaced draft, a discard
+  or a delete (after the commit). Keeping the stored file passes
+  unchecked; admin-panel files are never removed.
+- **Department and team deletes** advance the revision of the wiki pages
+  that link the deleted row (a head's or lead's form opened before the
+  delete answers 404 or 412).
+- **Reserved slugs** (for lane 16C's routes `/wiki/<space>/new` and
+  `/wiki/drafts`): a page slug `new` and a space slug `drafts` are refused
+  for every writer (400 `invalid` on `slug`). The content API never
+  derives them (its slugs carry a random suffix); in the admin panel a
+  page titled "New" needs another slug. A row that already has one keeps
+  it until a panel save that sends the slug (then rename it).
+- **The `/manage` forms name the author** (`editable.authorName`, every
+  authored type).
+- **Grants: +52 rows**, no revocation: wiki-space `authoringList`,
+  `editable` (admin_role, editor); wiki-page `createDraft` (admin_role,
+  editor, department_head, team_lead), `myDrafts`, `editable`,
+  `saveDraft`, `publish`, `discardDraft`, `revisions`, `revision`,
+  `restore` (admin_role, editor, department_head, team_lead, member),
+  `unpublish`, `authoringList` (admin_role, editor). The drift check then
+  covers 155 managed actions.
+- **No schema, no env, no `JWT_SECRET` rotation.** The structure lock is
+  one row in `content_versions` (`target_uid` `sinnlos::wiki-structure`,
+  created by the first wiki write).
+- **Known limits.** A space whose name another space already has answers
+  Strapi's own 400 ("This attribute must be unique", no code). The lock
+  protocol (§5 R10) accepts two rare interleavings that Postgres ends by
+  aborting one transaction (40P01, rolled back whole; the client sees a
+  500 and retries): a department or team delete against two wiki saves
+  of its pages, and an admin-panel bulk publish or unpublish of several
+  wiki pages (or spaces) against a save of one of them. A discard of a page's draft
+  drops the parent link of its subpages that were never published (Strapi
+  5.57); they keep their space and author, who sets the parent again.
+
+**Before the deploy (read-only)**
+
+```bash
+psql_db -X < infra/diagnostics/wiki-parent-cycles.sql
+```
+
+It lists the pages on a parent loop (with the path), the page rows whose
+parent sits in another space, the page rows without a space, and the
+counts. Expected on the owner's instance: **0, 0, 0** (the demo pages have
+no parents). A loop found here is repaired in the admin panel before or
+after the deploy (clear one page's parent and publish); it does not block
+the deploy. The reserved slugs (expected: no rows; rename one in the admin
+panel):
+
+```bash
+psql_db -X -c "SELECT 'wiki_page' AS type, document_id, slug FROM wiki_pages WHERE lower(slug) = 'new' UNION ALL SELECT 'wiki_space', document_id, slug FROM wiki_spaces WHERE lower(slug) = 'drafts';"
+```
+
+**After the deploy**
+
+1. The cms boot log shows `[bootstrap] granted 52 permission(s) across
+   intranet roles` and `[bootstrap] permission drift: none (report-only
+   check of 155 managed actions)`; `prod-perm-diff.sql` equals the
+   snapshot (no `db_only`, no `code_only` rows).
+2. As an editor: `PUT /api/wiki-pages/<id>?status=draft` without
+   `If-Match` answers 428; `GET /api/wiki-pages/<id>/editable` answers 200
+   with `roleClass: "moderator"` and an `ETag`.
+3. In the admin panel: setting a page's parent to its own child is
+   refused; unpublishing a space that has pages is refused; a document
+   whose file is replaced and published loses the old stamped file after
+   the commit (admin-panel uploads stay).
+4. `wiki-parent-cycles.sql` again: unchanged.
+
+**Rollback** (to the image before 16B; the batch runbook covers the whole
+batch): a plain retag, no database step, no `JWT_SECRET` rotation. The old
+image's sync prunes the 13 custom actions' 52 rows with their routes and
+re-creates them on the roll-forward (C31); check the effective
+permissions after both steps (`prod-perm-diff.sql` of the running image).
+The old image gives admin_role and editor the wiki bypass back, lets the
+panel write loops and unpublish non-empty spaces again, and refuses
+`document.file` in the content API; files attached in between stay
+attached. The structure lock row stays (unused by the old image).
+
+#### Upgrading to documents and the wiki in the web (batch 16, lane 16C)
+
+Lane 16C of batch 16 (branch `feat/v2-authoring-web-p2`; deep-dive decision
+06 §L1-§L7, §E6, owner amendments 1 and 2; plan `plan-batch-16.md` §3 16C)
+is the web half of v2 authoring phase 2. It changes the web only, but it
+needs the cms of lanes 16A (the document upload profile), 16D (the wiki
+revisions) and 16B (the wiki routes and grants, `document.file`, the
+preview's author name, `wikiPages.unpublish`), so it ships with them in the
+"Deploying batch 16" runbook. What users notice:
+
+- **`/manage` has six areas for editors and admins**: _Documents_ and
+  _Wiki_ join announcements, events, polls and quick links. **Department
+  heads** (with a department) get three: announcements, events and
+  **documents** for their own department; never the wiki area.
+- **Documents are written in the web** (`/manage/documents`, `/new`, the
+  edit page with a preview): title, description, category, the file, the
+  departments that see it, and for moderators _Schedule…_ (publish and
+  withdraw) and _Delete_. A department head's department is shown, not
+  chosen; no _Schedule…_, no _Delete_, _Discard changes_ only with a
+  published version.
+- **The file**: _Choose a file_ / _Replace the file_ takes PDF, Word
+  (.docx), Excel (.xlsx), PowerPoint (.pptx) up to 20 MB and JPEG, PNG,
+  WebP up to 5 MB. A wrong type or size is refused when the file is picked;
+  the file is uploaded when the author saves, and the cms decides by
+  content (a renamed `.xlsm` is refused then: "This file is not accepted",
+  under the file input). After a conflict, _Overwrite_ keeps the uploaded
+  file (no second upload). A file uploaded but never saved is removed by
+  the nightly janitor after 24 h.
+- **The wiki in `/manage`** (moderators): the spaces (create, edit, delete
+  while empty; who reads each one: everyone, roles, one department, one
+  team) and per space its page tree with each page's status (Draft,
+  Published, Changes pending, Scheduled, Schedule failed).
+- **Writing in the wiki itself**: _New page_ on a space (department heads,
+  team leads, moderators); _Edit_ and _History_ on a page for its author,
+  its department's head, its team's lead and moderators; drafts that
+  readers do not see, listed under _My drafts_ (`/wiki/drafts`); a page's
+  history with a preview of each version and _Restore this version_
+  (published at once; an older entry restores the text only). A parent
+  that would put a page below itself is refused under the picker.
+- **The previews** in `/manage` name the real author (and the event's
+  organizer) instead of "Unknown".
+- **The document library** links files through the web's `/uploads`
+  proxy (it built cms-host links before).
+- **Uploads above 10 MB through the web work** (marketplace photos
+  included): the proxy cut request bodies at Next's 10 MB default; it now
+  lets 22 MB through, like the Server Action limit.
+
+**Configuration:** none. No `.env`, compose, Traefik or Caddy change (the
+edges set no body limit; the cms caps at 50 MB). `next.config.mjs` gains
+`experimental.proxyClientMaxBodySize: "22mb"` (built into the image). The
+message catalogs gain `messages/manage/{documents,wiki}.*.json`.
+
+**Deploy:** with batch 16, never alone (an older cms answers 404 on the
+wiki routes: `/manage/wiki` shows the "could not be loaded" banner and the
+wiki editor the not-found page; document files cannot be attached before
+16B).
+
+**After the deploy: the browser checks** (the runbook's step "In a
+browser"; English and German, a phone at 360 px and a desktop):
+
+1. **As an editor:** `/manage` shows six tiles; the Wiki tile counts pages.
+2. **Documents:** _New document_; pick a `.xlsm` (refused at once, no
+   upload); pick a 20 MB PDF and _Save draft_ (it uploads and the page
+   becomes the document's edit page; the preview names the file and "Uploaded
+   by" you); _Publish_ (asks first). As a member, `/documents` lists it and
+   the download link starts with `/uploads/` and opens the PDF. Back as the
+   editor: _Replace the file_ with a 20 MB XLSX and _Save and publish_;
+   _Schedule…_ a withdrawal before the publication (refused in the
+   dialog), then a valid one; _Unpublish_; _Delete_.
+3. **A conflict:** the same document in two tabs; save in one, pick a file
+   and save in the other: "Changed in the meantime"; _Overwrite_ saves
+   without uploading again (the web log shows one upload).
+4. **As the Finance head** (or any department head with a department):
+   three tiles (no wiki); a new document shows the department read-only,
+   no _Schedule…_, no _Delete_; upload a PPTX, _Publish_; a Finance member
+   lists it, a Marketing member does not. `/manage/wiki` sends the head
+   back to `/manage`.
+5. **Wiki:** as an editor create a space in `/manage/wiki`; as a team lead
+   open it in the wiki, _New page_, _Save draft_ (readers do not see it;
+   _My drafts_ lists it), _Publish_; a member reads it and has no _Edit_;
+   the author edits with a change note; _History_ lists the save with the
+   note; show an older version and _Restore this version_ (asks first;
+   the history gains "Restores version #…"). Deleting the space while it
+   has pages is refused with "This space still has pages…".
+6. **Keyboard:** Tab reaches the file input (its button shows the focus
+   ring), the Markdown tabs follow the arrow keys, the parent picker opens
+   with Enter, every dialog closes with Escape and returns the focus.
+
+**Logs:** refusals are warnings, outages and web bugs errors; a `428` is
+always a web bug:
+
+```bash
+"${COMPOSE[@]}" logs --since 30m web | grep -E '\[manage-(documents|wiki)\]'
+```
+
+`[manage-documents] upload refused: 400 ValidationError → invalid` is a
+refused file (its type or size); `upload answered … rows, not one file row`
+should never appear. Next's `Request body exceeded 22 MB` means a request
+above the cap (nothing a form sends).
+
+**Known limits** (recorded, not fixed here):
+
+- A missing or foreign item's authoring page answers **HTTP 200** with the
+  not-found page and `noindex` (the cms answers 404; nothing leaks). The
+  lane's spike (plan S14, a production build): an existence check in a
+  blocking `generateMetadata` with a request-memoized loader shared with
+  the page read the cms once per view but still answered 200, for browsers
+  and for HTML-limited bots alike, behind `(app)/loading.tsx`. Question
+  18's default stands: no app-wide change.
+- `/wiki/drafts` and `/wiki/[space]/new` are routes inside the readers'
+  slug namespace. The authoring links carry a marker (`?mine=1`,
+  `?create=1`), and without it the two addresses show a space whose slug is
+  `drafts` or a page whose slug is `new` when one exists, so readers' links
+  keep working. Lane 16B reserves both slugs in the cms for every writer,
+  so only a row that had one before batch 16 can still take an address
+  (the reserved-slug query of "Deploying batch 16" finds it).
+- The parent picker offers the space's published pages (what readers
+  see); a draft-only parent stays selected but is not offered.
+- The page tree of a space reads at most 1 000 pages (it says so when cut).
+
+**Rollback:** with batch 16 (the batch runbook). This lane has no data of
+its own: the web writes only through the cms's authoring routes and the
+upload endpoint.
+
+**Rehearsal (2026-10-14, lane 16C):** unit suite, typecheck (apps and
+tests), lint, `format:check` and `next build` passed. Host Playwright
+(Chromium) against the lane's worktree cms (Strapi 5.57 with 16A's upload
+profile and 16B's contracts, a throwaway SQLite with the demo seed) and the
+web with `next start`, through a counting proxy: an editor's six tiles; a
+`.xlsm` and a 20 MB + 1 byte PDF refused on pick without a request; a
+**20 MB PDF uploaded through the Server Action** (both 22 MB edges) and
+attached; a member downloads it through `/uploads` (`application/pdf`); a
+fake `.docx` refused by the cms with the focus on the file input; a
+conflict whose _Overwrite_ uploaded nothing again (one upload in all); a
+picked file kept across an unpublish and attached by the next save; a
+refused upload from _Schedule…_ closing the dialog with the focus on the
+file input; the schedule's end-before-start refusal; unpublish and
+delete; a department
+head's three tiles, pinned department, no _Schedule…_ or _Delete_, an
+image published to Engineering that an Engineering member lists and a
+Design member does not, _Discard changes_ only with a published version,
+crafted `DELETE` (403) and `publishAt` (400) refused, the explanation
+without a department. The wiki pages were looked at against a stand-in for
+16B's routes (fixtures from the cms's real spaces and pages): every new
+page at 360 and 1280 px, light and dark, English and German (132 page
+views), no horizontal scroll; keyboard: the file input, the Markdown tabs,
+the parent picker, the restore and delete dialogs. **Waiting for the
+integrated cms:** the wiki flows end to end (spaces, a team lead's draft,
+publish, Edit per role, history and restore, the parent loop, the
+non-empty space, two tabs), the preview's "Uploaded by", and an XLSX and
+PPTX upload by a department head. Two Codex review rounds were fixed before
+the final run: the two routes inside the readers' slug namespace (now
+behind `?create=1` and `?mine=1`, a failed lookup staying with the
+readers), a picked file lost on a status change, and an upload refused
+from the _Schedule…_ dialog hidden behind it.
+
 #### Deploying batch 15.2 (relation grants in populate filters and sort)
 
 Batch 15.2 (branch `fix/nested-populate-relation-grants`) ships after
@@ -2070,8 +3391,11 @@ populate (`populate[pages][sort]=department.name:asc`) answers 500 with a
 SQL error in the cms log for callers that hold the target's `find`; 15.2
 turns it into 400 only where the grant is missing. Nothing leaks, and the
 web sends no such sort; a line from it in step 5's error filter is someone
-sending that request by hand. Batch 16 refuses every relation sort inside a
-populate.
+sending that request by hand. **Closed in batch 16:** every relation or
+media path in a populate's sort answers the core's 400 `Invalid key <key>
+at <path>` for every caller (a media path such as
+`populate[teams][sort]=avatar.name` answered 500 as well); a rollback to
+15.2 brings the 500 back.
 
 **Rehearsal** (2026-10-13, local staging in Traefik mode, from 1d0b117):
 this section walked as written. Before the deploy, populate filters
@@ -2559,7 +3883,8 @@ it; running it is the owner's decision (below).
      the client is already executing a query is deprecated and will be
      removed in pg@9.0. …` / ``(Use `node --trace-deprecation ...` to show
      where the warning was created)`` on
-     the cms's stderr after its first publish or upload (since the
+     the cms's stderr once per cms process, after its first database
+     activity, e.g. a sign-in and the first page reads (since the
      Strapi 5.57 update; it does not match the error filter);
    - in the web log, `Error: Failed to find Server Action "<id>". This
      request might be from an older or newer deployment.` (with `Read
@@ -2956,13 +4281,15 @@ required env, no grant, no route, no edge change.
     writes no new audit row; a cms restart starts the backoff over. Until
     then the item stays visible: the site does not hide an item whose
     Unpublish at passed (the time is a setting of the draft). If it must
-    go now, unpublish it in the panel. Known limit: each run reads the due
-    withdrawals from the earliest on, at most 2,000 rows, and passes over
-    those still backing off; with more than 2,000 earlier withdrawals that
-    keep failing, a later healthy one is not reached. Failing withdrawals
-    show Schedule error (and the `[scheduler] … failed` line): fix their
-    cause, clear or change their Unpublish at, or unpublish them by hand,
-    and the rest follow.
+    go now, unpublish it in the panel. Since batch 16 (issue #73) failing
+    withdrawals never hold up a healthy one: each run takes the due
+    withdrawals that never failed for good first, in deadline order, and
+    retries at most 10 failing ones whose backoff is over, from where the
+    previous run stopped (wrapping at the end), so each is retried within
+    one run per 10 failures ("Upgrading to wiki history as after-images
+    (batch 16, lane 16D)"). Failing withdrawals show Schedule error (and
+    the `[scheduler] … failed` line): fix their cause, clear or change
+    their Unpublish at, or unpublish them by hand.
   - Every check of a time (due, an ended window) is made when the run
     holds the item's lock, not when the run started: a run that reaches an
     item late, behind a lock or a long batch, does not publish one whose

@@ -10,6 +10,9 @@
 #      ENTRA_ENABLED=1 (D-ENTRA-01: cms and web would refuse to start),
 #      DATETIME_LEGACY_ZONE set while the running database still holds
 #      pre-contract datetime columns (the new cms would refuse to start),
+#      no wiki revision draft rows while this release runs wiki revisions
+#      without draft & publish (batch 16: the new cms would refuse to
+#      start; infra/migrations/wiki-revision-dp/migrate.sql first),
 #      and a DOMAIN every Traefik router can match: a bare host name, no
 #      placeholder, the host of WEB_PUBLIC_URL and CMS_PUBLIC_URL.
 #      Then the deploy checks (FX35): one deploy per compose project at a
@@ -437,6 +440,44 @@ datetime_repair_env_missing() {
   [[ "${naive}" =~ ^[0-9]+$ && "${naive}" -gt 0 ]]
 }
 
+# Batch 16 (DA03): wiki revisions run without draft & publish from the
+# release whose wiki-revision schema says so. On a database that still
+# holds revision rows with published_at IS NULL (after a rollback to a
+# release before it, whose first boot cloned a draft twin of every
+# revision), the new cms refuses to start (apps/cms/src/utils/
+# revision-dp-guard.ts; without that guard Strapi would delete them). The
+# deploy is refused here instead, before the backup and before any
+# container changes, naming infra/migrations/wiki-revision-dp/migrate.sql.
+REVISION_SCHEMA="apps/cms/src/api/wiki-revision/content-types/wiki-revision/schema.json"
+REVISION_SCHEMA_IN_IMAGE="/app/apps/cms/dist/src/api/wiki-revision/content-types/wiki-revision/schema.json"
+REVISION_DP_RUNBOOK='docs/DEPLOYMENT.md, "One-time: wiki revisions draft/publish off"'
+
+# Prints the number of wiki_revisions rows with published_at IS NULL in the
+# running database (0 without the table), or nothing when there is no db
+# container to ask or the query gave up (after 5 s waiting for a lock, 10 s
+# in all), like naive_app_columns. Arguments run in front of the docker
+# call (PROBE_TIMEOUT).
+revision_draft_rows() {
+  # shellcheck disable=SC2016
+  "$@" docker exec -i "${PROJECT}-db-1" sh -c 'psql -X -q -tA -U "$POSTGRES_USER" -d "$POSTGRES_DB"' 2>/dev/null <<'SQL'
+SET lock_timeout = '5s';
+SET statement_timeout = '10s';
+SELECT to_regclass('public.wiki_revisions') IS NOT NULL AS has_revisions \gset
+\if :has_revisions
+SELECT count(*) FROM public.wiki_revisions WHERE published_at IS NULL;
+\else
+SELECT 0;
+\endif
+SQL
+}
+
+# Whether this checkout runs wiki revisions without draft & publish (its
+# schema says draftAndPublish false).
+checkout_revisions_dp_off() {
+  [[ -f "${CHECKOUT}/${REVISION_SCHEMA}" ]] &&
+    grep -Eq '"draftAndPublish"[[:space:]]*:[[:space:]]*false' "${CHECKOUT}/${REVISION_SCHEMA}"
+}
+
 # The rollback hint runs on a failed deploy and must print every line, also
 # with a hung docker daemon or a locked database: each of its docker calls
 # runs under this bound. `timeout` exits 124 at the deadline (137 after the
@@ -481,6 +522,18 @@ USER_SCHEMA_IN_IMAGE="/app/apps/cms/dist/src/extensions/users-permissions/conten
 image_has_token_version() {
   "${PROBE_TIMEOUT[@]}" docker run --rm --pull never --network none --entrypoint grep "$1" \
     -q tokenVersion "${USER_SCHEMA_IN_IMAGE}" 2>/dev/null
+}
+
+# Whether a cms image runs wiki revisions WITH draft & publish (a release
+# before batch 16): exit 0 yes, 1 no, anything else unknown (no such image
+# here, another layout, docker failed or timed out, no `timeout`). Its first
+# boot after a rollback clones a draft twin of every revision, so a later
+# roll-forward to this release needs infra/migrations/wiki-revision-dp/
+# migrate.sql first (the preflight above refuses it until then). Never
+# pulls, no network; the compiled schema, as for poll guest access.
+image_revisions_draft_publish() {
+  "${PROBE_TIMEOUT[@]}" docker run --rm --pull never --network none --entrypoint grep "$1" \
+    -Eq '"draftAndPublish"[[:space:]]*:[[:space:]]*true' "${REVISION_SCHEMA_IN_IMAGE}" 2>/dev/null
 }
 
 # A cms from before batch 13 checks a Strapi JWT's signature and expiry
@@ -580,6 +633,10 @@ ROLLBACK_ORIGIN=""
 # newer one (it only warns). A target cms from before the token version of
 # batch 13, or one that cannot be checked, gets the mandatory JWT_SECRET
 # rotation before the start commands (print_jwt_secret_rotation_hint).
+# A target cms that runs wiki revisions with draft & publish (before batch
+# 16), or one that cannot be checked, gets the roll-forward note: the next
+# deploy of this release needs infra/migrations/wiki-revision-dp/migrate.sql
+# first (the revision preflight refuses it until then).
 # Every probe is bounded (PROBE_TIMEOUT); one that fails or times out
 # prints the variant for the unknown case, never fewer lines.
 print_rollback_hint() {
@@ -588,13 +645,14 @@ print_rollback_hint() {
     echo "       no containers ran before this deploy): fix the cause and re-run." >&2
     return 0
   fi
-  local rollback=("${COMPOSE[@]}") naive cms_cmd guest_access=0 web_zone=0 token_version=0
+  local rollback=("${COMPOSE[@]}") naive cms_cmd guest_access=0 web_zone=0 token_version=0 revisions_dp=0
   local web_image="${PROJECT}-web:${ROLLBACK_REF}" cms_image="${PROJECT}-cms:${ROLLBACK_REF}"
   naive="$(naive_app_columns "${PROBE_TIMEOUT[@]}" || true)"
   cms_cmd="$("${PROBE_TIMEOUT[@]}" docker image inspect -f '{{json .Config.Cmd}}' "${cms_image}" 2>/dev/null || true)"
   image_has_poll_guest_access "${cms_image}" || guest_access=$?
   image_web_zone_explicit "${web_image}" || web_zone=$?
   image_has_token_version "${cms_image}" || token_version=$?
+  image_revisions_draft_publish "${cms_image}" || revisions_dp=$?
   if [[ "${guest_access}" != "0" ]]; then
     print_guest_vote_revoke_hint "${guest_access}" "${cms_image}"
   fi
@@ -643,6 +701,18 @@ print_rollback_hint() {
   fi
   if [[ "${guest_access}" != "0" ]]; then
     print_guest_vote_recheck_hint
+  fi
+  if [[ "${revisions_dp}" != "1" ]]; then
+    if [[ "${revisions_dp}" == "0" ]]; then
+      echo "       A roll-forward to this release needs migrate.sql first: ${cms_image} runs wiki revisions with" >&2
+      echo "       draft & publish, and its first boot clones a draft twin of every revision." >&2
+    else
+      echo "       A roll-forward to this release needs migrate.sql first, unless ${cms_image} runs wiki revisions" >&2
+      echo "       without draft & publish (it could not be checked here: no migrate.sql only if this prints 0):" >&2
+      echo "                      docker run --rm --pull never --network none --entrypoint grep ${cms_image} -Ec '\"draftAndPublish\"[[:space:]]*:[[:space:]]*true' ${REVISION_SCHEMA_IN_IMAGE}" >&2
+    fi
+    echo "       Before the next deploy (it refuses until then), with cms and web stopped and after a backup:" >&2
+    echo "       ${INFRA_DIR}/migrations/wiki-revision-dp/preflight.sql, then migrate.sql (${REVISION_DP_RUNBOOK})." >&2
   fi
   if [[ "${ROLLBACK_REF}" == "rollback" ]]; then
     echo "       Rollback target: :rollback, the images that ran before the first deploy with this script (no" >&2
@@ -1210,6 +1280,23 @@ if datetime_repair_env_missing; then
   echo "       (read-only report, rehearsal on a copy), set DATETIME_LEGACY_ZONE (and, if the old cms" >&2
   echo "       ran in UTC first, DATETIME_LEGACY_UTC_UNTIL) and re-run." >&2
   preflight_failed=1
+fi
+if checkout_revisions_dp_off; then
+  REVISION_DRAFTS="$(revision_draft_rows "${PROBE_TIMEOUT[@]}" || true)"
+  if [[ "${REVISION_DRAFTS}" =~ ^[0-9]+$ && "${REVISION_DRAFTS}" -gt 0 ]]; then
+    echo "ERROR: the running database holds ${REVISION_DRAFTS} wiki revision draft row(s), and this release runs" >&2
+    echo "       wiki revisions without draft & publish: the new cms refuses to start on them (a rollback to a" >&2
+    echo "       release before batch 16 cloned a draft twin of every revision). With cms and web stopped and" >&2
+    echo "       after a backup, run the read-only preflight, then the migration as one transaction:" >&2
+    echo "                      ${COMPOSE[*]} exec -T db sh -c 'psql -X -v ON_ERROR_STOP=1 -U \"\$POSTGRES_USER\" -d \"\$POSTGRES_DB\"' < ${INFRA_DIR}/migrations/wiki-revision-dp/preflight.sql" >&2
+    echo "                      ${COMPOSE[*]} exec -T db sh -c 'psql -X -v ON_ERROR_STOP=1 --single-transaction -U \"\$POSTGRES_USER\" -d \"\$POSTGRES_DB\"' < ${INFRA_DIR}/migrations/wiki-revision-dp/migrate.sql" >&2
+    echo "       (${REVISION_DP_RUNBOOK}), then re-run." >&2
+    preflight_failed=1
+  elif [[ "${REVISION_DRAFTS}" =~ ^[0-9]+$ ]]; then
+    echo "  wiki revisions: no draft rows"
+  else
+    echo "  wiki revisions: not checked (no database to ask); the new cms checks at its start"
+  fi
 fi
 if ((preflight_failed)); then
   echo "Preflight failed. Nothing was changed." >&2

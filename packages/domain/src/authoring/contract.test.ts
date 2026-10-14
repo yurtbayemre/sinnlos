@@ -68,6 +68,9 @@ describe("codes", () => {
         "visibilityTarget",
         "optionCount",
         "optionDuplicate",
+        "fileType",
+        "fileTooLarge",
+        "parentCycle",
       ].sort(),
     );
     expect([...AUTHORING_FORM_CODES]).toEqual(["neverPublished", "spaceNotEmpty"]);
@@ -81,7 +84,8 @@ describe("codes", () => {
     expect(FORM_KEY).toBe("_form");
     expect(STATUS_KEY).toBe("status");
     expect(isAuthoringCode("neverPublished")).toBe(true);
-    expect(isAuthoringCode("fileType")).toBe(false);
+    expect(isAuthoringCode("fileType")).toBe(true);
+    expect(isAuthoringCode("notACode")).toBe(false);
   });
 });
 
@@ -140,7 +144,6 @@ describe("field lists per class (§N6)", () => {
       "uploadedBy",
       "ownerDepartment",
       "scheduleError",
-      "file",
       "id",
       "documentId",
       "publishedAt",
@@ -152,6 +155,16 @@ describe("field lists per class (§N6)", () => {
           (fields ?? []).filter((field) => never.includes(field)),
           type,
         ).toEqual([]);
+      }
+    }
+  });
+
+  it("lists the document file for both classes (batch 16, K18)", () => {
+    expect(DOCUMENT_MODERATOR_FIELDS).toContain("file");
+    expect(DOCUMENT_DEPARTMENT_AUTHOR_FIELDS).toContain("file");
+    for (const type of ["announcement", "event", "quickLink", "poll"] as const) {
+      for (const fields of Object.values(AUTHORING_FIELDS[type])) {
+        expect(fields ?? [], type).not.toContain("file");
       }
     }
   });

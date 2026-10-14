@@ -1,0 +1,52 @@
+{
+  "title": "Documents",
+  "description": "The files of the document library: upload them, describe them, choose who sees them, schedule and publish them.",
+  "new": "New document",
+  "newDescription": "Saved as a draft first; readers find it in the library once it is published.",
+  "editTitle": "Edit document",
+  "emptyTitle": "No documents yet",
+  "emptyHint": "Add the first one; it stays a draft until you publish it.",
+  "sections": {
+    "document": "Document",
+    "file": "File",
+    "audience": "Audience"
+  },
+  "fields": {
+    "title": {
+      "label": "Title"
+    },
+    "description": {
+      "label": "Description",
+      "hint": "Shown under the title in the library."
+    },
+    "category": {
+      "label": "Category"
+    },
+    "departments": {
+      "label": "Show to departments",
+      "hint": "Only members of the chosen departments see it; editors and admins always do. None chosen: everyone."
+    },
+    "file": {
+      "label": "File",
+      "hint": "PDF, Word (.docx), Excel (.xlsx) or PowerPoint (.pptx) up to 20 MB, or a JPEG, PNG or WebP image up to 5 MB. The intranet checks what the file really is; files with macros, templates and slide shows are refused.",
+      "choose": "Choose a file",
+      "replace": "Replace the file",
+      "current": "Current file",
+      "none": "No file yet.",
+      "picked": "Uploaded when you save: {name} ({size})",
+      "uploaded": "Uploaded, attached when you save: {name} ({size})",
+      "cancelPick": "Keep the current file",
+      "cancelPickNew": "Remove the selection",
+      "download": "Download {name}",
+      "fileType": "This file is not accepted. Upload a PDF, Word (.docx), Excel (.xlsx) or PowerPoint (.pptx) file, or a JPEG, PNG or WebP image. Files with macros (.docm, .xlsm, .pptm), templates, slide shows and binary workbooks (.xlsb) are refused, also when they are renamed.",
+      "fileTooLarge": "This file is too large: PDF and Office files may have up to 20 MB, images up to 5 MB.",
+      "required": "Choose a file.",
+      "invalid": "This file cannot be attached (it is gone, or already belongs to another item). Choose it again."
+    }
+  },
+  "uploading": "Uploading the file…",
+  "preview": {
+    "uploadedBy": "Uploaded by {name}",
+    "noFile": "No file attached"
+  }
+}

@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
 
 import { createStrapiStub, type StrapiStub } from "../test/strapi-stub.test.helper";
-import { authoringChecks, pollHasVotes, type AuthoringChecksHost } from "./authoring-checks";
+import {
+  DOCUMENT_FILE_MIMES,
+  authoringChecks,
+  pollHasVotes,
+  type AuthoringChecksHost,
+} from "./authoring-checks";
 import type { RelationRef, ToOneRelationInput } from "./write-allowlist";
 
 /**
@@ -49,6 +54,12 @@ function world(): StrapiStub {
           provider_metadata: { uploadedBy: 42 },
         },
         { id: 4, name: "d.pdf", mime: "application/pdf", provider_metadata: null },
+        {
+          id: 5,
+          name: "e.pdf",
+          mime: "application/pdf",
+          provider_metadata: { uploadedBy: 42, removing: "2026-10-13T10:00:00.000Z" },
+        },
       ],
     },
   });
@@ -193,6 +204,20 @@ describe("role types", () => {
 });
 
 describe("ownUpload (§E2)", () => {
+  it("accepts exactly the stored mimes of the upload table", () => {
+    expect([...DOCUMENT_FILE_MIMES].sort()).toEqual(
+      [
+        "application/pdf",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        "image/jpeg",
+        "image/png",
+        "image/webp",
+      ].sort(),
+    );
+  });
+
   it("needs the caller's stamp, an allowed mime and no link but the document's own rows", async () => {
     const strapi = world();
     const { mediaChecks } = checks(strapi);
@@ -200,6 +225,8 @@ describe("ownUpload (§E2)", () => {
     expect(await mediaChecks.ownUpload?.(2)).toBeNull();
     expect(await mediaChecks.ownUpload?.(3)).toBeNull();
     expect(await mediaChecks.ownUpload?.(4)).toBeNull();
+    // Tombstoned: a removal reserved it (16A, utils/upload-orphans.ts).
+    expect(await mediaChecks.ownUpload?.(5)).toBeNull();
     expect(await mediaChecks.ownUpload?.(999)).toBeNull();
     strapi.tables[FILE][0].related = [{ id: 100, __type: DOCUMENT }];
     expect(await mediaChecks.ownUpload?.(1)).toBe(1);

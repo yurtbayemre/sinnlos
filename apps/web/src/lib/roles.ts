@@ -290,7 +290,10 @@ export interface Capabilities {
   wikiPages: {
     /** Department heads, team leads and moderators (in spaces they can read). */
     create: boolean;
-    /** "row": the can-edit-wiki row classes (author, head, lead); "any": moderators. */
+    /**
+     * "row": the can-edit-wiki row classes (author, head, lead; @sinnlos/
+     * domain classifyWikiEditor decides per page); "any": moderators.
+     */
     edit: "row" | "any" | "none";
     unpublish: boolean;
     schedule: boolean;
@@ -407,9 +410,9 @@ export function capabilitiesFor(role: Role): Capabilities {
     wikiPages: {
       create: hasRole(WIKI_PAGE_CREATOR_ROLES, role),
       edit: moderator ? "any" : hasRole(WIKI_PAGE_ROW_EDITOR_ROLES, role) ? "row" : "none",
-      // No unpublish action exists yet (batch 16); scheduling is the
+      // wiki-page.unpublish (batch 16): moderators; scheduling is the
       // moderators' update, like the areas' `schedule`.
-      unpublish: false,
+      unpublish: moderator,
       schedule: moderator,
       delete: moderator,
     },

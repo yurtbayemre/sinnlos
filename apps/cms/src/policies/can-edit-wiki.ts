@@ -1,132 +1,22 @@
-import { GUEST, hasRole, type RoleHolder } from "../bootstrap/roles";
-import { loadUserScope, visibleWikiSpaceIds } from "../utils/visible-ids";
-import { editablePageSpace, wikiRelationChecks } from "../utils/wiki-write-targets";
-import {
-  USER_UID,
-  WIKI_PAGE_UID,
-  enforceWriteAllowlist,
-  WRITE_BYPASS_ROLES,
-  hasTargetId,
-  targetRowWhere,
-  type StrapiDb,
-  type WritePolicy,
-} from "../utils/write-allowlist";
-
-interface PageRow {
-  id: number;
-  documentId: string;
-  author?: { id?: number } | null;
-  department?: { id?: number } | null;
-  team?: { id?: number; lead?: { id?: number } | null } | null;
-}
-
-interface CallerRow {
-  department?: { id?: number } | null;
-}
-
-type PageEditorClass = "author" | "departmentHead" | "teamLead";
+import { wikiPageGate } from "../utils/wiki-gate";
 
 /**
- * Write gate for wiki pages, create and update (#24, FX07).
+ * global::can-edit-wiki (deep-dive decision 06 §B2, §J2; batch 16 lane 16B,
+ * policy kind `row-write-gate`): the write gate of wiki pages, on every
+ * route of api/wiki-page but the reads and the delete, configured with the
+ * route's `{ uid }` and, for the custom actions, its `intent`.
  *
- * admin_role / editor pass with the payload untouched: they also author in
- * the admin panel and may place pages anywhere.
+ *   - admin_role and editor: the `moderator` class on every page. No
+ *     bypass since batch 16: their payloads go through the allowlist's
+ *     moderator rule like everyone's.
+ *   - the row classes (@sinnlos/domain wiki-edit.ts classifyWikiEditor):
+ *     the page's author, the head of its department, the lead of its team,
+ *     on every row of the page and only while it sits in a space they can
+ *     read; department heads and team leads create (`author`).
+ *   - everyone else, and every refused row: false (403) on the generic
+ *     create and update and on the lists, 404 on the custom page actions.
  *
- * Create (no target id): any role but guest (the create grant itself is
- * held by department_head and team_lead only). Role class "author": page
- * content, a required `space` the caller can read and an optional `parent`
- * that is a readable page of that space. author and lastEditor are set to
- * the caller, and `slug` is derived from the title plus a random suffix:
- * Strapi checks slug uniqueness across every published page, hidden spaces
- * included, so a client-chosen slug would reveal which slugs exist there.
- *
- * Update: the page's author, the head of the page's department or the lead
- * of the page's team (classes "author", "departmentHead", "teamLead", first
- * match wins), and, new with FX07, only while every row of the page sits in
- * one space the caller can read. Page content, `revisionSummary` (the
- * controller consumes it) and a `parent` that is a readable page of the
- * SAME space, neither the page itself nor one of its descendants. The
- * controller still sets lastEditor.
- *
- * Everything else a non-bypass payload carries answers the allowlist's
- * generic 400: `slug`, `space` on update, `children`, `revisions`, `author`,
- * `lastEditor`, `department`, `team`, Strapi's own keys. The fields and
- * checks live in utils/write-allowlist.ts and utils/wiki-write-targets.ts.
- * The allowlist also pins `status=published` for these callers, so a
- * `?status=draft` write cannot answer with draft rows through
- * `populate[space][populate][pages]`, `parent` or `children`.
- *
- * A row the caller may not write is `false` (403), the same for a missing
- * page, a page they do not own and a page in a space they cannot read; the
- * payload is only looked at after that. Strict boolean result: Strapi
- * treats `undefined` as a pass.
+ * The rules, the loader and the classifier live in utils/wiki-gate.ts; the
+ * decision travels to the authoring controller on ctx.state.
  */
-export default async (
-  policyContext: WritePolicy,
-  _config: unknown,
-  { strapi }: { strapi: StrapiDb },
-): Promise<boolean> => {
-  const user = policyContext.state?.user;
-  if (!user || typeof user.id !== "number" || !user.role?.type) return false;
-  if (hasRole(user, WRITE_BYPASS_ROLES)) return true;
-  if (hasRole(user, [GUEST])) return false;
-
-  if (!hasTargetId(policyContext.params?.id)) {
-    const visibleSpaceIds = await visibleSpacesOf(strapi, user.id);
-    return enforceWriteAllowlist(
-      policyContext,
-      { uid: WIKI_PAGE_UID, action: "create", roleClass: "author" },
-      { callerId: user.id, relationChecks: wikiRelationChecks(strapi, { visibleSpaceIds }) },
-    );
-  }
-
-  // A malformed target id is refused like a missing page (never queried).
-  const where = targetRowWhere(policyContext.params?.id);
-  if (!where) return false;
-  const page = (await strapi.db.query(WIKI_PAGE_UID).findOne({
-    where,
-    populate: { author: true, department: true, team: { populate: { lead: true } } },
-  })) as PageRow | null;
-  if (!page) return false;
-  const roleClass = await pageEditorClass(strapi, user.id, user, page);
-  if (!roleClass) return false;
-
-  const visibleSpaceIds = await visibleSpacesOf(strapi, user.id);
-  const spaceDocumentId = await editablePageSpace(strapi, page.documentId, visibleSpaceIds);
-  if (!spaceDocumentId) return false;
-
-  return enforceWriteAllowlist(
-    policyContext,
-    { uid: WIKI_PAGE_UID, action: "update", roleClass },
-    {
-      callerId: user.id,
-      relationChecks: wikiRelationChecks(strapi, {
-        visibleSpaceIds,
-        spaceDocumentId,
-        pageDocumentId: page.documentId,
-      }),
-    },
-  );
-};
-
-async function visibleSpacesOf(strapi: StrapiDb, userId: number): Promise<Set<number>> {
-  return new Set(await visibleWikiSpaceIds(strapi, await loadUserScope(strapi, userId)));
-}
-
-async function pageEditorClass(
-  strapi: StrapiDb,
-  userId: number,
-  caller: RoleHolder,
-  page: PageRow,
-): Promise<PageEditorClass | undefined> {
-  if (page.author?.id === userId) return "author";
-  if (hasRole(caller, ["department_head"]) && typeof page.department?.id === "number") {
-    const me = (await strapi.db.query(USER_UID).findOne({
-      where: { id: userId },
-      populate: { department: true },
-    })) as CallerRow | null;
-    if (me?.department?.id === page.department.id) return "departmentHead";
-  }
-  if (hasRole(caller, ["team_lead"]) && page.team?.lead?.id === userId) return "teamLead";
-  return undefined;
-}
+export default wikiPageGate();

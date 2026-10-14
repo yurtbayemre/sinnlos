@@ -373,8 +373,9 @@ describe("capabilitiesFor = the cms grants (decision 06 §L2)", () => {
     const { wikiPages } = capabilitiesFor(role);
     const moderator = MODERATORS.includes(role);
     expect(wikiPages.create).toBe(holds(role, `${A.wikiPage}.create`));
-    // can-edit-wiki: moderators bypass, every other holder of update is
-    // limited to its row classes (own page, head, lead).
+    // can-edit-wiki: moderators are the `moderator` class on every page,
+    // every other holder of update is limited to its row classes (own page,
+    // head, lead). unpublish is a custom action (batch 16): moderators.
     expect(wikiPages.edit).toBe(
       !holds(role, `${A.wikiPage}.update`) ? "none" : moderator ? "any" : "row",
     );

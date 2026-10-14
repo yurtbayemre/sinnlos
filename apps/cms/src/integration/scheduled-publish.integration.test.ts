@@ -397,7 +397,10 @@ describe.each(testEngines())("scheduled publishing on %s", (engine) => {
   it("a parent cycle among scheduled wiki pages waits out the dependency limit, then ends in notPublishable (Codex review)", async () => {
     // The admin panel and the Document Service let a draft's parent point
     // back at its own child; both pages waited for each other forever. The
-    // wait is bounded now (DEPENDENCY_WAIT_MINUTES, 60).
+    // wait is bounded now (DEPENDENCY_WAIT_MINUTES, 60). Since batch 16 the
+    // wiki checks refuse a write that closes the loop (parentCycle, for
+    // every writer), so the loop here is one left from before (an older
+    // panel, raw SQL): its link row is written raw.
     const base = Date.now();
     const slug = (name: string) => `it-cycle-${name}-${base}`;
     const due = new Date(base - 60_000).toISOString();
@@ -407,9 +410,37 @@ describe.each(testEngines())("scheduled publishing on %s", (engine) => {
     const b = await t.strapi.documents(WIKI_PAGE).create({
       data: { title: "Cycle B", slug: slug("b"), parent: a.documentId, publishAt: due },
     });
-    await t.strapi
-      .documents(WIKI_PAGE)
-      .update({ documentId: a.documentId, data: { parent: b.documentId } });
+    await expect(
+      t.strapi
+        .documents(WIKI_PAGE)
+        .update({ documentId: a.documentId, data: { parent: b.documentId } }),
+    ).rejects.toThrow(/below itself/);
+    const join = (
+      (t.strapi.db as unknown as { metadata: { get(uid: string): unknown } }).metadata.get(
+        WIKI_PAGE,
+      ) as {
+        attributes: Record<
+          string,
+          {
+            joinTable: {
+              name: string;
+              joinColumn: { name: string };
+              inverseJoinColumn: { name: string };
+            };
+          }
+        >;
+      }
+    ).attributes.parent.joinTable;
+    await (
+      t.strapi.db as unknown as {
+        getConnection(table: string): { insert(row: Record<string, unknown>): Promise<unknown> };
+      }
+    )
+      .getConnection(join.name)
+      .insert({
+        [join.joinColumn.name]: (await draftOf(WIKI_PAGE, a.documentId))?.id,
+        [join.inverseJoinColumn.name]: (await draftOf(WIKI_PAGE, b.documentId))?.id,
+      });
     const attempts = newAttempts();
     const within = await scheduler.runScheduledPublishing(t.strapi, new Date(base), attempts);
     for (const page of [a, b]) {
@@ -816,4 +847,172 @@ describe.each(testEngines())("scheduled publishing on %s", (engine) => {
       }),
     ]);
   });
+
+  // ---------------------------------------------------------------------------
+  // Issue #73: the withdrawal selection has two tiers (healthy ones in
+  // deadline order; failing ones through a reserved quota of 10 per run
+  // from a keyset cursor), so failing withdrawals never starve a healthy one.
+
+  /** The unpublishes the Document Service saw, and the documents it refuses. */
+  const unpublishFault = {
+    attempted: [] as string[],
+    refuse: new Set<string>(),
+    stall: new Set<string>(),
+  };
+  let unpublishFaultAdded = false;
+  const watchUnpublishes = () => {
+    unpublishFault.attempted = [];
+    if (unpublishFaultAdded) return;
+    unpublishFaultAdded = true;
+    const { NotPublishableError } = t.requireBuilt<{
+      NotPublishableError: new (keys: readonly string[]) => Error;
+    }>("src/utils/publish-readiness");
+    const documents = t.strapi.documents as unknown as {
+      use(
+        middleware: (
+          context: { uid: string; action: string; params?: { documentId?: string } },
+          next: () => Promise<unknown>,
+        ) => Promise<unknown>,
+      ): void;
+    };
+    documents.use(async (context, next) => {
+      const documentId = context.params?.documentId ?? "";
+      if (context.uid === QUICK_LINK && context.action === "unpublish") {
+        unpublishFault.attempted.push(documentId);
+        // A permanent failure: recorded once, then the withdrawal backs off.
+        if (unpublishFault.refuse.has(documentId)) throw new NotPublishableError(["url"]);
+        if (unpublishFault.stall.has(documentId)) {
+          throw Object.assign(new Error("deadlock detected"), { code: "40P01" });
+        }
+      }
+      return next();
+    });
+  };
+
+  /**
+   * `count` published quick links with a passed withdrawal, written raw (as
+   * a long-running instance accumulates them): `failed` ones carry the
+   * scheduleError of an earlier failure, the others none. Returns their
+   * documentIds in draft-row id order (the retry tier's cursor order).
+   */
+  const seedWithdrawals = async (prefix: string, count: number, failed: boolean) => {
+    const earlier = new Date(Date.now() - 60 * 60_000);
+    const data: Record<string, unknown>[] = [];
+    for (let index = 0; index < count; index += 1) {
+      const documentId = `${prefix}${String(index).padStart(24 - prefix.length, "0")}`;
+      const base = { documentId, label: `${prefix} ${index}`, url: "https://example.org/73" };
+      data.push(
+        { ...base, publishedAt: earlier },
+        {
+          ...base,
+          publishedAt: null,
+          unpublishAt: earlier,
+          scheduleError: failed ? "notPublishable" : null,
+        },
+      );
+    }
+    const query = t.strapi.db.query(QUICK_LINK) as unknown as {
+      createMany(params: { data: Record<string, unknown>[] }): Promise<unknown>;
+    };
+    for (let start = 0; start < data.length; start += 500) {
+      await query.createMany({ data: data.slice(start, start + 500) });
+    }
+    const drafts = await t.strapi.db.query(QUICK_LINK).findMany({
+      where: { documentId: { $startsWith: prefix }, publishedAt: null },
+      select: ["documentId"],
+      orderBy: { id: "asc" },
+    });
+    return drafts.map((row) => row.documentId as string);
+  };
+  const removeSeeded = (prefix: string) =>
+    (
+      t.strapi.db.query(QUICK_LINK) as unknown as {
+        deleteMany(params: { where: Record<string, unknown> }): Promise<unknown>;
+      }
+    ).deleteMany({ where: { documentId: { $startsWith: prefix } } });
+  const failingDue = (now: Date) =>
+    t.strapi.db.query(QUICK_LINK).count({
+      where: {
+        publishedAt: null,
+        unpublishAt: { $notNull: true, $lte: now },
+        scheduleError: { $notNull: true },
+      },
+    });
+
+  it("#73: 2,001 permanently failing earlier withdrawals do not keep a healthy later one visible", async () => {
+    watchUnpublishes();
+    const failing = await seedWithdrawals("it73fail", 2_001, true);
+    unpublishFault.refuse = new Set(failing);
+    try {
+      const healthy = await t.strapi.documents(QUICK_LINK).create({
+        data: { label: "Healthy", url: "https://example.org/healthy" },
+        status: "published",
+      });
+      await t.strapi.documents(QUICK_LINK).update({
+        documentId: healthy.documentId,
+        data: { unpublishAt: ahead(1_000) },
+      });
+      const now = new Date(Date.now() + 5_000);
+      const result = await scheduler.runScheduledPublishing(t.strapi, now, newAttempts());
+      expect(result.unpublished).toContain(key(QUICK_LINK, healthy.documentId));
+      expect(await rows(QUICK_LINK, healthy.documentId)).toEqual([
+        expect.objectContaining({ publishedAt: null, unpublishAt: null }),
+      ]);
+      // The reserved quota tried ten of the failures, the oldest first, and
+      // they stay pending (live, deadline kept).
+      expect(result.failed).toEqual(failing.slice(0, 10).map((id) => key(QUICK_LINK, id)));
+      expect(
+        await t.strapi.db.query(QUICK_LINK).count({
+          where: { documentId: { $startsWith: "it73fail" }, publishedAt: { $notNull: true } },
+        }),
+      ).toBe(2_001);
+    } finally {
+      unpublishFault.refuse = new Set();
+      await removeSeeded("it73fail");
+    }
+  }, 300_000);
+
+  it("#73: with tier 1 kept full, every ready failure is attempted within ⌈N/10⌉ runs and the cursor skips none", async () => {
+    watchUnpublishes();
+    const now = new Date(Date.now() + 5_000);
+    expect(await failingDue(now)).toBe(0);
+    const failing = await seedWithdrawals("it73retry", 25, true);
+    // 60 due withdrawals without a failure that fail transiently: tier 1 stays full.
+    const stalled = await seedWithdrawals("it73stall", 60, false);
+    unpublishFault.refuse = new Set(failing);
+    unpublishFault.stall = new Set(stalled);
+    try {
+      const attempts = newAttempts();
+      // Three failures still back off: examined, passed over, never attempted.
+      const waiting = new Set([failing[2], failing[11], failing[19]]);
+      for (const documentId of waiting) {
+        attempts.deferWithdrawal(
+          QUICK_LINK,
+          documentId,
+          now,
+          await revisionOf(QUICK_LINK, documentId),
+        );
+      }
+      const ready = failing.filter((documentId) => !waiting.has(documentId));
+      const runs = Math.ceil(ready.length / 10);
+      const perRun: string[][] = [];
+      for (let n = 0; n < runs; n += 1) {
+        const before = unpublishFault.attempted.length;
+        const result = await scheduler.runScheduledPublishing(t.strapi, now, attempts);
+        const attempted = unpublishFault.attempted.slice(before);
+        // Tier 1 got every slot the retry tier left.
+        expect(attempted.filter((id) => stalled.includes(id))).toHaveLength(
+          SCHEDULE_BATCH - result.failed.length,
+        );
+        perRun.push(attempted.filter((id) => failing.includes(id)));
+      }
+      expect(perRun).toEqual([ready.slice(0, 10), ready.slice(10, 20), ready.slice(20)]);
+      expect(perRun.flat().filter((id) => waiting.has(id))).toEqual([]);
+    } finally {
+      unpublishFault.refuse = new Set();
+      unpublishFault.stall = new Set();
+      await removeSeeded("it73retry");
+      await removeSeeded("it73stall");
+    }
+  }, 300_000);
 });

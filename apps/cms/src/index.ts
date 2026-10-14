@@ -21,6 +21,8 @@ import { enforceSecretGuard } from "./utils/env-guard";
 import { registerLiveEventSubscriber } from "./utils/live-events";
 import { assertNoOrgDrafts } from "./utils/org-dp-guard";
 import { backfillPollAudience } from "./utils/poll-audience-backfill";
+import { backfillRevisions } from "./utils/revision-backfill";
+import { assertNoRevisionDrafts } from "./utils/revision-dp-guard";
 import { backfillTargetingFlags } from "./utils/targeting-flags-backfill";
 
 /**
@@ -36,7 +38,7 @@ import { backfillTargetingFlags } from "./utils/targeting-flags-backfill";
  *   - entra-identity-index.ts: the (tenant, object id) unique index;
  *   - document-middlewares.ts: every Document Service middleware, in its
  *     slot order (decision 06 §K);
- *   - document-indexes.ts: the revision and schedule indexes;
+ *   - document-indexes.ts: the revision, schedule and wiki history indexes;
  *   - user-contact-sanitizer.ts and restricted-relation-guard.ts: the two
  *     content-API hooks register() installs.
  * The ORDER of the calls below is load-bearing (see the comments), and
@@ -68,6 +70,11 @@ export default {
     // (draftAndPublish true -> false). FIRST, so nothing in register() runs
     // on such a database; see utils/org-dp-guard.ts.
     await assertNoOrgDrafts(strapi);
+    // Batch 16 (DA03): the same for wiki_revisions, whose draft & publish is
+    // off since then. A rollback to batch 15.1 or older clones one draft
+    // twin per revision; infra/migrations/wiki-revision-dp/migrate.sql
+    // removes them before a roll-forward. See utils/revision-dp-guard.ts.
+    await assertNoRevisionDrafts(strapi);
     // Datetime contract (database/ensure-timestamptz.ts): log the zones,
     // verify the DB session runs in UTC, refuse a non-UTC process on a fresh
     // database, before the one-time repair or (beforeSync hook) on a boot
@@ -155,6 +162,14 @@ export default {
     // (utils/targeting-flags-backfill.ts). Before the seed and the draft
     // twins, so a cloned draft copies the repaired value.
     await backfillTargetingFlags(strapi);
+    // Batch 16 (DA03): wiki revisions get their page anchor and kind, and
+    // every page whose draft or published content no snapshot holds gets a
+    // `baseline` revision (the cutover: the first boot of batch 16, and every
+    // boot after a rollback window). One transaction; THROWS on error, so no
+    // page is saved before its baseline exists (utils/revision-backfill.ts).
+    // Before the seed and the draft twins: their draft creates then find the
+    // baseline and record nothing.
+    await backfillRevisions(strapi);
     await seedAdminUser(strapi);
     // FX13 review: SMTP set without DIGEST_FROM / PUBLIC_WEB_URL (the owner
     // defaults are gone) → say so at boot, not only at the 07:30 run.

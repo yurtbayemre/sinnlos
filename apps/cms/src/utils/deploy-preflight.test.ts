@@ -59,7 +59,11 @@ import {
  *  11. FX40 (owner decision 2026-10-12): for a target cms from before the
  *      token version of batch 13, or one it cannot check, the hint prints
  *      the mandatory JWT_SECRET rotation before its start commands, and
- *      never edits infra/.env itself.
+ *      never edits infra/.env itself;
+ *  12. batch 16 (DA03): for a target cms that runs wiki revisions with
+ *      draft & publish, or one it cannot check, the hint says that a
+ *      roll-forward needs infra/migrations/wiki-revision-dp/migrate.sql;
+ *      the preflight's revision probe is bounded like the naive query.
  * The state, tag and lock logic of FX35 (and a full stubbed deploy) is
  * pinned in infra/deploy-flow.test.ts.
  *
@@ -631,6 +635,13 @@ interface HintProbes {
    */
   tokenVersionCheck?: number;
   /**
+   * Exit code of the `docker run … grep "draftAndPublish": true` image
+   * check of the wiki-revision schema: 1 the target cms runs wiki revisions
+   * without draft & publish (batch 16 on; default), 0 with it (before batch
+   * 16), anything else unknown.
+   */
+  revisionDpCheck?: number;
+  /**
    * docker subcommands ("exec", "image", "run") that hang: the `timeout`
    * stub ends them with 124, as the real one does at the deadline.
    */
@@ -688,11 +699,14 @@ function rollbackHintRun(
     shellLine("WEB_DATETIME_VALUE="),
     `POLL_SCHEMA_IN_IMAGE=${shellQuote(shellAssignment("POLL_SCHEMA_IN_IMAGE"))}`,
     `USER_SCHEMA_IN_IMAGE=${shellQuote(shellAssignment("USER_SCHEMA_IN_IMAGE"))}`,
+    `REVISION_SCHEMA_IN_IMAGE=${shellQuote(shellAssignment("REVISION_SCHEMA_IN_IMAGE"))}`,
+    shellLine("REVISION_DP_RUNBOOK="),
     shellLine("REVOKE_GUEST_VOTE_PSQL="),
     `STUB_CMD=${shellQuote(cmd ?? "")}`,
     `STUB_NAIVE=${shellQuote(probes.naive ?? "0")}`,
     `STUB_IMAGE_CHECK=${probes.imageCheck ?? 0}`,
     `STUB_TOKEN_VERSION_CHECK=${probes.tokenVersionCheck ?? 0}`,
+    `STUB_REVISION_DP_CHECK=${probes.revisionDpCheck ?? 1}`,
     `STUB_HANG=${shellQuote(` ${(probes.hang ?? []).join(" ")} `)}`,
     `STUB_WEB_LABEL=${shellQuote(probes.webLabel === undefined ? "zone-explicit" : (probes.webLabel ?? ""))}`,
     "BOUNDED=0",
@@ -711,6 +725,7 @@ function rollbackHintRun(
     '      [[ -n "${STUB_CMD}" ]] || return 1; printf \'%s\\n\' "${STUB_CMD}" ;;',
     '    "run "*)',
     '      if [[ "$*" == *" tokenVersion "* ]]; then return "${STUB_TOKEN_VERSION_CHECK}"; fi',
+    '      if [[ "$*" == *draftAndPublish* ]]; then return "${STUB_REVISION_DP_CHECK}"; fi',
     '      return "${STUB_IMAGE_CHECK}" ;;',
     '    "exec "*)',
     '      if [[ "$(cat)" == *up_permissions* ]]; then echo "permission probe" >&3; fi',
@@ -721,6 +736,7 @@ function rollbackHintRun(
     shellFunction("naive_app_columns"),
     shellFunction("image_has_poll_guest_access"),
     shellFunction("image_has_token_version"),
+    shellFunction("image_revisions_draft_publish"),
     shellFunction("print_jwt_secret_rotation_hint"),
     shellFunction("image_web_zone_explicit"),
     shellFunction("print_guest_vote_revoke_hint"),
@@ -1018,6 +1034,7 @@ describe(
           "bounded docker image",
           "bounded docker run",
           "bounded docker run",
+          "bounded docker run",
         ]);
         expect(stdout).toContain(
           `bounded docker image inspect -f {{ index .Config.Labels "org.sinnlos.datetime" }} infra-web:rollback`,
@@ -1046,6 +1063,8 @@ describe(
           "docker image inspect -f '{{json .Config.Cmd}}' infra-cms:rollback",
           "THEN, once the previous cms is up",
           "rollback/revoke-guest-poll-vote.sql",
+          "A roll-forward to this release needs migrate.sql first, unless infra-cms:rollback runs wiki revisions",
+          "/srv/infra/migrations/wiki-revision-dp/preflight.sql, then migrate.sql",
           "a re-run before the first successful deploy keeps this :rollback",
         ]);
       },
@@ -1249,6 +1268,7 @@ function traefikComposeJson(hosts: TraefikHosts = {}, cmsEnv: Record<string, str
 function preflightRun(
   env: Record<string, string>,
   hosts: TraefikHosts = {},
+  revisions: { dpOff: boolean; drafts: string } = { dpOff: false, drafts: "0" },
 ): {
   status: number | null;
   stdout: string;
@@ -1262,6 +1282,11 @@ function preflightRun(
     "log() { printf '==> %s\\n' \"$*\"; }",
     "jwt_rotation_missing() { return 1; }",
     "datetime_repair_env_missing() { return 1; }",
+    `checkout_revisions_dp_off() { return ${revisions.dpOff ? 0 : 1}; }`,
+    `revision_draft_rows() { printf '%s' ${shellQuote(revisions.drafts)}; }`,
+    shellLine("PROBE_TIMEOUT=("),
+    shellLine("REVISION_DP_RUNBOOK="),
+    "INFRA_DIR=/srv/infra",
     "compose_stub() {",
     "cat <<'COMPOSE_JSON'",
     traefikComposeJson(hosts, env),
@@ -1708,3 +1733,133 @@ describe(
     });
   },
 );
+
+describe(
+  "rollback hint and preflight: wiki revisions without draft & publish (batch 16, DA03)",
+  BASH_BUDGET,
+  () => {
+    const COMPOSE_LINE =
+      "docker compose -p infra -f /srv/infra/docker-compose.yml -f /srv/infra/docker-compose.traefik.yml";
+    const SHA = "1d0b1178869a";
+    const STRAPI_CMD = '["node_modules/.bin/strapi","start"]';
+    const SCHEMA =
+      "/app/apps/cms/dist/src/api/wiki-revision/content-types/wiki-revision/schema.json";
+
+    it("checks the compiled wiki-revision schema of the target image, bounded, never pulling", () => {
+      const path = shellAssignment("REVISION_SCHEMA_IN_IMAGE");
+      expect(path).toBe(SCHEMA);
+      const source = path.replace(/^\/app\//, "").replace("/dist/src/", "/src/");
+      expect(read(...source.split("/"))).toMatch(/"draftAndPublish"\s*:\s*false/);
+      expect(shellFunction("image_revisions_draft_publish")).toContain(
+        '"${PROBE_TIMEOUT[@]}" docker run --rm --pull never --network none --entrypoint grep "$1"',
+      );
+      expect(shellFunction("print_rollback_hint")).toContain(
+        'image_revisions_draft_publish "${cms_image}" || revisions_dp=$?',
+      );
+    });
+
+    it("the preflight probe is bounded and reads the checkout's schema", () => {
+      const probe = shellFunction("revision_draft_rows");
+      expect(probe).toContain("SET lock_timeout = '5s';");
+      expect(probe).toContain("SET statement_timeout = '10s';");
+      expect(probe).toContain("psql -X -q -tA");
+      expect(probe).toContain(
+        "SELECT count(*) FROM public.wiki_revisions WHERE published_at IS NULL;",
+      );
+      expect(DEPLOY).toContain(
+        'REVISION_DRAFTS="$(revision_draft_rows "${PROBE_TIMEOUT[@]}" || true)"',
+      );
+      expect(shellAssignment("REVISION_SCHEMA")).toBe(
+        "apps/cms/src/api/wiki-revision/content-types/wiki-revision/schema.json",
+      );
+    });
+
+    it.skipIf(!HAS_BASH)(
+      "a target cms with wiki revision draft & publish: the roll-forward needs migrate.sql",
+      () => {
+        const { stdout, stderr } = rollbackHintRun(STRAPI_CMD, { ref: SHA, revisionDpCheck: 0 });
+        expect(stdout).toContain(
+          `bounded docker run --rm --pull never --network none --entrypoint grep infra-cms:${SHA} -Eq`,
+        );
+        expectInOrder(stderr, [
+          `${COMPOSE_LINE} up -d --no-build web cms`,
+          `A roll-forward to this release needs migrate.sql first: infra-cms:${SHA} runs wiki revisions with`,
+          "draft & publish, and its first boot clones a draft twin of every revision.",
+          "Before the next deploy (it refuses until then), with cms and web stopped and after a backup:",
+          '/srv/infra/migrations/wiki-revision-dp/preflight.sql, then migrate.sql (docs/DEPLOYMENT.md, "One-time: wiki revisions draft/publish off").',
+          "Rollback target: the last-known-good state",
+        ]);
+        expect(stderr).not.toContain("could not be checked here: no migrate.sql");
+        // No JWT_SECRET rotation for batch 15.1 (it knows the token version).
+        expect(stderr).not.toContain("MANDATORY");
+      },
+    );
+
+    it.skipIf(!HAS_BASH)("prints it with the check when the target cannot be checked", () => {
+      for (const revisionDpCheck of [2, 124, 125]) {
+        const hint = rollbackHint(STRAPI_CMD, "0", { ref: SHA, revisionDpCheck });
+        expectInOrder(hint, [
+          `A roll-forward to this release needs migrate.sql first, unless infra-cms:${SHA} runs wiki revisions`,
+          "without draft & publish (it could not be checked here: no migrate.sql only if this prints 0):",
+          `docker run --rm --pull never --network none --entrypoint grep infra-cms:${SHA} -Ec '"draftAndPublish"[[:space:]]*:[[:space:]]*true' ${SCHEMA}`,
+          "/srv/infra/migrations/wiki-revision-dp/preflight.sql, then migrate.sql",
+        ]);
+      }
+    });
+
+    it.skipIf(!HAS_BASH)("says nothing about migrate.sql for a target from batch 16 on", () => {
+      const hint = rollbackHint(STRAPI_CMD, "0", { ref: SHA, revisionDpCheck: 1 });
+      expect(hint).not.toContain("migrate.sql");
+      expect(hint).toContain(`${COMPOSE_LINE} up -d --no-build web cms`);
+    });
+  },
+);
+
+describe("preflight: wiki revision draft rows (batch 16, DA03)", BASH_BUDGET, () => {
+  const fits = { ENTRA_ENABLED: "0" };
+
+  it.skipIf(!HAS_BASH)(
+    "refuses before the backup while the database holds draft rows, naming preflight and migrate.sql",
+    () => {
+      const run = preflightRun(fits, {}, { dpOff: true, drafts: "12" });
+      expect(run.status).toBe(1);
+      expect(run.stdout).not.toContain("Preflight OK");
+      expect(run.stderr).toContain(
+        "ERROR: the running database holds 12 wiki revision draft row(s), and this release runs",
+      );
+      expect(run.stderr).toContain("/srv/infra/migrations/wiki-revision-dp/preflight.sql");
+      expect(run.stderr).toContain(
+        'psql -X -v ON_ERROR_STOP=1 --single-transaction -U "$POSTGRES_USER" -d "$POSTGRES_DB"\' < /srv/infra/migrations/wiki-revision-dp/migrate.sql',
+      );
+      expect(run.stderr).toContain('"One-time: wiki revisions draft/publish off"');
+      expect(run.stderr).toContain("Preflight failed. Nothing was changed.");
+    },
+  );
+
+  it.skipIf(!HAS_BASH)(
+    "passes with a line when there are none, or the database cannot be asked",
+    () => {
+      const none = preflightRun(fits, {}, { dpOff: true, drafts: "0" });
+      expect(none.status, none.stderr).toBe(0);
+      expect(none.stdout).toContain("  wiki revisions: no draft rows");
+      const unknown = preflightRun(fits, {}, { dpOff: true, drafts: "" });
+      expect(unknown.status, unknown.stderr).toBe(0);
+      expect(unknown.stdout).toContain("  wiki revisions: not checked (no database to ask)");
+    },
+  );
+
+  it.skipIf(!HAS_BASH)(
+    "asks nothing for a checkout that runs wiki revisions with draft & publish",
+    () => {
+      const run = preflightRun(fits, {}, { dpOff: false, drafts: "12" });
+      expect(run.status, run.stderr).toBe(0);
+      expect(run.stdout).not.toContain("wiki revisions");
+    },
+  );
+
+  it("reads the checkout's schema", () => {
+    expect(shellFunction("checkout_revisions_dp_off")).toContain(
+      `grep -Eq '"draftAndPublish"[[:space:]]*:[[:space:]]*false' "\${CHECKOUT}/\${REVISION_SCHEMA}"`,
+    );
+  });
+});

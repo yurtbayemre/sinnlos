@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import type { Route } from "next";
 import { useTranslations } from "next-intl";
 import type { AuthoringResult, EditableBase } from "@sinnlos/domain";
 import type { AuthoringActionResult } from "@/lib/manage/authoring-action";
@@ -25,6 +26,10 @@ import { metaOf, useAuthoringEditor } from "./use-authoring-editor";
  *  - A save makes the saved values the new baseline; a discard and a
  *    Reload reset the form to the fresh `editable`.
  *  - Unsaved changes ask before the tab is closed or reloaded.
+ *
+ * The typed areas take their paths and draft mode from lib/manage/areas.ts;
+ * an editor outside them (a wiki space, a wiki page) passes its own
+ * `drafts`, `itemPath` and `listPath`.
  */
 
 export interface ItemActions {
@@ -62,7 +67,7 @@ export function sameValues(a: object, b: object): boolean {
   return true;
 }
 
-export function useItemEditor<V extends object, E extends EditableBase>({
+export function useItemEditor<V extends object, E extends Omit<EditableBase, "roleClass">>({
   area,
   formId,
   editable,
@@ -71,6 +76,12 @@ export function useItemEditor<V extends object, E extends EditableBase>({
   fieldOrder,
   actions,
   extraInput,
+  extraDirty = false,
+  busy = false,
+  onReset: onResetExtra,
+  drafts = area !== "wiki" && hasDrafts(area),
+  itemPath = (data) => areaItemPath(area, data.documentId),
+  listPath = AREA_PATH[area],
 }: {
   area: ManageArea;
   formId: string;
@@ -81,6 +92,23 @@ export function useItemEditor<V extends object, E extends EditableBase>({
   actions: ItemActions;
   /** More arguments of every save (a poll's hasVotes). */
   extraInput?: Record<string, unknown>;
+  /** A change the values do not hold (a picked file not uploaded yet): counts as unsaved. */
+  extraDirty?: boolean;
+  /** A step the form runs before its saves (an upload) is running (useAuthoringEditor). */
+  busy?: boolean;
+  /**
+   * Runs when the form resets to a fresh `editable` (Reload after a
+   * conflict, Discard changes): state the form keeps outside its values (a
+   * picked file) goes with it. Not on the refresh after a save or a status
+   * change, which keeps every unsaved edit.
+   */
+  onReset?: () => void;
+  /** The item has drafts (explicit status); false: every save publishes (polls, wiki spaces). */
+  drafts?: boolean;
+  /** Where a create navigates: the new item's page. */
+  itemPath?: (data: AuthoringResult) => Route;
+  /** Where a delete navigates. */
+  listPath?: Route;
 }) {
   const t = useTranslations("manage.common.success");
   const router = useRouter();
@@ -97,8 +125,9 @@ export function useItemEditor<V extends object, E extends EditableBase>({
       setValues(fresh);
       setInitial(fresh);
       setRetarget(false);
+      onResetExtra?.();
     },
-    [toValues],
+    [toValues, onResetExtra],
   );
 
   const editor = useAuthoringEditor({
@@ -107,11 +136,12 @@ export function useItemEditor<V extends object, E extends EditableBase>({
     fieldOrder,
     source: editable,
     onReset,
+    externalBusy: busy,
   });
   const { meta, run, requestReset } = editor;
   // A ticked re-target confirmation is a change to save: the publish bar
   // then saves (Save and publish) instead of publishing the draft as it is.
-  const dirty = retarget || !sameValues(values, initial);
+  const dirty = retarget || extraDirty || !sameValues(values, initial);
   // The Schedule… button that opened the dialog, for the focus on close.
   const scheduleOpener = useRef<HTMLElement | null>(null);
 
@@ -127,16 +157,32 @@ export function useItemEditor<V extends object, E extends EditableBase>({
     setValues((previous) => ({ ...previous, [key]: value }));
   }, []);
 
-  const goToList = useCallback(() => router.push(AREA_PATH[area]), [router, area]);
+  const goToList = useCallback(() => router.push(listPath), [router, listPath]);
 
-  /** A save of the current values; `schedule` from the Schedule… dialog. */
+  /**
+   * Closes the Schedule… dialog after a refusal that is not about its own
+   * fields, without returning the focus to Schedule…: the form's error
+   * takes it (a refused field, or a refused upload started from the dialog).
+   */
+  const leaveSchedule = useCallback(() => {
+    scheduleOpener.current = null;
+    setScheduleOpen(false);
+  }, []);
+
+  /**
+   * A save of the current values; `schedule` from the Schedule… dialog.
+   * `override`: values the form set in the same event and React has not
+   * rendered yet (a file just uploaded), part of what is saved.
+   */
   const save = useCallback(
-    (status: "draft" | "published", schedule?: ScheduleValues) => {
-      const snapshot = values;
+    (status: "draft" | "published", schedule?: ScheduleValues, override?: Partial<V>) => {
+      const snapshot = override ? { ...values, ...override } : values;
       const creating = meta === null;
       // A draft save without a change would write an empty draft, advance
       // the revision (other tabs get 412) and show "Changes pending".
-      if (!creating && !schedule && !dirty && (status === "draft" || !hasDrafts(area))) return;
+      if (!creating && !schedule && !dirty && !override && (status === "draft" || !drafts)) {
+        return;
+      }
       const intent = schedule
         ? "schedule"
         : status === "published"
@@ -167,16 +213,14 @@ export function useItemEditor<V extends object, E extends EditableBase>({
               keys.length === 0 ||
               keys.some((key) => key !== "publishAt" && key !== "unpublishAt")
             ) {
-              // The focus goes to the refused field, not back to Schedule….
-              scheduleOpener.current = null;
-              setScheduleOpen(false);
+              leaveSchedule();
             }
           },
           onSuccess: (data: AuthoringResult | null) => {
             if (schedule) setScheduleOpen(false);
             if (creating && data) {
               flash(status === "published" ? t("createdPublished") : t("created"));
-              router.replace(areaItemPath(area, data.documentId));
+              router.replace(itemPath(data));
               return;
             }
             setInitial(snapshot);
@@ -184,7 +228,7 @@ export function useItemEditor<V extends object, E extends EditableBase>({
             flash(
               schedule
                 ? t("scheduled")
-                : !hasDrafts(area)
+                : !drafts
                   ? t("saved")
                   : status === "published"
                     ? t("published")
@@ -194,7 +238,22 @@ export function useItemEditor<V extends object, E extends EditableBase>({
         },
       );
     },
-    [values, meta, initial, retarget, dirty, extraInput, run, actions, flash, t, router, area],
+    [
+      values,
+      meta,
+      initial,
+      retarget,
+      dirty,
+      extraInput,
+      run,
+      actions,
+      flash,
+      t,
+      router,
+      drafts,
+      itemPath,
+      leaveSchedule,
+    ],
   );
 
   const transition = useCallback(
@@ -261,6 +320,7 @@ export function useItemEditor<V extends object, E extends EditableBase>({
     scheduleOpen,
     setScheduleOpen,
     scheduleOpener,
+    leaveSchedule,
     /**
      * Reload after a conflict: the fresh `editable`, the changes dropped,
      * the Schedule… dialog closed (its values belonged to the old version).

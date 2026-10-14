@@ -141,6 +141,7 @@ export function useAuthoringEditor<Source extends object | null>({
   fieldOrder,
   source,
   onReset,
+  externalBusy = false,
 }: {
   formId: string;
   initialMeta: ItemMeta | null;
@@ -150,6 +151,12 @@ export function useAuthoringEditor<Source extends object | null>({
   source: Source;
   /** Resets the form's values to `source` (after Reload and after Discard). */
   onReset: (source: Source) => void;
+  /**
+   * A step the form runs itself before its action (a file upload): the
+   * form is busy, and a failure's focus waits until the step has ended
+   * (its controls are disabled while it runs).
+   */
+  externalBusy?: boolean;
 }) {
   const router = useRouter();
   const [meta, setMeta] = useState<ItemMeta | null>(initialMeta);
@@ -189,7 +196,7 @@ export function useAuthoringEditor<Source extends object | null>({
   // the action has settled: the controls are disabled while it runs, and a
   // disabled control cannot take the focus (a state update after the
   // action's await commits before the transition ends).
-  const busy = isPending || refreshing;
+  const busy = isPending || refreshing || externalBusy;
   const focused = useRef<object | null>(null);
   useEffect(() => {
     if (!focusRequest || busy || focused.current === focusRequest) return;
@@ -272,6 +279,16 @@ export function useAuthoringEditor<Source extends object | null>({
   );
 
   /**
+   * A failure of a step the form ran itself before its save (the upload of
+   * a file): the alert above the actions, which takes the focus.
+   */
+  const fail = useCallback((code: CommonCode | "unshown") => {
+    setFieldErrors({});
+    setFailure({ kind: "common", code });
+    setFocusRequest({ field: null });
+  }, []);
+
+  /**
    * "Overwrite" in the conflict dialog: the same call with the cms's
    * current version. The call sends only the fields this form changed, so
    * the other author's changes to the rest stay; afterwards the form
@@ -317,6 +334,7 @@ export function useAuthoringEditor<Source extends object | null>({
     alertRef,
     run,
     refuse,
+    fail,
     clearConflict: () => setConflict(null),
     requestReset,
   };
