@@ -48,6 +48,10 @@ describe("isNavActive", () => {
       "/polls/new",
       "/documents",
       "/manage/acknowledgements",
+      "/manage/documents/new",
+      "/manage/wiki",
+      "/wiki/drafts",
+      "/wiki/it/setup/history",
     ];
     for (const pathname of pages) {
       const active = NAV_ITEMS.filter((item) => isNavActive(pathname, item.href));

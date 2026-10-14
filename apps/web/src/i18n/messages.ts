@@ -16,13 +16,15 @@
  */
 import type { Locale } from "./locale";
 
-/** The /manage namespaces of phase 1 (batch 15), each one file per language. */
+/** The /manage namespaces (batch 15; documents and wiki batch 16), each one file per language. */
 export const MANAGE_MESSAGE_AREAS = [
   "common",
   "announcements",
   "events",
   "polls",
   "quickLinks",
+  "documents",
+  "wiki",
 ] as const;
 
 export type ManageMessageArea = (typeof MANAGE_MESSAGE_AREAS)[number];
@@ -41,6 +43,8 @@ const MANAGE: Readonly<Record<Locale, Readonly<Record<ManageMessageArea, () => J
     events: () => import("../../messages/manage/events.en.json"),
     polls: () => import("../../messages/manage/polls.en.json"),
     quickLinks: () => import("../../messages/manage/quickLinks.en.json"),
+    documents: () => import("../../messages/manage/documents.en.json"),
+    wiki: () => import("../../messages/manage/wiki.en.json"),
   },
   de: {
     common: () => import("../../messages/manage/common.de.json"),
@@ -48,6 +52,8 @@ const MANAGE: Readonly<Record<Locale, Readonly<Record<ManageMessageArea, () => J
     events: () => import("../../messages/manage/events.de.json"),
     polls: () => import("../../messages/manage/polls.de.json"),
     quickLinks: () => import("../../messages/manage/quickLinks.de.json"),
+    documents: () => import("../../messages/manage/documents.de.json"),
+    wiki: () => import("../../messages/manage/wiki.de.json"),
   },
 };
 

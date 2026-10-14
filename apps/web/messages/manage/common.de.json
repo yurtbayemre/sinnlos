@@ -1,7 +1,7 @@
 {
   "title": "Verwaltung",
-  "description": "Neuigkeiten, Termine, Umfragen und Schnellzugriffe schreiben, planen und veröffentlichen.",
-  "descriptionDepartmentAuthor": "Neuigkeiten und Termine für {department} schreiben und veröffentlichen.",
+  "description": "Neuigkeiten, Termine, Umfragen, Schnellzugriffe, Dokumente und das Wiki schreiben, planen und veröffentlichen.",
+  "descriptionDepartmentAuthor": "Neuigkeiten, Termine und Dokumente für {department} schreiben und veröffentlichen.",
   "back": "Verwaltung",
   "landing": {
     "contentSection": "Inhalte",
@@ -24,6 +24,14 @@
     "quickLinks": {
       "title": "Schnellzugriff",
       "description": "Die Verknüpfungen auf der Übersicht aller."
+    },
+    "documents": {
+      "title": "Dokumente",
+      "description": "Dateien für die Bibliothek: Richtlinien, Formulare, Vorlagen und Anleitungen."
+    },
+    "wiki": {
+      "title": "Wiki",
+      "description": "Bereiche, wer sie liest, und die Entwürfe und Planungen aller Seiten. Gezählt werden Seiten."
     }
   },
   "counts": {

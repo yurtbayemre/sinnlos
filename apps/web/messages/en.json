@@ -175,9 +175,17 @@
     "tags": "Tags",
     "contents": "Contents",
     "emptySpacesTitle": "No wiki spaces yet",
-    "emptySpacesHint": "Create a space in the Strapi admin to start collecting knowledge.",
+    "emptySpacesHint": "Editors and admins create spaces under Manage.",
     "emptyPagesTitle": "No pages yet in this space",
-    "emptyPagesHint": "Pages created in the Strapi admin will appear here once published."
+    "emptyPagesHint": "Pages appear here once they are published.",
+    "pageActions": "Page actions",
+    "spaceActions": "Space actions",
+    "edit": "Edit",
+    "history": "History",
+    "newPage": "New page",
+    "myDrafts": "My drafts",
+    "manageSpaces": "Manage spaces",
+    "manageSpace": "Manage this space"
   },
   "departments": {
     "title": "Departments",
@@ -343,7 +351,7 @@
     "guide": "Guide",
     "other": "Other",
     "emptyTitle": "No documents yet",
-    "emptyHint": "Admins and editors can upload documents from the Strapi admin panel.",
+    "emptyHint": "Editors, admins and department heads add documents under Manage.",
     "noFile": "No file attached"
   },
   "profile": {

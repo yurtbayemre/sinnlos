@@ -7,7 +7,7 @@ import {
   type AuthoringPagination,
 } from "@sinnlos/domain";
 import { fetchAuthoringList, type AuthoringListQuery } from "@/lib/api/manage/authoring";
-import { AREA_TYPE, hasDrafts, SCHEDULE_FIELDS, type ManageArea } from "@/lib/manage/areas";
+import { AREA_TYPE, hasDrafts, SCHEDULE_FIELDS, type TypedArea } from "@/lib/manage/areas";
 import { tryFetch } from "@/lib/safe-fetch";
 
 /**
@@ -24,7 +24,7 @@ import { tryFetch } from "@/lib/safe-fetch";
  */
 
 /** The status tabs of an area, "all" first. */
-export function statusTabs(area: ManageArea): ("all" | AuthoringListStatusFilter)[] {
+export function statusTabs(area: TypedArea): ("all" | AuthoringListStatusFilter)[] {
   if (!hasDrafts(area)) return [];
   const tabs: ("all" | AuthoringListStatusFilter)[] = ["all", "draft", "published", "modified"];
   if (SCHEDULE_FIELDS[area].length > 0) tabs.push("scheduled", "failed");
@@ -44,19 +44,24 @@ export interface ListFilters {
 const first = (value: string | string[] | undefined): string =>
   (Array.isArray(value) ? value[0] : value) ?? "";
 
+/** The URL's `page`: an integer from 1 to 10,000, else 1. */
+export function pageParam(params: ListSearchParams): number {
+  const page = Number(first(params.page));
+  return Number.isInteger(page) && page >= 1 && page <= 10_000 ? page : 1;
+}
+
 /**
  * The filters of a list URL that the area and the viewer can use.
  * `ownerFilter`: whether the viewer may filter by owner (moderators on
  * announcements and events).
  */
 export function parseListFilters(
-  area: ManageArea,
+  area: TypedArea,
   params: ListSearchParams,
   { ownerFilter }: { ownerFilter: boolean },
 ): ListFilters {
   const status = first(params.status);
   const tabs = statusTabs(area);
-  const page = Number(first(params.page));
   const owner = first(params.owner);
   return {
     status:
@@ -64,7 +69,7 @@ export function parseListFilters(
         ? (status as AuthoringListStatusFilter)
         : null,
     q: first(params.q).trim().slice(0, AUTHORING_LIST_MAX_QUERY),
-    page: Number.isInteger(page) && page >= 1 && page <= 10_000 ? page : 1,
+    page: pageParam(params),
     owner: ownerFilter && (owner === "department" || owner === "moderators") ? owner : null,
   };
 }
@@ -78,7 +83,8 @@ export interface ManageListView {
   failed: boolean;
 }
 
-const NO_PAGES: AuthoringPagination = {
+/** The pagination of a list the cms did not answer. */
+export const NO_PAGES: AuthoringPagination = {
   page: 1,
   pageSize: AUTHORING_LIST_PAGE_SIZE,
   pageCount: 0,
@@ -87,7 +93,7 @@ const NO_PAGES: AuthoringPagination = {
 
 /** One page of the area's authoring list. */
 export async function loadManageList(
-  area: ManageArea,
+  area: TypedArea,
   filters: ListFilters,
 ): Promise<ManageListView> {
   const query: AuthoringListQuery = {

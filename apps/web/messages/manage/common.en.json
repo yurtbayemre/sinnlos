@@ -1,7 +1,7 @@
 {
   "title": "Manage",
-  "description": "Write, schedule and publish announcements, events, polls and quick links.",
-  "descriptionDepartmentAuthor": "Write and publish announcements and events for {department}.",
+  "description": "Write, schedule and publish announcements, events, polls, quick links, documents and the wiki.",
+  "descriptionDepartmentAuthor": "Write and publish announcements, events and documents for {department}.",
   "back": "Manage",
   "landing": {
     "contentSection": "Content",
@@ -24,6 +24,14 @@
     "quickLinks": {
       "title": "Quick links",
       "description": "The shortcuts on everyone’s dashboard."
+    },
+    "documents": {
+      "title": "Documents",
+      "description": "Files for the library: policies, forms, templates and guides."
+    },
+    "wiki": {
+      "title": "Wiki",
+      "description": "Spaces, who reads them, and the drafts and schedules of every page. The counts are pages."
     }
   },
   "counts": {

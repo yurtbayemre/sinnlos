@@ -1,0 +1,194 @@
+{
+  "title": "Wiki",
+  "description": "Die Bereiche des Wikis: wer sie liest, und die Entwürfe und Planungen ihrer Seiten. Seiten werden im Wiki selbst geschrieben.",
+  "new": "Neuer Bereich",
+  "newDescription": "Ein Bereich sammelt Seiten und legt fest, wer sie liest. Seine Seiten werden im Wiki geschrieben.",
+  "editTitle": "Bereich bearbeiten",
+  "emptyTitle": "Noch keine Bereiche",
+  "emptyHint": "Legen Sie den ersten Bereich an; seine Seiten werden im Wiki geschrieben.",
+  "sections": {
+    "space": "Bereich",
+    "readers": "Wer ihn liest"
+  },
+  "visibility": {
+    "public": "Alle",
+    "role": "Bestimmte Rollen",
+    "department": "Eine Abteilung",
+    "team": "Ein Team"
+  },
+  "fields": {
+    "name": {
+      "label": "Name",
+      "hint": "Die Adresse des Bereichs entsteht beim Anlegen aus dem Namen und ändert sich danach nicht."
+    },
+    "icon": {
+      "label": "Symbol",
+      "none": "Standard (Buch)"
+    },
+    "description": {
+      "label": "Beschreibung"
+    },
+    "visibility": {
+      "label": "Wer ihn liest",
+      "hint": "Redaktion und Admins lesen jeden Bereich.",
+      "confirmAudience": "Damit sähen alle den Bereich. Setzen Sie dafür „Diese Zielgruppe beim Speichern bestätigen“, oder wählen Sie, wer ihn liest."
+    },
+    "allowedRoles": {
+      "label": "Rollen",
+      "visibilityTarget": "Wählen Sie mindestens eine Rolle."
+    },
+    "department": {
+      "label": "Abteilung",
+      "choose": "Abteilung wählen",
+      "visibilityTarget": "Wählen Sie die Abteilung, die den Bereich liest."
+    },
+    "team": {
+      "label": "Team",
+      "choose": "Team wählen",
+      "visibilityTarget": "Wählen Sie das Team, das den Bereich liest."
+    },
+    "_form": {
+      "spaceNotEmpty": "Dieser Bereich hat noch Seiten und kann deshalb nicht gelöscht werden. Verschieben oder löschen Sie zuerst seine Seiten."
+    }
+  },
+  "list": {
+    "pages": "{count, plural, =0 {Keine Seiten} one {# Seite} other {# Seiten}}",
+    "address": "Adresse: /wiki/{slug}"
+  },
+  "space": {
+    "description": "Alle Seiten dieses Bereichs, auch Entwürfe und geplante.",
+    "newPage": "Neue Seite",
+    "edit": "Bereich bearbeiten",
+    "open": "Im Wiki öffnen",
+    "pagesTitle": "Seiten",
+    "treeLabel": "Seiten von {space}",
+    "emptyTitle": "Noch keine Seiten",
+    "emptyHint": "Schreiben Sie die erste Seite im Wiki.",
+    "truncated": "Nicht alle Seiten konnten geladen werden; im Baum können welche fehlen.",
+    "editPage": "{title} bearbeiten",
+    "viewPage": "{title} ansehen",
+    "history": "Verlauf von {title}",
+    "untitled": "(ohne Titel)",
+    "deleteHasPages": "Dieser Bereich hat {count, plural, one {# Seite} other {# Seiten}}. Er kann erst gelöscht werden, wenn er leer ist.",
+    "deleteBody": "Der Bereich wird endgültig entfernt. Das lässt sich nicht rückgängig machen."
+  },
+  "editor": {
+    "newTitle": "Neue Seite",
+    "newDescription": "In {space}. „Entwurf speichern“ lässt die Seite unveröffentlicht; „Veröffentlichen“ zeigt sie allen, die den Bereich lesen.",
+    "editTitle": "Seite bearbeiten",
+    "inSpace": "In {space}",
+    "sections": {
+      "content": "Inhalt",
+      "placement": "Platz im Bereich",
+      "responsibility": "Abteilung und Team",
+      "note": "Änderungsnotiz"
+    },
+    "fields": {
+      "title": {
+        "label": "Titel"
+      },
+      "summary": {
+        "label": "Zusammenfassung",
+        "hint": "Ein, zwei Sätze unter dem Titel und in der Seitenliste des Bereichs."
+      },
+      "body": {
+        "label": "Text"
+      },
+      "tags": {
+        "label": "Schlagwörter",
+        "hint": "Durch Kommas getrennt, zum Beispiel: Einarbeitung, Laptop. Bis zu 20.",
+        "invalid": "Bis zu 20 Schlagwörter.",
+        "tooLong": "Ein Schlagwort darf bis zu 100 Zeichen haben."
+      },
+      "tocEnabled": {
+        "label": "Inhaltsverzeichnis anzeigen",
+        "hint": "Listet die Überschriften des Textes über ihm auf."
+      },
+      "order": {
+        "label": "Reihenfolge",
+        "hint": "0 bis 10000; kleinere Zahlen stehen im Bereich vorn."
+      },
+      "parent": {
+        "label": "Übergeordnete Seite",
+        "none": "Keine (oberste Ebene)",
+        "hint": "Die Seite steht unter ihrer übergeordneten Seite. Veröffentlichte Seiten dieses Bereichs kommen infrage.",
+        "current": "Die bisherige übergeordnete Seite (nicht veröffentlicht)",
+        "notPublishable": "Die übergeordnete Seite ist nicht veröffentlicht. Veröffentlichen Sie sie zuerst, oder wählen Sie eine andere."
+      },
+      "department": {
+        "label": "Abteilung",
+        "hint": "Ihre Leitung darf die Seite bearbeiten.",
+        "none": "Keine Abteilung"
+      },
+      "team": {
+        "label": "Team",
+        "hint": "Seine Leitung darf die Seite bearbeiten.",
+        "none": "Kein Team"
+      },
+      "revisionSummary": {
+        "label": "Änderungsnotiz",
+        "hint": "Was Sie geändert haben, für den Verlauf der Seite. Freiwillig."
+      },
+      "space": {
+        "invalid": "Diesen Bereich gibt es nicht mehr, oder Sie dürfen darin nicht mehr schreiben.",
+        "required": "Diesen Bereich gibt es nicht mehr, oder Sie dürfen darin nicht mehr schreiben."
+      }
+    },
+    "parentsFailed": "Die Seiten dieses Bereichs konnten nicht geladen werden, daher lässt sich die übergeordnete Seite gerade nicht ändern. Laden Sie die Seite neu, um es erneut zu versuchen.",
+    "parentsTruncated": "Nicht alle Seiten dieses Bereichs konnten geladen werden; in der Liste können welche fehlen.",
+    "viewPage": "Seite ansehen",
+    "history": "Verlauf",
+    "backToSpace": "Zurück zu {space}",
+    "deleteDraft": "Entwurf löschen",
+    "deleteDraftTitle": "Diesen Entwurf löschen?",
+    "deleteDraftBody": "Die Seite wurde nie veröffentlicht, daher wird der Entwurf endgültig gelöscht.",
+    "deleteDraftConfirm": "Entwurf löschen",
+    "noSpace": "Den Bereich dieser Seite gibt es nicht mehr."
+  },
+  "drafts": {
+    "title": "Meine Entwürfe",
+    "description": "Ihre Wiki-Seiten mit Änderungen, die noch nicht veröffentlicht sind.",
+    "emptyTitle": "Keine Entwürfe",
+    "emptyHint": "Seiten, die Sie als Entwurf speichern, stehen hier, bis sie veröffentlicht sind.",
+    "inSpace": "in {space}",
+    "updated": "Gespeichert {date}",
+    "noSpace": "Bereich gelöscht",
+    "untitled": "(ohne Titel)"
+  },
+  "history": {
+    "title": "Verlauf",
+    "description": "Alle gespeicherten Fassungen von „{title}“, die neueste zuerst. Wiederherstellen veröffentlicht eine Fassung als neue Fassung; nichts geht verloren.",
+    "backToPage": "Zurück zur Seite",
+    "backToEditor": "Seite bearbeiten",
+    "listLabel": "Fassungen",
+    "emptyTitle": "Noch keine Fassungen",
+    "emptyHint": "Jedes Speichern der Seite fügt hier eine Fassung hinzu.",
+    "kinds": {
+      "after": "Gespeichert",
+      "baseline": "Stand bei der Umstellung",
+      "before": "Stand vor einer Bearbeitung (älteres Format)"
+    },
+    "editorAdmin": "im Admin-Bereich",
+    "editorNone": "kein Bearbeiter erfasst",
+    "by": "von {name}",
+    "note": "Notiz: {note}",
+    "restoredFrom": "Stellt Fassung #{id} wieder her",
+    "version": "Fassung #{id}",
+    "show": "Anzeigen",
+    "showLabel": "Fassung #{id} anzeigen",
+    "shown": "Unten angezeigt",
+    "untitled": "(kein Titel erfasst)",
+    "previewTitle": "Fassung #{id}",
+    "previewLegacy": "Dieser ältere Eintrag enthält nur den Text von vor einer Bearbeitung. Beim Wiederherstellen bekommt die Seite diesen Text und behält ihren aktuellen Titel und ihre Zusammenfassung.",
+    "previewNotFound": "Diese Fassung gehört nicht zu der Seite, oder es gibt sie nicht mehr.",
+    "previewFailed": "Diese Fassung konnte nicht geladen werden.",
+    "emptyBody": "Diese Fassung hat keinen Text.",
+    "restore": "Diese Fassung wiederherstellen",
+    "restoreTitle": "Diese Fassung wiederherstellen?",
+    "restoreBody": "Die Seite bekommt Titel, Zusammenfassung und Text dieser Fassung und wird sofort veröffentlicht. Der Verlauf behält jede Fassung.",
+    "restoreBodyLegacy": "Die Seite bekommt den Text dieser Fassung und behält ihren aktuellen Titel und ihre Zusammenfassung. Sie wird sofort veröffentlicht. Der Verlauf behält jede Fassung.",
+    "restoreConfirm": "Wiederherstellen und veröffentlichen",
+    "restored": "Fassung wiederhergestellt und veröffentlicht.",
+    "pagination": "Seiten des Verlaufs"
+  }
+}

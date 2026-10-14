@@ -1,7 +1,13 @@
 import Link from "next/link";
-import { BookOpen, Globe2, Lock } from "lucide-react";
+import { BookOpen, FilePen, Globe2, Lock, Settings } from "lucide-react";
 import { getTranslations } from "next-intl/server";
+import { buttonVariants } from "@/components/ui/button";
+import { areaAccess } from "@/lib/manage/access";
+import { AREA_PATH } from "@/lib/manage/areas";
+import { WIKI_DRAFTS_PATH } from "@/lib/manage/wiki-paths";
+import { capabilitiesFor } from "@/lib/roles";
 import { api } from "@/lib/strapi";
+import { getViewer } from "@/lib/viewer";
 import { tryFetch } from "@/lib/safe-fetch";
 import type { WikiSpace } from "@/lib/types";
 import { wikiSpaceIconName } from "@/lib/wiki-content";
@@ -17,13 +23,39 @@ export async function generateMetadata() {
 }
 
 export default async function WikiHomePage() {
-  const [t, tCommon] = await Promise.all([getTranslations("wiki"), getTranslations("common")]);
+  const [t, tCommon, viewer] = await Promise.all([
+    getTranslations("wiki"),
+    getTranslations("common"),
+    getViewer(),
+  ]);
   const { data, failed } = await tryFetch(() => api.wiki.spaces(), "wiki");
   const spaces = (data?.data ?? []) as WikiSpace[];
+  // Writing (batch 16): the caller's drafts for every role that edits wiki
+  // pages; the spaces in /manage for moderators.
+  const capabilities = capabilitiesFor(viewer.role);
+  const drafts = capabilities.wikiPages.edit !== "none";
+  const manage = areaAccess(capabilities, "wiki") !== null;
 
   return (
     <div className="space-y-6">
-      <PageHeader title={t("title")} description={t("description")} />
+      <PageHeader title={t("title")} description={t("description")}>
+        {drafts || manage ? (
+          <div className="flex flex-wrap gap-2">
+            {drafts && (
+              <Link href={WIKI_DRAFTS_PATH} className={buttonVariants({ variant: "outline" })}>
+                <FilePen className="h-4 w-4" aria-hidden="true" />
+                {t("myDrafts")}
+              </Link>
+            )}
+            {manage && (
+              <Link href={AREA_PATH.wiki} className={buttonVariants({ variant: "outline" })}>
+                <Settings className="h-4 w-4" aria-hidden="true" />
+                {t("manageSpaces")}
+              </Link>
+            )}
+          </div>
+        ) : null}
+      </PageHeader>
 
       {failed && <FetchErrorBanner />}
 

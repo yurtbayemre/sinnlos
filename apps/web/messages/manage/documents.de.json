@@ -1,0 +1,52 @@
+{
+  "title": "Dokumente",
+  "description": "Die Dateien der Dokumentenbibliothek: hochladen, beschreiben, festlegen, wer sie sieht, planen und veröffentlichen.",
+  "new": "Neues Dokument",
+  "newDescription": "Wird zuerst als Entwurf gespeichert; in der Bibliothek erscheint es, sobald es veröffentlicht ist.",
+  "editTitle": "Dokument bearbeiten",
+  "emptyTitle": "Noch keine Dokumente",
+  "emptyHint": "Legen Sie das erste an; es bleibt ein Entwurf, bis Sie es veröffentlichen.",
+  "sections": {
+    "document": "Dokument",
+    "file": "Datei",
+    "audience": "Zielgruppe"
+  },
+  "fields": {
+    "title": {
+      "label": "Titel"
+    },
+    "description": {
+      "label": "Beschreibung",
+      "hint": "Steht in der Bibliothek unter dem Titel."
+    },
+    "category": {
+      "label": "Kategorie"
+    },
+    "departments": {
+      "label": "Für Abteilungen anzeigen",
+      "hint": "Nur Mitglieder der gewählten Abteilungen sehen es; Redaktion und Admins immer. Keine gewählt: alle."
+    },
+    "file": {
+      "label": "Datei",
+      "hint": "PDF, Word (.docx), Excel (.xlsx) oder PowerPoint (.pptx) bis 20 MB oder ein JPEG-, PNG- oder WebP-Bild bis 5 MB. Das Intranet prüft, was die Datei wirklich ist; Dateien mit Makros, Vorlagen und Bildschirmpräsentationen werden abgelehnt.",
+      "choose": "Datei auswählen",
+      "replace": "Datei ersetzen",
+      "current": "Aktuelle Datei",
+      "none": "Noch keine Datei.",
+      "picked": "Wird beim Speichern hochgeladen: {name} ({size})",
+      "uploaded": "Hochgeladen, wird beim Speichern angehängt: {name} ({size})",
+      "cancelPick": "Aktuelle Datei behalten",
+      "cancelPickNew": "Auswahl entfernen",
+      "download": "{name} herunterladen",
+      "fileType": "Diese Datei wird nicht angenommen. Laden Sie eine PDF-, Word- (.docx), Excel- (.xlsx) oder PowerPoint-Datei (.pptx) oder ein JPEG-, PNG- oder WebP-Bild hoch. Dateien mit Makros (.docm, .xlsm, .pptm), Vorlagen, Bildschirmpräsentationen und binäre Arbeitsmappen (.xlsb) werden abgelehnt, auch wenn sie umbenannt sind.",
+      "fileTooLarge": "Diese Datei ist zu groß: PDF- und Office-Dateien bis 20 MB, Bilder bis 5 MB.",
+      "required": "Wählen Sie eine Datei aus.",
+      "invalid": "Diese Datei kann nicht angehängt werden (sie ist nicht mehr da oder gehört schon zu einem anderen Eintrag). Wählen Sie sie erneut aus."
+    }
+  },
+  "uploading": "Die Datei wird hochgeladen…",
+  "preview": {
+    "uploadedBy": "Hochgeladen von {name}",
+    "noFile": "Keine Datei angehängt"
+  }
+}

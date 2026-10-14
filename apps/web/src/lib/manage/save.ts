@@ -13,7 +13,7 @@ import {
   validReference,
   type AuthoringActionResult,
 } from "./authoring-action";
-import { AREA_TYPE, hasDrafts, SCHEDULE_FIELDS, type ManageArea } from "./areas";
+import { AREA_TYPE, hasDrafts, SCHEDULE_FIELDS, type TypedArea } from "./areas";
 import {
   buildSchedulePayload,
   widensToEveryone,
@@ -70,7 +70,7 @@ export interface SaveSpec<V extends object> {
 }
 
 export async function saveItem<V extends object>(
-  area: ManageArea,
+  area: TypedArea,
   rawInput: SaveInput,
   spec: SaveSpec<V>,
 ): Promise<AuthoringActionResult> {

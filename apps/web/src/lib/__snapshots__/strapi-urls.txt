@@ -17,7 +17,7 @@ GET http://cms.test/api/wiki-spaces?populate[department]=true&populate[team]=tru
 GET http://cms.test/api/wiki-spaces?filters[slug][$eq]=hand%2Fbook&populate[pages][fields][0]=title&populate[pages][fields][1]=slug&populate[pages][fields][2]=summary&populate[pages][fields][3]=order cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
 
 ## api.wiki.page
-GET http://cms.test/api/wiki-pages?filters[space][slug][$eq]=handbook&filters[slug][$eq]=on%20boarding&populate[author][fields][0]=displayName&populate[author][fields][1]=username&populate[lastEditor][fields][0]=displayName&populate[lastEditor][fields][1]=username&populate[space][fields][0]=name&populate[space][fields][1]=slug cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
+GET http://cms.test/api/wiki-pages?filters[space][slug][$eq]=handbook&filters[slug][$eq]=on%20boarding&populate[author][fields][0]=displayName&populate[author][fields][1]=username&populate[lastEditor][fields][0]=displayName&populate[lastEditor][fields][1]=username&populate[space][fields][0]=name&populate[space][fields][1]=slug&populate[department][fields][0]=name&populate[team][fields][0]=name&populate[team][populate][lead][fields][0]=displayName cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
 
 ## api.announcements.list
 GET http://cms.test/api/announcements?populate[author][fields][0]=username&populate[author][fields][1]=email&populate[author][fields][2]=displayName&populate[author][fields][3]=jobTitle&sort=pinned:desc,createdAt:desc&pagination[pageSize]=20 cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]

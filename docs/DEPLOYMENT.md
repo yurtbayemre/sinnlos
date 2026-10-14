@@ -2509,6 +2509,161 @@ panel write loops and unpublish non-empty spaces again, and refuses
 `document.file` in the content API; files attached in between stay
 attached. The structure lock row stays (unused by the old image).
 
+#### Upgrading to documents and the wiki in the web (batch 16, lane 16C)
+
+Lane 16C of batch 16 (branch `feat/v2-authoring-web-p2`; deep-dive decision
+06 §L1-§L7, §E6, owner amendments 1 and 2; plan `plan-batch-16.md` §3 16C)
+is the web half of v2 authoring phase 2. It changes the web only, but it
+needs the cms of lanes 16A (the document upload profile), 16D (the wiki
+revisions) and 16B (the wiki routes and grants, `document.file`, the
+preview's author name, `wikiPages.unpublish`), so it ships with them in the
+"Deploying batch 16" runbook. What users notice:
+
+- **`/manage` has six areas for editors and admins**: _Documents_ and
+  _Wiki_ join announcements, events, polls and quick links. **Department
+  heads** (with a department) get three: announcements, events and
+  **documents** for their own department; never the wiki area.
+- **Documents are written in the web** (`/manage/documents`, `/new`, the
+  edit page with a preview): title, description, category, the file, the
+  departments that see it, and for moderators _Schedule…_ (publish and
+  withdraw) and _Delete_. A department head's department is shown, not
+  chosen; no _Schedule…_, no _Delete_, _Discard changes_ only with a
+  published version.
+- **The file**: _Choose a file_ / _Replace the file_ takes PDF, Word
+  (.docx), Excel (.xlsx), PowerPoint (.pptx) up to 20 MB and JPEG, PNG,
+  WebP up to 5 MB. A wrong type or size is refused when the file is picked;
+  the file is uploaded when the author saves, and the cms decides by
+  content (a renamed `.xlsm` is refused then: "This file is not accepted",
+  under the file input). After a conflict, _Overwrite_ keeps the uploaded
+  file (no second upload). A file uploaded but never saved is removed by
+  the nightly janitor after 24 h.
+- **The wiki in `/manage`** (moderators): the spaces (create, edit, delete
+  while empty; who reads each one: everyone, roles, one department, one
+  team) and per space its page tree with each page's status (Draft,
+  Published, Changes pending, Scheduled, Schedule failed).
+- **Writing in the wiki itself**: _New page_ on a space (department heads,
+  team leads, moderators); _Edit_ and _History_ on a page for its author,
+  its department's head, its team's lead and moderators; drafts that
+  readers do not see, listed under _My drafts_ (`/wiki/drafts`); a page's
+  history with a preview of each version and _Restore this version_
+  (published at once; an older entry restores the text only). A parent
+  that would put a page below itself is refused under the picker.
+- **The previews** in `/manage` name the real author (and the event's
+  organizer) instead of "Unknown".
+- **The document library** links files through the web's `/uploads`
+  proxy (it built cms-host links before).
+- **Uploads above 10 MB through the web work** (marketplace photos
+  included): the proxy cut request bodies at Next's 10 MB default; it now
+  lets 22 MB through, like the Server Action limit.
+
+**Configuration:** none. No `.env`, compose, Traefik or Caddy change (the
+edges set no body limit; the cms caps at 50 MB). `next.config.mjs` gains
+`experimental.proxyClientMaxBodySize: "22mb"` (built into the image). The
+message catalogs gain `messages/manage/{documents,wiki}.*.json`.
+
+**Deploy:** with batch 16, never alone (an older cms answers 404 on the
+wiki routes: `/manage/wiki` shows the "could not be loaded" banner and the
+wiki editor the not-found page; document files cannot be attached before
+16B).
+
+**After the deploy: the browser checks** (the runbook's step "In a
+browser"; English and German, a phone at 360 px and a desktop):
+
+1. **As an editor:** `/manage` shows six tiles; the Wiki tile counts pages.
+2. **Documents:** _New document_; pick a `.xlsm` (refused at once, no
+   upload); pick a 20 MB PDF and _Save draft_ (it uploads and the page
+   becomes the document's edit page; the preview names the file and "Uploaded
+   by" you); _Publish_ (asks first). As a member, `/documents` lists it and
+   the download link starts with `/uploads/` and opens the PDF. Back as the
+   editor: _Replace the file_ with a 20 MB XLSX and _Save and publish_;
+   _Schedule…_ a withdrawal before the publication (refused in the
+   dialog), then a valid one; _Unpublish_; _Delete_.
+3. **A conflict:** the same document in two tabs; save in one, pick a file
+   and save in the other: "Changed in the meantime"; _Overwrite_ saves
+   without uploading again (the web log shows one upload).
+4. **As the Finance head** (or any department head with a department):
+   three tiles (no wiki); a new document shows the department read-only,
+   no _Schedule…_, no _Delete_; upload a PPTX, _Publish_; a Finance member
+   lists it, a Marketing member does not. `/manage/wiki` sends the head
+   back to `/manage`.
+5. **Wiki:** as an editor create a space in `/manage/wiki`; as a team lead
+   open it in the wiki, _New page_, _Save draft_ (readers do not see it;
+   _My drafts_ lists it), _Publish_; a member reads it and has no _Edit_;
+   the author edits with a change note; _History_ lists the save with the
+   note; show an older version and _Restore this version_ (asks first;
+   the history gains "Restores version #…"). Deleting the space while it
+   has pages is refused with "This space still has pages…".
+6. **Keyboard:** Tab reaches the file input (its button shows the focus
+   ring), the Markdown tabs follow the arrow keys, the parent picker opens
+   with Enter, every dialog closes with Escape and returns the focus.
+
+**Logs:** refusals are warnings, outages and web bugs errors; a `428` is
+always a web bug:
+
+```bash
+"${COMPOSE[@]}" logs --since 30m web | grep -E '\[manage-(documents|wiki)\]'
+```
+
+`[manage-documents] upload refused: 400 ValidationError → invalid` is a
+refused file (its type or size); `upload answered … rows, not one file row`
+should never appear. Next's `Request body exceeded 22 MB` means a request
+above the cap (nothing a form sends).
+
+**Known limits** (recorded, not fixed here):
+
+- A missing or foreign item's authoring page answers **HTTP 200** with the
+  not-found page and `noindex` (the cms answers 404; nothing leaks). The
+  lane's spike (plan S14, a production build): an existence check in a
+  blocking `generateMetadata` with a request-memoized loader shared with
+  the page read the cms once per view but still answered 200, for browsers
+  and for HTML-limited bots alike, behind `(app)/loading.tsx`. Question
+  18's default stands: no app-wide change.
+- `/wiki/drafts` and `/wiki/[space]/new` are routes inside the readers'
+  slug namespace. The authoring links carry a marker (`?mine=1`,
+  `?create=1`), and without it the two addresses show a space whose slug is
+  `drafts` or a page whose slug is `new` when one exists, so readers' links
+  keep working. Reserving the two slugs in the cms (which derives slugs
+  from names) would remove the extra read; not in this lane.
+- The parent picker offers the space's published pages (what readers
+  see); a draft-only parent stays selected but is not offered.
+- The page tree of a space reads at most 1 000 pages (it says so when cut).
+
+**Rollback:** with batch 16 (the batch runbook). This lane has no data of
+its own: the web writes only through the cms's authoring routes and the
+upload endpoint.
+
+**Rehearsal (2026-10-14, lane 16C):** unit suite, typecheck (apps and
+tests), lint, `format:check` and `next build` passed. Host Playwright
+(Chromium) against the lane's worktree cms (Strapi 5.57 with 16A's upload
+profile and 16B's contracts, a throwaway SQLite with the demo seed) and the
+web with `next start`, through a counting proxy: an editor's six tiles; a
+`.xlsm` and a 20 MB + 1 byte PDF refused on pick without a request; a
+**20 MB PDF uploaded through the Server Action** (both 22 MB edges) and
+attached; a member downloads it through `/uploads` (`application/pdf`); a
+fake `.docx` refused by the cms with the focus on the file input; a
+conflict whose _Overwrite_ uploaded nothing again (one upload in all); a
+picked file kept across an unpublish and attached by the next save; a
+refused upload from _Schedule…_ closing the dialog with the focus on the
+file input; the schedule's end-before-start refusal; unpublish and
+delete; a department
+head's three tiles, pinned department, no _Schedule…_ or _Delete_, an
+image published to Engineering that an Engineering member lists and a
+Design member does not, _Discard changes_ only with a published version,
+crafted `DELETE` (403) and `publishAt` (400) refused, the explanation
+without a department. The wiki pages were looked at against a stand-in for
+16B's routes (fixtures from the cms's real spaces and pages): every new
+page at 360 and 1280 px, light and dark, English and German (132 page
+views), no horizontal scroll; keyboard: the file input, the Markdown tabs,
+the parent picker, the restore and delete dialogs. **Waiting for the
+integrated cms:** the wiki flows end to end (spaces, a team lead's draft,
+publish, Edit per role, history and restore, the parent loop, the
+non-empty space, two tabs), the preview's "Uploaded by", and an XLSX and
+PPTX upload by a department head. Two Codex review rounds were fixed before
+the final run: the two routes inside the readers' slug namespace (now
+behind `?create=1` and `?mine=1`, a failed lookup staying with the
+readers), a picked file lost on a status change, and an upload refused
+from the _Schedule…_ dialog hidden behind it.
+
 #### Deploying batch 15.2 (relation grants in populate filters and sort)
 
 Batch 15.2 (branch `fix/nested-populate-relation-grants`) ships after

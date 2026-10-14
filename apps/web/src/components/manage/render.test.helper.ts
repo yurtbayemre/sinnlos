@@ -7,12 +7,16 @@ import announcementsDe from "../../../messages/manage/announcements.de.json";
 import announcementsEn from "../../../messages/manage/announcements.en.json";
 import commonDe from "../../../messages/manage/common.de.json";
 import commonEn from "../../../messages/manage/common.en.json";
+import documentsDe from "../../../messages/manage/documents.de.json";
+import documentsEn from "../../../messages/manage/documents.en.json";
 import eventsDe from "../../../messages/manage/events.de.json";
 import eventsEn from "../../../messages/manage/events.en.json";
 import pollsDe from "../../../messages/manage/polls.de.json";
 import pollsEn from "../../../messages/manage/polls.en.json";
 import quickLinksDe from "../../../messages/manage/quickLinks.de.json";
 import quickLinksEn from "../../../messages/manage/quickLinks.en.json";
+import wikiDe from "../../../messages/manage/wiki.de.json";
+import wikiEn from "../../../messages/manage/wiki.en.json";
 import { withManageMessages } from "@/i18n/messages";
 
 /**
@@ -28,6 +32,8 @@ export const MESSAGES = {
     events: eventsEn,
     polls: pollsEn,
     quickLinks: quickLinksEn,
+    documents: documentsEn,
+    wiki: wikiEn,
   }),
   de: withManageMessages(de, {
     common: commonDe,
@@ -35,6 +41,8 @@ export const MESSAGES = {
     events: eventsDe,
     polls: pollsDe,
     quickLinks: quickLinksDe,
+    documents: documentsDe,
+    wiki: wikiDe,
   }),
 };
 

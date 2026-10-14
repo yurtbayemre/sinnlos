@@ -1,12 +1,17 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, Tag } from "lucide-react";
+import { ArrowLeft, History, Pencil, Tag } from "lucide-react";
 import { getFormatter, getTranslations } from "next-intl/server";
 import { Markdown, type MarkdownRehypePlugins } from "@/components/markdown";
+import { buttonVariants } from "@/components/ui/button";
+import type { WikiPageDetail } from "@/lib/api/wiki";
 import { formatInstant, LONG_DAY } from "@/lib/date-format";
+import { canEditWikiPage } from "@/lib/manage/wiki-edit-access";
+import { wikiEditPath, wikiHistoryPath } from "@/lib/manage/wiki-paths";
+import { capabilitiesFor } from "@/lib/roles";
 import { api } from "@/lib/strapi";
-import type { WikiPage as WikiPageEntry } from "@/lib/types";
 import { displayNameOf } from "@/lib/utils";
+import { getViewer } from "@/lib/viewer";
 import { rehypeWikiToc, showsToc, wikiTags } from "@/lib/wiki-content";
 
 interface Props {
@@ -16,16 +21,21 @@ interface Props {
 export default async function WikiPage({ params }: Props) {
   const { space, slug } = await params;
   // `format` renders instants in APP_TIME_ZONE (i18n/request.ts).
-  const [t, tCommon, format] = await Promise.all([
+  const [t, tCommon, format, viewer] = await Promise.all([
     getTranslations("wiki"),
     getTranslations("common"),
     getFormatter(),
+    getViewer(),
   ]);
   // Let fetch errors propagate to app/(app)/error.tsx so the user sees a
   // retry prompt instead of a misleading 404.
   const data = await api.wiki.page(space, slug);
-  const entry = data.data?.[0] as WikiPageEntry | undefined;
+  const entry = data.data?.[0] as WikiPageDetail | undefined;
   if (!entry) notFound();
+  // Edit and History (batch 16, K17): the cms's own row rule on the page's
+  // author, department and team lead; UX only, the editor's `editable`
+  // decides (lib/manage/wiki-edit-access.ts).
+  const editable = canEditWikiPage(viewer, capabilitiesFor(viewer.role), entry);
 
   const author = entry.author;
   const lastEditor = entry.lastEditor;
@@ -55,7 +65,7 @@ export default async function WikiPage({ params }: Props) {
           <ArrowLeft className="h-3.5 w-3.5" aria-hidden="true" />
           {entry.space?.name ?? t("backToSpace")}
         </Link>
-        <h1 className="text-4xl font-semibold tracking-tight">{entry.title}</h1>
+        <h1 className="break-words text-4xl font-semibold tracking-tight">{entry.title}</h1>
         {entry.summary ? (
           <p className="mt-2 text-lg text-muted-foreground">{entry.summary}</p>
         ) : null}
@@ -70,6 +80,24 @@ export default async function WikiPage({ params }: Props) {
           ) : null}
           {updated ? <span>· {updated}</span> : null}
         </div>
+        {editable && entry.documentId ? (
+          <div role="group" aria-label={t("pageActions")} className="mt-4 flex flex-wrap gap-2">
+            <Link
+              href={wikiEditPath(space, slug, entry.documentId)}
+              className={buttonVariants({ variant: "outline", size: "sm" })}
+            >
+              <Pencil className="h-4 w-4" aria-hidden="true" />
+              {t("edit")}
+            </Link>
+            <Link
+              href={wikiHistoryPath(space, slug, entry.documentId)}
+              className={buttonVariants({ variant: "ghost", size: "sm" })}
+            >
+              <History className="h-4 w-4" aria-hidden="true" />
+              {t("history")}
+            </Link>
+          </div>
+        ) : null}
         {tags.length > 0 ? (
           <div className="mt-3 flex flex-wrap items-center gap-1.5">
             <Tag className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
