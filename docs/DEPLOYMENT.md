@@ -1988,6 +1988,14 @@ What changes:
   `/manage` flash and the live-news hint add the inset too; in landscape
   `<html>` keeps the content out of the notch. Android and desktop are
   unchanged (every inset is 0 there).
+- **The top bar on phones** (found in the walkthrough, no issue): below
+  640 px _Sign out_, and the demo's _Demo mode_ badge, show only an icon,
+  square like the bar's other buttons, with the label as the accessible
+  name. With the label the controls needed more than a 360 px phone has:
+  the search button slid under the bell (by 14 px with "Abmelden"), and
+  "Demo-Modus" pushed every page 6 px sideways. The dashboard's news grid
+  sizes its phone column to the screen (a long news title had widened the
+  dashboard to 379 px). From 640 px up nothing changes.
 - **#81, the wiki page form in the admin panel.** Lane 16D turned draft &
   publish off for wiki revisions. The Content Manager shows a draft
   page's to-many relations to draft rows only while the target has draft
@@ -2162,6 +2170,11 @@ rollback to `<B16_TAG>` with no `MANDATORY` step: report it.
      (the dashboard) stays readable above the bar; landscape shows the
      sidebar clear of the notch. On an Android phone the bar looks as
      before.
+   - **The top bar on a phone** (or a window about 360 px wide), signed
+     in, in German: search, bell, theme, language, avatar and a sign-out
+     icon side by side without overlap; the icon signs out. Neither the
+     dashboard nor any other page scrolls sideways. A wide window shows
+     _Abmelden_ as before.
 
 9. **+15 and +60 minutes:** no new error types, no restarts, no 5xx, as
    for batch 16.
@@ -2172,7 +2185,8 @@ the home indicator. `/manage` counts each area's published items and links
 to them. The admin panel's wiki page form no longer shows a Revisions
 field (page history is in the wiki's History). The /manage forms say in
 words when readers do not see an item yet, or still see its published
-version. Every wiki space links _My drafts_.
+version. Every wiki space links _My drafts_. On phones the top bar's Sign
+out is an icon, and the bar fits the screen.
 
 **Rollback** (the owner's decision only; to the batch 16 images,
 `<B16_TAG>` = `02c06fc73487`)
@@ -2199,7 +2213,8 @@ someone put the field back through _Configure the view_. A rollback
 reopens #70 (quiz lessons complete by click again on `confirm` courses,
 and without answers through the API) and puts the iPhone tab bar back on
 the home indicator; the published counts, the status line texts and the
-spaces' _My drafts_ link go away. The roll-forward is a normal
+spaces' _My drafts_ link go away, and the phone top bar shows its labels
+again. The roll-forward is a normal
 `infra/deploy.sh`.
 
 #### Deploying batch 16 (v2 authoring phase 2: documents with uploads, the wiki)

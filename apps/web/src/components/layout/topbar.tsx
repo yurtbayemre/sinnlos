@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { FlaskConical, LogOut, type LucideIcon } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -73,8 +74,8 @@ export async function Topbar() {
               </Avatar>
             </Link>
             {DEMO_MODE ? (
-              <Button variant="ghost" size="sm" disabled>
-                {tAuth("demoMode")}
+              <Button variant="ghost" size="sm" disabled className={PHONE_ICON_BUTTON}>
+                <PhoneIconLabel icon={FlaskConical} label={tAuth("demoMode")} />
               </Button>
             ) : (
               <SignOutButton label={tAuth("signOut")} />
@@ -89,9 +90,28 @@ export async function Topbar() {
 function SignOutButton({ label }: { label: string }) {
   return (
     <form action={signOutAction}>
-      <Button variant="ghost" size="sm" type="submit">
-        {label}
+      <Button variant="ghost" size="sm" type="submit" className={PHONE_ICON_BUTTON}>
+        <PhoneIconLabel icon={LogOut} label={label} />
       </Button>
     </form>
+  );
+}
+
+/**
+ * Below `sm` the last button of the bar (Sign out, or the Demo mode badge)
+ * shows only its icon, square like the other h-9 controls: with its label
+ * the controls needed more than a 360 px phone has (the search button slid
+ * under the bell, by 14 px with "Abmelden"; "Demo-Modus" also pushed the
+ * page 6 px sideways). The label stays the accessible name (sr-only); from
+ * `sm` up the button shows the label alone, on one line, as before.
+ */
+const PHONE_ICON_BUTTON = "w-9 px-0 sm:w-auto sm:px-3";
+
+function PhoneIconLabel({ icon: Icon, label }: { icon: LucideIcon; label: string }) {
+  return (
+    <>
+      <Icon aria-hidden="true" className="h-4 w-4 sm:hidden" />
+      <span className="sr-only sm:not-sr-only sm:whitespace-nowrap">{label}</span>
+    </>
   );
 }
