@@ -1937,6 +1937,75 @@ is degraded while the new cms boots. For the manual production-safe sequence
 (and rollback), see the
 [update procedure](#74-update-procedure-production-safe).
 
+#### Deploying batch 16.1
+
+**Web and lesson completion (branch `fix/16.1-web`: issues #78, #70, #71)**
+
+What changes for users:
+
+- **#78, `/manage`:** every area tile also counts its **published** items
+  (the list's "Published" tab: an item with unpublished changes counts
+  under "Changes pending" there, not here); polls count their published
+  polls, the wiki its published pages. A count whose list has that status
+  tab opens the list filtered to it (`/manage/<area>?status=<status>`);
+  the polls and wiki counts stay plain (no tabs there). Department heads
+  keep their three tiles, editors six. No cms change: every
+  `authoringList` already takes `status=published`.
+- **#70, training:** a lesson with a quiz completes only with every
+  answer correct, **on every course** (the default `confirm` mode
+  included, which used to leave the button free next to a wrong answer).
+  The course's `completionMode` now picks the feedback only: per answer
+  (`confirm`) or one "Check answers" (`quizGate`). The web sends the
+  answers with the completion, and `POST /api/lesson-progresses` checks
+  them against the published lesson's quiz: without them, or with a
+  wrong one, 400 `Quiz not passed` and no receipt. Lessons without a quiz
+  complete by click as before. Receipts written before 16.1 stay valid
+  (nothing is re-checked or deleted); answers are never stored.
+- **#71, phones:** the page sets `viewport-fit=cover`, so iOS reports the
+  safe-area insets the tab bar already padded by: on an iPhone with a
+  home indicator the bar grows by the inset (34 px) and its labels sit
+  above the indicator instead of on it. The page's bottom room, the
+  `/manage` flash and the live-news hint add the inset too; in landscape
+  the body keeps the content out of the notch. Android and desktop are
+  unchanged (every inset is 0 there).
+
+Deploy notes: **cms and web in the same `infra/deploy.sh` run** (the web
+sends the answers the new cms requires). No schema, no env, no edge
+change, no permission rows (the `lesson-progress.create` grant is
+unchanged), no `JWT_SECRET` rotation, nobody signed out. Between the cms
+and the web restart, or from a tab still on the old build, completing a
+**quiz lesson** fails ("Could not save completion"); a reload fixes it.
+Nothing is written in that window.
+
+After the deploy (browser, as in "Deploying batch 16"'s checks):
+
+1. **The viewport:**
+
+   ```bash
+   curl -s https://sinnlos.yurtbay.dev/sign-in | grep -o '<meta name="viewport"[^>]*>'
+   ```
+
+   prints `content="width=device-width, initial-scale=1, viewport-fit=cover"`.
+
+2. **`/manage` as an editor:** six tiles, each with a "Published" count;
+   "Published" on announcements, events, quick links and documents opens
+   the list on its Published tab with the same number of rows. As a
+   department head: three tiles, their department's counts.
+3. **Training, as a test member on a course with a quiz lesson** (a
+   `confirm` course if there is one): the lesson's "Complete lesson" is
+   locked; a wrong answer says "Not quite — try again" and keeps it
+   locked; all answers right unlocks it, and the completion saves.
+   Lessons completed before the deploy still show as completed.
+4. **On an iPhone** (Safari, scrolled so the toolbar collapses): the tab
+   labels sit above the home indicator; the end of a long page (the
+   dashboard) stays readable above the bar; landscape shows the sidebar
+   clear of the notch. On an Android phone the bar looks as before.
+
+Rollback: the batch 16 retag. 16.1 writes nothing batch 16 cannot read
+(receipts keep their shape); a rollback reopens #70 (quiz lessons
+complete by click again on confirm courses, and without answers through
+the API) and puts the iPhone tab bar back on the home indicator.
+
 #### Deploying batch 16 (v2 authoring phase 2: documents with uploads, the wiki)
 
 Batch 16 (branch `batch/16`: `main` `490d82a` plus the four lanes of plan
