@@ -14,6 +14,7 @@ import {
   rowsOf,
   seedPage,
   seedSpace,
+  wikiApi,
 } from "./wiki.test.helper";
 
 interface PgResult {
@@ -203,6 +204,43 @@ describe.each(testEngines())("wiki checks on %s", (engine) => {
         .toBeGreaterThanOrEqual(count);
     }
 
+    it("a page create queued behind its space's delete answers invalid on space, from the content API too", async () => {
+      for (const source of ["content API", "Document Service"] as const) {
+        const target = await seedSpace(t);
+        const title = `IT Queued Page ${source}`;
+        const held = await holdStructure();
+        // The delete queues first on the structure row, so it wins.
+        const removal = settle(
+          t.strapi.documents(WIKI_SPACE).delete({ documentId: target.documentId }),
+        );
+        await lockWaits(1);
+        const creation =
+          source === "content API"
+            ? wikiApi(t).createDraft("editor", { title, body: "x", space: target.documentId })
+            : settle(
+                docs().create({
+                  data: { title, slug: `it-q-${Date.now()}`, space: target.documentId },
+                }),
+              );
+        await lockWaits(2);
+        await held.commit();
+        expect((await removal).ok, source).toBe(true);
+        const created = await creation;
+        if (source === "content API") {
+          const res = created as Awaited<ReturnType<ReturnType<typeof wikiApi>["createDraft"]>>;
+          expect(res.status, res.text).toBe(400);
+          expect((res.body as { error?: { details?: unknown } }).error?.details).toMatchObject({
+            keys: ["space"],
+          });
+        } else {
+          expect(errorOf(created as Settled<unknown>)).toMatchObject({
+            details: { keys: ["space"] },
+          });
+        }
+        expect(await t.strapi.db.query(WIKI_PAGE).count({ where: { title } })).toBe(0);
+      }
+    });
+
     it("two parent changes that would close a loop between them: one is refused", async () => {
       const a = await seedPage(t, { space: space.documentId });
       const b = await seedPage(t, { space: space.documentId });
@@ -249,6 +287,7 @@ describe.each(testEngines())("wiki checks on %s", (engine) => {
       })) as Row[];
       if (removed.ok) {
         expect(pages).toEqual([]);
+        expect(errorOf(created)).toMatchObject({ details: { keys: ["space"] } });
       } else {
         expect((errorOf(removed) as { details?: unknown }).details).toEqual({
           keys: ["_form"],

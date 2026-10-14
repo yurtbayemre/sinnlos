@@ -9,7 +9,7 @@ import {
 } from "./document-lock";
 import { relationLinkTable } from "./targeting-flags";
 import { lockWikiStructure } from "./wiki-structure-lock";
-import { refuseKeys } from "./write-allowlist";
+import { parseToOneRelation, refuseKeys } from "./write-allowlist";
 
 /**
  * The wiki checks (deep-dive plan batch 16, S2 and S15; lane 16B item 5):
@@ -46,7 +46,10 @@ import { refuseKeys } from "./write-allowlist";
  * THE PAGE'S SPACE. A create, update or clone whose payload names a space
  * must leave the page's draft linked to one: a space deleted between the
  * write's checks and its insert (both now under the structure lock) answers
- * `invalid` on `space`.
+ * `invalid` on `space`. The space it names is looked up under the lock
+ * before the action, so a delete that won the lock answers that same
+ * refusal, not Strapi's own `Document with id "…" not found` without keys
+ * (the batch 16 staging rehearsal).
  *
  * SPACES. Every mutating wiki-space action takes the structure lock too.
  * A publish (also a create or update with `status: published`) deletes the
@@ -286,6 +289,18 @@ async function draftHasSpace(strapi: WikiChecksHost, documentId: string): Promis
   return isRecord(draft) && isRecord(draft.space);
 }
 
+/**
+ * Whether the space a page payload points at still has a row (looked up
+ * under the structure lock). A shape this cannot read, or one without a
+ * target, is left to Strapi and the after-check.
+ */
+async function namedSpaceExists(strapi: WikiChecksHost, data: unknown): Promise<boolean> {
+  const target = isRecord(data) ? parseToOneRelation(data.space)?.target : undefined;
+  if (!target) return true;
+  const where = "id" in target ? { id: target.id } : { documentId: target.documentId };
+  return (await strapi.db.query(WIKI_SPACE_UID).count({ where })) > 0;
+}
+
 /** The document an action writes (create and clone: the new one, from the result). */
 function writtenDocumentId(action: string, params: Record<string, unknown>, result: unknown) {
   if (action === "create" || action === "clone") {
@@ -315,12 +330,16 @@ export function createWikiChecks(strapi: WikiChecksHost): DocumentActionMiddlewa
     if (uid === WIKI_PAGE_UID && MUTATING_ACTIONS.includes(action)) {
       return strapi.db.transaction(async () => {
         await lockWikiStructure(strapi);
+        const namesItsSpace = PAYLOAD_ACTIONS.includes(action) && namesSpace(params.data);
+        if (namesItsSpace && !(await namedSpaceExists(strapi, params.data))) {
+          refuseKeys(["space"]);
+        }
         const before = await readParentEdges(strapi);
         const result = await next();
         const after = await readParentEdges(strapi);
         const loop = loopThrough(after, addedEdges(before, after));
         if (loop) throw parentCycleError();
-        if (PAYLOAD_ACTIONS.includes(action) && namesSpace(params.data)) {
+        if (namesItsSpace) {
           const documentId = writtenDocumentId(action, params, result);
           if (!documentId || !(await draftHasSpace(strapi, documentId))) refuseKeys(["space"]);
         }

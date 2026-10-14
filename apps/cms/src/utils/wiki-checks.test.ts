@@ -319,6 +319,35 @@ describe("createWikiChecks", () => {
     ).resolves.toEqual({ documentId: "new" });
   });
 
+  it("maps a space deleted while the write waited for the lock to invalid on space (staging rehearsal)", async () => {
+    const checks = createWikiChecks(fakeHost(world()));
+    // Strapi's own lookup of a missing target answers a 400 without keys.
+    const next = vi.fn(async () => {
+      throw new errors.ValidationError('Document with id "gone", locale "null" not found');
+    });
+    for (const space of ["gone", { documentId: "gone" }, { id: 99 }, { connect: ["gone"] }]) {
+      for (const action of ["create", "update", "clone"]) {
+        const details = await refusal(
+          checks(
+            { uid: PAGE, action, params: { documentId: "c", data: { title: "x", space } } },
+            next,
+          ),
+        );
+        expect(details, `${action} ${JSON.stringify(space)}`).toEqual({ keys: ["space"] });
+      }
+    }
+    expect(next).not.toHaveBeenCalled();
+    // A space that exists, by documentId or row id, goes on to the action.
+    const passed = vi.fn(async () => ({ documentId: "c" }));
+    for (const space of ["s1", { id: 10 }]) {
+      await checks(
+        { uid: PAGE, action: "update", params: { documentId: "c", data: { space } } },
+        passed,
+      );
+    }
+    expect(passed).toHaveBeenCalledTimes(2);
+  });
+
   it("refuses a space delete, unpublish and deleting discard while a page links it", async () => {
     const checks = createWikiChecks(fakeHost(world()));
     for (const action of ["delete", "unpublish"]) {
