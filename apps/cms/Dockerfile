@@ -3,7 +3,7 @@
 # (and so deps and builder) and `runner` both start FROM this stage. A stage
 # alias rather than a build ARG, because Dependabot's docker updater reads
 # FROM lines only: a digest in an ARG default would never be bumped again.
-FROM node:24-alpine@sha256:ebfe2f90462722a7a4de65e91990e97fe0d401c70e0e762c5b53302f905ec1c1 AS node-base
+FROM node:24-alpine@sha256:44fce696f38ba8c987c4db89954051000bbd05ffd8d8659ba15ed4a8602e937f AS node-base
 
 FROM node-base AS base
 # build-base + python3: node-gyp fallback for better-sqlite3 when its prebuilt
