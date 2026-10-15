@@ -52,9 +52,10 @@ Further reading:
   reactions: other sessions see a new comment in under two seconds over
   server-sent events, with polling as the fallback.
 - **Wiki** spaces that are public or visible to selected roles, a
-  department or a team. The cms keeps a snapshot of a page's previous text
-  whenever an edit changes it; nobody reads these revisions through the API
-  (they can hold draft text), and the web does not show them yet.
+  department or a team. Every save that changes a page's draft records a
+  revision of the state it leads to; the page's _History_ in the web shows
+  them with a preview and a restore, read through the wiki-page routes only
+  (the revision type itself has no API route).
 - **Departments and teams**, a **people directory** with org chart and
   _Direct reports_, and **celebrations** of work anniversaries and opt-in
   birthdays.
@@ -69,9 +70,12 @@ Further reading:
   completion report.
 - **Notifications** and opt-in **e-mail digests** (daily or weekly).
 - **Authoring in the web** at `/manage`: editors and admins write
-  announcements, events, polls and quick links with drafts, a preview,
-  scheduled publishing and a check for concurrent changes; department heads
-  write announcements and events for their own department. Every change
+  announcements, events, polls, quick links and documents (with the file
+  upload) with drafts, a preview, scheduled publishing and a check for
+  concurrent changes; department heads write announcements, events and
+  documents for their own department. Admins, editors, department heads and
+  team leads write wiki pages in the wiki itself, with drafts and a page
+  history; admins and editors manage the spaces at `/manage/wiki`. Every change
   advances a per-document revision and lands in an append-only activity
   trail that the admin panel lists.
 - **Global search (⌘K)** with anonymous search analytics.
@@ -99,7 +103,7 @@ Further reading:
 │   ├── Caddyfile                   the bundled Caddy (standalone boxes, local full-stack runs)
 │   ├── readme-permissions.test.ts  pins the permission tables of this README to the cms
 │   └── .env.example
-├── docs/                   DEPLOYMENT.md, security.md, architecture.md
+├── docs/                   DEPLOYMENT.md, security.md, architecture.md, ROADMAP.md, screenshots/
 ├── pnpm-workspace.yaml
 └── package.json
 ```
@@ -116,7 +120,7 @@ thin re-exports, pinned by `domain-reexports.test.ts` in each app.
 
 ### Content model
 
-Strapi has 22 collection types plus two routes-only APIs
+Strapi has 24 collection types plus two routes-only APIs
 (`apps/cms/src/api/`). Who may read or write what is in
 [Roles and permissions](#roles-and-permissions) below; the per-type access
 rules are in
@@ -138,20 +142,22 @@ rules are in
 | `poll-vote`       | One vote per user and poll; the content API casts and counts votes through custom routes only                   |
 | `document`        | File library entry, company-wide or for selected departments                                                    |
 | `classified`      | Marketplace ad: 5 categories, up to 4 photos, listed for 30 days by default (at most 90)                        |
-| `quick-link`      | Dashboard link, company-wide or for selected departments; maintained in the Strapi admin                        |
+| `quick-link`      | Dashboard link, company-wide or for selected departments; written at `/manage/quick-links` or in the admin      |
 | `course`          | Training course with ordered lessons, `mandatory` flag and completion mode; maintained in the Strapi admin      |
 | `lesson`          | One lesson: Markdown body, YouTube video, optional quiz                                                         |
 | `lesson-progress` | Completion receipt per user and lesson                                                                          |
 | `search-log`      | Anonymous search telemetry (term and result count, no user)                                                     |
 | `wiki-space`      | Namespace for wiki pages with its own visibility                                                                |
 | `wiki-page`       | Markdown page with tags, order, optional table of contents, parent page                                         |
-| `wiki-revision`   | Snapshot of a page's previous text, written when an edit changes it; no API route, hidden in the admin panel    |
+| `wiki-revision`   | One recorded state of a page after each changing draft save; read through the wiki-page history routes only     |
+| `content-version` | Per-document revision behind the concurrent-change check (`If-Match`); written by the cms only, no route        |
+| `audit-event`     | Append-only activity trail, one row per change of a guarded document (keys, no values); kept 365 days, no route |
 | _profile_         | Routes-only: `GET`/`PUT /api/me`, the self-service profile                                                      |
 | _entra-auth_      | Routes-only: `POST /api/auth/entra/exchange`, the server-to-server step of the Microsoft sign-in (404 when off) |
 
 **Draft & publish.** `announcement`, `course`, `document`, `event`,
-`lesson`, `poll`, `quick-link`, `wiki-space`, `wiki-page` and
-`wiki-revision` keep Strapi's draft & publish (pinned per type in
+`lesson`, `poll`, `quick-link`, `wiki-space` and `wiki-page` keep
+Strapi's draft & publish (pinned per type in
 `apps/cms/src/content-type-flags.test.ts`): the admin panel edits a draft
 row, readers get the published row. An entry with a published row but no
 draft is given its draft at boot (`apps/cms/src/utils/draft-twins.ts`; see
@@ -159,6 +165,9 @@ draft is given its draft at boot (`apps/cms/src/utils/draft-twins.ts`; see
 Departments and teams have no drafts any more; a database from before that
 change needs a one-time migration
 ([One-time: org draft/publish off](./docs/DEPLOYMENT.md#one-time-org-draftpublish-off)).
+Wiki revisions have none either since batch 16 (one published row per
+revision; the cms refuses to boot on leftover draft rows, see
+[Deploying batch 16](./docs/DEPLOYMENT.md#deploying-batch-16-v2-authoring-phase-2-documents-with-uploads-the-wiki)).
 
 ### Roles and permissions
 
@@ -421,7 +430,7 @@ instance runs.
   ([Local sign-in](./docs/security.md#local-sign-in)).
 - **Demo data:** `SEED_DEMO_DATA=1` in `apps/cms/.env` seeds a database
   that has no department and no user yet (`apps/cms/src/seed-demo.ts`;
-  later boots skip it). It writes **12 of the 22 collection types**:
+  later boots skip it). It writes **12 of the 24 collection types**:
   departments, teams, announcements, events, wiki spaces and pages, kudos,
   polls, poll votes, documents, comments and reactions, plus ten users
   (password `demo1234`): `alex.morgan@sinnlos.local` is `admin_role`;
@@ -817,10 +826,11 @@ Roles and access:
       department member sees the announcements and wiki spaces targeted at
       their department
 - [ ] An admin and an editor see the _Manage_ link and `/manage` with the
-      announcement, event, poll and quick-link areas (an admin also the
-      reports); a department head with a department sees _Manage_ with
-      announcements and events of their department only; an editor sees
-      _New poll_; a guest sees no RSVP controls and no _New ad_ button
+      announcement, event, poll, quick-link, document and wiki areas (an
+      admin also the reports); a department head with a department sees
+      _Manage_ with announcements, events and documents of their department
+      only; an editor sees _New poll_; a guest sees no RSVP controls and no
+      _New ad_ button
 - [ ] A guest's navigation has no Announcements, Departments, Teams, Kudos,
       Marketplace or Training; opening one of them by URL shows _Not
       available for your account_, and neither the web nor the cms logs a
