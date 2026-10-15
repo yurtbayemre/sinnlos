@@ -252,9 +252,7 @@ class LiveBus {
 }
 
 declare global {
-  // eslint-disable-next-line no-var
   var __sinnlosLiveBus: LiveBus | undefined;
-  // eslint-disable-next-line no-var
   var __sinnlosLiveBusShutdown: boolean | undefined;
 }
 
