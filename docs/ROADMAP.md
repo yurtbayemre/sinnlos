@@ -71,7 +71,7 @@ Workvivo, Sociabble, Simpplr, MangoApps feature guides, June 2026).
 > polls. Documents with uploads and the wiki editor follow in phase 2
 > (batch 16).
 >
-> **Status update (2026-10-14, batch 16, not deployed yet):** v2 frontend
+> **Status update (2026-10-14, batch 16, deployed 2026-10-14):** v2 frontend
 > authoring, phase 2. Editors and admins write documents at
 > `/manage/documents` with a file (PDF, Word, Excel, PowerPoint up to
 > 20 MB, images up to 5 MB, accepted by content; macro-enabled Office
@@ -84,6 +84,15 @@ Workvivo, Sociabble, Simpplr, MangoApps feature guides, June 2026).
 > loops and the deletion of non-empty spaces are refused for every
 > writer, the admin panel included. Every ad and file delete writes an
 > audit row.
+>
+> **Status update (2026-10-14, batch 16.1, deployed 2026-10-14):** the
+> fixes from the batch 16 walkthrough (v0.16.1, issues #70, #71, #78 to
+> #82): a quiz lesson completes only with correct answers on every course,
+> the phone tab bar clears the iPhone home indicator, `/manage` counts
+> published items, and the admin panel's wiki page form drops the
+> revisions field. **2026-10-15:** scoped dependency overrides close 29 of
+> 35 Dependabot alerts (PR #84); the six left have no usable fix (see
+> docs/architecture.md §7b).
 
 ## Why this is cheaper than it looks
 
