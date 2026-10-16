@@ -94,6 +94,13 @@ Workvivo, Sociabble, Simpplr, MangoApps feature guides, June 2026).
 > 35 Dependabot alerts (PR #84); the six left have no usable fix (see
 > docs/architecture.md §7b).
 
+> **Planned (2026-10-16, batch 17):** the reviewed
+> [implementation plan](plan-batch-17.md) covers training authoring, an
+> additional exam mode, department/team content editing and the admin
+> activity page. Implementation has not started. The plan preserves the
+> existing learning modes and panel fallback, and requires focused Strapi
+> checks plus a compatible rollback release before deployment.
+
 ## Why this is cheaper than it looks
 
 Three architectural decisions already made carry most of the weight:
