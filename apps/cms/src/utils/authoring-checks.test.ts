@@ -221,19 +221,19 @@ describe("ownUpload (§E2)", () => {
   it("needs the caller's stamp, an allowed mime and no link but the document's own rows", async () => {
     const strapi = world();
     const { mediaChecks } = checks(strapi);
-    expect(await mediaChecks.ownUpload?.(1)).toBe(1);
-    expect(await mediaChecks.ownUpload?.(2)).toBeNull();
-    expect(await mediaChecks.ownUpload?.(3)).toBeNull();
-    expect(await mediaChecks.ownUpload?.(4)).toBeNull();
+    expect(await mediaChecks.ownUpload?.(1, "file")).toBe(1);
+    expect(await mediaChecks.ownUpload?.(2, "file")).toBeNull();
+    expect(await mediaChecks.ownUpload?.(3, "file")).toBeNull();
+    expect(await mediaChecks.ownUpload?.(4, "file")).toBeNull();
     // Tombstoned: a removal reserved it (16A, utils/upload-orphans.ts).
-    expect(await mediaChecks.ownUpload?.(5)).toBeNull();
-    expect(await mediaChecks.ownUpload?.(999)).toBeNull();
+    expect(await mediaChecks.ownUpload?.(5, "file")).toBeNull();
+    expect(await mediaChecks.ownUpload?.(999, "file")).toBeNull();
     strapi.tables[FILE][0].related = [{ id: 100, __type: DOCUMENT }];
-    expect(await mediaChecks.ownUpload?.(1)).toBe(1);
+    expect(await mediaChecks.ownUpload?.(1, "file")).toBe(1);
     strapi.tables[FILE][0].related = [{ id: 555, __type: DOCUMENT }];
-    expect(await mediaChecks.ownUpload?.(1)).toBeNull();
+    expect(await mediaChecks.ownUpload?.(1, "file")).toBeNull();
     strapi.tables[FILE][0].related = [{ id: 100, __type: "api::classified.classified" }];
-    expect(await mediaChecks.ownUpload?.(1)).toBeNull();
+    expect(await mediaChecks.ownUpload?.(1, "file")).toBeNull();
   });
 });
 

@@ -36,13 +36,13 @@ const REMOVED: ReadonlyArray<readonly [method: string, path: string]> = [
   // lesson-progress: receipts are immutable.
   ["PUT", "/api/lesson-progresses/1"],
   ["DELETE", "/api/lesson-progresses/1"],
-  // course / lesson: authored in the admin panel only.
-  ["POST", "/api/courses"],
-  ["PUT", "/api/courses/1"],
+  // Training deletion and organisation structure stay in the admin panel.
   ["DELETE", "/api/courses/1"],
-  ["POST", "/api/lessons"],
-  ["PUT", "/api/lessons/1"],
   ["DELETE", "/api/lessons/1"],
+  ["POST", "/api/departments"],
+  ["DELETE", "/api/departments/1"],
+  ["POST", "/api/teams"],
+  ["DELETE", "/api/teams/1"],
   // search-log: create only (the admin summary is its own route).
   ["GET", "/api/search-logs"],
   ["GET", "/api/search-logs/1"],

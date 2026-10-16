@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import { PRIVILEGED_ROLE_TYPES, shouldSanitizeForRole } from "../utils/sanitize-user-contact";
-import { WRITE_BYPASS_ROLES, isWriteBypassRole } from "../utils/write-allowlist";
 import {
   ADMIN,
   AUTHENTICATED,
@@ -59,13 +58,11 @@ describe("role vocabulary (B02)", () => {
     }
   });
 
-  it("the derived bypass and privilege sets follow it", () => {
+  it("the derived moderator and privilege sets follow it", () => {
     expect([...PRIVILEGED_ROLE_TYPES]).toEqual([...STAFF_ROLES]);
-    expect(WRITE_BYPASS_ROLES).toEqual([...MODERATORS]);
     for (const role of [...ROLE_PRIVILEGE_ORDER, AUTHENTICATED]) {
       const moderator = (MODERATORS as readonly string[]).includes(role);
       expect(hasRole({ role: { type: role } }, MODERATORS), role).toBe(moderator);
-      expect(isWriteBypassRole(role), role).toBe(moderator);
       expect(shouldSanitizeForRole(role), role).toBe(
         !(STAFF_ROLES as readonly string[]).includes(role),
       );

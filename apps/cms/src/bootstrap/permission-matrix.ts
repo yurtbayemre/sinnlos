@@ -102,11 +102,9 @@ export const PERMISSION_MATRIX: Record<
 > = {
   admin_role: {
     "api::acknowledgement.acknowledgement": ALL_ACTIONS,
-    // Training (issue #29, admin-authoring variant): course/lesson are
-    // maintained in the Strapi admin — the content api exposes READS
-    // only (the write routes do not even exist, see the routers).
-    "api::course.course": READ_ACTIONS,
-    "api::lesson.lesson": READ_ACTIONS,
+    // Training authoring uses can-author, explicit status and version tokens; no delete.
+    "api::course.course": [...READ_ACTIONS, "create", "update"],
+    "api::lesson.lesson": [...READ_ACTIONS, "create", "update"],
     // No update/delete (FX01): the routes are gone (`only:`), receipts
     // are corrected in the Strapi admin. Same for the other trimmed
     // routers below — see REMOVED_CORE_ACTIONS.
@@ -114,7 +112,7 @@ export const PERMISSION_MATRIX: Record<
     "api::announcement.announcement": ALL_ACTIONS,
     "api::classified.classified": ALL_ACTIONS,
     "api::comment.comment": [...READ_ACTIONS, "create", "delete"],
-    "api::department.department": ALL_ACTIONS,
+    "api::department.department": [...READ_ACTIONS, "update"],
     "api::document.document": ALL_ACTIONS,
     "api::event.event": ALL_ACTIONS,
     // delete deliberately admin-only across ALL roles: removing someone
@@ -129,7 +127,7 @@ export const PERMISSION_MATRIX: Record<
     "api::quick-link.quick-link": ALL_ACTIONS,
     "api::search-log.search-log": ["create"],
     "api::reaction.reaction": [...READ_ACTIONS, "create", "delete"],
-    "api::team.team": ALL_ACTIONS,
+    "api::team.team": [...READ_ACTIONS, "update"],
     "api::wiki-space.wiki-space": ALL_ACTIONS,
     "api::wiki-page.wiki-page": ALL_ACTIONS,
   },
@@ -157,8 +155,8 @@ export const PERMISSION_MATRIX: Record<
     "api::notification.notification": [...READ_ACTIONS, "delete"],
     "api::poll.poll": ALL_ACTIONS,
     "api::quick-link.quick-link": ALL_ACTIONS,
-    "api::course.course": READ_ACTIONS,
-    "api::lesson.lesson": READ_ACTIONS,
+    "api::course.course": [...READ_ACTIONS, "create", "update"],
+    "api::lesson.lesson": [...READ_ACTIONS, "create", "update"],
     "api::lesson-progress.lesson-progress": ["find", "findOne", "create"],
     "api::search-log.search-log": ["create"],
     "api::reaction.reaction": [...READ_ACTIONS, "create", "delete"],
@@ -392,6 +390,10 @@ const authoringGrants = (
   Object.fromEntries(actions.map((action) => [`${uid}.${action}`, roles]));
 
 export const AUTHORING_ACTION_GRANTS: Readonly<Record<string, readonly MatrixRoleType[]>> = {
+  ...authoringGrants("api::course.course", AUTHORING_ACTIONS, MODERATORS),
+  ...authoringGrants("api::lesson.lesson", AUTHORING_ACTIONS, MODERATORS),
+  ...authoringGrants("api::department.department", ["editable"], [ADMIN, "department_head"]),
+  ...authoringGrants("api::team.team", ["editable"], [ADMIN, "department_head", "team_lead"]),
   ...authoringGrants("api::announcement.announcement", AUTHORING_ACTIONS, DEPARTMENT_AUTHORS),
   ...authoringGrants("api::event.event", AUTHORING_ACTIONS, DEPARTMENT_AUTHORS),
   ...authoringGrants("api::document.document", AUTHORING_ACTIONS, DEPARTMENT_AUTHORS),
@@ -405,6 +407,7 @@ export const AUTHORING_ACTION_GRANTS: Readonly<Record<string, readonly MatrixRol
 
 export const CUSTOM_ACTION_GRANTS: Record<string, readonly MatrixRoleType[] | "*"> = {
   ...AUTHORING_ACTION_GRANTS,
+  "api::audit-event.audit-event.list": [ADMIN],
   // Same readers as lessons; these actions enforce published lesson and parent.
   "api::lesson.lesson.player": [...STAFF_ROLES, AUTHENTICATED],
   "api::lesson.lesson.check": [...STAFF_ROLES, AUTHENTICATED],
@@ -511,6 +514,8 @@ export const USER_UID = "plugin::users-permissions.user";
  * controller actions), and a revocation without a row costs nothing.
  */
 const REMOVED_CORE_ACTIONS: Partial<Record<ContentTypeUid, CrudAction[]>> = {
+  "api::department.department": ["create", "delete"],
+  "api::team.team": ["create", "delete"],
   "api::poll-vote.poll-vote": ALL_ACTIONS,
   "api::wiki-revision.wiki-revision": ALL_ACTIONS,
   "api::notification.notification": ["create", "update"],

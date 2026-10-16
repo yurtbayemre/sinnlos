@@ -126,34 +126,34 @@ Strapi has 24 collection types plus two routes-only APIs
 rules are in
 [docs/security.md](./docs/security.md#content-types-and-their-access-rules).
 
-| Type              | Purpose                                                                                                         |
-| ----------------- | --------------------------------------------------------------------------------------------------------------- |
-| `department`      | Org unit with head, members, teams and wiki pages (no draft & publish: one row, a save is live)                 |
-| `team`            | Belongs to a department, has a lead and members (no draft & publish)                                            |
-| `announcement`    | Dashboard news, targeted by `department`, `team` and `audienceRoles`; optional read confirmation; expiry        |
-| `acknowledgement` | Read receipt for a mandatory announcement, one per user, immutable                                              |
-| `comment`         | Comments on announcements and wiki pages (the web shows them on announcements)                                  |
-| `reaction`        | Emoji reactions on the same targets as comments                                                                 |
-| `kudos`           | Peer recognition (from, to, message, company value)                                                             |
-| `notification`    | Per-user notification rows, written by the cms only                                                             |
-| `event`           | Calendar events with ICS export and optional RSVP                                                               |
-| `event-rsvp`      | Attendance answer (`yes`/`no`/`maybe`) per user and event                                                       |
-| `poll`            | Question with 2 to 10 options, deadline, anonymous flag, department targeting and guest access                  |
-| `poll-vote`       | One vote per user and poll; the content API casts and counts votes through custom routes only                   |
-| `document`        | File library entry, company-wide or for selected departments                                                    |
-| `classified`      | Marketplace ad: 5 categories, up to 4 photos, listed for 30 days by default (at most 90)                        |
-| `quick-link`      | Dashboard link, company-wide or for selected departments; written at `/manage/quick-links` or in the admin      |
-| `course`          | Training course with ordered lessons, `mandatory` flag and completion mode; maintained in the Strapi admin      |
-| `lesson`          | One lesson: Markdown body, YouTube video, optional quiz                                                         |
-| `lesson-progress` | Completion receipt per user and lesson                                                                          |
-| `search-log`      | Anonymous search telemetry (term and result count, no user)                                                     |
-| `wiki-space`      | Namespace for wiki pages with its own visibility                                                                |
-| `wiki-page`       | Markdown page with tags, order, optional table of contents, parent page                                         |
-| `wiki-revision`   | One recorded state of a page after each changing draft save; read through the wiki-page history routes only     |
-| `content-version` | Per-document revision behind the concurrent-change check (`If-Match`); written by the cms only, no route        |
-| `audit-event`     | Append-only activity trail, one row per change of a guarded document (keys, no values); kept 365 days, no route |
-| _profile_         | Routes-only: `GET`/`PUT /api/me`, the self-service profile                                                      |
-| _entra-auth_      | Routes-only: `POST /api/auth/entra/exchange`, the server-to-server step of the Microsoft sign-in (404 when off) |
+| Type              | Purpose                                                                                                                |
+| ----------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `department`      | Org unit with head, members, teams and wiki pages (no draft & publish: one row, a save is live)                        |
+| `team`            | Belongs to a department, has a lead and members (no draft & publish)                                                   |
+| `announcement`    | Dashboard news, targeted by `department`, `team` and `audienceRoles`; optional read confirmation; expiry               |
+| `acknowledgement` | Read receipt for a mandatory announcement, one per user, immutable                                                     |
+| `comment`         | Comments on announcements and wiki pages (the web shows them on announcements)                                         |
+| `reaction`        | Emoji reactions on the same targets as comments                                                                        |
+| `kudos`           | Peer recognition (from, to, message, company value)                                                                    |
+| `notification`    | Per-user notification rows, written by the cms only                                                                    |
+| `event`           | Calendar events with ICS export and optional RSVP                                                                      |
+| `event-rsvp`      | Attendance answer (`yes`/`no`/`maybe`) per user and event                                                              |
+| `poll`            | Question with 2 to 10 options, deadline, anonymous flag, department targeting and guest access                         |
+| `poll-vote`       | One vote per user and poll; the content API casts and counts votes through custom routes only                          |
+| `document`        | File library entry, company-wide or for selected departments                                                           |
+| `classified`      | Marketplace ad: 5 categories, up to 4 photos, listed for 30 days by default (at most 90)                               |
+| `quick-link`      | Dashboard link, company-wide or for selected departments; written at `/manage/quick-links` or in the admin             |
+| `course`          | Training course with ordered lessons, `mandatory` flag and completion mode; authoring API and Strapi panel             |
+| `lesson`          | One lesson: Markdown body, YouTube video, optional quiz                                                                |
+| `lesson-progress` | Completion receipt per user and lesson                                                                                 |
+| `search-log`      | Anonymous search telemetry (term and result count, no user)                                                            |
+| `wiki-space`      | Namespace for wiki pages with its own visibility                                                                       |
+| `wiki-page`       | Markdown page with tags, order, optional table of contents, parent page                                                |
+| `wiki-revision`   | One recorded state of a page after each changing draft save; read through the wiki-page history routes only            |
+| `content-version` | Per-document revision behind the concurrent-change check (`If-Match`); written by the cms only, no route               |
+| `audit-event`     | Append-only activity trail, one row per change of a guarded document (keys, no values); kept 365 days, admin-only read |
+| _profile_         | Routes-only: `GET`/`PUT /api/me`, the self-service profile                                                             |
+| _entra-auth_      | Routes-only: `POST /api/auth/entra/exchange`, the server-to-server step of the Microsoft sign-in (404 when off)        |
 
 **Draft & publish.** `announcement`, `course`, `document`, `event`,
 `lesson`, `poll`, `quick-link`, `wiki-space` and `wiki-page` keep
@@ -199,13 +199,13 @@ Content types: `C` = create, `R` = find + findOne, `U` = update,
 | `announcement`    | CRUD         | CRUD     | CRU               | R           | R        | —       | R               |
 | `classified`      | CRUD         | CRUD     | CRUD              | CRUD        | CRUD     | —       | R               |
 | `comment`         | CRD          | CRD      | CRD               | CRD         | CRD      | R       | CR              |
-| `course`          | R            | R        | R                 | R           | R        | —       | R               |
-| `department`      | CRUD         | R        | RU                | R           | R        | —       | R               |
+| `course`          | CRU          | CRU      | R                 | R           | R        | —       | R               |
+| `department`      | RU           | R        | RU                | R           | R        | —       | R               |
 | `document`        | CRUD         | CRUD     | CRU               | R           | R        | R       | R               |
 | `event`           | CRUD         | CRUD     | CRU               | R           | R        | R       | R               |
 | `event-rsvp`      | CRUD         | CRU      | CRU               | CRU         | CRU      | —       | CRU             |
 | `kudos`           | CRD          | CRD      | CR                | CR          | CR       | —       | CR              |
-| `lesson`          | R            | R        | R                 | R           | R        | —       | R               |
+| `lesson`          | CRU          | CRU      | R                 | R           | R        | —       | R               |
 | `lesson-progress` | CR           | CR       | CR                | CR          | CR       | —       | CR              |
 | `notification`    | RD           | RD       | RD                | RD          | RD       | R       | R               |
 | `poll`            | CRUD         | CRUD     | R                 | R           | R        | R       | R               |
@@ -213,7 +213,7 @@ Content types: `C` = create, `R` = find + findOne, `U` = update,
 | `quick-link`      | CRUD         | CRUD     | R                 | R           | R        | R       | R               |
 | `reaction`        | CRD          | CRD      | CRD               | CRD         | CRD      | R       | CR              |
 | `search-log`      | C            | C        | C                 | C           | C        | C       | C               |
-| `team`            | CRUD         | R        | RU                | RU          | R        | —       | R               |
+| `team`            | RU           | R        | RU                | RU          | R        | —       | R               |
 | `wiki-space`      | CRUD         | CRUD     | R                 | R           | R        | R       | R               |
 | `wiki-page`       | CRUD         | CRUD     | CRU               | CRU         | RU       | R       | R               |
 | `wiki-revision`   | —            | —        | —                 | —           | —        | —       | —               |
@@ -283,6 +283,19 @@ Custom actions and plugin routes (`✓` = granted, `—` = not granted):
 | `api::lesson.lesson.player` | `GET /api/lessons/:id/player` | ✓ | ✓ | ✓ | ✓ | ✓ | — | ✓ |
 | `api::lesson.lesson.check` | `POST /api/lessons/:id/check` | ✓ | ✓ | ✓ | ✓ | ✓ | — | ✓ |
 
+| `api::course.course.authoringList` | `GET /api/courses/authoring` | ✓ | ✓ | — | — | — | — | — |
+| `api::course.course.editable` | `GET /api/courses/:id/editable` | ✓ | ✓ | — | — | — | — | — |
+| `api::course.course.publish` | `POST /api/courses/:id/publish` | ✓ | ✓ | — | — | — | — | — |
+| `api::course.course.unpublish` | `POST /api/courses/:id/unpublish` | ✓ | ✓ | — | — | — | — | — |
+| `api::course.course.discardDraft` | `POST /api/courses/:id/discard-draft` | ✓ | ✓ | — | — | — | — | — |
+| `api::lesson.lesson.authoringList` | `GET /api/lessons/authoring` | ✓ | ✓ | — | — | — | — | — |
+| `api::lesson.lesson.editable` | `GET /api/lessons/:id/editable` | ✓ | ✓ | — | — | — | — | — |
+| `api::lesson.lesson.publish` | `POST /api/lessons/:id/publish` | ✓ | ✓ | — | — | — | — | — |
+| `api::lesson.lesson.unpublish` | `POST /api/lessons/:id/unpublish` | ✓ | ✓ | — | — | — | — | — |
+| `api::lesson.lesson.discardDraft` | `POST /api/lessons/:id/discard-draft` | ✓ | ✓ | — | — | — | — | — |
+| `api::department.department.editable` | `GET /api/departments/:id/editable` | ✓ | — | ✓ | — | — | — | — |
+| `api::team.team.editable` | `GET /api/teams/:id/editable` | ✓ | — | ✓ | ✓ | — | — | — |
+| `api::audit-event.audit-event.list` | `GET /api/audit-events` | ✓ | — | — | — | — | — | — |
 <!-- custom-action-grants:end -->
 
 The anonymous `public` role holds none of these, and the cms revokes the
@@ -291,6 +304,8 @@ mean in practice (immutable read receipts, ownership gates, removed core
 routes, the deliberate `guest` exceptions, why every role reads users, the
 upload hardening) is in
 [docs/security.md](./docs/security.md#permission-matrix-fine-print).
+
+The training authoring API accepts admin/editor writes with explicit draft/published status and If-Match revisions; course/lesson deletion stays in the panel. Organisation API edits are limited to descriptions, department color and admin-only images: names, structure, membership and creation/deletion stay in the panel. The fixed activity read is admin-only, with 25 rows per page and no generic query or mutation surface. The corresponding training/org/activity web forms are the next Batch 17 step.
 
 ### Languages
 

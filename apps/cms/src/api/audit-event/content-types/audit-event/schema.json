@@ -5,7 +5,7 @@
     "singularName": "audit-event",
     "pluralName": "audit-events",
     "displayName": "Audit event",
-    "description": "Content activity trail (decision 06 §H): one row per Document Service change of a guarded document, written inside the change's transaction by utils/audit.ts. Append-only (lifecycles.ts); kept AUDIT_RETENTION_DAYS (default 365). Keys only, never values. No routes in batch 15."
+    "description": "Content activity trail (decision 06 §H): one row per Document Service change of a guarded document, written inside the change's transaction by utils/audit.ts. Append-only (lifecycles.ts); kept AUDIT_RETENTION_DAYS (default 365). Keys only, never values. Admin-only fixed activity read; no content-API writes."
   },
   "options": { "draftAndPublish": false },
   "attributes": {

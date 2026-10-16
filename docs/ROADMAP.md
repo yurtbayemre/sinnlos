@@ -94,15 +94,14 @@ Workvivo, Sociabble, Simpplr, MangoApps feature guides, June 2026).
 > 35 Dependabot alerts (PR #84); the six left have no usable fix (see
 > docs/architecture.md §7b).
 
-> **In progress (2026-10-16, batch 17):** the reviewed
-> [implementation plan](plan-batch-17.md) covers training authoring, an
-> additional exam feedback mode, department/team content editing and the admin
-> activity page. The contracts, single-row org probe and shared player/API are
-> implemented locally. Learner responses omit keys in every mode; exam returns
-> only an overall result. All 44 HTTP player/privacy tests pass on SQLite and
-> Postgres. Training/org/activity authoring and media claims are next. The plan retains panel fallback, requires real HTTP privacy regressions,
-> and rehearses rollback to the previous CMS/web pair with a reversible exam-mode
-> downgrade instead of a separate compatibility release.
+> **In progress (2026-10-17, batch 17):** the reviewed
+> [implementation plan](plan-batch-17.md) has completed its contracts/org probe,
+> shared answerless player/API and backend remainder locally. Training authoring,
+> single-row org edits, course/org image claims and the admin activity read are
+> implemented with guarded grants. The web authoring forms, org detail rendering,
+> activity page, report move and navigation are next. Browser acceptance and the
+> combined deploy/rollback rehearsal with the previous CMS/web pair remain pending.
+> The accepted unlimited-attempt and current-published quiz limits remain.
 
 ## Why this is cheaper than it looks
 

@@ -321,8 +321,8 @@ const DRAFT_AND_PUBLISH_VERBS: readonly AuthoringVerb[] = [
  * CMS grants since batch 15 (lane 15A): announcements, events, quick links
  * and documents with every verb (the custom publish, unpublish and
  * discardDraft actions, `schedule` as `update`), polls and wiki spaces with
- * create, edit and delete (a poll publishes at create; §A), nothing on
- * courses and lessons (their write routes arrive in batch 17). Decision 06
+ * create, edit and delete (a poll publishes at create; §A). Courses and
+ * lessons have draft/publish authoring without delete (batch 17). Decision 06
  * §L2 maps each verb to a CMS action: `edit` and `schedule` to `update`,
  * `discard` to `discardDraft`. Documents have no web pages before 16C; the
  * capability says what the CMS allows, not which page exists (§N7).
@@ -334,8 +334,8 @@ const MODERATOR_AUTHORING: Readonly<Record<AuthoringArea, readonly AuthoringVerb
   quickLinks: DRAFT_AND_PUBLISH_VERBS,
   documents: DRAFT_AND_PUBLISH_VERBS,
   wikiSpaces: ["create", "edit", "delete"],
-  courses: [],
-  lessons: [],
+  courses: ["create", "edit", "publish", "unpublish", "schedule", "discard"],
+  lessons: ["create", "edit", "publish", "unpublish", "schedule", "discard"],
 };
 
 /**
@@ -417,7 +417,7 @@ export function capabilitiesFor(role: Role): Capabilities {
       delete: moderator,
     },
     org: {
-      // department.update: admin_role (can-edit-department bypass) and the
+      // department.update/editable: admin_role and the
       // head of the department; editor reads departments only.
       editDepartment: admin ? "any" : role === "department_head" ? "own" : "none",
       // team.update: admin_role, the head of the team's department, its lead.
@@ -427,8 +427,8 @@ export function capabilitiesFor(role: Role): Capabilities {
       analytics: admin,
       acknowledgements: admin,
       training: admin,
-      // The activity page arrives with batch 17.
-      activity: false,
+      // The fixed activity read is admin-only.
+      activity: admin,
     },
   };
 }

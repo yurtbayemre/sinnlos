@@ -407,7 +407,7 @@ describe("capabilitiesFor = the cms grants (decision 06 §L2)", () => {
     expect(caps.reports.analytics).toBe(holds(role, "api::search-log.search-log.summary"));
     expect(caps.reports.acknowledgements).toBe(holds(role, "plugin::users-permissions.role.find"));
     expect(caps.reports.training).toBe(admin);
-    expect(caps.reports.activity).toBe(false);
+    expect(caps.reports.activity).toBe(holds(role, "api::audit-event.audit-event.list"));
   });
 
   it("gives a value that is no role nothing", () => {

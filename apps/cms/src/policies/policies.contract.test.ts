@@ -23,7 +23,7 @@ import {
  *      false, for callers without a user, a role, a role type or an id, for
  *      lookalike role spellings and for missing, malformed and foreign
  *      target ids. The only other outcomes are a 400 (a ValidationError):
- *      the write allowlist's, for the three FX07 write gates, and
+ *      the write allowlist's and the org query closure's, and
  *      event-rsvp-own-rows' refusal of a client filter on the user
  *      relation (pinned in its own suite; the sweep below sends none); and
  *      the thrown ForbiddenError("Forbidden") of a gate whose refusal must
@@ -60,6 +60,9 @@ import {
  *      its team on their pages (in a space they read), everyone else false;
  *      a route config without the wiki-page uid gives no class; a custom
  *      page action refuses with a 404.
+ *   7. Single-row org gates enforce every admitted role, with admin_role
+ *      only moderating; editable refuses missing access with 404, updates
+ *      with false. Every query key, including status, is refused.
  */
 
 type PolicyFn = (ctx: StubPolicyContext, config: unknown, deps: { strapi: StrapiStub }) => unknown;
@@ -315,14 +318,14 @@ type Kind =
   | "status-pin"
   | "ownership"
   | "role-gate"
-  | "write-allowlist"
+  | "org-write-gate"
   | "moderator-write-gate"
   | "department-author-write-gate"
   | "row-write-gate";
 
 /** Kinds whose payload refusal is the allowlist's 400 (a ValidationError). */
 const WRITE_GATE_KINDS: readonly Kind[] = [
-  "write-allowlist",
+  "org-write-gate",
   "moderator-write-gate",
   "department-author-write-gate",
   "row-write-gate",
@@ -517,17 +520,35 @@ const CONTRACTS: Record<string, PolicyContract> = {
     cases: [{ bypass: ADMIN_EDITOR, injectsFilter: false, pinsStatus: false }],
     ownRequest: () => ({ params: { id: "1" } }),
   },
-  // FX07 write gates: admin_role/editor skip the allowlist.
+  // Single-row org gates: every admitted class is enforced; admin_role only moderates.
   "can-edit-department": {
-    kind: "write-allowlist",
+    kind: "org-write-gate",
     anonymous: "deny",
-    cases: [{ bypass: ADMIN_EDITOR, injectsFilter: false, pinsStatus: false }],
+    cases: [
+      { bypass: [], injectsFilter: false, pinsStatus: false },
+      {
+        config: { intent: "editable" },
+        bypass: [],
+        injectsFilter: false,
+        pinsStatus: false,
+        refusal: "notFound",
+      },
+    ],
     ownRequest: (ids) => ({ params: { id: ids.department }, body: { data: { description: "x" } } }),
   },
   "can-edit-team": {
-    kind: "write-allowlist",
+    kind: "org-write-gate",
     anonymous: "deny",
-    cases: [{ bypass: ADMIN_EDITOR, injectsFilter: false, pinsStatus: false }],
+    cases: [
+      { bypass: [], injectsFilter: false, pinsStatus: false },
+      {
+        config: { intent: "editable" },
+        bypass: [],
+        injectsFilter: false,
+        pinsStatus: false,
+        refusal: "notFound",
+      },
+    ],
     ownRequest: (ids) => ({ params: { id: ids.team }, body: { data: { description: "x" } } }),
   },
   // The wiki-page row gate (batch 16): no bypass. The moderator class is
@@ -933,19 +954,19 @@ describe.each(Object.keys(CONTRACTS).sort())("policy contract: %s", (name) => {
         const decoy = { filters: "DECOY" };
         const ctx = policyContext(
           { id: USER_ID[type], role: roleOf(type) },
-          { ...own, query: CLIENT_QUERY, decoy },
+          { ...own, query: contract.kind === "org-write-gate" ? {} : CLIENT_QUERY, decoy },
         );
         const body = ctx.request.body as { data?: unknown } | undefined;
         const sent = body?.data;
         expect(await run(name, config, ctx)).toEqual({ result: true });
         expect(ctx.query).toBe(decoy);
         const intent = (config as { intent?: unknown } | undefined)?.intent;
-        if (contract.kind === "write-allowlist") {
-          // The allowlist pins the write to published on the REAL query and
-          // replaces the payload with the checked copy.
-          expect(ctx.request.query.status).toBe("published");
-          expect(body?.data).not.toBe(sent);
-          expect(body?.data).toEqual(sent);
+        if (contract.kind === "org-write-gate") {
+          expect(ctx.request.query).toEqual({});
+          if (intent !== "editable") {
+            expect(body?.data).not.toBe(sent);
+            expect(body?.data).toEqual(sent);
+          }
         } else if (contract.kind === "row-write-gate" && intent === undefined) {
           // The same for a row class's generic update, with lastEditor the caller.
           expect(ctx.request.query.status).toBe("published");
