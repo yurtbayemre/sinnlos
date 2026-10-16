@@ -2,6 +2,10 @@ name: CI
 
 # Pull requests (any branch) and pushes to main. A branch without a pull
 # request runs CI through "Run workflow" (workflow_dispatch).
+# docs/**/*.md changes only need formatting; README contracts and all other
+# paths keep application checks. Frontend-only changes keep timezone tests
+# without databases; CMS/shared/infra/dependency/config changes need databases.
+# Manual runs always run every check.
 on:
   push:
     branches: [main]
@@ -25,11 +29,40 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  changes:
+    name: CI scope
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      full: ${{ steps.scope.outputs.full }}
+      database: ${{ steps.scope.outputs.database }}
+    steps:
+      - name: Checkout history for PR and push comparisons
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Test CI scope
+        run: node --test scripts/ci-scope.test.mjs
+
+      - name: Determine CI scope
+        id: scope
+        run: node scripts/ci-scope.mjs
+
   build:
+    needs: changes
+    # Keep this existing check failing when scope detection fails.
+    if: ${{ !cancelled() }}
     name: typecheck · lint · build
+    env:
+      SINNLOS_TEST_CMS: ${{ needs.changes.outputs.database }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
+      - name: Require successful scope detection
+        if: needs.changes.result != 'success'
+        run: exit 1
+
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -46,18 +79,21 @@ jobs:
           cache: pnpm
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --frozen-lockfile ${{ needs.changes.outputs.full != 'true' && '--ignore-scripts' || '' }}
 
       # packages/domain (SH01) ships dist/cjs + dist/esm; the apps' typecheck
       # and build and the package's dist test (packages/domain/src/
       # dist.test.ts, required under CI) read it.
       - name: Build @sinnlos/domain
+        if: needs.changes.outputs.full == 'true'
         run: pnpm build:domain
 
       - name: Typecheck
+        if: needs.changes.outputs.full == 'true'
         run: pnpm typecheck
 
       - name: Lint
+        if: needs.changes.outputs.full == 'true'
         run: pnpm lint
 
       # Blocking since the format sweep after batch 10. The two long
@@ -66,18 +102,22 @@ jobs:
         run: pnpm format:check
 
       - name: Test
+        if: needs.changes.outputs.full == 'true'
         run: pnpm test
 
       - name: Build
+        if: needs.changes.outputs.full == 'true'
         run: pnpm build
 
       # Blocking: a critical advisory in a production dependency fails the
       # run (fix it with an update or a scoped pnpm override).
       - name: Audit production dependencies (critical, blocking)
+        if: needs.changes.outputs.full == 'true'
         run: pnpm audit --prod --audit-level=critical
 
       # Advisory only: high findings are reported without blocking.
       - name: Audit production dependencies (high, non-blocking)
+        if: needs.changes.outputs.full == 'true'
         run: pnpm audit --prod --audit-level=high
         continue-on-error: true
 
@@ -87,12 +127,14 @@ jobs:
   # runner, the read-only report) switched on by SINNLOS_TEST_PG_URL. Gate
   # for every Strapi, knex or pg upgrade.
   datetime:
-    name: datetime · TZ matrix · Postgres 16
+    needs: changes
+    if: needs.changes.outputs.full == 'true'
+    name: datetime · TZ matrix
     runs-on: ubuntu-latest
     timeout-minutes: 30
     services:
       postgres:
-        image: postgres:16-alpine
+        image: ${{ needs.changes.outputs.database == 'true' && 'postgres:16-alpine' || '' }}
         env:
           POSTGRES_USER: sinnlos
           POSTGRES_PASSWORD: sinnlos
@@ -105,7 +147,8 @@ jobs:
           --health-timeout 5s
           --health-retries 20
     env:
-      SINNLOS_TEST_PG_URL: postgres://sinnlos:sinnlos@localhost:5432/sinnlos
+      SINNLOS_TEST_CMS: ${{ needs.changes.outputs.database }}
+      SINNLOS_TEST_PG_URL: ${{ needs.changes.outputs.database == 'true' && 'postgres://sinnlos:sinnlos@localhost:5432/sinnlos' || '' }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -128,7 +171,7 @@ jobs:
         run: pnpm build:domain
 
       # UTC, Europe/Berlin, Pacific/Auckland (scripts/test-tz.mjs).
-      - name: Test under three process time zones, with Postgres 16
+      - name: Test under three process time zones
         run: pnpm test:tz
 
   # Strapi-in-process integration suite (roadmap S11, `pnpm test:integration`,
@@ -138,6 +181,8 @@ jobs:
   # with one account per role. Separate from the TZ matrix: the suite pins
   # TZ=UTC itself (vitest.integration.config.ts), as the container does.
   integration:
+    needs: changes
+    if: needs.changes.outputs.database == 'true'
     name: integration · SQLite + Postgres 16
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -184,6 +229,8 @@ jobs:
   # The deployment files themselves: shell scripts and the compose files as
   # docker compose renders them. No Node needed.
   infra:
+    needs: changes
+    if: needs.changes.outputs.full == 'true'
     name: infra · shellcheck · compose config
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -255,6 +302,8 @@ jobs:
   # infra/deploy.sh builds them (context = repo root). Nothing is pushed;
   # the layer cache lives in the GitHub Actions cache, one scope per image.
   images:
+    needs: changes
+    if: needs.changes.outputs.full == 'true'
     name: images · ${{ matrix.app }}
     runs-on: ubuntu-latest
     timeout-minutes: 30

@@ -46,7 +46,14 @@ export default defineConfig({
   },
   test: {
     environment: "node",
-    include: ["apps/**/*.test.ts", "packages/**/*.test.ts", "infra/**/*.test.ts"],
+    include: [
+      // Keep the database-free deployment contract that reads web runtime/auth config.
+      ...(process.env.SINNLOS_TEST_CMS === "false"
+        ? ["apps/web/**/*.test.ts", "apps/cms/src/utils/deploy-preflight.test.ts"]
+        : ["apps/**/*.test.ts"]),
+      "packages/**/*.test.ts",
+      "infra/**/*.test.ts",
+    ],
     // The Strapi-in-process suite runs on its own: pnpm test:integration
     // (vitest.integration.config.ts).
     exclude: [
