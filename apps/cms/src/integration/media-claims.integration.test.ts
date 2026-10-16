@@ -435,13 +435,11 @@ describe.each(testEngines())("media claims on %s", (engine) => {
       await waitGone(replacement);
 
       const legacy = await panelFile();
-      await t.strapi
-        .documents(uid)
-        .update({
-          documentId: target.documentId,
-          data: { [field]: legacy },
-          ...(training ? { status: "published" } : {}),
-        });
+      await t.strapi.documents(uid).update({
+        documentId: target.documentId,
+        data: { [field]: legacy },
+        ...(training ? { status: "published" } : {}),
+      });
       expect((await save({ [field]: legacy })).status).toBe(200);
       expect((await save({ [field]: null })).status).toBe(200);
       expect(await exists(legacy)).toBe(true);
@@ -461,13 +459,11 @@ describe.each(testEngines())("media claims on %s", (engine) => {
     await expect(
       t.strapi.db.transaction(async () => {
         await asUser("editor", () =>
-          t.strapi
-            .documents(uid)
-            .update({
-              documentId: parent.documentId,
-              status: "published",
-              data: { coverImage: second },
-            }),
+          t.strapi.documents(uid).update({
+            documentId: parent.documentId,
+            status: "published",
+            data: { coverImage: second },
+          }),
         );
         throw new Error("rollback image replacement");
       }),
@@ -479,13 +475,11 @@ describe.each(testEngines())("media claims on %s", (engine) => {
         .update({ documentId: parent.documentId, status: "draft", data: { coverImage: second } }),
     );
     expect(await exists(first)).toBe(true);
-    const published = await t.strapi
-      .documents(uid)
-      .findOne({
-        documentId: parent.documentId,
-        status: "published",
-        populate: { coverImage: true },
-      });
+    const published = await t.strapi.documents(uid).findOne({
+      documentId: parent.documentId,
+      status: "published",
+      populate: { coverImage: true },
+    });
     expect(published?.coverImage).toMatchObject({ id: first });
     await t.strapi.documents(uid).publish({ documentId: parent.documentId });
     await waitGone(first);
@@ -600,14 +594,12 @@ describe.each(testEngines())("media claims on %s", (engine) => {
     it("org attachment and cleanup serialize on the same file lock", async () => {
       for (const attachFirst of [true, false]) {
         const file = await upload("admin_role", PNG_1PX);
-        const target = await t.strapi
-          .documents(DEPARTMENT)
-          .create({
-            data: {
-              name: `Race ${Math.random()}`,
-              slug: `race-${Math.random().toString(36).slice(2)}`,
-            },
-          });
+        const target = await t.strapi.documents(DEPARTMENT).create({
+          data: {
+            name: `Race ${Math.random()}`,
+            slug: `race-${Math.random().toString(36).slice(2)}`,
+          },
+        });
         const attach = () =>
           asUser("admin_role", () =>
             t.strapi
