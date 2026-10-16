@@ -557,6 +557,7 @@
     "quizAllCorrect": "All correct!",
     "quizSomeWrong": "{count, plural, one {# answer is not right yet} other {# answers are not right yet}} — adjust and check again.",
     "completeLocked": "Completion unlocks after passing the comprehension check.",
+    "quizContentInvalid": "This quiz contains invalid content. Please contact the course author.",
     "quizNotPassed": "Not all answers are correct (the questions may have changed). Answer them again."
   },
   "trainingReport": {

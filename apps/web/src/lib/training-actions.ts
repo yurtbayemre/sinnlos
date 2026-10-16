@@ -1,11 +1,14 @@
 "use server";
 
 import { refresh } from "next/cache";
+import { QUIZ_CONTENT_INVALID } from "@sinnlos/domain";
 import { actionFailure, runCmsAction, type ActionResult } from "@/lib/action-result";
 import { strapi } from "@/lib/strapi";
 
 /** The cms's 400 for a quiz lesson completed without the correct answers (issue #70). */
 const QUIZ_REFUSAL = "Quiz not passed";
+
+export type TrainingActionError = "quizFailed" | typeof QUIZ_CONTENT_INVALID;
 
 /** The most answers a completion carries (a bound on the client's input, not on quizzes). */
 const MAX_ANSWERS = 100;
@@ -32,7 +35,7 @@ function isAnswerList(value: unknown): value is number[] {
 export async function completeLesson(
   lessonDocumentId: string,
   answers: number[] | null = null,
-): Promise<ActionResult<"quizFailed">> {
+): Promise<ActionResult<TrainingActionError>> {
   // A Server Action's arguments come from the client.
   if (typeof lessonDocumentId !== "string" || lessonDocumentId === "") {
     return actionFailure("invalid");
@@ -51,8 +54,11 @@ export async function completeLesson(
       }),
     {
       label: "[training] complete lesson",
-      mapError: (cms) =>
-        cms.status === 400 && cms.message === QUIZ_REFUSAL ? "quizFailed" : undefined,
+      mapError: (cms) => {
+        if (cms.status !== 400) return undefined;
+        if (cms.details?.code === QUIZ_CONTENT_INVALID) return QUIZ_CONTENT_INVALID;
+        return cms.message === QUIZ_REFUSAL ? "quizFailed" : undefined;
+      },
       // Progress is read uncached (D-DC01) — refresh so the course pages and
       // the dashboard banner reflect the new state without a manual reload.
       after: () => refresh(),

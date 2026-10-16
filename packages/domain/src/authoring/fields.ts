@@ -174,3 +174,33 @@ export const DOCUMENT_CATEGORIES = ["policy", "form", "template", "guide", "othe
 
 /** Most departments one payload may name (event, quick link, document, poll). */
 export const MAX_TARGET_DEPARTMENTS = 50;
+
+// Batch 17 contracts; live authoring registration stays with each guarded endpoint.
+
+/** Training writers are the existing moderators (admin_role and editor). */
+export const TRAINING_FIELDS = {
+  course: {
+    moderator: ["title", "description", "mandatory", "completionMode", "coverImage", "publishAt"],
+  },
+  lesson: {
+    moderator: ["title", "body", "order", "course", "videoUrl", "quiz", "publishAt"],
+  },
+} as const;
+
+export type TrainingAuthoringType = keyof typeof TRAINING_FIELDS;
+
+/** Org moderator means admin_role only; heads/leads keep their existing row grants. */
+export const ORG_FIELDS = {
+  department: {
+    moderator: ["description", "color", "headerImage"],
+    departmentHead: ["description", "color"],
+  },
+  team: {
+    moderator: ["description", "avatar"],
+    departmentHead: ["description"],
+    teamLead: ["description"],
+  },
+} as const;
+
+export type OrgAuthoringType = keyof typeof ORG_FIELDS;
+export type OrgEditorClass = keyof (typeof ORG_FIELDS)["team"];

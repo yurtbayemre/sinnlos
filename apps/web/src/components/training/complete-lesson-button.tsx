@@ -4,9 +4,10 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { CheckCircle2 } from "lucide-react";
+import { QUIZ_CONTENT_INVALID } from "@sinnlos/domain";
 import { Button } from "@/components/ui/button";
 import { isSharedErrorCode, startCmsAction, type CommonCode } from "@/lib/action-result";
-import { completeLesson } from "@/lib/training-actions";
+import { completeLesson, type TrainingActionError } from "@/lib/training-actions";
 
 /**
  * "Mark lesson as completed" control (ack-button clone, issue #29).
@@ -38,7 +39,7 @@ export function CompleteLessonButton({
   const tErrors = useTranslations("actionErrors");
   const router = useRouter();
   const [justCompleted, setJustCompleted] = useState(false);
-  const [error, setError] = useState<CommonCode | "quizFailed" | null>(null);
+  const [error, setError] = useState<CommonCode | TrainingActionError | null>(null);
   const [isPending, startTransition] = useTransition();
 
   const completed = completedAtLabel !== null || justCompleted;
@@ -76,9 +77,11 @@ export function CompleteLessonButton({
         <span role="alert" className="text-sm text-destructive">
           {error === "quizFailed"
             ? t("quizNotPassed")
-            : isSharedErrorCode(error)
-              ? tErrors(error)
-              : t("completeFailed")}
+            : error === QUIZ_CONTENT_INVALID
+              ? t("quizContentInvalid")
+              : isSharedErrorCode(error)
+                ? tErrors(error)
+                : t("completeFailed")}
         </span>
       )}
     </div>
