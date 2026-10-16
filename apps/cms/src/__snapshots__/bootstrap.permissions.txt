@@ -65,8 +65,10 @@ admin_role|api::kudos.kudos.findOne
 admin_role|api::lesson-progress.lesson-progress.create
 admin_role|api::lesson-progress.lesson-progress.find
 admin_role|api::lesson-progress.lesson-progress.findOne
+admin_role|api::lesson.lesson.check
 admin_role|api::lesson.lesson.find
 admin_role|api::lesson.lesson.findOne
+admin_role|api::lesson.lesson.player
 admin_role|api::notification.notification.delete
 admin_role|api::notification.notification.find
 admin_role|api::notification.notification.findOne
@@ -164,8 +166,10 @@ authenticated|api::kudos.kudos.findOne
 authenticated|api::lesson-progress.lesson-progress.create
 authenticated|api::lesson-progress.lesson-progress.find
 authenticated|api::lesson-progress.lesson-progress.findOne
+authenticated|api::lesson.lesson.check
 authenticated|api::lesson.lesson.find
 authenticated|api::lesson.lesson.findOne
+authenticated|api::lesson.lesson.player
 authenticated|api::notification.notification.find
 authenticated|api::notification.notification.findOne
 authenticated|api::notification.notification.markAllRead
@@ -251,8 +255,10 @@ department_head|api::kudos.kudos.findOne
 department_head|api::lesson-progress.lesson-progress.create
 department_head|api::lesson-progress.lesson-progress.find
 department_head|api::lesson-progress.lesson-progress.findOne
+department_head|api::lesson.lesson.check
 department_head|api::lesson.lesson.find
 department_head|api::lesson.lesson.findOne
+department_head|api::lesson.lesson.player
 department_head|api::notification.notification.delete
 department_head|api::notification.notification.find
 department_head|api::notification.notification.findOne
@@ -356,8 +362,10 @@ editor|api::kudos.kudos.findOne
 editor|api::lesson-progress.lesson-progress.create
 editor|api::lesson-progress.lesson-progress.find
 editor|api::lesson-progress.lesson-progress.findOne
+editor|api::lesson.lesson.check
 editor|api::lesson.lesson.find
 editor|api::lesson.lesson.findOne
+editor|api::lesson.lesson.player
 editor|api::notification.notification.delete
 editor|api::notification.notification.find
 editor|api::notification.notification.findOne
@@ -487,8 +495,10 @@ member|api::kudos.kudos.findOne
 member|api::lesson-progress.lesson-progress.create
 member|api::lesson-progress.lesson-progress.find
 member|api::lesson-progress.lesson-progress.findOne
+member|api::lesson.lesson.check
 member|api::lesson.lesson.find
 member|api::lesson.lesson.findOne
+member|api::lesson.lesson.player
 member|api::notification.notification.delete
 member|api::notification.notification.find
 member|api::notification.notification.findOne
@@ -564,8 +574,10 @@ team_lead|api::kudos.kudos.findOne
 team_lead|api::lesson-progress.lesson-progress.create
 team_lead|api::lesson-progress.lesson-progress.find
 team_lead|api::lesson-progress.lesson-progress.findOne
+team_lead|api::lesson.lesson.check
 team_lead|api::lesson.lesson.find
 team_lead|api::lesson.lesson.findOne
+team_lead|api::lesson.lesson.player
 team_lead|api::notification.notification.delete
 team_lead|api::notification.notification.find
 team_lead|api::notification.notification.findOne

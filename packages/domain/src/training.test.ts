@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   QUIZ_MAX_QUESTIONS,
+  isQuizSelectionList,
   parseQuiz,
   quizAnswersPass,
   validateQuiz,
@@ -145,5 +146,50 @@ describe("quizAnswersPass (the completion gate, issue #70)", () => {
     ]);
     expect(quizAnswersPass(withMalformed, [1, 0])).toBe(true);
     expect(quizAnswersPass(withMalformed, [1, 0, 0])).toBe(false);
+  });
+});
+
+describe("isQuizSelectionList", () => {
+  it("accepts empty, partial, unordered and maximum-size bounded selections", () => {
+    expect(isQuizSelectionList([])).toBe(true);
+    expect(isQuizSelectionList([{ questionIndex: 19, optionIndex: 7 }])).toBe(true);
+    expect(
+      isQuizSelectionList([
+        { questionIndex: 1, optionIndex: 1 },
+        { questionIndex: 0, optionIndex: 0 },
+      ]),
+    ).toBe(true);
+    expect(
+      isQuizSelectionList(
+        Array.from({ length: 20 }, (_, questionIndex) => ({ questionIndex, optionIndex: 0 })),
+      ),
+    ).toBe(true);
+  });
+
+  it("rejects wrong shapes, unknown keys, duplicates and values outside integer bounds", () => {
+    const first = { questionIndex: 0, optionIndex: 0 };
+    for (const value of [
+      undefined,
+      null,
+      "0,1",
+      {},
+      [null],
+      [[0, 0]],
+      [{ questionIndex: 0 }],
+      [{ ...first, correct: true }],
+      [{ questionIndex: 0, answer: 0 }],
+      [{ questionIndex: -1, optionIndex: 0 }],
+      [{ questionIndex: 20, optionIndex: 0 }],
+      [{ questionIndex: 0.1, optionIndex: 0 }],
+      [{ questionIndex: "0", optionIndex: 0 }],
+      [{ questionIndex: 0, optionIndex: -1 }],
+      [{ questionIndex: 0, optionIndex: 8 }],
+      [{ questionIndex: 0, optionIndex: 0.1 }],
+      [{ questionIndex: 0, optionIndex: "0" }],
+      [first, first],
+      Array(21).fill(first),
+    ]) {
+      expect(isQuizSelectionList(value), JSON.stringify(value)).toBe(false);
+    }
   });
 });

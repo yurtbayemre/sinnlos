@@ -8,20 +8,13 @@ import { useTranslations } from "next-intl";
 
 import { CompleteLessonButton } from "@/components/training/complete-lesson-button";
 import { QuizBlock } from "@/components/training/quiz-block";
-import { quizGatesCompletion, type CompletionMode, type QuizQuestion } from "@/lib/training-shared";
+import {
+  quizGatesCompletion,
+  type CompletionMode,
+  type LearnerQuizQuestion,
+} from "@/lib/training-shared";
 
-/**
- * Client wrapper tying the quiz to the completion button (issue #29; issue
- * #70): on every course the button of a lesson with questions stays locked
- * until all answers are correct, and the completion sends them, so the cms
- * can check them too. The course's completionMode picks the feedback only:
- * per answer ("confirm") or one batch check ("quizGate"). Already-completed
- * lessons show the quiz in instant mode for review and are never re-locked.
- * Lessons WITHOUT a quiz pass trivially (fail-open for content gaps — a
- * gate must never dead-lock a lesson, see evaluateQuiz). When the cms
- * refuses the answers anyway (the quiz changed since the page loaded), the
- * quiz starts over.
- */
+/** Quiz feedback unlocks completion; the CMS independently grades the submitted answers. */
 export function LessonCompletion({
   quiz,
   completionMode,
@@ -29,7 +22,7 @@ export function LessonCompletion({
   completedAtLabel,
   nextHref,
 }: {
-  quiz: QuizQuestion[];
+  quiz: LearnerQuizQuestion[];
   completionMode: CompletionMode;
   lessonDocumentId: string;
   completedAtLabel: string | null;
@@ -48,7 +41,8 @@ export function LessonCompletion({
       <QuizBlock
         key={attempt}
         quiz={quiz}
-        mode={gated && completionMode === "quizGate" ? "check" : "instant"}
+        lessonDocumentId={lessonDocumentId}
+        completionMode={completionMode}
         onPassedChange={gated ? setAnswers : undefined}
       />
       <footer className="flex flex-wrap items-center justify-between gap-4 border-t pt-6">

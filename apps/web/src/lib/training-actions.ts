@@ -1,8 +1,20 @@
 "use server";
 
 import { refresh } from "next/cache";
-import { QUIZ_CONTENT_INVALID } from "@sinnlos/domain";
-import { actionFailure, runCmsAction, type ActionResult } from "@/lib/action-result";
+import {
+  QUIZ_CONTENT_INVALID,
+  isDocumentId,
+  isQuizSelectionList,
+  type QuizCheckRequest,
+  type QuizCheckResponse,
+  type QuizSelection,
+} from "@sinnlos/domain";
+import {
+  actionFailure,
+  runCmsAction,
+  type ActionResult,
+  type CmsErrorInfo,
+} from "@/lib/action-result";
 import { strapi } from "@/lib/strapi";
 
 /** The cms's 400 for a quiz lesson completed without the correct answers (issue #70). */
@@ -54,14 +66,42 @@ export async function completeLesson(
       }),
     {
       label: "[training] complete lesson",
-      mapError: (cms) => {
-        if (cms.status !== 400) return undefined;
-        if (cms.details?.code === QUIZ_CONTENT_INVALID) return QUIZ_CONTENT_INVALID;
-        return cms.message === QUIZ_REFUSAL ? "quizFailed" : undefined;
-      },
+      mapError: trainingError,
       // Progress is read uncached (D-DC01) — refresh so the course pages and
       // the dashboard banner reflect the new state without a manual reload.
       after: () => refresh(),
+    },
+  );
+}
+
+function trainingError(cms: CmsErrorInfo): TrainingActionError | undefined {
+  if (cms.status !== 400) return undefined;
+  if (cms.details?.code === QUIZ_CONTENT_INVALID) return QUIZ_CONTENT_INVALID;
+  return cms.message === QUIZ_REFUSAL ? "quizFailed" : undefined;
+}
+
+/** Feedback only: no completion receipt and no refresh after a successful check. */
+export async function checkLesson(
+  lessonDocumentId: string,
+  answers: QuizSelection[],
+): Promise<ActionResult<TrainingActionError, QuizCheckResponse["data"]>> {
+  if (!isDocumentId(lessonDocumentId) || !isQuizSelectionList(answers)) {
+    return actionFailure("invalid");
+  }
+  const body: QuizCheckRequest = { data: { answers } };
+  return runCmsAction(
+    () =>
+      strapi<QuizCheckResponse>(`/api/lessons/${encodeURIComponent(lessonDocumentId)}/check`, {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
+    {
+      label: "[training] check lesson",
+      mapError: (cms) =>
+        cms.status === 400 && cms.message === "Invalid quiz answers"
+          ? "quizFailed"
+          : trainingError(cms),
+      data: (response) => response.data,
     },
   );
 }

@@ -15,7 +15,17 @@
  * parser and stays the AUTHORITATIVE XSS layer: this module is the
  * author-feedback layer.
  */
-import { validateQuiz, youtubeVideoId, type QuizQuestion } from "@sinnlos/domain";
+import {
+  QUIZ_CONTENT_INVALID,
+  isQuizSelectionList,
+  quizAnswersPass,
+  validateQuiz,
+  youtubeVideoId,
+  type QuizCheckResponse,
+  type QuizQuestion,
+  type QuizVerdict,
+  type TrainingCompletionMode,
+} from "@sinnlos/domain";
 
 import { parseAdminJsonField } from "./json-field";
 
@@ -79,4 +89,47 @@ export function validateLessonData(data: Record<string, unknown>): LessonDataRes
     }
   }
   return { normalized };
+}
+
+/** Stored content is already JSON; only null or [] means a manual-completion lesson. */
+export function validateStoredQuiz(
+  raw: unknown,
+): { quiz: QuizQuestion[] } | { error: typeof QUIZ_CONTENT_INVALID } {
+  const result = validateQuiz(raw);
+  return raw === undefined || "error" in result ? { error: QUIZ_CONTENT_INVALID } : result;
+}
+
+/** Same strict stored quiz and grader as completion; exam never returns individual verdicts. */
+export function checkStoredQuiz(
+  raw: unknown,
+  completionMode: TrainingCompletionMode,
+  selections: unknown,
+): QuizCheckResponse | { error: typeof QUIZ_CONTENT_INVALID | "Invalid quiz answers" } {
+  const validated = validateStoredQuiz(raw);
+  if ("error" in validated) return validated;
+  const { quiz } = validated;
+  if (
+    !isQuizSelectionList(selections) ||
+    selections.length > quiz.length ||
+    (completionMode !== "confirm" && selections.length !== quiz.length)
+  ) {
+    return { error: "Invalid quiz answers" };
+  }
+
+  const answers: (number | undefined)[] = Array(quiz.length).fill(undefined);
+  const verdicts: QuizVerdict[] = [];
+  for (const { questionIndex, optionIndex } of selections) {
+    if (questionIndex >= quiz.length || optionIndex >= quiz[questionIndex].options.length) {
+      return { error: "Invalid quiz answers" };
+    }
+    answers[questionIndex] = optionIndex;
+    verdicts.push({ questionIndex, correct: optionIndex === quiz[questionIndex].correctIndex });
+  }
+
+  const data: QuizCheckResponse["data"] = {
+    completionMode,
+    passed: quizAnswersPass(quiz, answers),
+  };
+  if (completionMode !== "exam") data.verdicts = verdicts;
+  return { data };
 }

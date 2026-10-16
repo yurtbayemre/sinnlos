@@ -201,6 +201,8 @@ const PREDICATES: Array<{
         role,
         `${A.course}.find`,
         `${A.lesson}.find`,
+        `${A.lesson}.player`,
+        `${A.lesson}.check`,
         `${A.lessonProgress}.find`,
         `${A.lessonProgress}.create`,
       ),

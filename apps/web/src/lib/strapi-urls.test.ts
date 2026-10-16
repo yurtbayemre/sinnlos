@@ -93,6 +93,24 @@ function respond(url: string): Response {
       },
     });
   }
+  if (/^\/api\/lessons\/[^/?]+\/player$/.test(path)) {
+    return json({
+      data: {
+        documentId: "lesson-doc-1",
+        title: "Lesson",
+        body: null,
+        order: 1,
+        videoUrl: null,
+        course: {
+          documentId: "course-doc-1",
+          title: "Course",
+          slug: "course",
+          completionMode: "confirm",
+        },
+        quiz: [],
+      },
+    });
+  }
   if (path.startsWith("/api/users/")) return json({ id: 7, displayName: "Person" });
   if (path.startsWith("/api/users?")) return json([]);
   if (path.startsWith("/api/search-logs/summary")) {

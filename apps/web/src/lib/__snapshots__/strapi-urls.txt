@@ -97,7 +97,7 @@ GET http://cms.test/api/courses?populate[lessons][fields][0]=documentId&populate
 GET http://cms.test/api/courses?filters[slug][$eq]=security%20%26%20safety&populate[lessons][fields][0]=documentId&populate[lessons][fields][1]=title&populate[lessons][fields][2]=order&populate[coverImage]=true cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
 
 ## training.fetchLessonByDocumentId
-GET http://cms.test/api/lessons?filters[documentId][$eq]=lesson%2Fdoc%201&populate[course][fields][0]=title&populate[course][fields][1]=slug&populate[course][fields][2]=documentId cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
+GET http://cms.test/api/lessons/lesson%2Fdoc%201/player cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
 
 ## training.fetchCourseProgress
 GET http://cms.test/api/lesson-progresses?filters[targetDocumentId][$in][0]=lesson-doc-1&filters[targetDocumentId][$in][1]=lesson%20doc%202&fields[0]=targetDocumentId&populate[user][fields][0]=id&sort[0]=id:asc&pagination[page]=1&pagination[pageSize]=100 cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
