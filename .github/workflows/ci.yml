@@ -3,7 +3,9 @@ name: CI
 # Pull requests (any branch) and pushes to main. A branch without a pull
 # request runs CI through "Run workflow" (workflow_dispatch).
 # docs/**/*.md changes only need formatting; README contracts and all other
-# paths keep full CI. Manual runs always run every check.
+# paths keep application checks. Frontend-only changes keep timezone tests
+# without databases; CMS/shared/infra/dependency/config changes need databases.
+# Manual runs always run every check.
 on:
   push:
     branches: [main]
@@ -33,6 +35,7 @@ jobs:
     timeout-minutes: 5
     outputs:
       full: ${{ steps.scope.outputs.full }}
+      database: ${{ steps.scope.outputs.database }}
     steps:
       - name: Checkout history for PR and push comparisons
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -51,6 +54,8 @@ jobs:
     # Keep this existing check failing when scope detection fails.
     if: ${{ !cancelled() }}
     name: typecheck · lint · build
+    env:
+      SINNLOS_TEST_CMS: ${{ needs.changes.outputs.database }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -124,12 +129,12 @@ jobs:
   datetime:
     needs: changes
     if: needs.changes.outputs.full == 'true'
-    name: datetime · TZ matrix · Postgres 16
+    name: datetime · TZ matrix
     runs-on: ubuntu-latest
     timeout-minutes: 30
     services:
       postgres:
-        image: postgres:16-alpine
+        image: ${{ needs.changes.outputs.database == 'true' && 'postgres:16-alpine' || '' }}
         env:
           POSTGRES_USER: sinnlos
           POSTGRES_PASSWORD: sinnlos
@@ -142,7 +147,8 @@ jobs:
           --health-timeout 5s
           --health-retries 20
     env:
-      SINNLOS_TEST_PG_URL: postgres://sinnlos:sinnlos@localhost:5432/sinnlos
+      SINNLOS_TEST_CMS: ${{ needs.changes.outputs.database }}
+      SINNLOS_TEST_PG_URL: ${{ needs.changes.outputs.database == 'true' && 'postgres://sinnlos:sinnlos@localhost:5432/sinnlos' || '' }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -165,7 +171,7 @@ jobs:
         run: pnpm build:domain
 
       # UTC, Europe/Berlin, Pacific/Auckland (scripts/test-tz.mjs).
-      - name: Test under three process time zones, with Postgres 16
+      - name: Test under three process time zones
         run: pnpm test:tz
 
   # Strapi-in-process integration suite (roadmap S11, `pnpm test:integration`,
@@ -176,7 +182,7 @@ jobs:
   # TZ=UTC itself (vitest.integration.config.ts), as the container does.
   integration:
     needs: changes
-    if: needs.changes.outputs.full == 'true'
+    if: needs.changes.outputs.database == 'true'
     name: integration · SQLite + Postgres 16
     runs-on: ubuntu-latest
     timeout-minutes: 20

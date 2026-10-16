@@ -41,10 +41,10 @@ test("CI scope uses the whole change and excludes only ordinary documentation", 
     });
     return { ...result, output: readFileSync(output, "utf8") };
   };
-  const check = (name, event, full) => {
+  const check = (name, event, full, database = full) => {
     const result = run(name, event);
     assert.equal(result.status, 0, result.stderr);
-    assert.equal(result.output, `full=${full}\n`);
+    assert.equal(result.output, `full=${full}\ndatabase=${database}\n`);
   };
   const pr = (base, head) => ({ pull_request: { base: { sha: base }, head: { sha: head } } });
 
@@ -67,10 +67,22 @@ test("CI scope uses the whole change and excludes only ordinary documentation", 
     ".github/workflows/ci.yml",
     "pnpm-lock.yaml",
     "apps/example.ts",
+    "apps/cms/src/api/example/controller.ts",
+    "apps/cms/src/api/example/schema.json",
+    "packages/domain/src/training.ts",
+    "infra/diagnostics/check.sql",
+    "vitest.config.ts",
   ]) {
     const before = git("rev-parse", "HEAD");
     write(path, "changed\n");
     check("push", { before, after: commit() }, true);
+  }
+  for (const path of ["apps/web/src/page.tsx", "apps/web/src/style.css", "apps/web/package.json"]) {
+    const before = git("rev-parse", "HEAD");
+    write(path);
+    const after = commit();
+    check("push", { before, after }, true, false);
+    check("pull_request", pr(before, after), true, false);
   }
   const code = git("rev-parse", "HEAD");
   write("docs/plan.md", "another doc change\n");
