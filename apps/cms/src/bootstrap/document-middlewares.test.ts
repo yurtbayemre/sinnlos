@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { IMAGE_FORMATS, UPLOAD_FORMAT_SPECS } from "@sinnlos/domain";
 
 import { DOCUMENT_FILE_MIMES } from "../utils/authoring-checks";
 import { MEDIA_CLAIM_FIELDS } from "../utils/media-claims";
@@ -101,11 +102,19 @@ describe("Document Service middleware slots (K6)", () => {
         }
       }
     }
-    expect([...mediaFields.keys()]).toEqual(["api::document.document.file"]);
+    expect([...mediaFields.keys()].sort()).toEqual([
+      "api::course.course.coverImage",
+      "api::department.department.headerImage",
+      "api::document.document.file",
+      "api::team.team.avatar",
+    ]);
     for (const [field, [uid, key]] of mediaFields) {
       // Claimed, with the very mimes the early check admits.
       expect([...(MEDIA_CLAIM_FIELDS[uid]?.[key] ?? [])].sort(), field).toEqual(
-        [...DOCUMENT_FILE_MIMES].sort(),
+        (uid === "api::document.document"
+          ? [...DOCUMENT_FILE_MIMES]
+          : IMAGE_FORMATS.map((format) => UPLOAD_FORMAT_SPECS[format].mime)
+        ).sort(),
       );
     }
     const slots = documentMiddlewares(host(null)).map((entry) => entry.slot);

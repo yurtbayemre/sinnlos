@@ -4,6 +4,8 @@ import {
   MAX_POLL_OPTION_LENGTH,
   MAX_TARGET_DEPARTMENTS,
   QUICK_LINK_CATEGORIES,
+  validateQuiz,
+  youtubeVideoId,
   WIKI_SPACE_VISIBILITIES,
   checkBoolean,
   checkEnum,
@@ -24,15 +26,11 @@ import {
   type AuthoringFieldCode,
 } from "@sinnlos/domain";
 import { errors, strings } from "@strapi/utils";
-import {
-  MODERATORS,
-  ROLE_PRIVILEGE_ORDER,
-  STAFF_ROLES,
-  hasRole,
-  type RoleType,
-} from "../bootstrap/roles";
+import { ROLE_PRIVILEGE_ORDER, STAFF_ROLES, type RoleType } from "../bootstrap/roles";
 import {
   ANNOUNCEMENT_UID,
+  COURSE_UID,
+  LESSON_UID,
   DOCUMENT_UID,
   EVENT_UID,
   QUICK_LINK_UID,
@@ -62,8 +60,8 @@ import { appTimeZone } from "./time";
  * The model is declarative and the one extension point of v2 authoring:
  *   content type → write action → ROLE CLASS → rule (the allowed fields,
  *   what the server derives, the checks across fields).
- * A role class is the caller's relation to the row being written: "head" of
- * this department, "lead" of this team, "author" of this page, and since
+ * A role class is the caller's relation to the row being written: "departmentHead" of
+ * this department, "teamLead" of this team, "author" of this page, and since
  * batch 15 "moderator" (admin_role/editor on the five phase-1 types) and
  * "departmentAuthor" (a department head on their department's announcement,
  * event or document, §N). The route's write policy decides the row gate and
@@ -72,14 +70,8 @@ import { appTimeZone } from "./time";
  * policy enforces which (type, action, classes), and that every write route
  * a role holds on these types goes through one.
  *
- * THE BYPASS ENDS ON THE AUTHORED TYPES. Announcement, event, quick-link,
- * document and poll (batch 15) and wiki-space (batch 16) are written
- * through global::can-author and the authoring controller (utils/
- * write-gate.ts, utils/authoring-controller.ts), wiki pages through the
- * rebuilt global::can-edit-wiki (utils/wiki-gate.ts, batch 16): admin_role
- * and editor are the `moderator` class there, so their payloads are
- * checked like everyone's. WRITE_BYPASS_ROLES is left only for the FX07
- * gates of departments and teams (batch 17 moves them).
+ * Every authored write, including moderator and organisation writes, uses
+ * its role class's allowlist. Org moderator means admin_role only.
  *
  * For every class:
  *   - every payload key must be listed for the class, otherwise the request
@@ -154,23 +146,6 @@ export const MODERATOR_CLASS = "moderator";
 /** The role class of a department head on their department's items (§N). */
 export const DEPARTMENT_AUTHOR_CLASS = "departmentAuthor";
 
-/**
- * Roles that skip the allowlist entirely on the FX07 gates that still have
- * a bypass (department, team: batch 17 rebuilds them): the MODERATORS of
- * the role vocabulary (bootstrap/roles.ts). The write policies check them
- * with `hasRole(user, WRITE_BYPASS_ROLES)`. On the authored types (the five
- * phase-1 types, wiki spaces and wiki pages) there is no bypass: moderators
- * are the `moderator` class.
- */
-export const WRITE_BYPASS_ROLES: readonly RoleType[] = MODERATORS;
-
-/**
- * The same check for a bare role type, for the route matrix
- * (routes.matrix.test.ts derives which grants the allowlist must cover).
- */
-export const isWriteBypassRole = (roleType: unknown): boolean =>
-  hasRole({ role: { type: roleType } }, WRITE_BYPASS_ROLES);
-
 export type WriteAction = "create" | "update";
 
 /**
@@ -209,7 +184,7 @@ export type RelationCheckName = "wikiSpace" | "wikiParent";
 
 /** Names of the to-one relation checks the v2 write gate supplies (utils/authoring-checks.ts). */
 export type AuthoringRelationCheckName =
-  "department" | "team" | "callerDepartment" | "teamOfCallerDepartment";
+  "department" | "team" | "callerDepartment" | "teamOfCallerDepartment" | "course";
 
 /** Every named to-one relation check. */
 export type AnyRelationCheckName = RelationCheckName | AuthoringRelationCheckName;
@@ -692,17 +667,41 @@ const WIKI_SPACE_MODERATOR: WriteRule = {
   crossCheck: wikiSpaceCrossCheck,
 };
 
-/**
- * Team rows: `description` only. `members` and `lead` are NOT writable by
- * any non-bypass class: membership decides who reads the team's wiki space
- * (visible-ids.ts) and who is in an announcement audience, and `lead`
- * grants edit rights on the team's pages, so both stay admin-managed (admin
- * panel, later the planned Entra directory sync). A plain member of the
- * team has no class here at all, so it cannot write the team. Media
- * (`avatar`) is admin-panel only.
- */
+/** Team leads and department heads edit text; structural fields stay in the panel. */
 const TEAM_EDIT: WriteRule = {
-  fields: { description: value(valueChecks.nullableText) },
+  fields: { description: value(checkMarkdown) },
+};
+const DEPARTMENT_EDIT: WriteRule = {
+  fields: { description: value(checkMarkdown), color: value(valueChecks.hexColor) },
+};
+const COURSE_MODERATOR: WriteRule = {
+  fields: {
+    title: value(checkRequiredString),
+    description: value(checkMarkdown),
+    mandatory: value(checkBoolean),
+    completionMode: value(checkEnum(["confirm", "quizGate", "exam"])),
+    coverImage: media("ownUpload"),
+    publishAt: value(checkNullableInstant),
+  },
+  crossCheck: scheduledCrossCheck,
+  readinessWhenScheduled: true,
+};
+const LESSON_MODERATOR: WriteRule = {
+  fields: {
+    title: value(checkRequiredString),
+    body: value(checkMarkdown),
+    order: value(checkOrder),
+    course: toOne("course"),
+    videoUrl: value((raw) =>
+      raw === null || raw === ""
+        ? null
+        : (checkNullableString(raw) ?? (youtubeVideoId(raw) ? null : "videoUrlNotYoutube")),
+    ),
+    quiz: value((raw) => ("error" in validateQuiz(raw) ? "quizInvalid" : null)),
+    publishAt: value(checkNullableInstant),
+  },
+  crossCheck: scheduledCrossCheck,
+  readinessWhenScheduled: true,
 };
 
 // ---- v2 authoring, batch 15: the five phase-1 types ------------------------
@@ -881,9 +880,6 @@ const POLL_RULES = { moderator: withCreate(POLL_MODERATOR, "author", false) };
 /*
  * v2 follow-ups, kept OUT of the table on purpose until each has its own
  * batch and check:
- *   - media: department `headerImage` and team `avatar` (batch 17), with
- *     the `media` builder and the `ownUpload` check document `file` uses
- *     since batch 16 (images only there).
  *   - team `members` / `lead`: stay admin-managed. Lead-managed membership
  *     belongs on a dedicated route with its own rules, not in this table.
  *   - wiki `space` on update (moving a page) stays in the admin panel; a
@@ -894,21 +890,34 @@ const POLL_RULES = { moderator: withCreate(POLL_MODERATOR, "author", false) };
  * (createDraft, saveDraft; batch 16), never through a lifted status pin.
  */
 export const WRITE_ALLOWLIST = {
-  [DEPARTMENT_UID]: {
-    update: {
-      // department_head whose own department this is. `name` stays with
-      // admin/editor: the planned Entra department sync matches on it.
-      head: {
+  [COURSE_UID]: {
+    create: {
+      moderator: { ...COURSE_MODERATOR, derivedFields: { slug: uniqueSlugFrom("title") } },
+    },
+    update: { moderator: COURSE_MODERATOR },
+  },
+  [LESSON_UID]: {
+    create: {
+      moderator: {
+        ...LESSON_MODERATOR,
         fields: {
-          description: value(valueChecks.nullableText),
-          color: value(valueChecks.hexColor),
+          ...LESSON_MODERATOR.fields,
+          course: { kind: "relation", check: "course", required: true },
         },
       },
+    },
+    update: { moderator: LESSON_MODERATOR },
+  },
+  [DEPARTMENT_UID]: {
+    update: {
+      moderator: { fields: { ...DEPARTMENT_EDIT.fields, headerImage: media("ownUpload") } },
+      departmentHead: DEPARTMENT_EDIT,
     },
   },
   [TEAM_UID]: {
     update: {
-      lead: TEAM_EDIT,
+      moderator: { fields: { ...TEAM_EDIT.fields, avatar: media("ownUpload") } },
+      teamLead: TEAM_EDIT,
       // department_head of the team's department: same rights as the lead.
       departmentHead: TEAM_EDIT,
     },
@@ -984,6 +993,28 @@ export const WRITE_ALLOWLIST = {
  * core validator no longer runs on these routes.
  */
 export const REFUSED_ATTRIBUTES: Readonly<Record<string, Readonly<Record<string, string>>>> = {
+  [COURSE_UID]: {
+    slug: "derived from title on create; fixed afterwards",
+    lessons: "inverse relation: a lesson names its course",
+    scheduleError: "scheduler bookkeeping",
+  },
+  [LESSON_UID]: { scheduleError: "scheduler bookkeeping" },
+  [DEPARTMENT_UID]: {
+    name: "structure stays in the panel",
+    slug: "structure stays in the panel",
+    head: "display only; does not grant rights",
+    members: "membership stays in the panel",
+    teams: "inverse structure stays in the panel",
+    pages: "inverse structure stays in the panel",
+  },
+  [TEAM_UID]: {
+    name: "structure stays in the panel",
+    slug: "structure stays in the panel",
+    lead: "membership stays in the panel",
+    members: "membership stays in the panel",
+    department: "structure stays in the panel",
+    pages: "inverse structure stays in the panel",
+  },
   [ANNOUNCEMENT_UID]: {
     author: "ownership: the caller, set on create (callerFields)",
     audience: "derived targeting flag (derivedFromMerged, contract K10)",
@@ -1077,7 +1108,7 @@ export type RelationListCheck = (refs: RelationRef[]) => Promise<string[] | null
 export type RoleTypesCheck = (types: string[]) => Promise<string[] | null>;
 
 /** Authorizes a media file id (a newly attached file), or null to refuse the field. */
-export type MediaCheck = (fileId: number) => Promise<number | null>;
+export type MediaCheck = (fileId: number, field: string) => Promise<number | null>;
 
 /** Answers whether the frozen-field condition holds (a poll has votes). */
 export type FrozenCheck = () => Promise<boolean>;
@@ -1416,7 +1447,7 @@ export async function applyWriteRule(
     if (currentId !== fileId) {
       const check = env.mediaChecks?.[spec.check];
       if (!check) missingCheck("media", spec.check);
-      authorized = await check(fileId);
+      authorized = await check(fileId, key);
     }
     if (authorized === null) refuseKeys([key]);
     out[key] = authorized;

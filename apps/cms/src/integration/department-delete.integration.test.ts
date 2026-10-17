@@ -149,10 +149,7 @@ describe.each(testEngines())("department delete on %s", (engine) => {
           .update({ where: { id: row.id }, data: { audience: null } });
       }
     }
-    const res = await t.api("admin_role", `/api/departments/${temp.documentId}`, {
-      method: "DELETE",
-    });
-    expect(res.status).toBe(204);
+    await t.strapi.documents("api::department.department").delete({ documentId: temp.documentId });
     expect(
       await t.strapi.db.query("api::department.department").count({
         where: { documentId: temp.documentId },
@@ -345,10 +342,9 @@ describe.each(testEngines())("department delete on %s", (engine) => {
       });
       expect(form?.audience, type.key).toBe("departments");
       // ... an admin deletes the department meanwhile ...
-      const res = await t.api("admin_role", `/api/departments/${department.documentId}`, {
-        method: "DELETE",
-      });
-      expect(res.status).toBe(204);
+      await t.strapi
+        .documents("api::department.department")
+        .delete({ documentId: department.documentId });
       // ... and the editor saves and publishes: every field as loaded, the
       // relation unchanged (the panel sends it as connect/disconnect only).
       await t.strapi.documents(type.uid).update({

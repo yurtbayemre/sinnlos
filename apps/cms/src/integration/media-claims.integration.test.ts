@@ -8,6 +8,7 @@ import {
   type TestRole,
   type TestStrapi,
 } from "./harness.test.helper";
+import { authoringApi } from "./authoring.test.helper";
 import { holdTransaction, qualified, settle, waitForLockWait } from "./pg-lock.test.helper";
 import { minimalPdf, PNG_1PX, uploadFiles } from "./upload.test.helper";
 
@@ -350,34 +351,139 @@ describe.each(testEngines())("media claims on %s", (engine) => {
     expect((published?.file as { id: number }).id).toBe(fresh);
   });
 
-  it("a file another writer links after the reservation is kept (a department's header image)", async () => {
-    const department = t.fixtures.departments.sales.documentId;
-    const file = await upload();
-    const reserved = await orphans.reserveRemoval(t.strapi, file);
-    expect(reserved.file).toBeDefined();
-    // Department writes check no tombstone: the link lands in between.
-    await t.strapi.documents(DEPARTMENT).update({
-      documentId: department,
-      data: { headerImage: file },
-    });
+  it("org image attachment refuses a reserved file; unclaimed user avatars retain the relink fallback", async () => {
+    const file = await upload("admin_role", PNG_1PX);
+    expect((await orphans.reserveRemoval(t.strapi, file)).file).toBeDefined();
+    await expect(
+      t.strapi.documents(DEPARTMENT).update({
+        documentId: t.fixtures.departments.sales.documentId,
+        data: { headerImage: file },
+      }),
+    ).rejects.toMatchObject({ details: { keys: ["headerImage"] } });
+    const user = t.fixtures.users.member.id;
+    await t.strapi.db
+      .query("plugin::users-permissions.user")
+      .update({ where: { id: user }, data: { avatar: file } });
     expect(await orphans.removeReserved(t.strapi, file)).toBe("linked");
     const row = await t.strapi.db.query(FILE).findOne({ where: { id: file } });
-    // Kept as it is: a retry may follow a removal that already took the bytes.
     expect(row?.provider_metadata).toMatchObject({ removing: expect.any(String) });
-    const linked = await t.strapi.documents(DEPARTMENT).findOne({
-      documentId: department,
-      populate: { headerImage: true },
+    await t.strapi.db
+      .query("plugin::users-permissions.user")
+      .update({ where: { id: user }, data: { avatar: null } });
+    expect(await orphans.removeReserved(t.strapi, file)).toBe("removed");
+    expect(await exists(file)).toBe(false);
+  });
+
+  it.each([
+    ["api::course.course", "courses", "coverImage"],
+    [DEPARTMENT, "departments", "headerImage"],
+    ["api::team.team", "teams", "avatar"],
+  ])(
+    "%s: HTTP image ownership, type, retain, replacement and clearing",
+    async (uid, plural, field) => {
+      const api = authoringApi(t);
+      const training = plural === "courses";
+      const target = await t.strapi.documents(uid).create({
+        data: training
+          ? { title: "Media course", slug: `media-course-${Math.random().toString(36).slice(2)}` }
+          : {
+              name: `Media ${Math.random().toString(36).slice(2)}`,
+              slug: `media-${Math.random().toString(36).slice(2)}`,
+            },
+        ...(training ? { status: "published" } : {}),
+      });
+      const save = async (data: Record<string, unknown>, role: TestRole = "admin_role") => {
+        const form = await api.editable(role, plural, target.documentId);
+        return api.update(role, plural, target.documentId, data, {
+          version: form.body.data?.version,
+          status: training ? "published" : null,
+        });
+      };
+      const own = await upload("admin_role", PNG_1PX);
+      const foreign = await upload("editor", PNG_1PX);
+      const pdf = await upload("admin_role");
+      expect((await save({ [field]: foreign })).status).toBe(400);
+      expect((await save({ [field]: pdf })).status).toBe(400);
+      const attached = await save({ [field]: own });
+      expect(attached.status, attached.text).toBe(200);
+      const form = await api.editable("admin_role", plural, target.documentId);
+      expect(form.body.data[field]).toMatchObject({ id: own, mime: "image/png" });
+      // Keeping another author's existing file is not a fresh attachment.
+      if (training) expect((await save({ [field]: own }, "editor")).status).toBe(200);
+      else expect((await save({ [field]: foreign }, "editor")).status).toBe(403);
+      await expect(
+        asUser("admin_role", () =>
+          t.strapi.documents(uid).create({
+            data: training
+              ? {
+                  title: "Taken",
+                  slug: `taken-${Math.random().toString(36).slice(2)}`,
+                  [field]: own,
+                }
+              : {
+                  name: `Taken ${Math.random()}`,
+                  slug: `taken-${Math.random().toString(36).slice(2)}`,
+                  [field]: own,
+                },
+          }),
+        ),
+      ).rejects.toMatchObject({ details: { keys: [field] } });
+      const replacement = await upload("admin_role", PNG_1PX);
+      expect((await save({ [field]: replacement })).status).toBe(200);
+      await waitGone(own);
+      expect((await save({ [field]: null })).status).toBe(200);
+      await waitGone(replacement);
+
+      const legacy = await panelFile();
+      await t.strapi.documents(uid).update({
+        documentId: target.documentId,
+        data: { [field]: legacy },
+        ...(training ? { status: "published" } : {}),
+      });
+      expect((await save({ [field]: legacy })).status).toBe(200);
+      expect((await save({ [field]: null })).status).toBe(200);
+      expect(await exists(legacy)).toBe(true);
+    },
+  );
+
+  it("course draft replacement retains the published image until publish, and rollback keeps links/files", async () => {
+    const uid = "api::course.course";
+    const first = await upload("editor", PNG_1PX);
+    const second = await upload("editor", PNG_1PX);
+    const parent = await asUser("editor", () =>
+      t.strapi.documents(uid).create({
+        data: { title: "Image drafts", slug: "image-drafts", coverImage: first },
+        status: "published",
+      }),
+    );
+    await expect(
+      t.strapi.db.transaction(async () => {
+        await asUser("editor", () =>
+          t.strapi.documents(uid).update({
+            documentId: parent.documentId,
+            status: "published",
+            data: { coverImage: second },
+          }),
+        );
+        throw new Error("rollback image replacement");
+      }),
+    ).rejects.toThrow("rollback image replacement");
+    expect(await exists(first)).toBe(true);
+    await asUser("editor", () =>
+      t.strapi
+        .documents(uid)
+        .update({ documentId: parent.documentId, status: "draft", data: { coverImage: second } }),
+    );
+    expect(await exists(first)).toBe(true);
+    const published = await t.strapi.documents(uid).findOne({
+      documentId: parent.documentId,
+      status: "published",
+      populate: { coverImage: true },
     });
-    expect((linked?.headerImage as { id: number } | null)?.id).toBe(file);
-    await t.strapi.documents(DEPARTMENT).update({
-      documentId: department,
-      data: { headerImage: null },
-    });
-    // Without a link the reserved removal goes through.
-    const other = await upload();
-    await orphans.reserveRemoval(t.strapi, other);
-    expect(await orphans.removeReserved(t.strapi, other)).toBe("removed");
-    expect(await exists(other)).toBe(false);
+    expect(published?.coverImage).toMatchObject({ id: first });
+    await t.strapi.documents(uid).publish({ documentId: parent.documentId });
+    await waitGone(first);
+    expect(await exists(second)).toBe(true);
   });
 
   it("attaches by the file's documentId too; a tombstoned one is refused before any link", async () => {
@@ -482,6 +588,32 @@ describe.each(testEngines())("media claims on %s", (engine) => {
           expect(errorOf(attachResult), order).toMatchObject({ details: { keys: ["file"] } });
         }
         expect(order === "attach first" ? attachResult.ok : !attachResult.ok, order).toBe(true);
+      }
+    });
+
+    it("org attachment and cleanup serialize on the same file lock", async () => {
+      for (const attachFirst of [true, false]) {
+        const file = await upload("admin_role", PNG_1PX);
+        const target = await t.strapi.documents(DEPARTMENT).create({
+          data: {
+            name: `Race ${Math.random()}`,
+            slug: `race-${Math.random().toString(36).slice(2)}`,
+          },
+        });
+        const attach = () =>
+          asUser("admin_role", () =>
+            t.strapi
+              .documents(DEPARTMENT)
+              .update({ documentId: target.documentId, data: { headerImage: file } }),
+          );
+        const remove = () => orphans.claimAndRemove(t.strapi, file);
+        const [attachment, removal] = attachFirst
+          ? await race(file, attach, remove)
+          : (await race(file, remove, attach)).reverse();
+        expect(attachment.ok).toBe(attachFirst);
+        expect(await exists(file)).toBe(attachFirst);
+        if (attachFirst) expect(removal).toMatchObject({ ok: true, value: "linked" });
+        else expect(errorOf(attachment)).toMatchObject({ details: { keys: ["headerImage"] } });
       }
     });
 

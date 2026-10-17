@@ -28,13 +28,20 @@ describe("validateLessonData (keys-present rule)", () => {
     expect(errorOf({ videoUrl: null })).toBeNull();
   });
 
-  it("rejects a non-YouTube videoUrl with a German admin message", () => {
-    expect(errorOf({ videoUrl: "https://vimeo.com/1" })).toContain("YouTube");
+  it("rejects a non-YouTube videoUrl with a readable panel message and stable field/code", () => {
+    expect(validateLessonData({ videoUrl: "https://vimeo.com/1" })).toMatchObject({
+      field: "videoUrl",
+      code: "videoUrlNotYoutube",
+      error: expect.stringContaining("YouTube"),
+    });
   });
 
   it("validates quiz and order only when present", () => {
-    expect(errorOf({ quiz: "[1]" })).toContain("Objekt");
-    expect(errorOf({ quiz: '{"question":"?"}' })).toContain("JSON-Array");
+    expect(validateLessonData({ quiz: "[1]" })).toMatchObject({
+      field: "quiz",
+      code: "quizInvalid",
+    });
+    expect(errorOf({ quiz: '{"question":"?"}' })).toContain("array");
     expect(errorOf({ order: -1 })).toContain("order");
     expect(errorOf({ order: 3 })).toBeNull();
   });
@@ -48,11 +55,15 @@ describe("validateLessonData: quiz from the admin panel (FX08)", () => {
     expect(validateLessonData({ quiz: text })).toEqual({ normalized: { quiz: [question] } });
   });
 
-  it("rejects text that is not JSON with a German message", () => {
+  it("rejects malformed JSON with a stable field/code and readable message", () => {
     for (const quiz of ["kaputt", "[{", "[{'question':'?'}]", "undefined"]) {
-      expect(validateLessonData({ quiz })).toEqual({ error: QUIZ_NOT_JSON_ERROR });
+      expect(validateLessonData({ quiz })).toEqual({
+        error: QUIZ_NOT_JSON_ERROR,
+        field: "quiz",
+        code: "quizInvalid",
+      });
     }
-    expect(QUIZ_NOT_JSON_ERROR).toBe("quiz ist kein gültiges JSON");
+    expect(QUIZ_NOT_JSON_ERROR).toBe("Quiz must be valid JSON.");
   });
 
   it("validates parsed text like an array", () => {

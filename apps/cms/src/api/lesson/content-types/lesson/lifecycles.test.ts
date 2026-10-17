@@ -52,7 +52,23 @@ describe("lesson lifecycle (FX08)", () => {
     ]) {
       expect(() => run("beforeUpdate", data)).toThrow(errors.ApplicationError);
     }
-    expect(() => run("beforeUpdate", { quiz: "[{" })).toThrow("quiz ist kein gültiges JSON");
+    expect(() => run("beforeUpdate", { quiz: "[{" })).toThrow("Quiz must be valid JSON.");
+  });
+
+  it("returns stable field codes for every panel validation refusal", () => {
+    for (const [data, field, code] of [
+      [{ quiz: "[{" }, "quiz", "quizInvalid"],
+      [{ quiz: [{ ...QUESTION, correctIndex: 5 }] }, "quiz", "quizInvalid"],
+      [{ videoUrl: "https://vimeo.com/1" }, "videoUrl", "videoUrlNotYoutube"],
+      [{ order: 10001 }, "order", "invalid"],
+    ] as const) {
+      try {
+        run("beforeUpdate", data);
+        throw new Error("Expected validation failure");
+      } catch (error) {
+        expect(error).toMatchObject({ details: { keys: [field], codes: { [field]: code } } });
+      }
+    }
   });
 
   it("ignores events without a data object", () => {

@@ -41,7 +41,12 @@ function assertValid(event: LessonLifecycleEvent): void {
   const data = event?.params?.data;
   if (!isRecord(data)) return;
   const result = validateLessonData(data);
-  if ("error" in result) throw new errors.ApplicationError(result.error);
+  if ("error" in result) {
+    throw new errors.ApplicationError(result.error, {
+      keys: [result.field],
+      codes: { [result.field]: result.code },
+    });
+  }
   if ("quiz" in result.normalized) data.quiz = result.normalized.quiz;
 }
 

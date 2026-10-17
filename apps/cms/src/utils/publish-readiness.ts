@@ -189,7 +189,10 @@ export async function publishBlockers(
     const target = attributes[key]?.target;
     if (!target) continue;
     const ref = refOf(draft[key]);
-    if (ref === null) continue;
+    if (ref === null) {
+      if (uid === LESSON_UID) blockers.push(key);
+      continue;
+    }
     const documentId = await targetDocumentId(strapi, target, ref);
     if (documentId === null || !(await hasPublishedRow(strapi, target, documentId))) {
       blockers.push(key);

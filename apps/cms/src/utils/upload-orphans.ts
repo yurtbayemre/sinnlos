@@ -28,11 +28,9 @@
  * order, @strapi/upload 5.57 services/upload.js); the app's removers do it
  * under the row lock again and only while nothing links the file
  * (`removeReserved`: a writer that checks no tombstone may have linked it
- * meanwhile). A failure in between leaves a tombstoned row: the document
- * and classified attach paths refuse a tombstoned file (the media claims,
- * the classified write lifecycle; 16B's `ownUploadCheck` through
- * `isTombstoned`; the other media fields and the admin panel's pickers do
- * not, a known limit after a failed removal), the
+ * meanwhile). A failure in between leaves a tombstoned row: document,
+ * training, organisation and classified attach paths refuse it. Unclaimed
+ * fields such as user avatars retain that known limit; the
  * janitor retries an unlinked tombstoned row once its tombstone is older
  * than TOMBSTONE_RETRY_MS, and an admin can delete it again after that
  * (the local provider's delete of missing bytes succeeds,
@@ -329,10 +327,9 @@ export function claimDecision(
 
 /**
  * The second half of the app's removal, after its reservation committed
- * the tombstone (the batch integration's Codex review). Only the document
- * and classified writes refuse a tombstoned file; a department's header
- * image, a team avatar, a course cover, a user avatar or an admin-panel
- * picker may still link it in between. So the bytes and the row go only
+ * the tombstone. Claimed media fields and classified writes refuse it;
+ * unclaimed fields such as user avatars may still link it in between.
+ * So the bytes and the row go only
  * under the row lock and while nothing links the file: a link's INSERT
  * takes `FOR KEY SHARE` on the file row (files_related_mph's foreign key),
  * so it committed before this check, or it waits for the delete and then

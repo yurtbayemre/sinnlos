@@ -575,10 +575,9 @@ describe.each(testEngines())("authoring: department authors on %s", (engine) => 
         "published",
       );
       expect([announcement.status, event.status]).toEqual([201, 201]);
-      const deleted = await t.api("admin_role", `/api/departments/${temp.documentId}`, {
-        method: "DELETE",
-      });
-      expect([200, 204]).toContain(deleted.status);
+      await t.strapi
+        .documents("api::department.department")
+        .delete({ documentId: temp.documentId });
       for (const [plural, created] of [
         ["announcements", announcement],
         ["events", event],

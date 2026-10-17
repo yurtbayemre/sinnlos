@@ -1,7 +1,7 @@
-import { DOCUMENT_FILE_MIME_TYPES } from "@sinnlos/domain";
+import { MEDIA_CLAIM_FIELDS } from "./media-fields";
 
 import { isRoleType } from "../bootstrap/roles";
-import { DEPARTMENT_UID, TEAM_UID } from "./authoring-uids";
+import { COURSE_UID, DEPARTMENT_UID, TEAM_UID } from "./authoring-uids";
 import { isTombstoned, uploadedByOf } from "./upload-orphans";
 import type {
   FrozenCheck,
@@ -60,7 +60,9 @@ export const FILE_UID = "plugin::upload.file";
 export const POLL_VOTE_UID = "api::poll-vote.poll-vote";
 
 /** Mimes a document file may have (§E1, amendment 2: the upload table's stored mimes). */
-export const DOCUMENT_FILE_MIMES: ReadonlySet<string> = new Set(DOCUMENT_FILE_MIME_TYPES);
+export const DOCUMENT_FILE_MIMES: ReadonlySet<string> = new Set(
+  MEDIA_CLAIM_FIELDS["api::document.document"].file,
+);
 
 interface Row {
   id?: unknown;
@@ -197,14 +199,18 @@ function roleTypesCheck(strapi: AuthoringChecksHost): RoleTypesCheck {
 
 /** `ownUpload` (§E2): stamped by the caller, an allowed mime, linked by nothing else. */
 function ownUploadCheck(strapi: AuthoringChecksHost, context: AuthoringCheckContext): MediaCheck {
-  return async (fileId) => {
+  return async (fileId, field) => {
     const file = (await strapi.db.query(FILE_UID).findOne({
       where: { id: fileId },
       populate: { related: true },
     })) as Row | null;
     if (!isRecord(file) || uploadedByOf(file) !== context.callerId) return null;
     if (isTombstoned(file)) return null;
-    if (typeof file.mime !== "string" || !DOCUMENT_FILE_MIMES.has(file.mime)) return null;
+    if (
+      typeof file.mime !== "string" ||
+      !MEDIA_CLAIM_FIELDS[context.uid]?.[field]?.includes(file.mime)
+    )
+      return null;
     const related = Array.isArray(file.related) ? (file.related as Row[]) : [];
     const foreign = related.some(
       (link) =>
@@ -254,6 +260,10 @@ export function authoringChecks(
   const documentId = context.documentId;
   return {
     relationChecks: {
+      course: toOneCheck(strapi, COURSE_UID, undefined, {
+        ...EXACTLY_ONE_OR_CLEAR,
+        allowClear: false,
+      }),
       department: toOneCheck(strapi, DEPARTMENT_UID, undefined, EXACTLY_ONE_OR_CLEAR),
       team: toOneCheck(strapi, TEAM_UID, undefined, EXACTLY_ONE_OR_CLEAR),
       callerDepartment: mine

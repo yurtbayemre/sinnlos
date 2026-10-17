@@ -341,15 +341,14 @@ describe.each(testEngines())("read exposure on %s", (engine) => {
       expect((await t.api("admin_role", path)).status).toBe(200);
     });
 
-    it("a write response does not populate the relation either (PUT /api/teams as its lead)", async () => {
+    it("an org write refuses the populate query instead of returning a relation", async () => {
       const res = await t.api<{ data: Record<string, unknown> }>(
         "team_lead",
         `/api/teams/${t.fixtures.teams.platform.documentId}?populate[pages]=true`,
         { method: "PUT", json: { data: { description: "Updated by the lead" } } },
       );
-      expect(res.status).toBe(200);
-      expect(res.body.data.description).toBe("Updated by the lead");
-      expect(res.body.data).not.toHaveProperty("pages");
+      expect(res.status).toBe(400);
+      expect(res.body.data).toBeNull();
       expect(res.text).not.toContain(MARKER);
     });
   });

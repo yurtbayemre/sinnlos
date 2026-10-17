@@ -52,7 +52,8 @@
  *     so a file another request attached in between stays. Each removal
  *     records its audit row, linked to the document (utils/delete-audit.ts).
  */
-import { DOCUMENT_FILE_MIME_TYPES } from "@sinnlos/domain";
+import { MEDIA_CLAIM_FIELDS } from "./media-fields";
+export { MEDIA_CLAIM_FIELDS } from "./media-fields";
 
 import { afterCommit } from "./after-commit";
 import { resolveActor } from "./audit";
@@ -71,13 +72,6 @@ import {
 import { refuseKeys } from "./write-allowlist";
 
 export const MEDIA_CLAIMS_LOG = "[media-claims]";
-
-/** The claimed media fields per uid, each with the stored mimes it accepts (batch 17 extends it). */
-export const MEDIA_CLAIM_FIELDS: Readonly<
-  Record<string, Readonly<Record<string, readonly string[]>>>
-> = {
-  "api::document.document": { file: DOCUMENT_FILE_MIME_TYPES },
-};
 
 /** The slice of the Strapi instance the claims use (the real one in production). */
 export type MediaClaimsHost = any;

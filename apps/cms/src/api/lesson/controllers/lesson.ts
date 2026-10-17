@@ -1,10 +1,12 @@
 import { factories } from "@strapi/strapi";
+import { authoringActions } from "../../../utils/authoring-controller";
 import { QUIZ_CONTENT_INVALID, type LessonPlayerResponse } from "@sinnlos/domain";
 
 import { loadPublishedLesson } from "../../../utils/training-access";
 import { checkStoredQuiz, validateStoredQuiz } from "../../../utils/training-validation";
 
 export default factories.createCoreController("api::lesson.lesson", ({ strapi }) => ({
+  ...authoringActions(strapi, "api::lesson.lesson"),
   async player(ctx) {
     if (!ctx.state.user) return ctx.unauthorized();
     if (Object.keys(ctx.query ?? {}).length) return ctx.badRequest("Query parameters not allowed");

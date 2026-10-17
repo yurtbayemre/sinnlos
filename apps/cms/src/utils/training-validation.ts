@@ -17,6 +17,9 @@
  */
 import {
   QUIZ_CONTENT_INVALID,
+  QUIZ_MAX_QUESTIONS,
+  QUIZ_MAX_OPTIONS,
+  QUIZ_MAX_TEXT,
   isQuizSelectionList,
   quizAnswersPass,
   validateQuiz,
@@ -38,9 +41,15 @@ export interface NormalizedLessonData {
   quiz?: QuizQuestion[] | null;
 }
 
-export type LessonDataResult = { normalized: NormalizedLessonData } | { error: string };
+export type LessonDataResult =
+  | { normalized: NormalizedLessonData }
+  | {
+      error: string;
+      field: "videoUrl" | "quiz" | "order";
+      code: "videoUrlNotYoutube" | "quizInvalid" | "invalid";
+    };
 
-export const QUIZ_NOT_JSON_ERROR = "quiz ist kein gültiges JSON";
+export const QUIZ_NOT_JSON_ERROR = "Quiz must be valid JSON.";
 
 /**
  * Validate the mutable lesson fields present in a lifecycle `data`
@@ -58,34 +67,43 @@ export const QUIZ_NOT_JSON_ERROR = "quiz ist kein gültiges JSON";
  * normalised value validates to itself, which matters because beforeCreate
  * runs again on every publish.
  *
- * Returns the normalised values, or a German error message for the admin
- * panel.
+ * Returns normalized values, or stable field/code details and a readable panel message.
  */
 export function validateLessonData(data: Record<string, unknown>): LessonDataResult {
   const normalized: NormalizedLessonData = {};
   if ("videoUrl" in data && data.videoUrl != null && data.videoUrl !== "") {
     if (youtubeVideoId(data.videoUrl) == null) {
       return {
-        error:
-          "videoUrl: nur YouTube-Links (https://www.youtube.com/watch?v=…, youtu.be/…, youtube-nocookie.com/embed/…)",
+        error: "Video URL must be an HTTPS YouTube video link.",
+        field: "videoUrl",
+        code: "videoUrlNotYoutube",
       };
     }
   }
   if ("quiz" in data && data.quiz !== undefined) {
     const parsed = parseAdminJsonField(data.quiz);
-    if (!parsed.ok) return { error: QUIZ_NOT_JSON_ERROR };
+    if (!parsed.ok) return { error: QUIZ_NOT_JSON_ERROR, field: "quiz", code: "quizInvalid" };
     if (parsed.value === null) {
       normalized.quiz = null;
     } else {
       const result = validateQuiz(parsed.value);
-      if ("error" in result) return { error: result.error };
+      if ("error" in result)
+        return {
+          error: `Quiz must be an array of at most ${QUIZ_MAX_QUESTIONS} questions, each with question text, 2–${QUIZ_MAX_OPTIONS} options (at most ${QUIZ_MAX_TEXT} characters each) and a valid correctIndex.`,
+          field: "quiz",
+          code: "quizInvalid",
+        };
       normalized.quiz = result.quiz;
     }
   }
   if ("order" in data && data.order != null) {
     const order = data.order;
     if (typeof order !== "number" || !Number.isInteger(order) || order < 0 || order > 10000) {
-      return { error: "order: ganze Zahl zwischen 0 und 10000" };
+      return {
+        error: "Lesson order must be an integer from 0 to 10000.",
+        field: "order",
+        code: "invalid",
+      };
     }
   }
   return { normalized };

@@ -345,11 +345,12 @@ letters:
   `is-reaction-author`; moderators bypass).
 - **Kudos:** create for every staff role and `authenticated`, but delete
   only for the moderators (`is-admin-or-editor` on the route).
-- **Departments and teams:** `U` for department heads and team leads is
-  gated by `can-edit-department` / `can-edit-team` and limited to the
-  [write allowlist](#field-level-write-allowlist) (description, plus colour
-  on the head's own department); wiki page `C`/`U` by `can-edit-wiki` and
-  the same allowlist.
+- **Departments and teams (batch 17):** `U` and `editable` use
+  `can-edit-department` / `can-edit-team` and the
+  [write allowlist](#field-level-write-allowlist). Only `admin_role`
+  moderates org content; heads/leads retain their row rights. Every class
+  is checked. Content-API create/delete routes and grants are removed;
+  structure remains in the panel. Wiki page `C`/`U` uses `can-edit-wiki`.
 - **Department authors (batch 15).** `department_head` holds `C` and `U` on
   announcements, events and documents, plus the five authoring actions
   (`publish`, `unpublish`, `discardDraft`, `authoringList`, `editable`) on
@@ -365,8 +366,13 @@ letters:
   `closesAt`). Never `guest` or `authenticated`. Neither editors nor
   department heads hold `role.find`: audience roles are written as role
   types and resolved on the server.
-- **Courses and lessons** have no content-API write routes at all
-  (`only: ["find", "findOne"]`); authoring happens in the Strapi admin.
+- **Courses and lessons (batch 17):** `admin_role` and `editor` may create,
+  update, list/edit drafts, publish, unpublish and discard drafts through
+  `can-author`. There is no content-API delete route. Discard without a
+  published version returns `neverPublished` and preserves the document.
+- **Activity (batch 17):** only `admin_role` has `audit-event.list` at
+  `GET /api/audit-events`; the controller enforces that role independently.
+  No generic detail, create, update or delete route is exposed.
 - **`search-log`** is write-only telemetry: no content-API route lists raw
   rows; the aggregates come from the `summary` route, granted to
   `admin_role` only.
@@ -485,8 +491,8 @@ route in `apps/cms/src/api/*/routes/*.ts`.
 ### Write-side guards
 
 - `can-author` (batch 15, decision 06 §B2): create and update of
-  announcements, events, quick links, documents, polls and (batch 16) wiki
-  spaces, and their authoring actions (publish, unpublish, discard-draft,
+  announcements, events, quick links, documents, polls, (batch 16) wiki
+  spaces and (batch 17) courses/lessons, and their authoring actions (publish, unpublish, discard-draft,
   the `/authoring` list and the `/:id/editable` form read), configured per
   route with
   `{ uid }` (and the action's `intent`). `admin_role` and `editor` are the
@@ -509,14 +515,17 @@ route in `apps/cms/src/api/*/routes/*.ts`.
   gets 403/404, never 412, and never the new revision.
 - `is-admin-or-editor`: delete of announcements, events, polls, documents,
   quick links, wiki spaces and wiki pages (with `If-Match`; a space with
-  pages answers 400 `spaceNotEmpty`); create and delete of departments and
-  teams; kudos delete; the search-log `summary` route.
-- `can-edit-department`: department update only by the `department_head`
-  of that department, and only `description` and `color` (`#rrggbb`);
-  `admin_role` and `editor` bypass.
-- `can-edit-team`: team update only by the team's lead or the head of its
-  department, and only `description`; plain team members get 403;
-  `admin_role` and `editor` bypass.
+  pages answers 400 `spaceNotEmpty`); kudos delete; the search-log `summary` route.
+- `can-edit-department`: update/editable for `admin_role` (`moderator`:
+  `description`, `color`, `headerImage`) and the `department_head` whose
+  current `user.department` matches (`departmentHead`: `description`,
+  `color`, `#rrggbb`). `department.head` is display-only; editors have no class.
+- `can-edit-team`: update/editable for `admin_role` (`moderator`:
+  `description`, `avatar`), the team's lead (`teamLead`) or its department's
+  head (`departmentHead`), both with `description` only. Lead precedence
+  applies within the existing `department_head`/`team_lead` grants; a stored
+  lead relation never grants access to editors or members. Both org gates
+  use the same single-row classifier for reads and locked writes.
 - `can-edit-wiki` (rebuilt in batch 16 on the `can-author` model, kind
   `row-write-gate`): every wiki-page route but the reads and the delete,
   configured with `{ uid }` (and the action's `intent`). `admin_role` and
@@ -551,13 +560,15 @@ route in `apps/cms/src/api/*/routes/*.ts`.
 ### Field-level write allowlist
 
 The write policies decide _whether_ a caller may write a row and in which
-role class (head, lead, author, moderator, department author, …);
+role class (department head, team lead, author, moderator, department author, …);
 `apps/cms/src/utils/write-allowlist.ts` decides _what_ that class may send
 (FX07). It is the single place those payload rules live. Since batch 15 it
 also holds the `admin_role`/`editor` payloads on announcements, events,
 quick links, documents and polls (the `moderator` class), since batch 16
-on wiki spaces and wiki pages; the bypass is left only on the department
-and team gates until batch 17 rebuilds them.
+on wiki spaces and wiki pages, and since batch 17 on courses, lessons,
+departments and teams. `WRITE_BYPASS_ROLES`, `isWriteBypassRole` and the
+`KNOWN_OPEN_PAYLOADS` exceptions are removed: every exposed authored
+create/update is checked for every granted role.
 
 The v2 authoring rules (batch 15, decision 06 §B1):
 
@@ -578,6 +589,11 @@ The v2 authoring rules (batch 15, decision 06 §B1):
   stored file passes unchecked. That check runs in the policy, before the
   transaction, so it only refuses early: the media claims (Document
   Service guards, below) check the same under the file row's lock.
+- **Course and org images (batch 17):** `course.coverImage`,
+  `department.headerImage` and `team.avatar` share those claims and early
+  checks. They accept JPEG, PNG and WebP up to 5 MB from the domain upload
+  table; the actual field selects its MIME rule. Only `admin_role` can
+  edit org images; heads/leads gain no org-image capability.
 - **Values have codes.** A refused value answers its key in
   `details.keys` and, where the check names a reason, a code in
   `details.codes` (`tooLong`, `invalidInstant`, `invalidUrl`,
@@ -615,8 +631,8 @@ The v2 authoring rules (batch 15, decision 06 §B1):
   the poll's lock at the write ([Poll department targeting](#poll-department-targeting)).
 - **No client query on writes.** The authoring controller refuses every
   query key but `status`, takes the status explicitly per type
-  (announcements, events, quick links and documents need `draft` or
-  `published`; polls always publish), writes through the Document Service
+  (announcements, events, quick links, documents, courses and lessons need
+  `draft` or `published`; polls always publish), writes through the Document Service
   and answers a fixed DTO (`documentId`, `version`, `status`,
   `publishedAt`, the schedule fields) with `ETag: "<version>"`. Updates and
   the custom actions need `If-Match` (428 without it, 412 with the current
@@ -641,29 +657,28 @@ The wiki (batch 16, `@sinnlos/domain` `authoring/wiki.ts`):
   history actions with fixed answers; the author classes' generic create
   and update stay pinned to published.
 
-The FX07 rules of the other gates:
+Training and organisation authoring (batch 17):
 
-- A department head may write `description` and `color` of their own
-  department; a team lead, or the head of the team's department, the
-  team's `description`.
-- Everything else (`pages`/`members`/`teams`/`head`/`lead` connects,
-  `name`, `slug`, media, `space` on update, `children`, `revisions`,
-  `author`, Strapi's own keys) and every refused value answer one generic
-  `400 Invalid or disallowed data field(s): <keys>`. A hidden, missing,
-  draft-only or wrong-space target gets the same answer.
-- Relations are rewritten to documentIds. A page's `space` must be a space
-  the author can read, its `parent` a readable page of the same space (not
-  the page itself or a descendant). `author`/`lastEditor` are set to the
-  caller, a new page's `slug` is derived from its title plus a random
-  suffix, and these writes always publish (`?status=draft` is pinned away).
-- `routes.matrix.test.ts` fails when a write route that a non-bypass role
-  holds on these types, or on any relation into the wiki, skips the
-  allowlist, and when a create or update a moderator holds on an authored
-  type is not enforced for the `moderator` class (`KNOWN_OPEN_PAYLOADS`
-  lists the department and team gates that still bypass).
+- Courses allow `title`, `description`, `mandatory`, `completionMode`,
+  `coverImage`, `publishAt`; lessons allow `title`, `body`, `order`, `course`,
+  `videoUrl`, `quiz`, `publishAt`. Slugs remain derived; inverse relations
+  and internal fields are refused. The lesson list applies its validated
+  course documentId filter before pagination/count. Only the authorised
+  editable DTO and panel expose quiz keys; learner responses stay answerless.
+- Org writes allow only the exact role fields above. Names, slugs, head,
+  lead, membership, department changes and inverse links are refused even
+  for admins. Both editable and update reject every query key, including
+  `status`; the Document Service receives no publication option. Raw legacy
+  descriptions are preserved when another field is saved.
+- Org update requires `If-Match`, returns only `documentId`/`version` with
+  ETag, and reclassifies access under the existing lock before reporting a
+  stale version. Missing access is 403 on update and 404 on editable.
+- `routes.matrix.test.ts` requires every authored create/update grant to
+  have a matching allowlist gate, with no tolerated org payload exception.
 
-The web has no write path for departments or teams, and the wiki pages of
-lane 16C arrive after batch 16's cms; these rules govern direct API calls. Department-head and team-lead rights compare
+The org forms and training authoring web pages belong to the following
+batch-17 web step; these guarded backend endpoints are already implemented.
+Department-head and team-lead rights compare
 department and team row ids, which is valid because departments and teams
 have no draft & publish (one row each, stable id). An instance that ran an
 earlier release with org drafts runs the one-time migration first
@@ -893,7 +908,8 @@ writers all pass them, and the cms refuses to boot when
   that would drop that link anyway is refused and rolled back. This binds
   the admin panel and the scheduler too.
 - **The media claims** (`utils/media-claims.ts`, lane 16A, registered in
-  batch 16): every action on a document locks each file its payload names
+  batch 16, extended in batch 17): `document.file`, `course.coverImage`,
+  `department.headerImage` and `team.avatar` lock each file their payload names
   or the action copies (`FOR UPDATE`, ascending ids, after the document's
   own revision row and the other locks), refuses one that is gone or
   being removed, and re-checks a newly linked stamped file under that lock
@@ -917,38 +933,45 @@ writers all pass them, and the cms refuses to boot when
   change them; a database superuser still can (an application trail, not
   tamper-evident storage). Not covered: user and role changes, refused
   attempts, raw writes other than the scheduler's.
+- **The activity read** (batch 17): `GET /api/audit-events` accepts only
+  `page`, `targetUid`, `actorKind`, `actorId`, `actorClass`, `from` and `to`.
+  Pages contain at most 25 rows; filters apply before count/page and order
+  is `createdAt DESC, id DESC`. Dates require offsets and inclusive ordered
+  bounds; actor ids require the user/admin namespace. Only fixed event
+  fields and actor labels are returned, with deleted-actor fallbacks and
+  `private, no-store`; no populated user/admin objects or generic query surface.
 
 ## Content types and their access rules
 
 The [README content model](../README.md#content-model) lists the types;
 this is who sees and changes what, per type.
 
-| Type              | Access rules                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `department`      | Readable by every role except `guest`. Master data without draft & publish: one row with a stable id, a save in the admin is live at once; hiding a unit means deleting it. Department heads edit their own (allowlist).                                                                                                                                                                                                                                                                         |
-| `team`            | Like `department`; the team's lead or its department's head edit the description.                                                                                                                                                                                                                                                                                                                                                                                                                |
-| `announcement`    | Visible to its audience only: `department`, `team` (member or lead) and `audienceRoles`, AND-combined over the criteria that are set; none set = everyone. Fails closed: `audience` = `departments` without a department or team, or `retargetRequired` (a targeted department or team was deleted), is admins' and editors' only and notifies nobody ([below](#announcement-and-event-targeting)). Gone for others from `expiresAt`.                                                            |
-| `acknowledgement` | One per user, anchored to the announcement's `targetDocumentId` (stable across re-publishes), immutable once created. Only the announcement's audience can acknowledge it, and only until it expires (admins and editors excepted); anyone else gets the same 400 as for a missing announcement.                                                                                                                                                                                                 |
-| `comment`         | Anchored by `targetType` + `targetDocumentId` (no foreign key). Reads and creates are filtered to targets the caller may see; an unpublished announcement's thread answers like a missing target until it is published again. Delete by the author or a moderator. `parent`/`replies` are not followed below the moderators (batch 15.2).                                                                                                                                                        |
-| `reaction`        | The same anchor and target visibility as comments. `create` toggles; with the boolean `reacted` it sets that end state instead (a repeated request changes nothing). Two simultaneous creates can both store a row; each keeps the oldest copy and deletes the others right after its insert, and removing deletes every copy. Delete takes the documentId or the numeric id.                                                                                                                    |
-| `kudos`           | `from` is always the sender; `to` must be another user. Readable by the staff roles and `authenticated`; the celebrations feed by the staff roles only.                                                                                                                                                                                                                                                                                                                                          |
-| `notification`    | Written by the cms itself (`utils/notify.ts`; the content API has no create or update), read and deleted by the recipient (`admin_role`: all). Publishing an announcement or event notifies its targeted users whose role holds the type's read grant (read from the permissions table at runtime) and who are not blocked, after the publish is saved; admins and editors get strictly the targeted audience. Mark-read takes up to 200 ids and only ever changes the caller's own unread rows. |
-| `event`           | Not visibility-scoped: every role with `event.find`, `guest` included, sees all published events. `departments` decide who is notified, not who can read; `notifyAudience` = `departments` without a department notifies nobody ([below](#announcement-and-event-targeting)). ICS export at `/api/events/:documentId/ics` (the numeric id of the published row also works, anything else is a 404).                                                                                              |
-| `event-rsvp`      | One answer per user and event (`create` is an upsert; the capacity gate counts each user's newest answer). Raw reads return only the caller's own rows (admin: all). Everyone else's answers come from `GET /api/event-rsvps/summary?targets=<documentIds>` (at most 50 published events): the yes/maybe/no counts, the names of the "yes" answers and the caller's own answer; who answered maybe or no never leaves the cms.                                                                   |
-| `poll`            | See [poll department targeting](#poll-department-targeting) and [guest access](#poll-guest-access). The author is set to the caller on `POST /api/polls`; 2 to 10 different, non-empty options, checked for every writer including the admin panel.                                                                                                                                                                                                                                              |
-| `poll-vote`       | No generic routes. `POST /api/polls/:id/vote` and `GET /api/polls/:id/results` take the poll's documentId or its published row id. A vote cannot be changed; the results count each voter's first ballot only, and a vote removes the voter's later rows right after it is stored. The card sends the answer text it showed, and the cms refuses a vote whose option moved ("Poll options changed").                                                                                             |
-| `document`        | No departments = company-wide; with departments, only their members. `audience` = `departments` (set on every row that links a department, by each write and a boot backfill) keeps a document moderator-only once its departments are gone, until it is re-targeted or set back to `all`.                                                                                                                                                                                                       |
-| `classified`      | Staff roles post; the author edits (admin bypass) and deletes (moderator bypass). Photos only through the [hardened upload](#upload-hardening), and only images the caller uploaded (moderators excepted). Expired ads leave the list at once and are deleted with their photos 90 days after `expiresAt` (03:45 cron).                                                                                                                                                                          |
-| `quick-link`      | Like `document`. No editing UI in the web; maintained in the Strapi admin.                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| `course`          | Read-only content API (draft & publish; authored in the admin). Published courses only.                                                                                                                                                                                                                                                                                                                                                                                                          |
-| `lesson`          | Generic reads omit the private quiz, including nested reads. Player/check require a published lesson and parent for every granted role and reject all query parameters. Player selects question/options only; check accepts bounded indexed answers, writes no receipt and returns no per-question verdicts for exam, including completed review. The admin panel retains the answer key. Video URLs remain lifecycle-validated and render-gated.                                                |
-| `lesson-progress` | Own rows only (admin: the `/manage/training` report), anchored on lesson documentId; no update/delete. Completion independently validates the current published quiz and answers; malformed quiz content fails with `quizContentInvalid`. Existing receipts survive quiz edits. No displayed-version binding or attempt limit: stale answers can pass if correct indices still match, and answers can be guessed. Course completion is derived at read time.                                     |
-| `search-log`      | Anonymous by design (term and result count, no user relation), write-only content API; aggregated, admin-only `/api/search-logs/summary`; 90-day retention (03:35 cron).                                                                                                                                                                                                                                                                                                                         |
-| `wiki-space`      | `visibility`: public, role (`allowedRoles`), department or team. Moderators write.                                                                                                                                                                                                                                                                                                                                                                                                               |
-| `wiki-page`       | Inherits its space's visibility. Written as described under `can-edit-wiki` and the write allowlist.                                                                                                                                                                                                                                                                                                                                                                                             |
-| `wiki-revision`   | No route and no grant for any role, and closed as a relation for every caller (batch 15.1): it can hold unpublished draft text. Since batch 16 one published row per revision, anchored by `pageDocumentId`, written in the save's transaction after every content change of a page's draft (web editor or panel admin); the boot and `deploy.sh` refuse revision drafts. Read only through the history actions. Hidden in the admin panel.                                                      |
-| _profile_         | `GET`/`PUT /api/me`, the caller's own record. The output is an allowlist (no password hash or tokens; the manager is a summary). `PUT` takes only the whitelisted fields, trims them, answers 400 above 255 characters and accepts `locale` `en` or `de` only. For a user bound to Entra, display name, job title, phone and office location belong to Entra: `PUT` ignores them and both answers list them in `entraManagedFields`. Guests see no digest options, and `PUT` ignores theirs.     |
-| _entra-auth_      | `POST /api/auth/entra/exchange`, server to server only ([above](#microsoft-entra-id)).                                                                                                                                                                                                                                                                                                                                                                                                           |
+| Type              | Access rules                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `department`      | Readable by every role except `guest`; one stable row without draft & publish. Admin edits description/color/headerImage; the head of current user.department edits description/color. No editor bypass, structural API writes or create/delete routes.                                                                                                                                                                                                                                                                                                   |
+| `team`            | Like `department`; admin edits description/avatar, a permitted lead or the head of its department edits description. Structure remains panel-only.                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `announcement`    | Visible to its audience only: `department`, `team` (member or lead) and `audienceRoles`, AND-combined over the criteria that are set; none set = everyone. Fails closed: `audience` = `departments` without a department or team, or `retargetRequired` (a targeted department or team was deleted), is admins' and editors' only and notifies nobody ([below](#announcement-and-event-targeting)). Gone for others from `expiresAt`.                                                                                                                     |
+| `acknowledgement` | One per user, anchored to the announcement's `targetDocumentId` (stable across re-publishes), immutable once created. Only the announcement's audience can acknowledge it, and only until it expires (admins and editors excepted); anyone else gets the same 400 as for a missing announcement.                                                                                                                                                                                                                                                          |
+| `comment`         | Anchored by `targetType` + `targetDocumentId` (no foreign key). Reads and creates are filtered to targets the caller may see; an unpublished announcement's thread answers like a missing target until it is published again. Delete by the author or a moderator. `parent`/`replies` are not followed below the moderators (batch 15.2).                                                                                                                                                                                                                 |
+| `reaction`        | The same anchor and target visibility as comments. `create` toggles; with the boolean `reacted` it sets that end state instead (a repeated request changes nothing). Two simultaneous creates can both store a row; each keeps the oldest copy and deletes the others right after its insert, and removing deletes every copy. Delete takes the documentId or the numeric id.                                                                                                                                                                             |
+| `kudos`           | `from` is always the sender; `to` must be another user. Readable by the staff roles and `authenticated`; the celebrations feed by the staff roles only.                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `notification`    | Written by the cms itself (`utils/notify.ts`; the content API has no create or update), read and deleted by the recipient (`admin_role`: all). Publishing an announcement or event notifies its targeted users whose role holds the type's read grant (read from the permissions table at runtime) and who are not blocked, after the publish is saved; admins and editors get strictly the targeted audience. Mark-read takes up to 200 ids and only ever changes the caller's own unread rows.                                                          |
+| `event`           | Not visibility-scoped: every role with `event.find`, `guest` included, sees all published events. `departments` decide who is notified, not who can read; `notifyAudience` = `departments` without a department notifies nobody ([below](#announcement-and-event-targeting)). ICS export at `/api/events/:documentId/ics` (the numeric id of the published row also works, anything else is a 404).                                                                                                                                                       |
+| `event-rsvp`      | One answer per user and event (`create` is an upsert; the capacity gate counts each user's newest answer). Raw reads return only the caller's own rows (admin: all). Everyone else's answers come from `GET /api/event-rsvps/summary?targets=<documentIds>` (at most 50 published events): the yes/maybe/no counts, the names of the "yes" answers and the caller's own answer; who answered maybe or no never leaves the cms.                                                                                                                            |
+| `poll`            | See [poll department targeting](#poll-department-targeting) and [guest access](#poll-guest-access). The author is set to the caller on `POST /api/polls`; 2 to 10 different, non-empty options, checked for every writer including the admin panel.                                                                                                                                                                                                                                                                                                       |
+| `poll-vote`       | No generic routes. `POST /api/polls/:id/vote` and `GET /api/polls/:id/results` take the poll's documentId or its published row id. A vote cannot be changed; the results count each voter's first ballot only, and a vote removes the voter's later rows right after it is stored. The card sends the answer text it showed, and the cms refuses a vote whose option moved ("Poll options changed").                                                                                                                                                      |
+| `document`        | No departments = company-wide; with departments, only their members. `audience` = `departments` (set on every row that links a department, by each write and a boot backfill) keeps a document moderator-only once its departments are gone, until it is re-targeted or set back to `all`.                                                                                                                                                                                                                                                                |
+| `classified`      | Staff roles post; the author edits (admin bypass) and deletes (moderator bypass). Photos only through the [hardened upload](#upload-hardening), and only images the caller uploaded (moderators excepted). Expired ads leave the list at once and are deleted with their photos 90 days after `expiresAt` (03:45 cron).                                                                                                                                                                                                                                   |
+| `quick-link`      | Like `document`. No editing UI in the web; maintained in the Strapi admin.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `course`          | Published learner reads; admin/editor authoring through `can-author`, explicit status and revision checks. No content-API delete; nondeleting discard. Cover images use registered media claims.                                                                                                                                                                                                                                                                                                                                                          |
+| `lesson`          | Generic reads omit the private quiz, including nested reads. Player/check require a published lesson and parent for every granted role and reject all query parameters. Player selects question/options only; check accepts bounded indexed answers, writes no receipt and returns no per-question verdicts for exam, including completed review. Author editable and the panel retain the answer key; admin/editor authoring uses the same revision and publication-readiness guards as courses. Video URLs remain lifecycle-validated and render-gated. |
+| `lesson-progress` | Own rows only (admin: the `/manage/training` report), anchored on lesson documentId; no update/delete. Completion independently validates the current published quiz and answers; malformed quiz content fails with `quizContentInvalid`. Existing receipts survive quiz edits. No displayed-version binding or attempt limit: stale answers can pass if correct indices still match, and answers can be guessed. Course completion is derived at read time.                                                                                              |
+| `search-log`      | Anonymous by design (term and result count, no user relation), write-only content API; aggregated, admin-only `/api/search-logs/summary`; 90-day retention (03:35 cron).                                                                                                                                                                                                                                                                                                                                                                                  |
+| `wiki-space`      | `visibility`: public, role (`allowedRoles`), department or team. Moderators write.                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `wiki-page`       | Inherits its space's visibility. Written as described under `can-edit-wiki` and the write allowlist.                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `wiki-revision`   | No route and no grant for any role, and closed as a relation for every caller (batch 15.1): it can hold unpublished draft text. Since batch 16 one published row per revision, anchored by `pageDocumentId`, written in the save's transaction after every content change of a page's draft (web editor or panel admin); the boot and `deploy.sh` refuse revision drafts. Read only through the history actions. Hidden in the admin panel.                                                                                                               |
+| _profile_         | `GET`/`PUT /api/me`, the caller's own record. The output is an allowlist (no password hash or tokens; the manager is a summary). `PUT` takes only the whitelisted fields, trims them, answers 400 above 255 characters and accepts `locale` `en` or `de` only. For a user bound to Entra, display name, job title, phone and office location belong to Entra: `PUT` ignores them and both answers list them in `entraManagedFields`. Guests see no digest options, and `PUT` ignores theirs.                                                              |
+| _entra-auth_      | `POST /api/auth/entra/exchange`, server to server only ([above](#microsoft-entra-id)).                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 
 ### Announcement and event targeting
 
@@ -1115,7 +1138,7 @@ regular relations. In responses about users, the contact fields `email`,
 ## Upload hardening
 
 The only granted content-API upload route, `POST /api/upload` (marketplace
-ad photos, and since batch 16 document files), is wrapped by
+ad photos, since batch 16 document files, and since batch 17 course/org images), is wrapped by
 `apps/cms/src/extensions/upload/strapi-server.ts` on top of the permission
 grant, with the pure rules in `apps/cms/src/utils/upload-guard.ts`,
 `upload-zip.ts` and `upload-ooxml.ts` (deep-dive decision 06 §E1, owner
@@ -1186,25 +1209,27 @@ the sniffed format>` and the mime the table's (core stores and serves by
   editor bypass), and every write of an ad, from any source (the Content
   Manager too), locks its image rows and refuses one that is being removed
   (the classified lifecycle); the media
-  claims (registered from batch 16, lane 16B) accept a document file only
-  when it is the caller's own upload, of an allowed mime, linked by nothing
-  else, checked under the file row's lock, and no publish, clone or discard
-  copies a file that is being removed.
+  claims cover document files and course/org images. New content-API
+  attachments must be the caller's own upload, of the field's allowed mime,
+  linked by nothing else, checked under the file row's lock. Every writer,
+  including the panel, refuses a tombstoned file on those registered fields;
+  no publish, clone or discard copies one that is being removed.
 - **Removal:** every delete, the app's and the Media Library's, first
   takes one reservation (`reserveRemoval`, `utils/upload-orphans.ts`): it
   locks the file row, re-reads it (a file that is gone or already being
   removed is skipped, so overlapping deletes remove and record it once),
   and commits a tombstone with the audit row before the bytes go; the
-  document and classified writes refuse a tombstoned file, and the janitor
+  document, course/org and classified writes refuse a tombstoned file, and the janitor
   retries an unlinked tombstoned row after 10 minutes. The app's removers
   (`claimAndRemove`) add their rules under the lock: stamped, linked by
   nothing, old enough; and they delete the bytes and the row under the
   lock again, only while nothing links the file (`removeReserved`): a
-  department's header image, a team avatar, a course cover, a user avatar
-  or an admin-panel picker checks no tombstone, so a link made in between
-  keeps the file (a warning, `[uploads] kept file <id>: …`). Known limit:
-  after a removal that failed between the bytes and the row, those
-  pickers can still link the tombstoned row.
+  user avatar or another unregistered media field can still be linked by
+  an admin-panel picker without checking the tombstone, so a link made in
+  between keeps the file (a warning, `[uploads] kept file <id>: …`). Known
+  limit: after a removal that failed between bytes and row, those
+  unregistered fields can still link it. Since batch 17 department header
+  images, team avatars and course covers no longer have this exception.
   `cleanupUploads` removes only the
   caller's own files; the nightly uploads janitor (03:30) only stamped files
   older than 24 hours, now including moderators' and department heads'
