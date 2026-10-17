@@ -346,3 +346,15 @@ These are per-area results; shared tests occur in more than one selection and ar
 The existing HTTP integration coverage was inspected; the full database/build suites were not repeated locally because the exact reviewed main commit already has green CI and application code is unchanged. No browser walkthrough, staging rehearsal or production operation was performed. The accepted limits in section 10 remain decisions, not new review findings.
 
 Next: prepare and review the exam mode downgrade/restore SQL and deployment instructions, then execute the browser acceptance and complete local staging cycle in section 8. Production deployment and the v0.17.0 release remain gated on that evidence and the owner's deployment go.
+
+## 17. Rollback preparation on 2026-10-17
+
+The [exam-mode runbook](../infra/rollback/exam-mode/README.md) now supplies the downgrade and roll-forward commands for the previously deployed CMS/web pair. `infra/deploy.sh` points to it before printing the retag/start instructions and performs no mode writes itself.
+
+- `downgrade.sql` atomically records only exam variants in a separate operational schema and maps them to quizGate. The saved identity is application schema, course documentId and draft/published state; row IDs and update times are diagnostics. An existing snapshot is never overwritten. The snapshot contains no quiz content or answer keys.
+- `restore.sql` requires an explicit decision for each saved variant. Only approved identities currently in quizGate are restored to exam, including rows replaced by republishing. Missing/ambiguous variants, unreviewed decisions and incompatible modes abort the transaction. Intentional learning modes and deleted variants can be excluded; unrelated courses and new variants are not converted.
+- Both scripts advance the existing authoring revision once per changed course document and leave quiz content, receipts, links and files alone. The runbook covers stopping all writers, archiving the snapshot, panel/scheduler checks, rollback-window reconciliation, repeat attempts and cleanup after verified roll-forward. The accepted answer disclosure, old org-write boundaries and media tombstone limit remain explicit.
+
+All 15 focused PostgreSQL regressions passed against disposable schemas, including replaced row IDs, mixed modes, deliberate exclusions, revision advances, retries and atomic rollback after a revision-write failure. The deploy-preflight suite passed 69 tests (7 existing skips), including the hint ordering and absence of automatic mode writes. The CMS test typecheck, formatting and Bash syntax checks passed. A separate psql/pg_dump smoke check verified downgrade, snapshot export, refusal before review and targeted restore in the disposable database. Independent review found no remaining issue. This is preparation and SQL verification; the real old/new image cycle and browser acceptance have not been performed.
+
+Next: execute the browser acceptance and complete local staging cycle in section 8 using this runbook. Production deployment and v0.17.0 still require that evidence and the owner's deployment go.
