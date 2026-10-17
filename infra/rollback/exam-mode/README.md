@@ -84,7 +84,8 @@ org text and intact linked images remain. Record any mode/publish/delete changes
 made during the rollback window for the per-variant review below.
 
 Accepted pre-17 behavior returns: learner APIs disclose correct answers again;
-old organisation create/delete routes and grants return; course/org image claims
+old organisation write rules return (including create/delete, missing revision
+checks and broader admin writes); course/org image claims
 again have the non-document tombstone-attachment limit. Returning to Batch 17
 cannot undo disclosed answers. Downgrade SQL does not delete intact linked images.
 
@@ -168,3 +169,8 @@ manual procedure; it performs no mode writes.
 
 Those tests do not replace the image-level deploy/rollback/roll-forward rehearsal
 or browser acceptance. Record that evidence separately before production deploy.
+
+The [2026-10-17 local image rehearsal](../../../docs/batch-17-image-rehearsal.md)
+exercised this procedure with the real v0.16.2 and Batch 17 images, including
+panel/scheduler republishing and an intentional mode edit during rollback.
+Browser acceptance and production deployment remain outstanding.
