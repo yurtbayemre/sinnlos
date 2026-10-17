@@ -1,7 +1,13 @@
 "use server";
 
 import { unstable_rethrow } from "next/navigation";
-import { UPLOAD_FILE_KEY, UPLOAD_HTTP_STATUS, type EditableMedia } from "@sinnlos/domain";
+import {
+  IMAGE_FORMATS,
+  UPLOAD_FORMAT_SPECS,
+  UPLOAD_FILE_KEY,
+  UPLOAD_HTTP_STATUS,
+  type EditableMedia,
+} from "@sinnlos/domain";
 import { actionFailure, failureFor, type ActionResult } from "@/lib/action-result";
 import { sendUpload } from "@/lib/api/manage/upload";
 import { DEMO_MODE } from "@/lib/config";
@@ -68,10 +74,18 @@ function fileRefused(code: string): UploadActionResult {
 }
 
 export async function uploadDocumentFile(form: unknown): Promise<UploadActionResult> {
+  return uploadFile(form, false);
+}
+
+export async function uploadImageFile(form: unknown): Promise<UploadActionResult> {
+  return uploadFile(form, true);
+}
+
+async function uploadFile(form: unknown, imageOnly: boolean): Promise<UploadActionResult> {
   // 1. The capability (a Server Action's argument is untrusted; checked after).
   const viewer = await getViewer();
   if (viewer.id === null) return actionFailure("unavailable");
-  const access = areaAccess(capabilitiesFor(viewer.role), "documents");
+  const access = areaAccess(capabilitiesFor(viewer.role), imageOnly ? "courses" : "documents");
   if (!canDo(access, "create") && !canDo(access, "edit")) return actionFailure("forbidden");
   if (lacksDepartment(access, viewer.department)) return actionFailure("forbidden");
 
@@ -80,7 +94,7 @@ export async function uploadDocumentFile(form: unknown): Promise<UploadActionRes
   const entries = form.getAll(UPLOAD_FILE_KEY);
   if (entries.length !== 1 || !(entries[0] instanceof File)) return fileRefused("required");
   const file = entries[0];
-  const early = checkUploadFile(file);
+  const early = checkUploadFile(file, imageOnly);
   if (early) return fileRefused(early);
   if (DEMO_MODE) return actionFailure("failed");
 
@@ -92,16 +106,16 @@ export async function uploadDocumentFile(form: unknown): Promise<UploadActionRes
     // The sign-in redirect of an expired session must reach Next.
     unstable_rethrow(error);
     if (error instanceof StrapiError && error.status === UPLOAD_HTTP_STATUS.bodyTooLarge) {
-      console.warn("[manage-documents] upload refused: 413 → fileTooLarge");
+      console.warn("[manage-upload] upload refused: 413 → fileTooLarge");
       return fileRefused("fileTooLarge");
     }
     const failure = failureFor(error);
     if (error instanceof StrapiError && error.status < 500) {
       console.warn(
-        `[manage-documents] upload refused: ${error.status} ${error.strapiName ?? "-"} → ${failure.code}`,
+        `[manage-upload] upload refused: ${error.status} ${error.strapiName ?? "-"} → ${failure.code}`,
       );
     } else {
-      console.error(`[manage-documents] upload failed → ${failure.code}`, error);
+      console.error(`[manage-upload] upload failed → ${failure.code}`, error);
     }
     return failure;
   }
@@ -112,9 +126,11 @@ export async function uploadDocumentFile(form: unknown): Promise<UploadActionRes
   const row = soleFileRow(answer);
   if (!row) {
     console.error(
-      `[manage-documents] upload answered ${Array.isArray(answer) ? `${answer.length} rows` : "no list"}, not one file row → failed`,
+      `[manage-upload] upload answered ${Array.isArray(answer) ? `${answer.length} rows` : "no list"}, not one file row → failed`,
     );
     return actionFailure("failed");
   }
+  if (imageOnly && !IMAGE_FORMATS.some((format) => UPLOAD_FORMAT_SPECS[format].mime === row.mime))
+    return fileRefused("fileType");
   return { ok: true, data: row };
 }

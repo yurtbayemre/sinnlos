@@ -25,6 +25,9 @@ export const MANAGE_MESSAGE_AREAS = [
   "quickLinks",
   "documents",
   "wiki",
+  "training",
+  "org",
+  "activity",
 ] as const;
 
 export type ManageMessageArea = (typeof MANAGE_MESSAGE_AREAS)[number];
@@ -45,6 +48,9 @@ const MANAGE: Readonly<Record<Locale, Readonly<Record<ManageMessageArea, () => J
     quickLinks: () => import("../../messages/manage/quickLinks.en.json"),
     documents: () => import("../../messages/manage/documents.en.json"),
     wiki: () => import("../../messages/manage/wiki.en.json"),
+    training: () => import("../../messages/manage/training.en.json"),
+    org: () => import("../../messages/manage/org.en.json"),
+    activity: () => import("../../messages/manage/activity.en.json"),
   },
   de: {
     common: () => import("../../messages/manage/common.de.json"),
@@ -54,6 +60,9 @@ const MANAGE: Readonly<Record<Locale, Readonly<Record<ManageMessageArea, () => J
     quickLinks: () => import("../../messages/manage/quickLinks.de.json"),
     documents: () => import("../../messages/manage/documents.de.json"),
     wiki: () => import("../../messages/manage/wiki.de.json"),
+    training: () => import("../../messages/manage/training.de.json"),
+    org: () => import("../../messages/manage/org.de.json"),
+    activity: () => import("../../messages/manage/activity.de.json"),
   },
 };
 

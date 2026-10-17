@@ -1,0 +1,83 @@
+{
+  "title": "Training",
+  "description": "Create courses, lessons and quizzes. Publication makes saved changes available to readers.",
+  "course": {
+    "title": "Courses",
+    "section": "Course",
+    "new": "New course",
+    "editTitle": "Edit course",
+    "emptyTitle": "No courses yet",
+    "emptyHint": "Create a course, then add its lessons."
+  },
+  "lesson": {
+    "title": "Lessons",
+    "section": "Lesson",
+    "new": "New lesson",
+    "editTitle": "Edit lesson",
+    "emptyTitle": "No lessons yet",
+    "emptyHint": "Add a lesson to this course."
+  },
+  "fields": {
+    "title": {
+      "label": "Title"
+    },
+    "description": {
+      "label": "Description"
+    },
+    "mandatory": {
+      "label": "Mandatory course"
+    },
+    "completionMode": {
+      "label": "Quiz feedback"
+    },
+    "coverImage": {
+      "label": "Cover image",
+      "hint": "JPEG, PNG or WebP, up to 5 MB."
+    },
+    "course": {
+      "label": "Course",
+      "hint": "Publish this course before publishing its lessons. Moving lessons remains available in the admin panel."
+    },
+    "body": {
+      "label": "Lesson content"
+    },
+    "order": {
+      "label": "Order",
+      "hint": "A whole number from 0 to 10,000. Lower numbers come first."
+    },
+    "videoUrl": {
+      "label": "YouTube video",
+      "hint": "Optional HTTPS link to a YouTube video."
+    }
+  },
+  "modes": {
+    "confirm": "Feedback after each answer",
+    "quizGate": "Check all answers together",
+    "exam": "Exam: overall result only"
+  },
+  "modeHint": "All answers are checked by the server. Exam gives only a passed/not-passed result. Attempts are unlimited, with no timer; guessing or sharing answers is still possible.",
+  "receiptsNotice": "Existing completions stay valid when you change questions, their order or the feedback mode.",
+  "quiz": {
+    "title": "Quiz",
+    "limits": "Up to {questions} questions, 2–{options} options per question and {characters} characters per text. Select one correct answer for each question.",
+    "questionNumber": "Question {number}",
+    "questionText": "Question text",
+    "optionNumber": "Answer {number}",
+    "correctAnswer": "Correct answer",
+    "chooseCorrect": "Mark answer {number} as correct",
+    "removeOptionNumber": "Remove answer {number}",
+    "remove": "Remove",
+    "addOption": "Add answer",
+    "removeQuestion": "Remove question",
+    "addQuestion": "Add question",
+    "validate": "Check quiz",
+    "invalid": "Complete every question and answer, and select one correct answer per question. Check the limits above.",
+    "valid": "The quiz is valid.",
+    "questionAdded": "Question added.",
+    "questionRemoved": "Question removed.",
+    "optionAdded": "Answer added.",
+    "optionRemoved": "Answer removed.",
+    "empty": "Without quiz questions, readers mark the lesson complete manually.",
+    "correct": "correct"
+  }
+}

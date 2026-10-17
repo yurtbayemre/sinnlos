@@ -146,7 +146,7 @@ export function WikiPageEditor({
   const moderator = editable ? editable.roleClass === "moderator" : wikiPages.edit === "any";
   const creating = editable === null;
   const itemPath = useCallback(
-    (data: AuthoringResult) => {
+    (data: Pick<AuthoringResult, "documentId" | "version">) => {
       const page = data as WikiPageResult;
       return wikiEditPath(page.spaceSlug ?? space.slug, page.slug, page.documentId);
     },

@@ -60,7 +60,7 @@ export function canDo(access: AreaAccess | null | undefined, verb: AuthoringVerb
 }
 
 /** The /manage areas the viewer authors in, in landing order. */
-export function manageAreasFor(capabilities: Capabilities): ManageArea[] {
+export function manageAreasFor(capabilities: Capabilities): Exclude<ManageArea, "lessons">[] {
   return MANAGE_AREAS.filter((area) => areaAccess(capabilities, area) !== null);
 }
 

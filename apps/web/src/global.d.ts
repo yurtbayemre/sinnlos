@@ -20,6 +20,9 @@ import type manageEvents from "../messages/manage/events.en.json";
 import type managePolls from "../messages/manage/polls.en.json";
 import type manageQuickLinks from "../messages/manage/quickLinks.en.json";
 import type manageWiki from "../messages/manage/wiki.en.json";
+import type manageTraining from "../messages/manage/training.en.json";
+import type manageOrg from "../messages/manage/org.en.json";
+import type manageActivity from "../messages/manage/activity.en.json";
 import type { Locale as AppLocale } from "@/i18n/locale";
 
 /**
@@ -34,6 +37,9 @@ interface ManageMessages {
   quickLinks: typeof manageQuickLinks;
   documents: typeof manageDocuments;
   wiki: typeof manageWiki;
+  training: typeof manageTraining;
+  org: typeof manageOrg;
+  activity: typeof manageActivity;
 }
 
 declare module "next-intl" {

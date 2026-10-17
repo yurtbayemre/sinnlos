@@ -17,6 +17,12 @@ import quickLinksDe from "../../../messages/manage/quickLinks.de.json";
 import quickLinksEn from "../../../messages/manage/quickLinks.en.json";
 import wikiDe from "../../../messages/manage/wiki.de.json";
 import wikiEn from "../../../messages/manage/wiki.en.json";
+import trainingDe from "../../../messages/manage/training.de.json";
+import trainingEn from "../../../messages/manage/training.en.json";
+import orgDe from "../../../messages/manage/org.de.json";
+import orgEn from "../../../messages/manage/org.en.json";
+import activityDe from "../../../messages/manage/activity.de.json";
+import activityEn from "../../../messages/manage/activity.en.json";
 import { withManageMessages } from "@/i18n/messages";
 
 /**
@@ -34,6 +40,9 @@ export const MESSAGES = {
     quickLinks: quickLinksEn,
     documents: documentsEn,
     wiki: wikiEn,
+    training: trainingEn,
+    org: orgEn,
+    activity: activityEn,
   }),
   de: withManageMessages(de, {
     common: commonDe,
@@ -43,6 +52,9 @@ export const MESSAGES = {
     quickLinks: quickLinksDe,
     documents: documentsDe,
     wiki: wikiDe,
+    training: trainingDe,
+    org: orgDe,
+    activity: activityDe,
   }),
 };
 

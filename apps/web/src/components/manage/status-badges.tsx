@@ -42,7 +42,7 @@ export function Badge({ tone, children }: { tone: keyof typeof TONE; children: R
 }
 
 export interface StatusBadgeInput {
-  status: AuthoringDocumentStatus;
+  status?: AuthoringDocumentStatus;
   publishAt?: string | null;
   scheduleError?: string | null;
   ownerDepartment?: OwnerDepartment | null;
@@ -70,7 +70,7 @@ export function StatusBadges({
   const publishAt = formatInstant(format, item.publishAt, DATE_TIME);
   return (
     <div className={cn("flex flex-wrap items-center gap-1.5", className)}>
-      {!hideStatus && (
+      {!hideStatus && item.status && (
         <Badge
           tone={
             item.status === "published"

@@ -1,7 +1,7 @@
 # Batch 17 implementation plan
 
 > Phase 3 of v2 frontend authoring (plan 12). Written 2026-10-16 against main 2f47b84fcadfd6f63ecffac1c78cdf388c5ea44d, released as v0.16.2.
-> Status: the 17A backend remainder is implemented locally (section 14), following the org probe/contracts (section 12) and shared player/API (section 13). The 17B web remainder is next. Decision 06 remains the approved scope; section 3 records the accepted lean exam-mode amendment, unlimited retries and no timer. Review corrections are recorded in section 11.
+> Status: the 17B web remainder is implemented locally (section 15), on top of the org probe/contracts (section 12), shared player/API (section 13) and backend remainder (section 14). Combined integration and rehearsal are next. Decision 06 remains the approved scope; section 3 records the accepted lean exam-mode amendment, unlimited retries and no timer. Review corrections are recorded in section 11.
 > Paths: cms/ = apps/cms/src/, web/ = apps/web/src/, domain/ = packages/domain/src/. Paths outside those roots are written in full.
 > This plan records the implementation baseline and local evidence; it does not verify or change the running server.
 
@@ -312,3 +312,18 @@ The backend remainder builds on the shared player/API commit bb0eecf:
 Validation is recorded against disposable SQLite/Postgres databases. Focused controller/gate tests and production/test typechecks pass; independent training, organisation, activity and media reviews found no remaining actionable issue. The complete real HTTP integration run passed all 45 files with 1,042 tests and 32 intentional skips on SQLite and PostgreSQL 16. The full local unit run passed 7,039 tests; two stale structural pins were updated, while six existing Windows SWC-cache/bash failures remain environment-specific. Complete integration and exact-head Linux CI evidence is recorded in the PR.
 
 The web authoring forms, org detail rendering, image upload UI, activity page, report relocation and navigation remain step four. No staging/production deploy, browser acceptance or deploy/rollback/roll-forward rehearsal has been performed. Existing panel-write and request-time role/department races, retained quiz receipts and the section 3 learner limits remain accepted.
+
+## 15. Fourth implementation step: 17B web remainder
+
+The web remainder builds on backend commit fc6e656 and PR #88:
+
+- `/manage/training` now lists courses for admins/editors, with new/edit pages, a nested paginated lesson list and lesson new/edit pages. Nested routes verify the lesson's editable course against the URL. Existing authoring requests, explicit status, If-Match, publish/schedule controls, previews and conflict dialogs are reused. Training has no delete control and discard requires a published version.
+- The bounded quiz builder uses question/options inputs, one correct-answer radio group, add/remove controls and the existing domain validator. Ordered quiz comparison now detects nested text/answer changes and question order. Saves/reset use the shared editor baseline. Mode/quiz editing explains retained receipts and the exam limitations; learner pages still use the answerless contract. Course readers display the cover through the existing authenticated upload path, safe Markdown on detail and a plain-text summary on the overview.
+- Department/team detail pages expose row-aware edit links. The authoritative editable response supplies one Save form with exact role fields, no publication state and a shared revision conflict flow. Legacy raw descriptions are omitted on unrelated saves; HTML-looking values retain escaped stripHtml display, other text uses safe Markdown. Readers now populate and display department headers and team avatars.
+- One image-only option extends the existing file control and upload path for course/org images, including the existing 5 MB limit, removal and server-sniffed MIME refusal. Uploaded IDs survive failed saves and explicit conflict overwrite without uploading twice; existing document uploads retain their role/format rules.
+- `/manage/activity` is admin-only with bounded type, actor namespace/id, class and date filters, pagination and distinct invalid/failed/empty states. Local date/time filters are converted with the existing application-zone validation. Audit content is escaped; missing content is not linked.
+- The admin report moved to `/manage/training/report`; the manage landing adds training and activity while retaining the three department-author areas. Routine content-manager shortcuts are narrowed; panel access remains for structure, users and permissions. German/English catalogs, skeletons, reader URL snapshots and contracts are updated together.
+
+Focused tests, production/test typechecks, lint, formatting and independent training, organisation, activity and shared-helper reviews passed. The complete local unit run passed 7,212 tests with 153 intentional skips; six existing Windows bash/SWC-cache failures remain, and the same SWC cache validation blocks the local web build. Exact-head Linux CI evidence is recorded in the follow-up PR. No dependencies, authentication transport, CI concurrency or existing completion receipts changed.
+
+Combined browser acceptance and the deploy/rollback/roll-forward rehearsal remain the integration step. No staging/production deployment or release has been performed; the accepted limits in section 10 remain.

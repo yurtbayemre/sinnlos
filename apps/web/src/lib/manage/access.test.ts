@@ -11,7 +11,6 @@ import {
   hasOwnerDepartment,
   MANAGE_AREAS,
   SCHEDULE_FIELDS,
-  type TypedArea,
 } from "./areas";
 import { k8Capabilities } from "./k8-capabilities.test.helper";
 
@@ -24,7 +23,7 @@ import { k8Capabilities } from "./k8-capabilities.test.helper";
  * follow whatever lib/roles.ts says.
  */
 
-const SIX_AREAS = ["announcements", "events", "polls", "quickLinks", "documents", "wiki"];
+const AREAS = ["announcements", "events", "polls", "quickLinks", "documents", "wiki", "courses"];
 
 const ENG = { documentId: "deptengineering000000000" };
 
@@ -32,7 +31,7 @@ describe("areaAccess with batch 15's capabilities (K8)", () => {
   it("moderators: every area, any item, the full verbs of each", () => {
     for (const role of ["admin_role", "editor"]) {
       const caps = k8Capabilities(roles, role);
-      expect(manageAreasFor(caps), role).toEqual(SIX_AREAS);
+      expect(manageAreasFor(caps), role).toEqual(AREAS);
       const announcements = areaAccess(caps, "announcements");
       expect(announcements).toEqual({
         area: "announcements",
@@ -107,7 +106,7 @@ describe("the K8 helper and lib/roles.ts (15A's values)", () => {
 describe("areaAccess with lib/roles.ts's own values", () => {
   it("follows lib/roles.ts: moderators' verbs, nobody else", () => {
     const editor = roles.capabilitiesFor("editor");
-    expect(manageAreasFor(editor)).toEqual(SIX_AREAS);
+    expect(manageAreasFor(editor)).toEqual(AREAS);
     expect(manageAreasFor(roles.capabilitiesFor("department_head"))).toEqual([
       "announcements",
       "events",
@@ -125,13 +124,14 @@ describe("areaAccess with lib/roles.ts's own values", () => {
 
 describe("the areas", () => {
   it("map to the K7 types, their capability areas and their pages", () => {
-    const typed = MANAGE_AREAS.filter((area): area is TypedArea => area !== "wiki");
+    const typed = MANAGE_AREAS.filter((area) => area !== "wiki");
     expect(typed.map((area) => AREA_TYPE[area])).toEqual([
       "announcement",
       "event",
       "poll",
       "quickLink",
       "document",
+      "course",
     ]);
     expect(MANAGE_AREAS.map((area) => AREA_CAPABILITY[area])).toEqual([
       "announcements",
@@ -140,6 +140,7 @@ describe("the areas", () => {
       "quickLinks",
       "documents",
       "wikiSpaces",
+      "courses",
     ]);
     for (const area of MANAGE_AREAS) {
       expect(roles.AUTHORING_AREAS).toContain(AREA_CAPABILITY[area]);

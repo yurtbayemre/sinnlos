@@ -2,13 +2,13 @@
 GET http://cms.test/api/departments?populate[head][fields][0]=displayName&populate[head][fields][1]=jobTitle&populate[teams]=true&sort[0]=name:asc&sort[1]=id:asc&pagination[page]=1&pagination[pageSize]=100 cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
 
 ## api.departments.one
-GET http://cms.test/api/departments?filters[slug][$eq]=research%20%26%20development&populate[head]=true&populate[teams][populate][lead]=true&populate[members]=true cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
+GET http://cms.test/api/departments?filters[slug][$eq]=research%20%26%20development&populate[head]=true&populate[headerImage]=true&populate[teams][populate][lead]=true&populate[members]=true cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
 
 ## api.teams.list
 GET http://cms.test/api/teams?populate[department]=true&populate[lead][fields][0]=displayName&populate[lead][fields][1]=jobTitle&populate[members][fields][0]=displayName&populate[members][fields][1]=jobTitle&sort[0]=name:asc&sort[1]=id:asc&pagination[page]=1&pagination[pageSize]=100 cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
 
 ## api.teams.one
-GET http://cms.test/api/teams?filters[slug][$eq]=platform&populate[department]=true&populate[lead]=true&populate[members]=true cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
+GET http://cms.test/api/teams?filters[slug][$eq]=platform&populate[department]=true&populate[lead]=true&populate[avatar]=true&populate[members]=true cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
 
 ## api.wiki.spaces
 GET http://cms.test/api/wiki-spaces?populate[department]=true&populate[team]=true&sort[0]=name:asc&sort[1]=id:asc&pagination[page]=1&pagination[pageSize]=100 cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
@@ -241,7 +241,7 @@ GET http://cms.test/api/search-logs/summary?days=30 cache=no-store headers[autho
 GET http://cms.test/api/wiki-pages?&pagination[pageSize]=1 cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
 GET http://cms.test/api/wiki-spaces?&pagination[pageSize]=1 cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
 
-## page.manage/training
+## page.manage/training/report
 GET http://cms.test/api/courses?populate[lessons][fields][0]=documentId&populate[lessons][fields][1]=title&populate[lessons][fields][2]=order&populate[coverImage]=true&sort[0]=title:asc&sort[1]=id:asc&pagination[page]=1&pagination[pageSize]=100 cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
 GET http://cms.test/api/lesson-progresses?filters[targetDocumentId][$in][0]=lesson-doc-1&fields[0]=targetDocumentId&populate[user][fields][0]=id&sort[0]=id:asc&pagination[page]=1&pagination[pageSize]=100 cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
 GET http://cms.test/api/me cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]

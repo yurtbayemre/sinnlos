@@ -67,7 +67,18 @@ describe("i18n request config", () => {
     expect(Object.keys(messages).sort()).toEqual([...Object.keys(de), "manage"].sort());
     const manage = messages.manage as Record<string, unknown>;
     expect(Object.keys(manage).sort()).toEqual(
-      ["announcements", "common", "documents", "events", "polls", "quickLinks", "wiki"].sort(),
+      [
+        "activity",
+        "announcements",
+        "common",
+        "documents",
+        "events",
+        "org",
+        "polls",
+        "quickLinks",
+        "training",
+        "wiki",
+      ].sort(),
     );
     expect(manage.common).toEqual(manageCommonDe);
     localeMock.mockResolvedValue("en");

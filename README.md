@@ -913,7 +913,12 @@ Pages and UI:
       The browser receives no solution keys; feedback creates no receipt and
       completion is independently graded by the cms. Completed exam review
       stays overall-only, and malformed quiz content cannot complete;
-      `/manage/training` shows the completion report (admin)
+      `/manage/training/report` shows the completion report (admin)
+- [ ] Admins/editors author courses and nested lessons at `/manage/training`;
+      quiz edits are detected, image uploads survive save conflicts, and previous
+      completion receipts remain valid. Department heads/leads edit their permitted
+      descriptions from the detail pages; admins also edit organisation images.
+      `/manage/activity` shows the admin-only filtered activity trail
 - [ ] After a few ⌘K searches, `/manage/analytics` shows the search section
       (totals, zero-result rate, top terms)
 - [ ] `/people/<id>` of a manager shows _Direct reports_

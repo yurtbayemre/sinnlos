@@ -104,7 +104,7 @@ export function FormAlert({
   failure,
   alertRef,
 }: {
-  area: ManageArea;
+  area: ManageArea | "org";
   /** The form's own field texts (useFieldErrorText). */
   scope?: string;
   failure: FormFailure | null;
@@ -245,7 +245,7 @@ function CancelLabel() {
 
 /** The error text under a field, from the editor's field errors. */
 export function useFieldError(
-  area: ManageArea,
+  area: ManageArea | "org",
   fieldErrors: Readonly<Record<string, string>>,
   scope?: string,
 ) {
