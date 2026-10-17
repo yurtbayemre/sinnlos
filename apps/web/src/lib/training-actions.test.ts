@@ -26,7 +26,7 @@ const refreshMock = vi.fn();
 vi.mock("@/lib/strapi", () => ({ strapi: (...args: unknown[]) => strapiMock(...args) }));
 vi.mock("next/cache", () => ({ refresh: () => refreshMock() }));
 
-const { completeLesson } = await import("./training-actions");
+const { completeLesson, checkLesson } = await import("./training-actions");
 
 const LESSON = "k3m9x0000000000000000000";
 
@@ -160,5 +160,67 @@ describe("completeLesson", () => {
       "utf8",
     );
     expect(controller).toContain('ctx.badRequest("Quiz not passed")');
+  });
+});
+
+describe("checkLesson", () => {
+  const id = "a".repeat(24);
+  const answers = [{ questionIndex: 0, optionIndex: 1 }];
+
+  it.each(["confirm", "quizGate", "exam"] as const)(
+    "returns server %s feedback without completing or refreshing",
+    async (completionMode) => {
+      const data = {
+        completionMode,
+        passed: true,
+        ...(completionMode === "exam" ? {} : { verdicts: [{ questionIndex: 0, correct: true }] }),
+      };
+      strapiMock.mockResolvedValue({ data });
+      await expect(checkLesson(id, answers)).resolves.toEqual({ ok: true, data });
+      expect(strapiMock).toHaveBeenCalledExactlyOnceWith(`/api/lessons/${id}/check`, {
+        method: "POST",
+        body: JSON.stringify({ data: { answers } }),
+      });
+      expect(refreshMock).not.toHaveBeenCalled();
+    },
+  );
+
+  it("rejects malformed identities and indexed answers before calling the CMS", async () => {
+    await expect(checkLesson("bad/id", answers)).resolves.toEqual({ ok: false, code: "invalid" });
+    for (const selections of [
+      null,
+      [0],
+      [{ questionIndex: 0, optionIndex: 8 }],
+      [...answers, ...answers],
+      [{ ...answers[0], mode: "confirm" }],
+    ]) {
+      await expect(checkLesson(id, selections as unknown as typeof answers)).resolves.toEqual({
+        ok: false,
+        code: "invalid",
+      });
+    }
+    expect(strapiMock).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [400, { message: "Quiz not passed" }, "quizFailed"],
+    [400, { message: "Invalid quiz answers" }, "quizFailed"],
+    [400, { details: { code: "quizContentInvalid" } }, "quizContentInvalid"],
+    [404, {}, "notFound"],
+    [500, { details: { code: "quizContentInvalid" } }, "unavailable"],
+  ])("maps status %i and the shared quiz error without refreshing", async (status, error, code) => {
+    strapiMock.mockRejectedValue(
+      new StrapiError(status as number, "Error", JSON.stringify({ error })),
+    );
+    await expect(checkLesson(id, answers)).resolves.toEqual({ ok: false, code });
+    expect(refreshMock).not.toHaveBeenCalled();
+  });
+
+  it("keeps transport failures and session expiry from becoming feedback", async () => {
+    strapiMock.mockRejectedValue(new TypeError("fetch failed"));
+    await expect(checkLesson(id, answers)).resolves.toEqual({ ok: false, code: "unavailable" });
+    const redirectError = signInRedirect();
+    strapiMock.mockRejectedValue(redirectError);
+    await expect(checkLesson(id, answers)).rejects.toBe(redirectError);
   });
 });

@@ -1,47 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  courseCompletion,
-  evaluateQuiz,
-  parseQuiz,
-  passingAnswers,
-  quizGatesCompletion,
-  sortLessons,
-} from "./training-shared";
-
-// The YouTube parser and parseQuiz are @sinnlos/domain's
-// (packages/domain/src/training.test.ts).
-
-describe("evaluateQuiz (quiz-gate batch check)", () => {
-  const quiz = parseQuiz([
-    { question: "q1", options: ["a", "b"], correctIndex: 0 },
-    { question: "q2", options: ["a", "b"], correctIndex: 1 },
-  ]);
-
-  it("passes only when every question is answered correctly", () => {
-    expect(evaluateQuiz(quiz, { 0: 0, 1: 1 })).toEqual({
-      wrong: [],
-      answeredAll: true,
-      passed: true,
-    });
-  });
-
-  it("reports wrong indexes without passing", () => {
-    const res = evaluateQuiz(quiz, { 0: 1, 1: 1 });
-    expect(res.passed).toBe(false);
-    expect(res.wrong).toEqual([0]);
-    expect(res.answeredAll).toBe(true);
-  });
-
-  it("does not pass on partial answers (and does not mark unanswered as wrong)", () => {
-    const res = evaluateQuiz(quiz, { 0: 0 });
-    expect(res).toEqual({ wrong: [], answeredAll: false, passed: false });
-  });
-
-  it("passes trivially on an empty quiz — a gate must never dead-lock a lesson", () => {
-    expect(evaluateQuiz([], {}).passed).toBe(true);
-  });
-});
+import { courseCompletion, quizGatesCompletion, sortLessons } from "./training-shared";
 
 describe("courseCompletion", () => {
   it("fails closed on zero lessons and derives done from the current list", () => {
@@ -65,21 +24,11 @@ describe("sortLessons", () => {
 });
 
 describe("the quiz gate of a lesson's completion (issue #70)", () => {
-  const quiz = parseQuiz([
-    { question: "q1", options: ["a", "b", "c"], correctIndex: 2 },
-    { question: "q2", options: ["a", "b"], correctIndex: 0 },
-  ]);
+  const quiz = [{ question: "q1", options: ["a", "b", "c"] }];
 
   it("gates every open lesson with questions, never one without or one completed", () => {
     expect(quizGatesCompletion(quiz, false)).toBe(true);
     expect(quizGatesCompletion(quiz, true)).toBe(false);
     expect(quizGatesCompletion([], false)).toBe(false);
-  });
-
-  it("hands out the answers in the quiz's order only once all are correct", () => {
-    expect(passingAnswers(quiz, { 1: 0, 0: 2 })).toEqual([2, 0]);
-    expect(passingAnswers(quiz, { 0: 1, 1: 0 })).toBeNull();
-    expect(passingAnswers(quiz, { 0: 2 })).toBeNull();
-    expect(passingAnswers(quiz, {})).toBeNull();
   });
 });

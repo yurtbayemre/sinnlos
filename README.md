@@ -280,6 +280,9 @@ Custom actions and plugin routes (`✓` = granted, `—` = not granted):
 | `plugin::users-permissions.user.findOne`        | `GET /api/users/:id`                            | ✓            | ✓        | ✓                 | ✓           | ✓        | ✓       | ✓               |
 | `plugin::users-permissions.user.me`             | `GET /api/users/me`                             | ✓            | ✓        | ✓                 | ✓           | ✓        | ✓       | ✓               |
 
+| `api::lesson.lesson.player` | `GET /api/lessons/:id/player` | ✓ | ✓ | ✓ | ✓ | ✓ | — | ✓ |
+| `api::lesson.lesson.check` | `POST /api/lessons/:id/check` | ✓ | ✓ | ✓ | ✓ | ✓ | — | ✓ |
+
 <!-- custom-action-grants:end -->
 
 The anonymous `public` role holds none of these, and the cms revokes the
@@ -445,7 +448,8 @@ instance runs.
   skips sign-in and answers reads from the in-memory fixtures in
   `apps/web/src/lib/demo.ts`, signed in as the fixture user Ada Lovelace (a
   `member` of Engineering). List reads apply their filters, sort and paging
-  to the fixtures; writes are not stored, and a path without a fixture logs
+  to the fixtures; quiz feedback and completion need a running cms. Writes are
+  not stored, and a path without a fixture logs
   `[demo] no fixture for …` and answers an empty list. It is not a second
   backend, and a production server with `DEMO_MODE=1` answers every page
   with a 500
@@ -890,8 +894,10 @@ Pages and UI:
 
 - [ ] `/training` lists published courses; on every course a lesson's
       completion button stays locked until every quiz answer is correct
-      (per answer on a `confirm` course, after "Check answers" on a
-      `quizGate` one), and the cms refuses the completion otherwise;
+      (per answer on `confirm`, collected on `quizGate`, overall-only on `exam`).
+      The browser receives no solution keys; feedback creates no receipt and
+      completion is independently graded by the cms. Completed exam review
+      stays overall-only, and malformed quiz content cannot complete;
       `/manage/training` shows the completion report (admin)
 - [ ] After a few ⌘K searches, `/manage/analytics` shows the search section
       (totals, zero-result rate, top terms)

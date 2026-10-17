@@ -97,10 +97,10 @@ Workvivo, Sociabble, Simpplr, MangoApps feature guides, June 2026).
 > **In progress (2026-10-16, batch 17):** the reviewed
 > [implementation plan](plan-batch-17.md) covers training authoring, an
 > additional exam feedback mode, department/team content editing and the admin
-> activity page. The shared contracts and single-row org probe are implemented.
-> The probe passes on SQLite and Postgres. Next, the shared player/API will omit answer
-> keys in every mode; exam will return only an overall result through the shared player and grading
-> path. The plan retains panel fallback, requires real HTTP privacy regressions,
+> activity page. The contracts, single-row org probe and shared player/API are
+> implemented locally. Learner responses omit keys in every mode; exam returns
+> only an overall result. All 44 HTTP player/privacy tests pass on SQLite and
+> Postgres. Training/org/activity authoring and media claims are next. The plan retains panel fallback, requires real HTTP privacy regressions,
 > and rehearses rollback to the previous CMS/web pair with a reversible exam-mode
 > downgrade instead of a separate compatibility release.
 

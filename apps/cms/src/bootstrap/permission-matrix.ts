@@ -405,6 +405,9 @@ export const AUTHORING_ACTION_GRANTS: Readonly<Record<string, readonly MatrixRol
 
 export const CUSTOM_ACTION_GRANTS: Record<string, readonly MatrixRoleType[] | "*"> = {
   ...AUTHORING_ACTION_GRANTS,
+  // Same readers as lessons; these actions enforce published lesson and parent.
+  "api::lesson.lesson.player": [...STAFF_ROLES, AUTHENTICATED],
+  "api::lesson.lesson.check": [...STAFF_ROLES, AUTHENTICATED],
   "api::event.event.ics": "*",
   // The RSVP summary for the events list (FX21): exactly the roles that
   // hold event-rsvp find in the matrix above. Never guest: guests read the

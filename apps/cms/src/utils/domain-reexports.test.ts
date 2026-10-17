@@ -124,7 +124,7 @@ const CASES: Array<{
     module: "utils/training-validation",
     exports: trainingValidation,
     fromDomain: { validateQuiz: "validateQuiz", youtubeVideoId: "youtubeVideoId" },
-    own: ["QUIZ_NOT_JSON_ERROR", "validateLessonData"],
+    own: ["QUIZ_NOT_JSON_ERROR", "validateLessonData", "validateStoredQuiz", "checkStoredQuiz"],
   },
   {
     module: "bootstrap/roles",

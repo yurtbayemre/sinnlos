@@ -390,6 +390,9 @@ const GOLDEN: Record<string, PolicySpec[]> = {
 
   "api::lesson.lesson.find": training("lesson"),
   "api::lesson.lesson.findOne": training("lesson"),
+  // Fixed learner actions enforce published targets inside the controller.
+  "api::lesson.lesson.player": [],
+  "api::lesson.lesson.check": [],
 
   "api::lesson-progress.lesson-progress.find": ["global::lesson-progress-visibility"],
   "api::lesson-progress.lesson-progress.findOne": ["global::lesson-progress-visibility"],
@@ -1352,7 +1355,9 @@ describe("route → policy matrix (S01)", async () => {
       ]) {
         const authoring = [...grants].filter(
           (action) =>
-            action.startsWith(`${uid}.`) && !["find", "findOne"].includes(splitAction(action)[1]),
+            action.startsWith(`${uid}.`) &&
+            !["find", "findOne"].includes(splitAction(action)[1]) &&
+            !["api::lesson.lesson.player", "api::lesson.lesson.check"].includes(action),
         );
         expect(authoring, uid).toEqual([]);
       }
@@ -1373,6 +1378,15 @@ describe("route → policy matrix (S01)", async () => {
   });
 
   describe("fixed holes (regressions)", () => {
+    it("player and feedback are granted exactly to lesson readers", () => {
+      const readers = [...(matrixGrants.get("api::lesson.lesson.find") ?? [])].sort();
+      for (const action of ["api::lesson.lesson.player", "api::lesson.lesson.check"]) {
+        expect(matrixRoles.filter((role) => effectiveGrants(role).has(action)).sort()).toEqual(
+          readers,
+        );
+      }
+    });
+
     it("FX01: POST/PUT/DELETE /api/poll-votes are gone or gated (forged votes)", () => {
       for (const write of ["create", "update", "delete"]) {
         const action = `api::poll-vote.poll-vote.${write}`;

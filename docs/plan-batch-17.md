@@ -1,7 +1,7 @@
 # Batch 17 implementation plan
 
 > Phase 3 of v2 frontend authoring (plan 12). Written 2026-10-16 against main 2f47b84fcadfd6f63ecffac1c78cdf388c5ea44d, released as v0.16.2.
-> Status: first implementation step complete locally: single-row org probe and shared contracts (section 12). The shared player/API change is next. Decision 06 remains the approved scope; section 3 records the accepted lean exam-mode amendment, unlimited retries and no timer. Review corrections are recorded in section 11.
+> Status: shared player/API implemented locally (section 13), following the org probe and contracts (section 12). The 17A backend remainder is next. Decision 06 remains the approved scope; section 3 records the accepted lean exam-mode amendment, unlimited retries and no timer. Review corrections are recorded in section 11.
 > Paths: cms/ = apps/cms/src/, web/ = apps/web/src/, domain/ = packages/domain/src/. Paths outside those roots are written in full.
 > This plan records the implementation baseline and local evidence; it does not verify or change the running server.
 
@@ -251,7 +251,7 @@ The lane lists are responsibilities, not a request to create every named file:
 
 ## 10. Completion gates for the plan and implementation
 
-Implementation follows the accepted section 3 decision: exam remains as overall-only feedback, all learner modes are answerless, retries are unlimited and there is no timer. The single-row org prerequisite passed on SQLite and Postgres (section 12); guarded org endpoints and their HTTP tests remain to be implemented. Privacy is a normal lane regression, not a pre-contract gate; real HTTP exposure still blocks release. Quiz privacy has not yet changed or passed its regression gate.
+Implementation follows the accepted section 3 decision: exam remains as overall-only feedback, all learner modes are answerless, retries are unlimited and there is no timer. The single-row org prerequisite passed on SQLite and Postgres (section 12); guarded org endpoints and their HTTP tests remain to be implemented. Privacy is a normal lane regression, not a pre-contract gate; real HTTP exposure still blocks release. The shared player/API privacy regression passed on SQLite and Postgres (section 13); production release and combined rehearsal remain pending.
 
 Before production deployment, exact-commit CI and the complete rehearsal with the previous CMS/web pair and mode downgrade/restore are mandatory. Accepted limits remain: panel saves lack If-Match and may overwrite a web change; panel structural/media privileges remain; quiz edits do not revoke receipts; current-published grading is not bound to previously displayed questions and retains concurrent publish/reparent availability races; unlimited retries permit guessing; in-flight role/team changes retain the existing request race. Rollback restores the old answer exposure and media/org boundaries described in section 3.4.
 
@@ -283,4 +283,17 @@ The NULL publishedAt fixture is injected after startup: the existing org boot gu
 
 Local validation: 181 focused unit/contract tests and 12 integration tests passed; domain build/export parity and production/test TypeScript checks passed across all three packages. Independent review found no actionable issue. The integration run used disposable databases, not staging or production.
 
-Next is the shared player/API change, including strict stored-quiz validation and release-blocking HTTP privacy regressions. This first step does not add endpoints, grants, capabilities, media claims or the exam schema value; existing learner reads still expose answers. Full release checks, browser acceptance and deploy/rollback rehearsal remain outstanding.
+Next is the shared player/API change, including strict stored-quiz validation and release-blocking HTTP privacy regressions. That first step did not add endpoints, grants, capabilities, media claims or the exam schema value; its learner reads still exposed answers. Section 13 records the subsequent player/API change. Full release checks, browser acceptance and deploy/rollback rehearsal remain outstanding.
+
+## 13. Second implementation step: shared player/API
+
+The shared player/API builds on the contracts commit 9a0d643:
+
+- Raw lesson.quiz is private for all generic content-API reads. One fixed player response contains only question/options; the new player and feedback actions have exactly the existing lesson read grants. The panel still reads and edits answer keys; web author editable endpoints belong to the backend remainder.
+- Player, feedback and completion share the published lesson/parent check. Feedback and completion share strict stored-quiz validation and the existing grader. Null/[] means manual completion; corrupt stored content fails with quizContentInvalid. Feedback creates no receipt and completion independently regrades using the caller from the session.
+- The course enum adds exam without changing existing/default modes. One web player requests confirm feedback per selection, quizGate feedback in a batch and exam aggregate feedback, including completed review. A shared bounded selection validator serves both request boundaries. Answer edits and unmount invalidate pending feedback; refused stale submissions reload the current player.
+- The HTTP regressions exposed a malformed scalar filter being wrapped by visibility policies before Strapi validation, causing 500. The existing narrowFilters now rejects that shape with 400 before rewriting it; no additional privacy middleware was needed.
+
+Local evidence: all 44 real HTTP tests pass on SQLite and Postgres 16, covering private direct/nested/filter/sort/search/populate and array/JSON query shapes, grants, unpublished targets, panel edits, corrupt content, failed receipt insertion, old receipts and current-published grading. The focused web checks pass, including stale feedback and unmount regressions; independent review findings were fixed. The local full unit run passed 6,983 tests but hit Windows shell/SWC-cache environment failures and a Postgres setup timeout; the isolated Postgres retry passed all 13 tests. Linux CI is the authority for the complete build and test run.
+
+Next: the 17A backend remainder (training/org/activity authoring and media claims), then the web remainder and combined acceptance. No staging/production deployment or rollback rehearsal has been performed. The existing DEMO_MODE remains a read-only fixture preview; interactive quiz feedback requires the CMS. Accepted unlimited-attempt and current-published race limits remain as documented in section 3.
