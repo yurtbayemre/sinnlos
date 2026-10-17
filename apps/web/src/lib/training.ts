@@ -45,7 +45,7 @@ export async function fetchLessonByDocumentId(documentId: string): Promise<Lesso
 /**
  * Every progress row for the given lessons, across ALL users — only useful
  * for admin_role (the lesson-progress-visibility policy scopes everyone
- * else to their own rows). The /manage/training report walks it PER COURSE
+ * else to their own rows). The /manage/training/report report walks it PER COURSE
  * (`targetDocumentId $in <lesson ids>`), so the walk cap scales with the
  * course size, not with the global row count. Sorted by id: without an
  * ORDER BY, Postgres may return rows in a different order per page, and

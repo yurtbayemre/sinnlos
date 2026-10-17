@@ -3,6 +3,8 @@ import { notFound } from "next/navigation";
 import { ArrowLeft, ArrowRight, CheckCircle2, Circle } from "lucide-react";
 import { getTranslations } from "next-intl/server";
 
+import { Markdown } from "@/components/markdown";
+import { mediaUrl } from "@/lib/config";
 import { SectionUnavailablePage } from "@/components/section-unavailable";
 import { Card, CardContent } from "@/components/ui/card";
 import { isReadDenied } from "@/lib/roles";
@@ -45,8 +47,15 @@ export default async function CoursePage({ params }: Params) {
   if (!page) notFound();
   const { course, lessons, total, completed: doneCount, done, statusUnknown, firstOpen } = page;
 
+  const coverImage = mediaUrl(course.coverImage?.url);
+
   return (
     <div className="space-y-8">
+      {coverImage && (
+        // Authenticated uploads are requested by the browser with its session cookie.
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={coverImage} alt="" className="max-h-80 w-full rounded-2xl object-cover" />
+      )}
       <div>
         <Link
           href="/training"
@@ -63,7 +72,11 @@ export default async function CoursePage({ params }: Params) {
             </span>
           )}
         </div>
-        {course.description && <p className="mt-1 text-muted-foreground">{course.description}</p>}
+        {course.description && (
+          <Markdown className="prose prose-sm mt-2 max-w-none text-muted-foreground dark:prose-invert">
+            {course.description}
+          </Markdown>
+        )}
         <div className="mt-3 flex flex-wrap items-center gap-4 text-sm">
           {statusUnknown ? (
             <span className="text-muted-foreground">–</span>

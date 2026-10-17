@@ -3,7 +3,7 @@ import Link from "next/link";
 import { Users2 } from "lucide-react";
 import { getTranslations } from "next-intl/server";
 import { api } from "@/lib/strapi";
-import { avatarThumbUrl } from "@/lib/config";
+import { avatarThumbUrl, mediaUrl } from "@/lib/config";
 import { isReadDenied } from "@/lib/roles";
 import { tryFetch } from "@/lib/safe-fetch";
 import { getViewer } from "@/lib/viewer";
@@ -11,6 +11,9 @@ import type { Department } from "@/lib/types";
 import { displayNameOf, initials, stripHtml } from "@/lib/utils";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { OrgDescription } from "@/components/org-description";
+import { buttonVariants } from "@/components/ui/button";
+import { canEditOrg } from "@/lib/manage/org-access";
 import { SectionUnavailablePage } from "@/components/section-unavailable";
 
 interface Props {
@@ -33,9 +36,11 @@ export default async function DepartmentPage({ params }: Props) {
   const t = await getTranslations("departments");
   const tTeams = await getTranslations("teams");
   const tCommon = await getTranslations("common");
+  const tOrg = await getTranslations("manage.org");
+  const viewer = await getViewer();
   // A role without department.find (guest) gets no request and an
   // explanation instead of the error page (SH02).
-  if (isReadDenied((await getViewer()).role, "departments")) {
+  if (isReadDenied(viewer.role, "departments")) {
     return <SectionUnavailablePage title={t("title")} />;
   }
   // Detail-page error strategy (WD07, same on all detail pages): fetch
@@ -50,19 +55,32 @@ export default async function DepartmentPage({ params }: Props) {
   const head = entry.head;
   const headAvatarUrl = avatarThumbUrl(head?.avatar);
   const color = entry.color ?? "#6366f1";
+  const headerImage = mediaUrl(entry.headerImage?.url);
 
   return (
     <div className="space-y-8">
-      <div
-        aria-hidden="true"
-        className="h-40 rounded-2xl"
-        style={{ background: `linear-gradient(135deg, ${color}, ${color}66)` }}
-      />
+      {headerImage ? (
+        // Org uploads have no intrinsic dimensions in the reader DTO.
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={headerImage} alt="" className="h-40 w-full rounded-2xl object-cover" />
+      ) : (
+        <div
+          aria-hidden="true"
+          className="h-40 rounded-2xl"
+          style={{ background: `linear-gradient(135deg, ${color}, ${color}66)` }}
+        />
+      )}
       <header>
         <h1 className="text-3xl font-semibold tracking-tight">{entry.name}</h1>
-        <p className="mt-1 text-muted-foreground">
-          {stripHtml(entry.description) || t("noDescriptionYet")}
-        </p>
+        <OrgDescription value={entry.description} empty={t("noDescriptionYet")} />
+        {canEditOrg("department", entry, viewer) && (
+          <Link
+            href={`/departments/${entry.slug}/edit`}
+            className={buttonVariants({ variant: "outline" })}
+          >
+            {tOrg("edit")}
+          </Link>
+        )}
       </header>
 
       <section className="grid gap-6 lg:grid-cols-3">

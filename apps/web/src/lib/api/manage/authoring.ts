@@ -35,6 +35,7 @@ import {
   type AuthoringListStatusFilter,
   type AuthoringOwnerFilter,
   type AuthoringType,
+  type TrainingAuthoringType,
   type AuthoringWriteResponse,
   type AuthoringWriteStatus,
   type EditableBase,
@@ -49,11 +50,12 @@ export interface AuthoringListQuery {
   q?: string;
   page?: number;
   owner?: AuthoringOwnerFilter;
+  course?: string;
 }
 
 /** `GET /api/P/authoring`: one page of the area's list (25 rows, K7). */
 export function fetchAuthoringList(
-  type: AuthoringType,
+  type: AuthoringType | TrainingAuthoringType,
   query: AuthoringListQuery = {},
 ): Promise<AuthoringListResponse> {
   const qs = strapiQuery();
@@ -61,13 +63,14 @@ export function fetchAuthoringList(
   const q = query.q?.trim().slice(0, AUTHORING_LIST_MAX_QUERY);
   if (q) qs.value("q", q);
   if (query.page && query.page > 1) qs.value("page", query.page);
-  if (query.owner) qs.value("owner", query.owner);
+  if (query.owner && type !== "course" && type !== "lesson") qs.value("owner", query.owner);
+  if (type === "lesson" && query.course) qs.value("course", query.course);
   return strapi<AuthoringListResponse>(withQuery(authoringPath(type, "authoringList"), qs));
 }
 
 /** `GET /api/P/:documentId/editable`: the draft in the write shape (K7). */
 export function fetchEditable<T extends EditableBase>(
-  type: AuthoringType,
+  type: AuthoringType | TrainingAuthoringType,
   documentId: string,
 ): Promise<EditableResponse<T>> {
   return strapi<EditableResponse<T>>(authoringPath(type, "editable", documentId));
@@ -94,13 +97,16 @@ export interface AuthoringWriteRequest {
  * which runCmsAction maps (AC01).
  */
 export function sendAuthoringWrite(
-  type: AuthoringType,
+  type: AuthoringType | TrainingAuthoringType,
   intent: AuthoringWriteIntent,
   request: AuthoringWriteRequest = {},
 ): Promise<AuthoringWriteResponse | undefined> {
   const route = authoringRoute(type, intent);
   let path = authoringPath(type, intent, request.documentId);
-  if ((intent === "create" || intent === "update") && AUTHORING_STATUS_MODES[type] === "explicit") {
+  if (
+    (intent === "create" || intent === "update") &&
+    (type === "course" || type === "lesson" || AUTHORING_STATUS_MODES[type] === "explicit")
+  ) {
     if (!request.status) throw new Error(`[authoring] ${type} ${intent} needs a status`);
     path = withQuery(path, strapiQuery().value("status", request.status));
   }

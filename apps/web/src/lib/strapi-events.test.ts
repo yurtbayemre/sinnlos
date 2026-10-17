@@ -78,13 +78,19 @@ describe("unused populates are gone (WD05)", () => {
     ["events.window", () => api.events.window(iso, iso), "populate[departments]"],
     ["announcements.list", () => api.announcements.list(), "populate[department]"],
     ["departments.list", () => api.departments.list(), "populate[headerImage]"],
-    ["departments.one", () => api.departments.one("engineering"), "populate[headerImage]"],
     ["polls.list", () => api.polls.list(), "populate[author]"],
   ] as const)("%s sends no %s", async (_label, read, populate) => {
     fetchMock.mockImplementation(async () => json(onePage));
     await read();
     expect(paths().length).toBeGreaterThan(0);
     for (const path of paths()) expect(path).not.toContain(populate);
+  });
+
+  it("populates images on the department and team detail pages", async () => {
+    await api.departments.one("engineering");
+    await api.teams.one("platform");
+    expect(paths()[0]).toContain("populate[headerImage]=true");
+    expect(paths()[1]).toContain("populate[avatar]=true");
   });
 
   it("keeps what the pages render: the organizer name, the author, the head and teams", async () => {

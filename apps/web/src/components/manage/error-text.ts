@@ -11,11 +11,12 @@ import { knownCode } from "@/lib/manage/errors";
  * (`manage.<area>.<scope>.fields`, the wiki editor's `editor`).
  */
 export function useFieldErrorText(
-  area: ManageArea,
+  area: ManageArea | "org",
   scope?: string,
 ): (field: string, code: string) => string {
   const t = useTranslations("manage");
-  const fields = scope ? `${area}.${scope}.fields` : `${area}.fields`;
+  const namespace = area === "courses" || area === "lessons" ? "training" : area;
+  const fields = scope ? `${namespace}.${scope}.fields` : `${namespace}.fields`;
   return (field, code) => {
     const known = knownCode(code);
     // A dynamic key: the area's field-specific wording, when it exists.

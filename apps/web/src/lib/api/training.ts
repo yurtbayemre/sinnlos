@@ -54,7 +54,7 @@ export function lessonByDocumentId(documentId: string): Promise<LessonPlayerResp
 
 /**
  * One page of the progress rows of the given lessons across all users
- * (admin_role, the /manage/training report), sorted by id: without an
+ * (admin_role, the /manage/training/report report), sorted by id: without an
  * ORDER BY, Postgres may return rows in a different order per page, and the
  * page walk would skip or repeat rows (WD02).
  */

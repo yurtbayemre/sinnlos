@@ -37,16 +37,16 @@ export interface ItemActions {
   publish?: (documentId: string, version: string) => Promise<AuthoringActionResult>;
   unpublish?: (documentId: string, version: string) => Promise<AuthoringActionResult>;
   discard?: (documentId: string, version: string) => Promise<AuthoringActionResult>;
-  remove: (documentId: string, version: string) => Promise<AuthoringActionResult>;
+  remove?: (documentId: string, version: string) => Promise<AuthoringActionResult>;
 }
 
 /** Lists whose order means something (a poll's answers: votes point at an index). */
-const ORDERED_LISTS = new Set(["options"]);
+const ORDERED_LISTS = new Set(["options", "quiz"]);
 
 /**
  * Whether two values objects say the same (strings, booleans, lists). A
  * list of ids is a set (a checkbox list puts its selection in option
- * order); `options` keeps its order.
+ * order); `options` and nested `quiz` values keep their order.
  */
 export function sameValues(a: object, b: object): boolean {
   const left = a as Record<string, unknown>;
@@ -106,7 +106,7 @@ export function useItemEditor<V extends object, E extends Omit<EditableBase, "ro
   /** The item has drafts (explicit status); false: every save publishes (polls, wiki spaces). */
   drafts?: boolean;
   /** Where a create navigates: the new item's page. */
-  itemPath?: (data: AuthoringResult) => Route;
+  itemPath?: (data: Pick<AuthoringResult, "documentId" | "version">) => Route;
   /** Where a delete navigates. */
   listPath?: Route;
 }) {
@@ -216,7 +216,7 @@ export function useItemEditor<V extends object, E extends Omit<EditableBase, "ro
               leaveSchedule();
             }
           },
-          onSuccess: (data: AuthoringResult | null) => {
+          onSuccess: (data) => {
             if (schedule) setScheduleOpen(false);
             if (creating && data) {
               flash(status === "published" ? t("createdPublished") : t("created"));

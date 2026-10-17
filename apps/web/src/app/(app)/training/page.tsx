@@ -7,6 +7,8 @@ import { FetchErrorBanner } from "@/components/fetch-error";
 import { PageHeader } from "@/components/page-header";
 import { SectionUnavailablePage } from "@/components/section-unavailable";
 import { Card, CardContent } from "@/components/ui/card";
+import { mediaUrl } from "@/lib/config";
+import { stripMarkdown } from "@/lib/utils";
 import { isReadDenied } from "@/lib/roles";
 import { loadTrainingOverview } from "@/lib/loaders/training";
 import { getViewer } from "@/lib/viewer";
@@ -49,10 +51,22 @@ export default async function TrainingPage() {
       ) : (
         <div className="stagger grid gap-4 md:grid-cols-2">
           {overview.courses.map(({ course, total, completed: doneCount, done }) => {
+            const coverImage = mediaUrl(
+              course.coverImage?.formats?.small?.url ?? course.coverImage?.url,
+            );
             return (
               <Link key={course.id} href={`/training/${course.slug}`} className="focus-card">
                 <Card interactive className="h-full transition-colors hover:border-primary/40">
                   <CardContent className="flex h-full flex-col gap-3 p-5">
+                    {coverImage && (
+                      // Authenticated uploads are requested by the browser with its session cookie.
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={coverImage}
+                        alt=""
+                        className="aspect-video w-full rounded-xl object-cover"
+                      />
+                    )}
                     <div className="flex items-start justify-between gap-3">
                       <h2 className="font-medium leading-snug">{course.title}</h2>
                       {course.mandatory && (
@@ -63,7 +77,7 @@ export default async function TrainingPage() {
                     </div>
                     {course.description && (
                       <p className="line-clamp-2 text-sm text-muted-foreground">
-                        {course.description}
+                        {stripMarkdown(course.description)}
                       </p>
                     )}
                     <div className="mt-auto flex items-center justify-between gap-3 pt-2 text-sm">

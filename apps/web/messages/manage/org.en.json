@@ -1,0 +1,24 @@
+{
+  "departmentTitle": "Edit department",
+  "teamTitle": "Edit team",
+  "edit": "Edit",
+  "back": "Back to details",
+  "scopeHint": "Edit the description and appearance here. Names, membership and organisational structure are managed in the admin panel.",
+  "imageHint": "JPEG, PNG or WebP, up to 5 MB.",
+  "fields": {
+    "description": {
+      "label": "Description",
+      "hint": "Markdown is supported. Existing HTML descriptions stay unchanged unless you edit this field."
+    },
+    "color": {
+      "label": "Colour",
+      "invalid": "Choose a six-digit hex colour."
+    },
+    "headerImage": {
+      "label": "Header image"
+    },
+    "avatar": {
+      "label": "Team image"
+    }
+  }
+}

@@ -5,7 +5,7 @@ import type {
   AuthoringListStatusFilter,
   AuthoringWriteStatus,
 } from "./dto.js";
-import type { AuthoringType } from "./fields.js";
+import type { AuthoringType, TrainingAuthoringType } from "./fields.js";
 
 /**
  * The HTTP contract of v2 authoring (deep-dive decision 06 §B3, §B5, §G;
@@ -118,8 +118,13 @@ export interface AuthoringRoute {
 }
 
 /** The route of `intent` on `type` (path with `:documentId`, without the query). */
-export function authoringRoute(type: AuthoringType, intent: AuthoringIntent): AuthoringRoute {
-  const base = `/${AUTHORING_PATHS[type]}`;
+export function authoringRoute(
+  type: AuthoringType | TrainingAuthoringType,
+  intent: AuthoringIntent,
+): AuthoringRoute {
+  const training = type === "course" || type === "lesson";
+  if (training && intent === "delete") throw new Error("Training has no authoring delete route");
+  const base = `/${training ? TRAINING_PATHS[type] : AUTHORING_PATHS[type]}`;
   switch (intent) {
     case "create":
       return { method: "POST", path: base, ifMatch: false };
@@ -142,7 +147,7 @@ export function authoringRoute(type: AuthoringType, intent: AuthoringIntent): Au
 
 /** The request path of `intent` on `type` for `documentId`, with `/api` (no query). */
 export function authoringPath(
-  type: AuthoringType,
+  type: AuthoringType | TrainingAuthoringType,
   intent: AuthoringIntent,
   documentId?: string,
 ): string {

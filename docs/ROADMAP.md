@@ -96,10 +96,11 @@ Workvivo, Sociabble, Simpplr, MangoApps feature guides, June 2026).
 
 > **In progress (2026-10-17, batch 17):** the reviewed
 > [implementation plan](plan-batch-17.md) has completed its contracts/org probe,
-> shared answerless player/API and backend remainder locally. Training authoring,
-> single-row org edits, course/org image claims and the admin activity read are
-> implemented with guarded grants. The web authoring forms, org detail rendering,
-> activity page, report move and navigation are next. Browser acceptance and the
+> shared answerless player/API, backend remainder and web remainder locally.
+> Training authoring, single-row org edits, course/org images and the admin activity
+> page use the guarded endpoints. The training report moved to
+> `/manage/training/report`; navigation and both locales are updated.
+> Combined integration is next. Browser acceptance and the
 > combined deploy/rollback rehearsal with the previous CMS/web pair remain pending.
 > The accepted unlimited-attempt and current-published quiz limits remain.
 

@@ -32,6 +32,10 @@
     "wiki": {
       "title": "Wiki",
       "description": "Spaces, who reads them, and the drafts, publications and schedules of every page. The counts are pages."
+    },
+    "courses": {
+      "title": "Training",
+      "description": "Create courses, lessons and quizzes; schedule and publish them."
     }
   },
   "counts": {
@@ -108,7 +112,8 @@
     "closeNow": "Close now",
     "working": "Working…",
     "backToList": "Back to the list",
-    "toolbar": "Actions"
+    "toolbar": "Actions",
+    "removeImage": "Remove image"
   },
   "confirm": {
     "publishTitle": "Publish now?",

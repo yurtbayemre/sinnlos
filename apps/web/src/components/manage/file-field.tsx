@@ -6,7 +6,7 @@ import { useTranslations } from "next-intl";
 import { DOCUMENT_UPLOAD_ACCEPT, type EditableMedia } from "@sinnlos/domain";
 import { buttonVariants } from "@/components/ui/button";
 import { mediaUrl } from "@/lib/config";
-import { formatBytes, formatKilobytes } from "@/lib/manage/upload-check";
+import { formatBytes, formatKilobytes, IMAGE_UPLOAD_ACCEPT } from "@/lib/manage/upload-check";
 import { cn } from "@/lib/utils";
 import { FieldGroup } from "./form-controls";
 
@@ -37,6 +37,8 @@ export function FileField({
   uploading = false,
   onPick,
   onCancelPick,
+  imageOnly = false,
+  onRemove,
 }: {
   /** fieldInputId(form, "file"): the input's id. */
   id: string;
@@ -54,9 +56,12 @@ export function FileField({
   uploading?: boolean;
   onPick: (file: File) => void;
   onCancelPick: () => void;
+  imageOnly?: boolean;
+  onRemove?: () => void;
 }) {
   const t = useTranslations("manage.documents.fields.file");
   const tDocuments = useTranslations("manage.documents");
+  const tCommon = useTranslations("manage.common");
   const describedBy = [hint ? `${id}-hint` : null, error ? `${id}-error` : null]
     .filter(Boolean)
     .join(" ");
@@ -127,7 +132,7 @@ export function FileField({
         <input
           id={id}
           type="file"
-          accept={DOCUMENT_UPLOAD_ACCEPT}
+          accept={imageOnly ? IMAGE_UPLOAD_ACCEPT : DOCUMENT_UPLOAD_ACCEPT}
           disabled={disabled}
           onChange={onChange}
           aria-describedby={describedBy || undefined}
@@ -145,6 +150,17 @@ export function FileField({
           {current || picked ? t("replace") : t("choose")}
         </label>
       </div>
+      {onRemove && (current || picked) && (
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={onRemove}
+          className={buttonVariants({ variant: "ghost", size: "sm" })}
+        >
+          <X className="h-4 w-4" aria-hidden="true" />
+          {tCommon("actions.removeImage")}
+        </button>
+      )}
       <p aria-live="polite" className="text-sm text-muted-foreground">
         {uploading ? tDocuments("uploading") : ""}
       </p>

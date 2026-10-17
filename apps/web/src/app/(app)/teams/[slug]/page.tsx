@@ -6,9 +6,13 @@ import { isReadDenied } from "@/lib/roles";
 import { tryFetch } from "@/lib/safe-fetch";
 import { getViewer } from "@/lib/viewer";
 import type { Team } from "@/lib/types";
-import { displayNameOf, initials, stripHtml } from "@/lib/utils";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { displayNameOf, initials } from "@/lib/utils";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { OrgDescription } from "@/components/org-description";
+import { avatarThumbUrl } from "@/lib/config";
+import { buttonVariants } from "@/components/ui/button";
+import { canEditOrg } from "@/lib/manage/org-access";
 import { SectionUnavailablePage } from "@/components/section-unavailable";
 
 interface Props {
@@ -30,9 +34,11 @@ export default async function TeamPage({ params }: Props) {
   const { slug } = await params;
   const t = await getTranslations("teams");
   const tCommon = await getTranslations("common");
+  const tOrg = await getTranslations("manage.org");
+  const viewer = await getViewer();
   // A role without team.find (guest) gets no request and an explanation
   // instead of the error page (SH02).
-  if (isReadDenied((await getViewer()).role, "teams")) {
+  if (isReadDenied(viewer.role, "teams")) {
     return <SectionUnavailablePage title={t("title")} />;
   }
   // Detail-page error strategy (WD07, same on all detail pages): fetch
@@ -45,15 +51,28 @@ export default async function TeamPage({ params }: Props) {
   const members = entry.members ?? [];
   const lead = entry.lead;
   const dept = entry.department;
+  const teamImage = avatarThumbUrl(entry.avatar);
 
   return (
     <div className="space-y-8">
       <header>
+        {teamImage && (
+          <Avatar className="mb-3 h-20 w-20">
+            <AvatarImage src={teamImage} alt={entry.name} />
+            <AvatarFallback>{initials(entry.name)}</AvatarFallback>
+          </Avatar>
+        )}
         <div className="text-sm font-medium text-muted-foreground">{dept?.name ?? ""}</div>
         <h1 className="text-3xl font-semibold tracking-tight">{entry.name}</h1>
-        <p className="mt-1 text-muted-foreground">
-          {stripHtml(entry.description) || tCommon("noDescription")}
-        </p>
+        <OrgDescription value={entry.description} empty={tCommon("noDescription")} />
+        {canEditOrg("team", entry, viewer) && (
+          <Link
+            href={`/teams/${entry.slug}/edit`}
+            className={buttonVariants({ variant: "outline" })}
+          >
+            {tOrg("edit")}
+          </Link>
+        )}
       </header>
 
       <section className="grid gap-6 lg:grid-cols-3">

@@ -27,7 +27,7 @@ export async function ManageListPage({
   area,
   searchParams,
 }: {
-  area: TypedArea;
+  area: Exclude<TypedArea, "courses" | "lessons">;
   searchParams: Promise<ListSearchParams>;
 }) {
   const { viewer, access } = await areaGate(area);

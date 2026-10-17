@@ -31,7 +31,7 @@ vi.mock("@/lib/roles", async (original) => {
 });
 vi.stubGlobal("fetch", fetchMock);
 
-const { uploadDocumentFile } = await import("./upload");
+const { uploadDocumentFile, uploadImageFile } = await import("./upload");
 
 const ENG = { id: 3, documentId: "deptengineering000000000", name: "Engineering", slug: "eng" };
 const viewer = (role: string | null, department: Viewer["department"] = null): Viewer => ({
@@ -260,5 +260,46 @@ describe("the answer (K14)", () => {
     expect((error as { digest?: string })?.digest).toMatch(
       /^NEXT_REDIRECT;[a-z]+;\/sign-in\?expired=1;/,
     );
+  });
+});
+
+describe("course and organisation image uploads", () => {
+  it.each(["admin_role", "editor"])(
+    "%s uploads one image with the shared multipart path",
+    async (role) => {
+      viewerRef.current = viewer(role);
+      fetchMock.mockResolvedValue(json(201, [{ ...ROW, mime: "image/png" }]));
+      expect(await uploadImageFile(formWith(fileOf("cover.png", IMAGE_MAX_BYTES)))).toMatchObject({
+        ok: true,
+        data: { id: 41, mime: "image/png" },
+      });
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    },
+  );
+  it.each(["department_head", "team_lead", "member", "guest", "authenticated"])(
+    "%s cannot upload authoring images",
+    async (role) => {
+      viewerRef.current = viewer(role, ENG);
+      expect(await uploadImageFile(formWith(fileOf("cover.png", 10)))).toEqual({
+        ok: false,
+        code: "forbidden",
+      });
+      expect(fetchMock).not.toHaveBeenCalled();
+    },
+  );
+  it("rejects documents, oversize images and a renamed document identified by the CMS", async () => {
+    expect(await uploadImageFile(formWith(fileOf("notes.pdf", 20)))).toMatchObject({
+      ok: false,
+      fields: { file: "fileType" },
+    });
+    expect(await uploadImageFile(formWith(fileOf("cover.png", IMAGE_MAX_BYTES + 1)))).toMatchObject(
+      { ok: false, fields: { file: "fileTooLarge" } },
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(await uploadImageFile(formWith(fileOf("renamed.png", 20)))).toMatchObject({
+      ok: false,
+      fields: { file: "fileType" },
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });

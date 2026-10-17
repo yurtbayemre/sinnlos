@@ -1,6 +1,8 @@
 import { unstable_rethrow } from "next/navigation";
 import type {
   AnnouncementEditable,
+  CourseEditable,
+  LessonEditable,
   DocumentEditable,
   EventEditable,
   PollEditable,
@@ -40,15 +42,19 @@ import { StrapiError } from "@/lib/strapi-error";
  * swallowed.
  */
 
-export type EditableOf<A extends TypedArea> = A extends "announcements"
-  ? AnnouncementEditable
-  : A extends "events"
-    ? EventEditable
-    : A extends "polls"
-      ? PollEditable
-      : A extends "documents"
-        ? DocumentEditable
-        : QuickLinkEditable;
+export type EditableOf<A extends TypedArea> = A extends "courses"
+  ? CourseEditable
+  : A extends "lessons"
+    ? LessonEditable
+    : A extends "announcements"
+      ? AnnouncementEditable
+      : A extends "events"
+        ? EventEditable
+        : A extends "polls"
+          ? PollEditable
+          : A extends "documents"
+            ? DocumentEditable
+            : QuickLinkEditable;
 
 export type EditorLoad<T> =
   { state: "ok"; editable: T } | { state: "notFound" } | { state: "failed" };
