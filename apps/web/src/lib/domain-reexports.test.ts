@@ -119,17 +119,10 @@ const CASES: Array<{
     module: "training-shared",
     exports: trainingShared,
     fromDomain: {
-      parseQuiz: "parseQuiz",
       youtubeEmbedUrl: "youtubeEmbedUrl",
       youtubeVideoId: "youtubeVideoId",
     },
-    own: [
-      "courseCompletion",
-      "evaluateQuiz",
-      "passingAnswers",
-      "quizGatesCompletion",
-      "sortLessons",
-    ],
+    own: ["courseCompletion", "quizGatesCompletion", "sortLessons"],
   },
 ];
 

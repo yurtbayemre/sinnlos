@@ -298,3 +298,19 @@ describe("DEMO_MODE: poll results", () => {
     }
   });
 });
+
+describe("DEMO_MODE: answerless lesson player", () => {
+  it("uses the fixed player envelope, leaving generic course and lesson reads without quiz data", async () => {
+    const lesson = await training.fetchLessonByDocumentId("demo-lesson-1");
+    expect(lesson?.quiz).toHaveLength(1);
+    expect(lesson?.quiz[0]).toEqual({ question: expect.any(String), options: expect.any(Array) });
+    expect(lesson?.course).toMatchObject({
+      documentId: "demo-course-1",
+      completionMode: "quizGate",
+    });
+    expect(JSON.stringify(demo("/api/courses"))).not.toContain('"quiz"');
+    expect(JSON.stringify(demo("/api/lessons"))).not.toContain('"quiz"');
+    expect(JSON.stringify(lesson)).not.toContain("correctIndex");
+    await expect(training.fetchLessonByDocumentId("missing")).resolves.toBeNull();
+  });
+});

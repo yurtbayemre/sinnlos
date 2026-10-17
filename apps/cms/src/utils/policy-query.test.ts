@@ -1,3 +1,4 @@
+import { errors } from "@strapi/utils";
 import { describe, expect, it, vi } from "vitest";
 import {
   BIND_HEADROOM,
@@ -162,6 +163,18 @@ describe("narrowFilters", () => {
       narrowFilters(query, clause);
       expect(query.filters, String(filters)).toBe(clause);
     }
+  });
+
+  it("refuses scalar client filters before wrapping them in $and", () => {
+    for (const filters of ['{"quiz":{"$notNull":true}}', "bad filter", true, 1]) {
+      const query = { filters };
+      expect(() => narrowFilters(query, clause)).toThrow(errors.ValidationError);
+      expect(query.filters).toBe(filters);
+    }
+    const filters = [{ title: { $eq: "x" } }];
+    const query: Record<string, unknown> = { filters };
+    narrowFilters(query, clause);
+    expect(query.filters).toEqual({ $and: [filters, clause] });
   });
 
   it("wraps the client filter and the clause in one $and, client first", () => {

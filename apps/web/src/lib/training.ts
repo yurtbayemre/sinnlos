@@ -9,6 +9,7 @@ import {
   type MyProgressRow,
   type ProgressReportRow,
 } from "@/lib/api/training";
+import { StrapiError } from "@/lib/strapi-error";
 import { walkAllPages, type WalkResult } from "@/lib/paginate";
 
 /**
@@ -33,8 +34,12 @@ export async function fetchCourseBySlug(slug: string): Promise<CourseView | null
 }
 
 export async function fetchLessonByDocumentId(documentId: string): Promise<LessonView | null> {
-  const res = await lessonByDocumentId(documentId);
-  return res.data?.[0] ?? null;
+  try {
+    return (await lessonByDocumentId(documentId)).data;
+  } catch (error) {
+    if (error instanceof StrapiError && error.status === 404) return null;
+    throw error;
+  }
 }
 
 /**

@@ -778,7 +778,7 @@ describe("schema.json enums = web unions and constants", () => {
     ],
     [
       "types.ts Course.completionMode",
-      unionValues<NonNullable<Course["completionMode"]>>()(["confirm", "quizGate"]),
+      unionValues<NonNullable<Course["completionMode"]>>()(["confirm", "quizGate", "exam"]),
       "api::course.course",
       "completionMode",
     ],

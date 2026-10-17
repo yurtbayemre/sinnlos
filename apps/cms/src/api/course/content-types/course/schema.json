@@ -5,7 +5,7 @@
     "singularName": "course",
     "pluralName": "courses",
     "displayName": "Course",
-    "description": "Training course (issue #29): ordered lessons, mandatory completion tracking. Maintained in the Strapi admin (no frontend authoring in v1); native draft & publish drives visibility. completionMode waehlt nur das Feedback des Quiz: confirm = Rueckmeldung pro Antwort; quizGate = eine Pruefung per 'Antworten pruefen'. In beiden Modi schliesst eine Lektion mit Quiz erst ab, wenn alle Antworten richtig sind (Retry erlaubt; der Server prueft die Antworten, seit 16.1, #70); eine Lektion ohne Quiz per Klick. Geplante v2-Werte (dokumentiert, NICHT bauen ohne eigenes Design): exam, plus validityMonths fuer wiederkehrende Unterweisungen."
+    "description": "Training course: ordered lessons, mandatory completion tracking and draft/publish visibility. completionMode waehlt nur das Feedback des Quiz: confirm = Rueckmeldung pro Antwort; quizGate = eine Pruefung per 'Antworten pruefen'; exam = nur Gesamtergebnis, auch bei abgeschlossenen Lektionen. In allen Modi schliesst eine Lektion mit Quiz erst ab, wenn alle Antworten richtig sind; eine Lektion ohne Quiz per Klick. Der Server prueft die Antworten und liefert keine Loesungsschluessel aus. Unbegrenzte Versuche, kein Timer; bestehende Abschluesse bleiben nach Quiz-Aenderungen gueltig."
   },
   "options": {
     "draftAndPublish": true
@@ -29,7 +29,7 @@
     },
     "completionMode": {
       "type": "enumeration",
-      "enum": ["confirm", "quizGate"],
+      "enum": ["confirm", "quizGate", "exam"],
       "default": "confirm"
     },
     "coverImage": {

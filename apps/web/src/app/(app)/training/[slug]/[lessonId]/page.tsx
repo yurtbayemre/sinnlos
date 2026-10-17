@@ -13,7 +13,7 @@ import { formatInstant, LONG_DAY } from "@/lib/date-format";
 import { isReadDenied } from "@/lib/roles";
 import { tryFetch } from "@/lib/safe-fetch";
 import { fetchCourseBySlug, fetchLessonByDocumentId, fetchMyProgress } from "@/lib/training";
-import { parseQuiz, sortLessons, type CompletionMode } from "@/lib/training-shared";
+import { sortLessons } from "@/lib/training-shared";
 import { getViewer } from "@/lib/viewer";
 
 /**
@@ -69,7 +69,6 @@ export default async function LessonPage({
   const completedAtIso = progressResult.data?.completed.get(lessonId) ?? null;
   // An instant, shown as its day in APP_TIME_ZONE (next-intl's formatter).
   const completedAtLabel = formatInstant(format, completedAtIso, LONG_DAY);
-  const quiz = parseQuiz(lesson.quiz);
 
   return (
     <article className="mx-auto max-w-3xl space-y-6">
@@ -93,9 +92,11 @@ export default async function LessonPage({
 
       {lesson.body && <Markdown headingAnchors>{lesson.body}</Markdown>}
 
+      {/* A refreshed question set or mode must clear feedback from the previous render. */}
       <LessonCompletion
-        quiz={quiz}
-        completionMode={(course.completionMode ?? "confirm") as CompletionMode}
+        key={JSON.stringify([lesson.documentId, lesson.quiz, lesson.course.completionMode])}
+        quiz={lesson.quiz}
+        completionMode={lesson.course.completionMode}
         lessonDocumentId={lessonId}
         completedAtLabel={completedAtLabel}
         nextHref={

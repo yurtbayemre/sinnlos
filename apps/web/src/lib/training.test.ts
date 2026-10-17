@@ -1,3 +1,4 @@
+import { StrapiError } from "@/lib/strapi-error";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 /**
@@ -15,7 +16,8 @@ vi.mock("@/lib/strapi/client", () => ({
   strapi: (...args: unknown[]) => strapiMock(...args),
 }));
 
-const { fetchCourseProgress, fetchMyProgress } = await import("./training");
+const { fetchCourseProgress, fetchMyProgress, fetchLessonByDocumentId } =
+  await import("./training");
 
 const page = (data: unknown[], pageNo: number, pageCount: number) => ({
   data,
@@ -68,5 +70,28 @@ describe("fetchMyProgress", () => {
     expect(strapiMock.mock.calls[0]).toEqual([
       "/api/lesson-progresses?fields[0]=targetDocumentId&fields[1]=completedAt&sort[0]=id:asc&pagination[page]=1&pagination[pageSize]=100",
     ]);
+  });
+});
+
+describe("fetchLessonByDocumentId", () => {
+  it("uses the fixed player route and preserves answerless questions", async () => {
+    const data = {
+      documentId: "lesson",
+      quiz: [{ question: "Q", options: ["A", "B"] }],
+      course: { completionMode: "exam" },
+    };
+    strapiMock.mockResolvedValue({ data });
+    await expect(fetchLessonByDocumentId("lesson/id")).resolves.toEqual(data);
+    expect(strapiMock).toHaveBeenCalledExactlyOnceWith("/api/lessons/lesson%2Fid/player");
+  });
+
+  it("maps an unavailable player to missing, preserving transport and permission failures", async () => {
+    strapiMock.mockRejectedValue(new StrapiError(404, "Not Found", ""));
+    await expect(fetchLessonByDocumentId("missing")).resolves.toBeNull();
+    for (const status of [403, 500]) {
+      const error = new StrapiError(status, "Error", "");
+      strapiMock.mockRejectedValue(error);
+      await expect(fetchLessonByDocumentId("lesson")).rejects.toBe(error);
+    }
   });
 });

@@ -5,7 +5,7 @@
     "singularName": "lesson",
     "pluralName": "lessons",
     "displayName": "Lesson",
-    "description": "One lesson of a training course. body = markdown (admin markdown editor, same pipeline as wiki); videoUrl = YouTube only (validated in lifecycles AND render-gated in the web player); quiz = JSON self-check (see utils/training-validation.ts for the shape)."
+    "description": "One lesson of a training course: markdown body, validated YouTube video and a private quiz answer key. Learners use the answerless player and server feedback/completion actions; authors edit the quiz in the panel."
   },
   "options": {
     "draftAndPublish": true
@@ -33,7 +33,8 @@
       "type": "string"
     },
     "quiz": {
-      "type": "json"
+      "type": "json",
+      "private": true
     },
     "publishAt": {
       "type": "datetime"

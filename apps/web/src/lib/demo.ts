@@ -19,10 +19,12 @@
  *   - an unknown poll's results answer 404 (a StrapiError, like the cms),
  *     and the batched /api/poll-results leaves it out;
  *   - anything else (a mutation, an unknown path) falls through to an
- *     empty list, with a console.warn outside production;
+ *     empty list, with a console.warn outside production; quiz feedback
+ *     requires the CMS, while the answerless player has a read-only fixture;
  *   - a production server with DEMO_MODE=1 answers every page and route
  *     that reads the session with a 500 (auth.ts throws on its first load).
  */
+import type { LearnerQuizQuestion, LessonPlayerResponse } from "@sinnlos/domain";
 import type { SearchSummary } from "@/lib/api/analytics";
 import { appTimeZone } from "@/lib/app-time-zone";
 import {
@@ -703,6 +705,19 @@ const demoReactions = [
   },
 ] satisfies Reaction[];
 
+const demoQuizzes: Record<string, LearnerQuizQuestion[]> = {
+  "demo-lesson-1": [
+    {
+      question: "A mail urges you to pay an invoice within 30 minutes. What do you do?",
+      options: [
+        "Pay it — sounds urgent",
+        "Verify via a known contact on a second channel",
+        "Forward it to a colleague",
+      ],
+    },
+  ],
+};
+
 const demoLessons = [
   {
     id: 1,
@@ -711,17 +726,6 @@ const demoLessons = [
     order: 1,
     body: '# Why this matters\n\nPhishing is the #1 entry vector. This 5-minute lesson shows the three patterns to watch for:\n\n1. **Urgency** ("act now!")\n2. **Authority** ("the CEO needs...")\n3. **Unusual channels**\n\n> When in doubt: verify via a second channel.',
     videoUrl: "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
-    quiz: [
-      {
-        question: "A mail urges you to pay an invoice within 30 minutes. What do you do?",
-        options: [
-          "Pay it — sounds urgent",
-          "Verify via a known contact on a second channel",
-          "Forward it to a colleague",
-        ],
-        correctIndex: 1,
-      },
-    ],
   },
   {
     id: 2,
@@ -729,7 +733,6 @@ const demoLessons = [
     title: "Passwords & 2FA",
     order: 2,
     body: "## Rules of thumb\n\n- Use the password manager for **everything**\n- One account, one password\n- 2FA on for mail, VPN and admin tools",
-    quiz: [],
   },
   {
     id: 3,
@@ -737,7 +740,6 @@ const demoLessons = [
     title: "Reporting an incident",
     order: 3,
     body: "If something feels off: **report early**. There is no penalty for false alarms — there is for silence.",
-    quiz: [],
   },
 ] satisfies Lesson[];
 
@@ -777,7 +779,13 @@ const demoCourses = [
 const lessonRows: Lesson[] = demoCourses.flatMap((c) =>
   c.lessons.map((l) => ({
     ...l,
-    course: { id: c.id, documentId: c.documentId, title: c.title, slug: c.slug },
+    course: {
+      id: c.id,
+      documentId: c.documentId,
+      title: c.title,
+      slug: c.slug,
+      completionMode: c.completionMode ?? "confirm",
+    },
   })),
 );
 
@@ -1056,6 +1064,30 @@ const ROUTES: [RegExp, Handler][] = [
   [/^\/api\/documents$/, (p) => list(documents, p)],
   [/^\/api\/classifieds$/, (p) => list(classifieds, p)],
   [/^\/api\/courses$/, (p) => list(demoCourses, p)],
+  [
+    /^\/api\/lessons\/([^/]+)\/player$/,
+    (_, match) => {
+      const lesson = lessonRows.find((row) => row.documentId === decodeURIComponent(match[1]!));
+      const course = lesson?.course;
+      if (!lesson?.documentId || !course?.documentId || !course.slug) throw notFound();
+      return {
+        data: {
+          documentId: lesson.documentId,
+          title: lesson.title,
+          body: lesson.body ?? null,
+          order: lesson.order ?? 0,
+          videoUrl: lesson.videoUrl ?? null,
+          course: {
+            documentId: course.documentId,
+            title: course.title,
+            slug: course.slug,
+            completionMode: course.completionMode ?? "confirm",
+          },
+          quiz: demoQuizzes[lesson.documentId] ?? [],
+        },
+      } satisfies LessonPlayerResponse;
+    },
+  ],
   [/^\/api\/lessons$/, (p) => list(lessonRows, p)],
   [/^\/api\/lesson-progresses$/, (p) => list(demoLessonProgress, p)],
   [/^\/api\/quick-links$/, (p) => list(quickLinks, p)],
