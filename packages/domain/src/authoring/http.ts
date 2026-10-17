@@ -1,3 +1,10 @@
+import type {
+  ActivityActorClass,
+  ActivityActorKind,
+  ActivityTargetUid,
+  AuthoringListStatusFilter,
+  AuthoringWriteStatus,
+} from "./dto.js";
 import type { AuthoringType } from "./fields.js";
 
 /**
@@ -166,3 +173,59 @@ export function versionFromEtag(etag: string | null | undefined): string | null 
 export const AUTHORING_LIST_PAGE_SIZE = 25;
 /** Longest `q` the list takes. */
 export const AUTHORING_LIST_MAX_QUERY = 100;
+
+// Batch 17 contracts, not additional live entries in AUTHORING_TYPES.
+
+/** Training has draft/publish and nondeleting discard, but no content-API delete. */
+export const TRAINING_AUTHORING_INTENTS = [
+  "create",
+  "update",
+  "publish",
+  "unpublish",
+  "discardDraft",
+  "authoringList",
+  "editable",
+] as const;
+
+export type TrainingAuthoringIntent = (typeof TRAINING_AUTHORING_INTENTS)[number];
+
+export const TRAINING_PATHS = { course: "courses", lesson: "lessons" } as const;
+
+/** Required on training create/update; all other query keys are refused. */
+export interface TrainingWriteQuery {
+  status: AuthoringWriteStatus;
+}
+
+export interface TrainingAuthoringListQuery {
+  status?: AuthoringListStatusFilter;
+  q?: string;
+  page?: number;
+}
+
+export interface LessonAuthoringListQuery extends TrainingAuthoringListQuery {
+  /** Canonical course documentId; applied before pagination and count. */
+  course?: string;
+}
+
+/** Single-row organisation content has only editable and If-Match update. */
+export const ORG_AUTHORING_INTENTS = ["update", "editable"] as const;
+export type OrgAuthoringIntent = (typeof ORG_AUTHORING_INTENTS)[number];
+
+export const ORG_PATHS = { department: "departments", team: "teams" } as const;
+
+/** Every query key is refused, including status. */
+export type OrgWriteQuery = Record<string, never>;
+
+/** GET /api/audit-events, admin_role only; no generic Strapi query keys. */
+export interface ActivityListQuery {
+  /** Integer 1..10000; fixed page size 25. */
+  page?: number;
+  targetUid?: ActivityTargetUid;
+  actorKind?: ActivityActorKind;
+  /** Positive int4; requires actorKind=user or admin, which scopes this id. */
+  actorId?: number;
+  actorClass?: ActivityActorClass;
+  /** Offset-bearing ISO instants, with from <= to (inclusive). */
+  from?: string;
+  to?: string;
+}

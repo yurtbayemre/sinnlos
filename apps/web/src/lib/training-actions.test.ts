@@ -110,6 +110,40 @@ describe("completeLesson", () => {
     expect(refreshMock).not.toHaveBeenCalled();
   });
 
+  it("distinguishes invalid stored quiz content from a wrong answer without recording success", async () => {
+    strapiMock.mockRejectedValue(
+      new StrapiError(
+        400,
+        "Bad Request",
+        JSON.stringify({
+          error: { message: "Invalid quiz content", details: { code: "quizContentInvalid" } },
+        }),
+      ),
+    );
+    await expect(completeLesson(LESSON, [0, 0])).resolves.toEqual({
+      ok: false,
+      code: "quizContentInvalid",
+    });
+    expect(refreshMock).not.toHaveBeenCalled();
+  });
+
+  it("keeps server failures as unavailable even if they carry the content error code", async () => {
+    strapiMock.mockRejectedValue(
+      new StrapiError(
+        500,
+        "Server Error",
+        JSON.stringify({
+          error: { details: { code: "quizContentInvalid" } },
+        }),
+      ),
+    );
+    await expect(completeLesson(LESSON, [0, 0])).resolves.toEqual({
+      ok: false,
+      code: "unavailable",
+    });
+    expect(refreshMock).not.toHaveBeenCalled();
+  });
+
   it("never sends answers that are no list of option indexes", async () => {
     for (const answers of [[-1], [1.5], ["1"], [null], "1,0", { 0: 1 }, Array(101).fill(0)]) {
       await expect(

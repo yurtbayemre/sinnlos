@@ -1,9 +1,9 @@
 # Batch 17 implementation plan
 
 > Phase 3 of v2 frontend authoring (plan 12). Written 2026-10-16 against main 2f47b84fcadfd6f63ecffac1c78cdf388c5ea44d, released as v0.16.2.
-> Status: reviewed planning draft; application implementation has not started. Decision 06 remains the approved scope; section 3 records the accepted lean exam-mode amendment, unlimited retries and no timer. Review corrections are recorded in section 11.
+> Status: first implementation step complete locally: single-row org probe and shared contracts (section 12). The shared player/API change is next. Decision 06 remains the approved scope; section 3 records the accepted lean exam-mode amendment, unlimited retries and no timer. Review corrections are recorded in section 11.
 > Paths: cms/ = apps/cms/src/, web/ = apps/web/src/, domain/ = packages/domain/src/. Paths outside those roots are written in full.
-> This plan records the implementation baseline; it does not verify the running server. Application work has not started.
+> This plan records the implementation baseline and local evidence; it does not verify or change the running server.
 
 ## 1. Outcome and scope
 
@@ -251,11 +251,11 @@ The lane lists are responsibilities, not a request to create every named file:
 
 ## 10. Completion gates for the plan and implementation
 
-Implementation can start from the accepted section 3 decision: exam remains as overall-only feedback, all learner modes are answerless, retries are unlimited and there is no timer. The single-row org probe remains an implementation task with a stop condition. Privacy is a normal lane regression, not a pre-contract gate; real HTTP exposure still blocks release. Neither check is claimed to have passed here.
+Implementation follows the accepted section 3 decision: exam remains as overall-only feedback, all learner modes are answerless, retries are unlimited and there is no timer. The single-row org prerequisite passed on SQLite and Postgres (section 12); guarded org endpoints and their HTTP tests remain to be implemented. Privacy is a normal lane regression, not a pre-contract gate; real HTTP exposure still blocks release. Quiz privacy has not yet changed or passed its regression gate.
 
 Before production deployment, exact-commit CI and the complete rehearsal with the previous CMS/web pair and mode downgrade/restore are mandatory. Accepted limits remain: panel saves lack If-Match and may overwrite a web change; panel structural/media privileges remain; quiz edits do not revoke receipts; current-published grading is not bound to previously displayed questions and retains concurrent publish/reparent availability races; unlimited retries permit guessing; in-flight role/team changes retain the existing request race. Rollback restores the old answer exposure and media/org boundaries described in section 3.4.
 
-Planning validation: repository/decision inspection and independent review only. No application code, dependencies, schema, database, production state or existing completion was changed while preparing this document.
+Original planning validation: repository/decision inspection and independent review only. Preparing the plan changed no application code, dependencies, schema, database, production state or existing completion. Implementation evidence is recorded separately below.
 
 ## 11. Plan review and accepted simplification on 2026-10-16
 
@@ -270,3 +270,17 @@ The initial training, organisation/media/activity and web/contracts reviews were
 - Preserve raw legacy organisation descriptions on unrelated saves. Keep media allowlists and claim registration atomic, move the old tombstone fixture to the right invariant and share MIME data without a middleware import cycle.
 
 These are plan corrections, not executed application tests or a rollback proof. No implementation-effort or rehearsal-time savings ratio is claimed.
+
+## 12. First implementation step: org probe and contracts
+
+The first merge-sequence step is implemented on top of main 36c62cf:
+
+- Domain contracts define training fields/intents, course/lesson editable and list shapes, one answerless learner question type, indexed feedback requests, the existing completion input, org role fields and single-row responses, and the bounded activity query/response vocabulary. They remain separate from live authoring registrations.
+- `quizContentInvalid` has one stable domain code, a web action mapping and German/English text. Existing quiz refusal and transport-error handling remain intact.
+- The real Document Service probe covers department and team updates with both legacy publishedAt shapes on SQLite and Postgres 16. A status-free save preserves one row, identity and relations, increments the revision once and emits one update audit event. A stale revision returns 412 without changing content, revision or audit.
+
+The NULL publishedAt fixture is injected after startup: the existing org boot guard still refuses such rows on restart. This probe establishes the narrow runtime write path, not boot compatibility or HTTP query/permission enforcement. Strapi stamps publishedAt during the update; no fake publish event is emitted. Do not reuse alwaysPublished for these org writes.
+
+Local validation: 181 focused unit/contract tests and 12 integration tests passed; domain build/export parity and production/test TypeScript checks passed across all three packages. Independent review found no actionable issue. The integration run used disposable databases, not staging or production.
+
+Next is the shared player/API change, including strict stored-quiz validation and release-blocking HTTP privacy regressions. This first step does not add endpoints, grants, capabilities, media claims or the exam schema value; existing learner reads still expose answers. Full release checks, browser acceptance and deploy/rollback rehearsal remain outstanding.

@@ -1,4 +1,4 @@
-import type { AuthoringRoleClass } from "./fields.js";
+import type { AuthoringRoleClass, OrgEditorClass } from "./fields.js";
 import type { WikiEditorClass, WikiSpaceVisibility } from "./wiki.js";
 
 /**
@@ -373,4 +373,99 @@ export interface WikiRevisionDetail extends WikiRevisionEntry {
   body: string | null;
   /** The page summary at that point; null for a legacy `before` entry. */
   pageSummary: string | null;
+}
+
+// ---------------------------------------------------------------------------
+// Batch 17 single-row organisation and activity contracts.
+
+/** Raw descriptions stay unchanged when saving another field. No draft/publication state. */
+export interface OrgEditableBase {
+  documentId: string;
+  version: string;
+  updatedAt: string | null;
+  name: string;
+  slug: string;
+  description: string | null;
+  roleClass: OrgEditorClass;
+}
+
+export interface DepartmentEditable extends OrgEditableBase {
+  roleClass: Exclude<OrgEditorClass, "teamLead">;
+  color: string | null;
+  /** Present only for the admin_role moderator. */
+  headerImage?: EditableMedia | null;
+}
+
+export interface TeamEditable extends OrgEditableBase {
+  /** Present only for the admin_role moderator. */
+  avatar?: EditableMedia | null;
+}
+
+export interface OrgEditableResponse<T extends OrgEditableBase> {
+  data: T;
+}
+
+/** PUT /api/{departments,teams}/:id, with ETag matching version. */
+export interface OrgWriteResponse {
+  data: { documentId: string; version: string };
+}
+
+/** Existing audit vocabulary (cms/utils/audit.ts); no new recorder or grants. */
+export type ActivityAction =
+  | "create"
+  | "update"
+  | "delete"
+  | "clone"
+  | "publish"
+  | "unpublish"
+  | "discardDraft"
+  | "restore"
+  | "schedulePublish"
+  | "scheduleUnpublish"
+  | "scheduleFailed";
+
+export type ActivityActorKind = "user" | "admin" | "system";
+export type ActivitySource = "content-api" | "admin" | "cron" | "system";
+export type ActivityActorClass = AuthoringRoleClass | WikiEditorClass;
+
+export type ActivityTargetUid =
+  | "api::announcement.announcement"
+  | "api::event.event"
+  | "api::quick-link.quick-link"
+  | "api::document.document"
+  | "api::poll.poll"
+  | "api::wiki-space.wiki-space"
+  | "api::wiki-page.wiki-page"
+  | "api::course.course"
+  | "api::lesson.lesson"
+  | "api::department.department"
+  | "api::team.team"
+  | "api::classified.classified"
+  | "plugin::upload.file";
+
+/** No user/admin objects or email; deleted actors retain their kind, id and a display label. */
+export interface ActivityActor {
+  kind: ActivityActorKind;
+  id: number | null;
+  displayName: string;
+  class: ActivityActorClass | null;
+}
+
+export interface ActivityListRow {
+  id: number;
+  createdAt: string;
+  action: ActivityAction;
+  targetUid: ActivityTargetUid;
+  targetDocumentId: string;
+  revision: number | null;
+  source: ActivitySource;
+  keys: string[];
+  detail: string | null;
+  actor: ActivityActor;
+}
+
+/** Newest createdAt first, then descending id; exact count and fixed page size 25. */
+export interface ActivityListResponse {
+  data: ActivityListRow[];
+  meta: { pagination: AuthoringPagination };
 }

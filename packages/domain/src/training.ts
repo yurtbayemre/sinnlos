@@ -1,3 +1,10 @@
+import type {
+  AuthoringListRow,
+  AuthoringPagination,
+  EditableBase,
+  EditableMedia,
+} from "./authoring/dto.js";
+
 /**
  * Training content rules (issue #29): the YouTube parser and the lesson quiz
  * schema. One implementation for both layers that check them (SH01):
@@ -171,4 +178,109 @@ export function quizAnswersPass(quiz: readonly QuizQuestion[], answers: unknown)
     answers.length === quiz.length &&
     quiz.every((question, i) => answers[i] === question.correctIndex)
   );
+}
+
+// ---------------------------------------------------------------------------
+// Batch 17 contracts; schema and current player behavior change together later.
+
+export type TrainingCompletionMode = "confirm" | "quizGate" | "exam";
+
+/** Stored quiz is malformed: HTTP 400 with error.details.code; never a failed attempt. */
+export const QUIZ_CONTENT_INVALID = "quizContentInvalid";
+
+/** Learner responses select only these fields; parseQuiz requires an author answer key. */
+export interface LearnerQuizQuestion {
+  question: string;
+  options: string[];
+}
+
+export interface TrainingCourseRef {
+  documentId: string;
+  title: string;
+  slug: string;
+}
+
+/** GET /api/lessons/:id/player; published lesson and parent, no generic query parameters. */
+export interface LessonPlayerResponse {
+  data: {
+    documentId: string;
+    title: string;
+    body: string | null;
+    order: number;
+    videoUrl: string | null;
+    course: TrainingCourseRef & { completionMode: TrainingCompletionMode };
+    quiz: LearnerQuizQuestion[];
+  };
+}
+
+/** Zero-based unique question indices; at most 20 selections, each a valid option index. */
+export interface QuizSelection {
+  questionIndex: number;
+  optionIndex: number;
+}
+
+/** POST /api/lessons/:id/check; confirm permits partial answers, other modes require all. */
+export interface QuizCheckRequest {
+  data: { answers: QuizSelection[] };
+}
+
+export interface QuizVerdict {
+  questionIndex: number;
+  correct: boolean;
+}
+
+/** Feedback never writes a receipt; mode comes from the current published course. */
+export interface QuizCheckResponse {
+  data: {
+    completionMode: TrainingCompletionMode;
+    /** True only when every question was submitted and passed. */
+    passed: boolean;
+    /** Omitted for exam, including completed review; otherwise only submitted questions. */
+    verdicts?: QuizVerdict[];
+  };
+}
+
+/** Existing POST /api/lesson-progresses payload; the server independently regrades. */
+export interface LessonCompletionRequest {
+  data: {
+    targetDocumentId: string;
+    /** One option index per question; omitted for a legitimate no-quiz lesson. */
+    answers?: number[];
+  };
+}
+
+export interface CourseEditable extends EditableBase {
+  roleClass: "moderator";
+  title: string;
+  slug: string;
+  description: string | null;
+  mandatory: boolean;
+  completionMode: TrainingCompletionMode;
+  coverImage: EditableMedia | null;
+  publishAt: string | null;
+  scheduleError: string | null;
+}
+
+export interface LessonEditable extends EditableBase {
+  roleClass: "moderator";
+  title: string;
+  body: string | null;
+  order: number;
+  /** A missing/deleted parent can be repaired; a course is required on create. */
+  course: TrainingCourseRef | null;
+  videoUrl: string | null;
+  /** Author contract includes correctIndex; never serialize into learner responses. */
+  quiz: QuizQuestion[];
+  publishAt: string | null;
+  scheduleError: string | null;
+}
+
+export interface LessonAuthoringListRow extends AuthoringListRow {
+  course: TrainingCourseRef | null;
+  order: number;
+}
+
+export interface LessonAuthoringListResponse {
+  data: LessonAuthoringListRow[];
+  meta: { pagination: AuthoringPagination };
 }
