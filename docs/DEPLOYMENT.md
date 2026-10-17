@@ -1952,6 +1952,20 @@ is degraded while the new cms boots. For the manual production-safe sequence
 (and rollback), see the
 [update procedure](#74-update-procedure-production-safe).
 
+#### Batch 17 rollback preparation (exam mode)
+
+Before rolling back Batch 17 to the previous CMS/web pair, follow
+[the exam mode rollback runbook](../infra/rollback/exam-mode/README.md).
+Stop every CMS/scheduler writer, save the affected draft/published course
+identities and run `downgrade.sql` before the old CMS starts. On roll-forward,
+review each saved variant and run `restore.sql` while writers remain stopped;
+republishing may have changed numeric row IDs. Neither script touches quiz
+content, receipts or files. The old release exposes answers and restores its
+previous org-write/media limits; roll-forward cannot undo disclosed answers.
+
+These files prepare the operation. Browser acceptance and the complete image
+rehearsal in the Batch 17 plan remain required before production deployment.
+
 #### Deploying batch 16.1 (fixes from the batch 16 walkthrough)
 
 Batch 16.1 (release v0.16.1; branch `batch/16.1`: `main` `02c06fc` plus

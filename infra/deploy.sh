@@ -656,6 +656,10 @@ print_rollback_hint() {
   if [[ "${guest_access}" != "0" ]]; then
     print_guest_vote_revoke_hint "${guest_access}" "${cms_image}"
   fi
+  echo "       If ${cms_image} predates batch 17, first stop all CMS/scheduler writers and follow:" >&2
+  echo "       ${INFRA_DIR}/rollback/exam-mode/README.md" >&2
+  echo "       Run ${INFRA_DIR}/rollback/exam-mode/downgrade.sql before starting the old CMS." >&2
+  echo "       On roll-forward, review the saved variants before running ${INFRA_DIR}/rollback/exam-mode/restore.sql." >&2
   echo "       To roll back to ${ROLLBACK_ORIGIN:-${web_image} and ${cms_image}}, retag, then start without a build:" >&2
   echo "                      docker tag ${web_image} ${PROJECT}-web:latest" >&2
   echo "                      docker tag ${cms_image} ${PROJECT}-cms:latest" >&2
