@@ -13,11 +13,10 @@ import { factories } from "@strapi/strapi";
  * routes do.
  */
 export default factories.createCoreRouter("api::department.department", {
+  only: ["find", "findOne", "update"],
   config: {
     find: { policies: ["global::published-only"] },
     findOne: { policies: ["global::published-only"] },
-    create: { policies: ["global::is-admin-or-editor"] },
     update: { policies: ["global::can-edit-department"] },
-    delete: { policies: ["global::is-admin-or-editor"] },
   },
 });

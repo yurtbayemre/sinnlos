@@ -39,8 +39,8 @@ const POLL = "api::poll.poll";
 
 /**
  * Written through the v2 authoring gate: the phase-1 types (batch 15) and
- * the wiki (batch 16). Wiki spaces go through global::can-author like the
- * phase-1 types; wiki pages through global::can-edit-wiki, the row gate of
+ * the wiki (batch 16), courses and lessons (batch 17). Wiki spaces and
+ * training go through global::can-author like the phase-1 types; wiki pages through global::can-edit-wiki, the row gate of
  * utils/wiki-gate.ts on the same loader, allowlist and controller.
  */
 export const AUTHORED_UIDS: readonly string[] = [
@@ -51,6 +51,8 @@ export const AUTHORED_UIDS: readonly string[] = [
   POLL,
   WIKI_SPACE_UID,
   WIKI_PAGE_UID,
+  COURSE_UID,
+  LESSON_UID,
 ];
 
 /** Department authors write these for their own department (amendment 1). */

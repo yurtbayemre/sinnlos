@@ -100,8 +100,6 @@ const OTHER_RAW_WRITERS: Readonly<Record<string, string>> = {
   "api/department/content-types/department/lifecycles.ts":
     "comment only: the flags and revisions go through targeting-flags.ts, " +
     "department-delete-restrict.ts and poll-department-delete.ts",
-  "api/department/controllers/department.ts":
-    "department writes only through the Document Service (super.update)",
   "api/event-rsvp/controllers/event-rsvp.ts": "RSVPs",
   "api/kudos/content-types/kudos/lifecycles.ts": "notifications",
   "api/kudos/controllers/kudos.ts": "kudos through the Document Service (super.create)",
@@ -111,7 +109,6 @@ const OTHER_RAW_WRITERS: Readonly<Record<string, string>> = {
   "api/profile/controllers/profile.ts": "users",
   "api/reaction/controllers/reaction.ts": "reactions",
   "api/search-log/controllers/search-log.ts": "search logs",
-  "api/team/controllers/team.ts": "team writes only through the Document Service (super.update)",
   "api/wiki-page/content-types/wiki-page/lifecycles.ts":
     "wiki revisions (not a guarded type): the after-image of a draft save, in its transaction",
   "bootstrap/sync-permissions.ts": "roles and permissions",
@@ -130,6 +127,8 @@ const OTHER_RAW_WRITERS: Readonly<Record<string, string>> = {
   "utils/draft-twins.ts": "comment only: the repair writes through documents.discardDraft",
   "utils/live-events.ts": "comment only",
   "utils/notify.ts": "notifications",
+  "utils/org-authoring.ts":
+    "department and team updates only through the Document Service under the authoring scope and document lock; the query layer only reads",
   "utils/revision-backfill.ts":
     "wiki revisions (not a guarded type): anchor, kind and the cutover baseline at boot",
   "utils/target-visibility.ts": "none (Set.delete); reads only",

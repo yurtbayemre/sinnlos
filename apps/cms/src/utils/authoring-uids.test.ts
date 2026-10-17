@@ -29,6 +29,8 @@ describe("authoring uid lists (K1)", () => {
       "api::poll.poll",
       "api::wiki-space.wiki-space",
       "api::wiki-page.wiki-page",
+      "api::course.course",
+      "api::lesson.lesson",
     ]);
     expect(DEPARTMENT_AUTHORED_UIDS).toEqual([
       "api::announcement.announcement",

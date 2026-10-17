@@ -805,3 +805,164 @@ describe("the wiki in the authoring controller", () => {
     expect(calls.map((call) => call.action)).toEqual(["discardDraft"]);
   });
 });
+
+const COURSE = "api::course.course";
+const LESSON = "api::lesson.lesson";
+const COURSE_DOC = "course000000000000000001";
+const LESSON_DOC = "lesson000000000000000001";
+
+describe("training authoring", () => {
+  it("projects the fixed author DTO, including answer keys and the draft course reference", async () => {
+    const { host } = harness();
+    const course = {
+      id: 10,
+      documentId: COURSE_DOC,
+      title: "Course",
+      slug: "course",
+      publishedAt: null,
+    };
+    const quiz = [{ question: "Choose?", options: ["A", "B"], correctIndex: 1 }];
+    const ctx = context(
+      gateFor({
+        uid: LESSON,
+        intent: "editable",
+        rows: {
+          documentId: LESSON_DOC,
+          draft: {
+            id: 1,
+            documentId: LESSON_DOC,
+            title: "Lesson",
+            course,
+            quiz,
+            order: 3,
+            videoUrl: null,
+            publishedAt: null,
+          },
+          published: null,
+        },
+      }),
+    );
+    await authoringActionsFor(host, LESSON).editable(ctx);
+    expect(ctx.body).toMatchObject({
+      data: {
+        title: "Lesson",
+        order: 3,
+        quiz,
+        body: null,
+        videoUrl: null,
+        course: { documentId: COURSE_DOC, title: "Course", slug: "course" },
+        publishAt: null,
+        scheduleError: null,
+        roleClass: "moderator",
+      },
+    });
+    const coverImage = {
+      id: 7,
+      name: "cover",
+      mime: "image/png",
+      size: 1,
+      url: "/cover",
+      uploadedBy: 99,
+    };
+    const courseCtx = context(
+      gateFor({
+        uid: COURSE,
+        intent: "editable",
+        rows: {
+          documentId: COURSE_DOC,
+          draft: { ...course, mandatory: false, completionMode: "exam", coverImage },
+          published: null,
+        },
+      }),
+    );
+    await authoringActionsFor(host, COURSE).editable(courseCtx);
+    expect(courseCtx.body).toMatchObject({
+      data: {
+        title: "Course",
+        slug: "course",
+        mandatory: false,
+        completionMode: "exam",
+        coverImage: { id: 7, name: "cover", mime: "image/png", size: 1, url: "/cover" },
+      },
+    });
+    expect(JSON.stringify(courseCtx.body)).not.toContain("uploadedBy");
+  });
+
+  it("validates course filters and applies them in the database before pagination/count", async () => {
+    expect(parseListQuery({ course: COURSE_DOC }, { course: true })).toEqual({
+      page: 1,
+      course: COURSE_DOC,
+    });
+    for (const course of ["123", "unknown", [COURSE_DOC], { documentId: COURSE_DOC }]) {
+      expect(() => parseListQuery({ course }, { course: true })).toThrow(errors.ValidationError);
+    }
+    expect(() => parseListQuery({ course: COURSE_DOC }, {})).toThrow(errors.ValidationError);
+    const { host, stub } = harness();
+    stub.tables[COURSE] = [{ id: 10, documentId: COURSE_DOC, title: "Course", slug: "course" }];
+    stub.tables[LESSON] = [
+      {
+        id: 1,
+        documentId: LESSON_DOC,
+        title: "One",
+        order: 4,
+        course: { id: 10 },
+        publishedAt: null,
+      },
+      {
+        id: 2,
+        documentId: "lesson000000000000000002",
+        title: "Other",
+        course: { id: 11, documentId: "course000000000000000002" },
+        publishedAt: null,
+      },
+    ];
+    const ctx = context(gateFor({ uid: LESSON, intent: "authoringList" }), {
+      query: { course: COURSE_DOC },
+    });
+    await authoringActionsFor(host, LESSON).authoringList(ctx);
+    expect(ctx.body).toMatchObject({
+      data: [{ documentId: LESSON_DOC, order: 4, course: { documentId: COURSE_DOC } }],
+      meta: { pagination: { total: 1 } },
+    });
+    const read = stub.calls.find((call) => call.uid === LESSON && call.method === "findMany");
+    expect(read?.params).toMatchObject({ where: { course: { documentId: COURSE_DOC } } });
+    expect(read?.params).not.toHaveProperty("select.quiz");
+  });
+
+  it.each([COURSE, LESSON])("never deletes %s by discard, even for moderators", async (uid) => {
+    const { host, stub, calls } = harness();
+    const documentId = uid === COURSE ? COURSE_DOC : LESSON_DOC;
+    stub.tables[uid] = [{ id: 1, documentId, title: "Draft", publishedAt: null }];
+    lock.locked = 3;
+    const ctx = context(gateFor({ uid, documentId, intent: "discardDraft" }), { ifMatch: '"3"' });
+    await expect(authoringActionsFor(host, uid).discardDraft?.(ctx)).rejects.toMatchObject({
+      details: { keys: ["_form"], codes: { _form: "neverPublished" } },
+    });
+    expect(calls).toEqual([]);
+    expect(lock.calls).toEqual([`${uid} ${documentId}`]);
+    expect(stub.tables[uid]).toHaveLength(1);
+  });
+
+  it("checks the class and token before revealing training discard availability", async () => {
+    const { host, stub } = harness();
+    stub.tables[COURSE] = [{ id: 1, documentId: COURSE_DOC, title: "Draft", publishedAt: null }];
+    lock.locked = 4;
+    const stale = context(
+      gateFor({ uid: COURSE, documentId: COURSE_DOC, intent: "discardDraft" }),
+      { ifMatch: '"3"' },
+    );
+    await authoringActionsFor(host, COURSE).discardDraft?.(stale);
+    expect(stale.status).toBe(412);
+    const lost = context(
+      gateFor({
+        uid: COURSE,
+        documentId: COURSE_DOC,
+        intent: "discardDraft",
+        classify: async () => null,
+      }),
+      { ifMatch: '"3"' },
+    );
+    await authoringActionsFor(host, COURSE).discardDraft?.(lost);
+    expect(lost.status).toBe(404);
+  });
+});

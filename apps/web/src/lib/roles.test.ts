@@ -292,7 +292,7 @@ describe("capabilitiesFor", () => {
         analytics: admin,
         acknowledgements: admin,
         training: admin,
-        activity: false,
+        activity: admin,
       });
     }
   });
@@ -324,7 +324,9 @@ describe("capabilitiesFor", () => {
     expect([...capabilitiesFor("editor").author.announcements].sort()).toEqual(
       ["create", "delete", "discard", "edit", "publish", "schedule", "unpublish"].sort(),
     );
-    expect(capabilitiesFor("admin_role").author.courses.size).toBe(0);
+    expect([...capabilitiesFor("admin_role").author.courses].sort()).toEqual(
+      ["create", "discard", "edit", "publish", "schedule", "unpublish"].sort(),
+    );
     // No schedule and no delete for department authors (decision 06 §N2).
     const head = capabilitiesFor("department_head");
     for (const area of departmentAreas) {

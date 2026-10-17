@@ -4,6 +4,8 @@ import { DEPARTMENT_AUTHOR_ROLES, MODERATORS, STAFF_ROLES, hasRole } from "../bo
 import {
   ANNOUNCEMENT_UID,
   AUTHORED_UIDS,
+  COURSE_UID,
+  LESSON_UID,
   DEPARTMENT_AUTHORED_UIDS,
   DOCUMENT_UID,
   EVENT_UID,
@@ -156,6 +158,8 @@ const DEPARTMENT_REF = { select: ["id", "documentId", "name"] };
 
 /** The relations each type's gate, list and form read (never a client populate). */
 export const AUTHORING_POPULATE: Readonly<Record<string, Record<string, unknown>>> = {
+  [COURSE_UID]: { coverImage: { select: ["id", "name", "mime", "size", "url"] } },
+  [LESSON_UID]: { course: { select: ["id", "documentId", "title", "slug"] } },
   [ANNOUNCEMENT_UID]: {
     department: DEPARTMENT_REF,
     team: { select: ["id", "documentId", "name"], populate: { department: { select: ["id"] } } },
@@ -386,7 +390,7 @@ export function normaliseRow(row: AuthoringRow | null): Record<string, unknown> 
             .map((role) => (isRecord(role) ? role.type : null))
             .filter((type): type is string => typeof type === "string")
         : [];
-    } else if (Array.isArray(value) && value.every(isRecord)) {
+    } else if (key !== "quiz" && Array.isArray(value) && value.every(isRecord)) {
       out[key] = value
         .map((entry) => entry.documentId)
         .filter((id): id is string => typeof id === "string");
