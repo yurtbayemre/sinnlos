@@ -32,6 +32,7 @@
  */
 import {
   AUTHORING_FIELDS,
+  TRAINING_FIELDS,
   DOCUMENT_CATEGORIES,
   QUICK_LINK_CATEGORIES,
   MAX_POLL_OPTION_LENGTH,
@@ -51,6 +52,7 @@ import {
   scheduleCodes,
   type AuthoringRoleClass,
   type AuthoringType,
+  type TrainingAuthoringType,
   type FieldCheck,
 } from "@sinnlos/domain";
 import { pollClosesAtForDay } from "@/lib/poll-close";
@@ -191,7 +193,10 @@ function buildFields<V extends object>(
  * across the company), an empty `departments` list. A payload without the
  * targeting keys changes nothing and widens nothing.
  */
-export function widensToEveryone(type: AuthoringType, data: Record<string, unknown>): boolean {
+export function widensToEveryone(
+  type: AuthoringType | TrainingAuthoringType,
+  data: Record<string, unknown>,
+): boolean {
   if (type === "announcement") {
     return "department" in data && data.department == null && data.team == null;
   }
@@ -514,12 +519,18 @@ export function buildPollPayload(
  * expiry after the publish). Only the keys the type and class allow.
  */
 export function buildSchedulePayload(
-  type: AuthoringType,
+  type: AuthoringType | TrainingAuthoringType,
   schedule: ScheduleValues,
   ctx: PayloadContext,
   { expiresAt }: { expiresAt?: string | null } = {},
 ): BuiltPayload {
-  const allowed = new Set(AUTHORING_FIELDS[type][ctx.roleClass] ?? []);
+  const allowed = new Set<string>(
+    type === "course" || type === "lesson"
+      ? ctx.roleClass === "moderator"
+        ? TRAINING_FIELDS[type].moderator
+        : []
+      : (AUTHORING_FIELDS[type][ctx.roleClass] ?? []),
+  );
   const data: Record<string, unknown> = {};
   const fields: Record<string, ManageErrorCode> = {};
   if (allowed.has("publishAt")) {

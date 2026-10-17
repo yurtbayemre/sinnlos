@@ -5,6 +5,7 @@
  * drafts) and progress is strictly the caller's own (admin_role: all rows).
  * Uncached (D-DC01).
  */
+import type { LessonPlayerResponse } from "@sinnlos/domain";
 import { strapi, type StrapiListResponse } from "@/lib/strapi/client";
 import { strapiQuery, withQuery, type StrapiQuery } from "@/lib/strapi/query";
 import type { Course, Lesson, LessonProgress } from "@/lib/types";
@@ -14,10 +15,8 @@ export type CourseView = Omit<Course, "lessons"> & {
   lessons?: Pick<Lesson, "id" | "documentId" | "title" | "order">[];
 };
 
-/** A lesson with its course's title, slug and documentId. */
-export type LessonView = Omit<Lesson, "course"> & {
-  course?: Pick<Course, "id" | "documentId" | "title" | "slug"> | null;
-};
+/** The fixed, answerless learner response, independent of authoring reads. */
+export type LessonView = LessonPlayerResponse["data"];
 
 /** A progress row as the report reads it: the lesson and the user's id. */
 export type ProgressReportRow = Pick<LessonProgress, "id" | "targetDocumentId"> & {
@@ -48,21 +47,14 @@ export function courseBySlug(slug: string): Promise<StrapiListResponse<CourseVie
   );
 }
 
-/** The lesson with this documentId, with its course's title, slug and documentId. */
-export function lessonByDocumentId(documentId: string): Promise<StrapiListResponse<LessonView>> {
-  return strapi<StrapiListResponse<LessonView>>(
-    withQuery(
-      "/api/lessons",
-      strapiQuery()
-        .filter("documentId", "$eq", documentId)
-        .populateFields("course", ["title", "slug", "documentId"]),
-    ),
-  );
+/** The published player content; generic lesson reads never carry quiz data. */
+export function lessonByDocumentId(documentId: string): Promise<LessonPlayerResponse> {
+  return strapi<LessonPlayerResponse>(`/api/lessons/${encodeURIComponent(documentId)}/player`);
 }
 
 /**
  * One page of the progress rows of the given lessons across all users
- * (admin_role, the /manage/training report), sorted by id: without an
+ * (admin_role, the /manage/training/report report), sorted by id: without an
  * ORDER BY, Postgres may return rows in a different order per page, and the
  * page walk would skip or repeat rows (WD02).
  */

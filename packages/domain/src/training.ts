@@ -15,8 +15,8 @@ import type {
  *     (apps/web/src/lib/training-shared.ts) is the AUTHORITATIVE XSS layer:
  *     the stored string is never rendered, the embed URL is rebuilt from the
  *     extracted id. Old rows and db-level writes bypass the lifecycle, so the
- *     player re-validates with the same parser and reads quizzes leniently
- *     (parseQuiz).
+ *     player re-validates video URLs with the same parser. Stored quizzes
+ *     are validated strictly before server feedback or completion.
  */
 
 /** Hosts accepted for lesson videos: YouTube only (owner decision). */
@@ -86,7 +86,7 @@ export const QUIZ_MAX_OPTIONS = 8;
 export const QUIZ_MAX_TEXT = 500;
 
 /**
- * Validate the lesson quiz JSON strictly (the write side). Expected shape:
+ * Validate lesson quiz JSON for authoring and server grading. Expected shape:
  * [{ "question": "...", "options": ["...", ...], "correctIndex": 0 }, ...].
  * Returns the normalized (trimmed) array or an error string (German: it
  * surfaces in the Strapi admin panel).
@@ -163,13 +163,10 @@ export function parseQuiz(raw: unknown): QuizQuestion[] {
 }
 
 /**
- * Whether `answers` pass `quiz` (issue #70): the completion gate of a quiz
- * lesson, server-side in the cms lesson-progress create and client-side in
- * the web player. `quiz` is the quiz as parseQuiz reads it, so the answers
- * index the questions the player shows; `answers` comes from the caller:
- * exactly one option index per question, each the correct one. A lesson
- * without (valid) questions passes with any answers: it completes by click,
- * and malformed questions parseQuiz drops never dead-lock it.
+ * Whether every submitted option matches a strictly validated quiz. Server
+ * feedback and completion must call validateQuiz on stored content first;
+ * the lenient display parser must never turn malformed content into a pass.
+ * A legitimate lesson without questions completes manually.
  */
 export function quizAnswersPass(quiz: readonly QuizQuestion[], answers: unknown): boolean {
   if (quiz.length === 0) return true;
@@ -181,7 +178,7 @@ export function quizAnswersPass(quiz: readonly QuizQuestion[], answers: unknown)
 }
 
 // ---------------------------------------------------------------------------
-// Batch 17 contracts; schema and current player behavior change together later.
+// Shared learner and authoring contracts.
 
 export type TrainingCompletionMode = "confirm" | "quizGate" | "exam";
 
@@ -219,6 +216,35 @@ export interface QuizSelection {
   optionIndex: number;
 }
 
+/** Transport bounds shared by the CMS and web; the CMS also checks the current quiz's bounds. */
+export function isQuizSelectionList(value: unknown): value is QuizSelection[] {
+  if (!Array.isArray(value) || value.length > QUIZ_MAX_QUESTIONS) return false;
+  const questions = new Set<number>();
+  for (const selection of value) {
+    if (
+      !selection ||
+      typeof selection !== "object" ||
+      Array.isArray(selection) ||
+      Object.keys(selection).length !== 2
+    )
+      return false;
+    const { questionIndex, optionIndex } = selection as Record<string, unknown>;
+    if (
+      typeof questionIndex !== "number" ||
+      !Number.isInteger(questionIndex) ||
+      questionIndex < 0 ||
+      questionIndex >= QUIZ_MAX_QUESTIONS ||
+      questions.has(questionIndex) ||
+      typeof optionIndex !== "number" ||
+      !Number.isInteger(optionIndex) ||
+      optionIndex < 0 ||
+      optionIndex >= QUIZ_MAX_OPTIONS
+    )
+      return false;
+    questions.add(questionIndex);
+  }
+  return true;
+}
 /** POST /api/lessons/:id/check; confirm permits partial answers, other modes require all. */
 export interface QuizCheckRequest {
   data: { answers: QuizSelection[] };

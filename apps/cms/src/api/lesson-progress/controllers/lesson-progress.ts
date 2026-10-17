@@ -1,5 +1,13 @@
 import { factories } from "@strapi/strapi";
-import { parseQuiz, quizAnswersPass } from "@sinnlos/domain";
+import {
+  QUIZ_CONTENT_INVALID,
+  QUIZ_MAX_OPTIONS,
+  QUIZ_MAX_QUESTIONS,
+  quizAnswersPass,
+} from "@sinnlos/domain";
+
+import { loadPublishedLesson } from "../../../utils/training-access";
+import { validateStoredQuiz } from "../../../utils/training-validation";
 
 /**
  * Completion receipts follow the acknowledgement integrity pattern
@@ -17,9 +25,8 @@ import { parseQuiz, quizAnswersPass } from "@sinnlos/domain";
  * Quiz lessons (issue #70): a lesson with questions completes only with
  * `answers`, one option index per question, every one correct
  * (quizAnswersPass, whatever the course's completionMode). The web gates
- * its button on the same answers; this is the gate that holds.
+ * its button on server feedback; completion independently regrades.
  */
-const LESSON_UID = "api::lesson.lesson";
 const PROGRESS_UID = "api::lesson-progress.lesson-progress";
 
 export default factories.createCoreController(PROGRESS_UID, ({ strapi }) => ({
@@ -38,21 +45,23 @@ export default factories.createCoreController(PROGRESS_UID, ({ strapi }) => ({
     // Deliberately ONE identical error for all failure modes — "no such
     // lesson", "draft only" and "course unpublished" — so the endpoint
     // is no existence oracle for draft documentIds (§5.17).
-    const lesson = await strapi.db.query(LESSON_UID).findOne({
-      where: { documentId: targetDocumentId, publishedAt: { $notNull: true } },
-      populate: { course: { select: ["id", "publishedAt"] } },
-    });
-    if (!lesson || !lesson.course?.publishedAt) {
-      return ctx.badRequest("Target not available for completion");
+    const lesson = await loadPublishedLesson(strapi, targetDocumentId);
+    if (!lesson) return ctx.badRequest("Target not available for completion");
+    const validated = validateStoredQuiz(lesson.quiz);
+    if ("error" in validated) {
+      return ctx.badRequest("Invalid quiz content", { code: QUIZ_CONTENT_INVALID });
     }
 
-    // The published quiz, read as the player reads it (parseQuiz), so the
-    // answers index the questions the caller was shown. Only after the
-    // lesson proved available: the refusal names nothing about a hidden one.
-    // Retries stay unlimited and the questions ship with their correctIndex
-    // (the player checks them in the browser): this proves the caller sent
-    // the right answers, it is no exam.
-    if (!quizAnswersPass(parseQuiz(lesson.quiz), data.answers)) {
+    // shortcut: no displayed-version binding; add version tokens if exam snapshots become required.
+    const answers = data.answers;
+    const bounded =
+      answers === undefined ||
+      (Array.isArray(answers) &&
+        answers.length <= QUIZ_MAX_QUESTIONS &&
+        answers.every(
+          (answer) => Number.isInteger(answer) && answer >= 0 && answer < QUIZ_MAX_OPTIONS,
+        ));
+    if (!bounded || !quizAnswersPass(validated.quiz, answers)) {
       // The web maps this exact text (lib/training-actions.ts).
       return ctx.badRequest("Quiz not passed");
     }

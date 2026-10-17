@@ -119,7 +119,7 @@ describe("the /manage shell", () => {
 });
 
 describe("the landing", () => {
-  it("an editor: the six area tiles, no reports and no Strapi links", async () => {
+  it("an editor: the seven area tiles, no reports and no Strapi links", async () => {
     const tree = elements(await ManagePage());
     expect(tileHrefs(tree).sort()).toEqual(
       [
@@ -129,6 +129,7 @@ describe("the landing", () => {
         "/manage/quick-links",
         "/manage/documents",
         "/manage/wiki",
+        "/manage/training",
       ].sort(),
     );
     expect(hrefs(tree)).not.toContain("/manage/analytics");
@@ -139,7 +140,12 @@ describe("the landing", () => {
     viewerRef.current = viewer("admin_role");
     const tree = elements(await ManagePage());
     expect(hrefs(tree)).toEqual(
-      expect.arrayContaining(["/manage/analytics", "/manage/acknowledgements", "/manage/training"]),
+      expect.arrayContaining([
+        "/manage/analytics",
+        "/manage/acknowledgements",
+        "/manage/training/report",
+        "/manage/activity",
+      ]),
     );
     expect(hrefs(tree).some((href) => href.includes("/admin/content-manager"))).toBe(true);
   });
@@ -192,12 +198,13 @@ describe("the landing", () => {
         "/api/polls/authoring?status=published",
         "/api/quick-links/authoring?status=published",
         "/api/wiki-pages/authoring?status=published",
+        "/api/courses/authoring?status=published",
       ].sort(),
     );
     const publishedCounts = tree.filter(
       (el) => el.type === StatCount && (el.props.count as { value: number }).value === 5,
     );
-    expect(publishedCounts).toHaveLength(6);
+    expect(publishedCounts).toHaveLength(7);
     // Polls have no status tabs and the wiki lists spaces: those counts are no link.
     const countLinks = hrefs(tree).filter((href) => href.includes("?status="));
     expect(publishedOnly(countLinks)).toEqual([
@@ -205,6 +212,7 @@ describe("the landing", () => {
       "/manage/documents?status=published",
       "/manage/events?status=published",
       "/manage/quick-links?status=published",
+      "/manage/training?status=published",
     ]);
     expect(countLinks.some((href) => href.startsWith("/manage/polls"))).toBe(false);
     expect(countLinks.some((href) => href.startsWith("/manage/wiki"))).toBe(false);

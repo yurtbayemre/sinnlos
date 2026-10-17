@@ -6,18 +6,24 @@ import {
   STATUS_KEY,
   announcementNeedsRetarget,
   eventNeedsRetarget,
+  parseQuiz,
   scopedNeedsRetarget,
   type AuthoringDocumentStatus,
   type AuthoringListRow,
   type AuthoringStatusMode,
   type AuthoringType,
   type OwnerDepartment,
+  type EditableMedia,
+  type TrainingAuthoringType,
+  type TrainingCourseRef,
   type WikiAuthoringType,
   type WikiSpaceRef,
 } from "@sinnlos/domain";
 import { errors } from "@strapi/utils";
 import {
   ANNOUNCEMENT_UID,
+  COURSE_UID,
+  LESSON_UID,
   DEPARTMENT_AUTHORED_UIDS,
   DOCUMENT_UID,
   EVENT_UID,
@@ -38,7 +44,7 @@ import {
   type AuthoringScope,
   type DocumentLockHost,
 } from "./document-lock";
-import { parseEntryRef } from "./entry-id";
+import { isDocumentId, parseEntryRef } from "./entry-id";
 import {
   AUTHORING_POPULATE,
   authoringGateOf,
@@ -104,6 +110,8 @@ import {
  * lock, after the token check: department authors never delete. On a wiki
  * page only its author and moderators may delete that way; the head of its
  * department and the lead of its team get 404 there, decided the same way.
+ * Training always refuses with neverPublished: courses and lessons are never
+ * deleted through the content API, regardless of the moderator class.
  *
  * WIKI PAGES (batch 16). Every create and update runs inside
  * `wikiEditContext` (the editor and the edit note `revisionSummary`, which
@@ -114,7 +122,7 @@ import {
 /** How each type's answers and forms are built. */
 export interface AuthoringSpec {
   uid: string;
-  type: AuthoringType | WikiAuthoringType;
+  type: AuthoringType | WikiAuthoringType | TrainingAuthoringType;
   statusMode: AuthoringStatusMode;
   /** The label field (list `label`, `q` filter). */
   labelField: string;
@@ -131,6 +139,27 @@ export interface AuthoringSpec {
 }
 
 export const AUTHORING_SPECS: Readonly<Record<string, AuthoringSpec>> = {
+  [COURSE_UID]: {
+    uid: COURSE_UID,
+    type: "course",
+    statusMode: "explicit",
+    labelField: "title",
+    authorField: null,
+    scheduled: true,
+    unpublishScheduled: false,
+    flagColumns: [],
+  },
+  [LESSON_UID]: {
+    uid: LESSON_UID,
+    type: "lesson",
+    statusMode: "explicit",
+    labelField: "title",
+    authorField: null,
+    scheduled: true,
+    unpublishScheduled: false,
+    flagColumns: [],
+    listColumns: ["order"],
+  },
   [ANNOUNCEMENT_UID]: {
     uid: ANNOUNCEMENT_UID,
     type: "announcement",
@@ -205,6 +234,8 @@ export const AUTHORING_SPECS: Readonly<Record<string, AuthoringSpec>> = {
     listColumns: ["slug", "order"],
   },
 };
+
+const isTrainingUid = (uid: string) => uid === COURSE_UID || uid === LESSON_UID;
 
 const isWikiUid = (uid: string) => uid === WIKI_PAGE_UID || uid === WIKI_SPACE_UID;
 
@@ -446,6 +477,27 @@ export function wikiSpaceRefOf(value: unknown): WikiSpaceRef | null {
   };
 }
 
+/** Fixed media DTO for author forms; never expose upload ownership or related content. */
+export function editableMediaOf(value: unknown): EditableMedia | null {
+  if (!isRecord(value) || typeof value.id !== "number") return null;
+  return {
+    id: value.id,
+    name: text(value.name) ?? "",
+    mime: text(value.mime) ?? "",
+    size: typeof value.size === "number" ? value.size : Number(value.size ?? 0),
+    url: text(value.url) ?? "",
+  };
+}
+
+function trainingCourseRefOf(value: unknown): TrainingCourseRef | null {
+  if (!isRecord(value) || typeof value.documentId !== "string") return null;
+  return {
+    documentId: value.documentId,
+    title: text(value.title) ?? "",
+    slug: text(value.slug) ?? "",
+  };
+}
+
 const ownerOf = (row: AuthoringRow | null): OwnerDepartment | null => {
   const owner = row?.ownerDepartment;
   return isRecord(owner) && typeof owner.documentId === "string"
@@ -481,7 +533,7 @@ export function rowNeedsRetarget(uid: string, row: Record<string, unknown> | nul
   if (!row) return false;
   if (uid === WIKI_SPACE_UID) return spaceNeedsRetarget(row);
   // A wiki page has no targeting: its space decides who reads it.
-  if (uid === WIKI_PAGE_UID) return false;
+  if (uid === WIKI_PAGE_UID || isTrainingUid(uid)) return false;
   if (uid === ANNOUNCEMENT_UID) {
     return announcementNeedsRetarget({
       audience: row.audience as string | null,
@@ -520,6 +572,28 @@ export async function editableFields(
   const moderator = roleClass === MODERATOR_CLASS;
   const retarget = needsRetarget(uid, rows);
   switch (uid) {
+    case COURSE_UID:
+      return {
+        title: text(draft.title) ?? "",
+        slug: text(draft.slug) ?? "",
+        description: text(draft.description),
+        mandatory: draft.mandatory !== false,
+        completionMode: text(draft.completionMode) ?? "confirm",
+        coverImage: editableMediaOf(draft.coverImage),
+        publishAt: iso(draft.publishAt),
+        scheduleError: text(draft.scheduleError),
+      };
+    case LESSON_UID:
+      return {
+        title: text(draft.title) ?? "",
+        body: text(draft.body),
+        order: typeof draft.order === "number" ? draft.order : 0,
+        course: trainingCourseRefOf(draft.course),
+        videoUrl: text(draft.videoUrl),
+        quiz: parseQuiz(draft.quiz),
+        publishAt: iso(draft.publishAt),
+        scheduleError: text(draft.scheduleError),
+      };
     case ANNOUNCEMENT_UID:
       return {
         title: text(draft.title) ?? "",
@@ -572,22 +646,12 @@ export async function editableFields(
         scheduleError: text(draft.scheduleError),
       };
     case DOCUMENT_UID: {
-      const file = isRecord(draft.file) ? draft.file : null;
       return {
         title: text(draft.title) ?? "",
         description: text(draft.description),
         category: text(draft.category) ?? "other",
         departments: documentIdsOf(draft.departments),
-        file:
-          file && typeof file.id === "number"
-            ? {
-                id: file.id,
-                name: text(file.name) ?? "",
-                mime: text(file.mime) ?? "",
-                size: typeof file.size === "number" ? file.size : Number(file.size ?? 0),
-                url: text(file.url) ?? "",
-              }
-            : null,
+        file: editableMediaOf(draft.file),
         ownerDepartment: ownerOf(draft),
         needsRetarget: retarget,
         ...(moderator
@@ -673,6 +737,8 @@ interface ListQuery {
   owner?: (typeof OWNER_FILTERS)[number];
   /** Wiki pages: the space's documentId. */
   space?: string;
+  /** Lessons: filter by the parent before pagination and count. */
+  course?: string;
 }
 
 /** Which keys a type's list takes besides `q` and `page`. */
@@ -683,6 +749,8 @@ export interface ListKeys {
   owner?: boolean;
   /** `space` (wiki pages). */
   space?: boolean;
+  /** `course` (lessons). */
+  course?: boolean;
 }
 
 /** A space documentId as the list filter takes it (the documentId shape of entry-id.ts). */
@@ -705,6 +773,7 @@ export function parseListQuery(
     ...(options.status === false ? [] : ["status"]),
     ...(allowOwner ? ["owner"] : []),
     ...(options.space ? ["space"] : []),
+    ...(options.course ? ["course"] : []),
   ];
   const raw = query ?? {};
   const refused = Object.keys(raw).filter((key) => !allowed.includes(key));
@@ -735,6 +804,10 @@ export function parseListQuery(
   if (options.space && raw.space !== undefined) {
     if (typeof raw.space === "string" && SPACE_FILTER.test(raw.space)) out.space = raw.space;
     else refused.push("space");
+  }
+  if (options.course && raw.course !== undefined) {
+    if (isDocumentId(raw.course)) out.course = raw.course;
+    else refused.push("course");
   }
   if (allowOwner && raw.owner !== undefined) {
     if (typeof raw.owner === "string" && (OWNER_FILTERS as readonly string[]).includes(raw.owner)) {
@@ -795,6 +868,7 @@ async function listDocuments(
     where.ownerDepartment = { id: { $null: true } };
   }
   if (query.space !== undefined) where.space = { documentId: query.space };
+  if (query.course !== undefined) where.course = { documentId: query.course };
   const populate = AUTHORING_POPULATE[spec.uid] ?? {};
   // The columns a list row needs (never a Markdown body): the label, the
   // state and schedule, and the targeting flags.
@@ -893,6 +967,12 @@ function listRow(
     authorName: spec.authorField ? displayNameOf(draft[spec.authorField]) : null,
     ...(owned ? { ownerDepartment: ownerOf(draft) } : {}),
     needsRetarget: needsRetarget(spec.uid, rows),
+    ...(spec.uid === LESSON_UID
+      ? {
+          course: trainingCourseRefOf(draft.course),
+          order: typeof draft.order === "number" ? draft.order : 0,
+        }
+      : {}),
     ...(spec.uid === WIKI_SPACE_UID
       ? {
           slug: text(draft.slug) ?? "",
@@ -1105,6 +1185,7 @@ export function authoringActionsFor(
         status: uid !== WIKI_SPACE_UID,
         owner: owned && gate.roleClass === MODERATOR_CLASS,
         space: uid === WIKI_PAGE_UID,
+        course: uid === LESSON_UID,
       });
       // Versions first, then the rows (see revisionsOf).
       const revisions = await revisionsOf(strapi, uid);
@@ -1190,12 +1271,12 @@ export function authoringActionsFor(
 
     actions.discardDraft = documentAction("discardDraft", async (scope, gate) => {
       const documentId = scope.documentId as string;
-      if (!mayDeleteByDiscard(gate.roleClass)) {
+      if (isTrainingUid(uid) || !mayDeleteByDiscard(gate.roleClass)) {
         // Under the document's lock and after the lock's own checks, in
         // its order (amendment row A1; K2 since 15B a3bfd5c: the class
         // on every scoped mutation, then the tokens): a discard without
         // a published row would delete the document, which department
-        // authors never do, and on a wiki page only its author and
+        // authors and training never do, and on a wiki page only its author and
         // moderators may (§J2). A caller who lost the class learns
         // nothing here, not even with current tokens.
         const locked = await lockDocument(strapi, uid, documentId);
@@ -1207,9 +1288,10 @@ export function authoringActionsFor(
         const published = await strapi.db
           .query(uid)
           .count({ where: { documentId, publishedAt: { $notNull: true } } });
-        if (published === 0 && !mayDeleteByDiscard(roleClass)) {
+        if (published === 0 && (isTrainingUid(uid) || !mayDeleteByDiscard(roleClass))) {
           // The page's other row classes: like a page they have no class on.
-          if (roleClass !== DEPARTMENT_AUTHOR_CLASS) throw new ClassLost(404);
+          if (!isTrainingUid(uid) && roleClass !== DEPARTMENT_AUTHOR_CLASS)
+            throw new ClassLost(404);
           throw new errors.ValidationError("There is no published version to return to", {
             keys: [FORM_KEY],
             codes: { [FORM_KEY]: "neverPublished" },

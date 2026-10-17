@@ -7,6 +7,11 @@ import {
   AUTHORING_STATUS_MODES,
   AUTHORING_TYPES,
   DEPARTMENT_AUTHORED_TYPES,
+  TRAINING_AUTHORING_INTENTS,
+  TRAINING_FIELDS,
+  TRAINING_PATHS,
+  ORG_FIELDS,
+  ORG_PATHS,
   WIKI_FIELDS,
   WIKI_PAGE_INTENTS,
   WIKI_PATHS,
@@ -69,9 +74,15 @@ const WIKI_PAGE = "api::wiki-page.wiki-page";
 
 describe("the authoring route table (K7) = the cms routes", () => {
   it("covers exactly the authored uids, with the schemas' plural names", () => {
-    expect([...AUTHORING_TYPES.map((type) => UID_OF[type]), WIKI_SPACE, WIKI_PAGE].sort()).toEqual(
-      [...AUTHORED_UIDS].sort(),
-    );
+    expect(
+      [
+        ...AUTHORING_TYPES.map((type) => UID_OF[type]),
+        WIKI_SPACE,
+        WIKI_PAGE,
+        "api::course.course",
+        "api::lesson.lesson",
+      ].sort(),
+    ).toEqual([...AUTHORED_UIDS].sort());
     for (const type of AUTHORING_TYPES) {
       const schema = JSON.parse(
         readFileSync(
@@ -165,4 +176,45 @@ describe("the wiki route table (K18) = the cms routes", () => {
       );
     }
   });
+});
+
+describe("batch 17 route contracts", () => {
+  it.each(["course", "lesson"] as const)(
+    "%s serves exactly the training intents and field classes",
+    async (type) => {
+      const uid = `api::${type}.${type}`;
+      const routes = await customRoutes(uid);
+      expect(routes.map((route) => route.handler).sort()).toEqual(
+        TRAINING_AUTHORING_INTENTS.filter((intent) => intent !== "create" && intent !== "update")
+          .map((intent) => `${uid}.${intent}`)
+          .sort(),
+      );
+      for (const route of routes) {
+        const intent = route.handler.split(".").pop()!;
+        const read = intent === "authoringList" || intent === "editable";
+        const suffix =
+          intent === "authoringList"
+            ? "authoring"
+            : `:id/${intent === "discardDraft" ? "discard-draft" : intent}`;
+        expect(route.method).toBe(read ? "GET" : "POST");
+        expect(route.path).toBe(`/${TRAINING_PATHS[type]}/${suffix}`);
+      }
+      expect(AUTHORING_SPECS[uid].statusMode).toBe("explicit");
+      for (const action of ["create", "update"] as const)
+        expect(writeClassesFor(uid, action)).toEqual(Object.keys(TRAINING_FIELDS[type]).sort());
+    },
+  );
+
+  it.each(["department", "team"] as const)(
+    "%s exposes only the org editable action with the exact update classes",
+    async (type) => {
+      const uid = `api::${type}.${type}`;
+      const routes = await customRoutes(uid);
+      expect(routes.map(({ method, path, handler }) => ({ method, path, handler }))).toEqual([
+        { method: "GET", path: `/${ORG_PATHS[type]}/:id/editable`, handler: `${uid}.editable` },
+      ]);
+      expect(writeClassesFor(uid, "update")).toEqual(Object.keys(ORG_FIELDS[type]).sort());
+      expect(writeClassesFor(uid, "create")).toEqual([]);
+    },
+  );
 });

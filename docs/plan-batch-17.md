@@ -1,7 +1,7 @@
 # Batch 17 implementation plan
 
 > Phase 3 of v2 frontend authoring (plan 12). Written 2026-10-16 against main 2f47b84fcadfd6f63ecffac1c78cdf388c5ea44d, released as v0.16.2.
-> Status: first implementation step complete locally: single-row org probe and shared contracts (section 12). The shared player/API change is next. Decision 06 remains the approved scope; section 3 records the accepted lean exam-mode amendment, unlimited retries and no timer. Review corrections are recorded in section 11.
+> Status: the 17B web remainder is implemented locally (section 15), on top of the org probe/contracts (section 12), shared player/API (section 13) and backend remainder (section 14). Combined integration and rehearsal are next. Decision 06 remains the approved scope; section 3 records the accepted lean exam-mode amendment, unlimited retries and no timer. Review corrections are recorded in section 11.
 > Paths: cms/ = apps/cms/src/, web/ = apps/web/src/, domain/ = packages/domain/src/. Paths outside those roots are written in full.
 > This plan records the implementation baseline and local evidence; it does not verify or change the running server.
 
@@ -251,7 +251,7 @@ The lane lists are responsibilities, not a request to create every named file:
 
 ## 10. Completion gates for the plan and implementation
 
-Implementation follows the accepted section 3 decision: exam remains as overall-only feedback, all learner modes are answerless, retries are unlimited and there is no timer. The single-row org prerequisite passed on SQLite and Postgres (section 12); guarded org endpoints and their HTTP tests remain to be implemented. Privacy is a normal lane regression, not a pre-contract gate; real HTTP exposure still blocks release. Quiz privacy has not yet changed or passed its regression gate.
+Implementation follows the accepted section 3 decision: exam remains as overall-only feedback, all learner modes are answerless, retries are unlimited and there is no timer. The single-row org prerequisite passed on SQLite and Postgres (section 12); guarded org endpoints and their HTTP tests are implemented (section 14). Privacy is a normal lane regression, not a pre-contract gate; real HTTP exposure still blocks release. The shared player/API privacy regression passed on SQLite and Postgres (section 13); production release and combined rehearsal remain pending.
 
 Before production deployment, exact-commit CI and the complete rehearsal with the previous CMS/web pair and mode downgrade/restore are mandatory. Accepted limits remain: panel saves lack If-Match and may overwrite a web change; panel structural/media privileges remain; quiz edits do not revoke receipts; current-published grading is not bound to previously displayed questions and retains concurrent publish/reparent availability races; unlimited retries permit guessing; in-flight role/team changes retain the existing request race. Rollback restores the old answer exposure and media/org boundaries described in section 3.4.
 
@@ -283,4 +283,47 @@ The NULL publishedAt fixture is injected after startup: the existing org boot gu
 
 Local validation: 181 focused unit/contract tests and 12 integration tests passed; domain build/export parity and production/test TypeScript checks passed across all three packages. Independent review found no actionable issue. The integration run used disposable databases, not staging or production.
 
-Next is the shared player/API change, including strict stored-quiz validation and release-blocking HTTP privacy regressions. This first step does not add endpoints, grants, capabilities, media claims or the exam schema value; existing learner reads still expose answers. Full release checks, browser acceptance and deploy/rollback rehearsal remain outstanding.
+Next is the shared player/API change, including strict stored-quiz validation and release-blocking HTTP privacy regressions. That first step did not add endpoints, grants, capabilities, media claims or the exam schema value; its learner reads still exposed answers. Section 13 records the subsequent player/API change. Full release checks, browser acceptance and deploy/rollback rehearsal remain outstanding.
+
+## 13. Second implementation step: shared player/API
+
+The shared player/API builds on the contracts commit 9a0d643:
+
+- Raw lesson.quiz is private for all generic content-API reads. One fixed player response contains only question/options; the new player and feedback actions have exactly the existing lesson read grants. The panel still reads and edits answer keys; web author editable endpoints belong to the backend remainder.
+- Player, feedback and completion share the published lesson/parent check. Feedback and completion share strict stored-quiz validation and the existing grader. Null/[] means manual completion; corrupt stored content fails with quizContentInvalid. Feedback creates no receipt and completion independently regrades using the caller from the session.
+- The course enum adds exam without changing existing/default modes. One web player requests confirm feedback per selection, quizGate feedback in a batch and exam aggregate feedback, including completed review. A shared bounded selection validator serves both request boundaries. Answer edits and unmount invalidate pending feedback; refused stale submissions reload the current player.
+- The HTTP regressions exposed a malformed scalar filter being wrapped by visibility policies before Strapi validation, causing 500. The existing narrowFilters now rejects that shape with 400 before rewriting it; no additional privacy middleware was needed.
+
+Local evidence: all 44 real HTTP tests pass on SQLite and Postgres 16, covering private direct/nested/filter/sort/search/populate and array/JSON query shapes, grants, unpublished targets, panel edits, corrupt content, failed receipt insertion, old receipts and current-published grading. The focused web checks pass, including stale feedback and unmount regressions; independent review findings were fixed. The local full unit run passed 6,983 tests but hit Windows shell/SWC-cache environment failures and a Postgres setup timeout; the isolated Postgres retry passed all 13 tests. Linux CI is the authority for the complete build and test run.
+
+Next: the 17A backend remainder (training/org/activity authoring and media claims), then the web remainder and combined acceptance. No staging/production deployment or rollback rehearsal has been performed. The existing DEMO_MODE remains a read-only fixture preview; interactive quiz feedback requires the CMS. Accepted unlimited-attempt and current-published race limits remain as documented in section 3.
+
+## 14. Third implementation step: 17A backend remainder
+
+The backend remainder builds on the shared player/API commit bb0eecf:
+
+- Course and lesson authoring use the existing gate/controller, explicit status, If-Match/ETag, locks, schedule checks and fixed editable/list DTOs. Only admin_role/editor receive writes. Delete stays in the panel; discarding without a published row refuses with neverPublished under the lock and preserves rows/links. Author editable responses include quiz keys; learner reads remain private.
+- The lesson course filter applies before pagination/count. A course is required on create, and every publisher (web, panel, scheduler) now refuses a missing or unpublished parent. Stored quiz objects survive shared row normalization for scheduling; lifecycle validation uses stable field codes and readable panel messages.
+- Department/team editable and update share one narrow single-row gate, independent of legacy publishedAt. Admins edit the frozen text/color/image fields; department heads and permitted team leads retain their existing row rights and lead precedence. Structural fields are refused for everyone. Queries including status are rejected, updates require If-Match, and lost access is reclassified under the existing lock. Raw legacy descriptions remain unchanged when omitted.
+- Org create/delete routes and grants are removed with explicit revocations. The bypass-role helper and tolerated-open S01 cases are gone; route, field, permission, README and diagnostic contracts cover all implemented actions.
+- One small field/MIME table feeds the early upload check and existing transactional claims for document.file, course.coverImage, department.headerImage and team.avatar. New images are owned uploads; retained legacy/other-author images remain valid, and removal waits for commit and absence of links. The upload transport retains its 5 MB image cap. Real tests cover each field and a PostgreSQL org attach/delete race; the relink-fallback fixture now uses the genuinely unclaimed user.avatar field.
+- GET /api/audit-events is an admin-only fixed read with validated filters, page size 25, exact counts and deterministic ordering. Actor names are loaded in bounded batches with separate user/admin identities and deleted-actor labels; no user/admin object or email is returned. Existing retention and append-only protection remain.
+
+Validation is recorded against disposable SQLite/Postgres databases. Focused controller/gate tests and production/test typechecks pass; independent training, organisation, activity and media reviews found no remaining actionable issue. The complete real HTTP integration run passed all 45 files with 1,042 tests and 32 intentional skips on SQLite and PostgreSQL 16. The full local unit run passed 7,039 tests; two stale structural pins were updated, while six existing Windows SWC-cache/bash failures remain environment-specific. Complete integration and exact-head Linux CI evidence is recorded in the PR.
+
+The web authoring forms, org detail rendering, image upload UI, activity page, report relocation and navigation remain step four. No staging/production deploy, browser acceptance or deploy/rollback/roll-forward rehearsal has been performed. Existing panel-write and request-time role/department races, retained quiz receipts and the section 3 learner limits remain accepted.
+
+## 15. Fourth implementation step: 17B web remainder
+
+The web remainder builds on backend commit fc6e656 and PR #88:
+
+- `/manage/training` now lists courses for admins/editors, with new/edit pages, a nested paginated lesson list and lesson new/edit pages. Nested routes verify the lesson's editable course against the URL. Existing authoring requests, explicit status, If-Match, publish/schedule controls, previews and conflict dialogs are reused. Training has no delete control and discard requires a published version.
+- The bounded quiz builder uses question/options inputs, one correct-answer radio group, add/remove controls and the existing domain validator. Ordered quiz comparison now detects nested text/answer changes and question order. Saves/reset use the shared editor baseline. Mode/quiz editing explains retained receipts and the exam limitations; learner pages still use the answerless contract. Course readers display the cover through the existing authenticated upload path, safe Markdown on detail and a plain-text summary on the overview.
+- Department/team detail pages expose row-aware edit links. The authoritative editable response supplies one Save form with exact role fields, no publication state and a shared revision conflict flow. Legacy raw descriptions are omitted on unrelated saves; HTML-looking values retain escaped stripHtml display, other text uses safe Markdown. Readers now populate and display department headers and team avatars.
+- One image-only option extends the existing file control and upload path for course/org images, including the existing 5 MB limit, removal and server-sniffed MIME refusal. Uploaded IDs survive failed saves and explicit conflict overwrite without uploading twice; existing document uploads retain their role/format rules.
+- `/manage/activity` is admin-only with bounded type, actor namespace/id, class and date filters, pagination and distinct invalid/failed/empty states. Local date/time filters are converted with the existing application-zone validation. Audit content is escaped; missing content is not linked.
+- The admin report moved to `/manage/training/report`; the manage landing adds training and activity while retaining the three department-author areas. Routine content-manager shortcuts are narrowed; panel access remains for structure, users and permissions. German/English catalogs, skeletons, reader URL snapshots and contracts are updated together.
+
+Focused tests, production/test typechecks, lint, formatting and independent training, organisation, activity and shared-helper reviews passed. The complete local unit run passed 7,212 tests with 153 intentional skips; six existing Windows bash/SWC-cache failures remain, and the same SWC cache validation blocks the local web build. Exact-head Linux CI evidence is recorded in the follow-up PR. No dependencies, authentication transport, CI concurrency or existing completion receipts changed.
+
+Combined browser acceptance and the deploy/rollback/roll-forward rehearsal remain the integration step. No staging/production deployment or release has been performed; the accepted limits in section 10 remain.

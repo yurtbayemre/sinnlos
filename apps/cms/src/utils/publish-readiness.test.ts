@@ -50,9 +50,12 @@ describe("publishBlockers (K3)", () => {
   });
 
   it("names a number below its min (lesson.order >= 0)", async () => {
-    const { strapi } = stub();
-    expect(await publishBlockers(strapi, LESSON, { title: "L", order: -1 })).toEqual(["order"]);
-    expect(await publishBlockers(strapi, LESSON, { title: "L", order: 0 })).toEqual([]);
+    const { strapi, liveCourse } = stub();
+    const course = liveCourse.documentId;
+    expect(await publishBlockers(strapi, LESSON, { title: "L", order: -1, course })).toEqual([
+      "order",
+    ]);
+    expect(await publishBlockers(strapi, LESSON, { title: "L", order: 0, course })).toEqual([]);
   });
 
   it("lesson.course must have a published row, in every shape a relation arrives in", async () => {
@@ -67,6 +70,11 @@ describe("publishBlockers (K3)", () => {
       { connect: [{ documentId: liveCourse.documentId }, { documentId: draftCourse.documentId }] },
       [{ documentId: draftCourse.documentId }],
       "no-such-course",
+      null,
+      undefined,
+      [],
+      { set: [] },
+      { connect: [], disconnect: [] },
     ]) {
       expect(await blocks(course), JSON.stringify(course)).toEqual(["course"]);
     }
@@ -74,14 +82,17 @@ describe("publishBlockers (K3)", () => {
       liveCourse.documentId,
       { documentId: liveCourse.documentId },
       { set: [{ documentId: liveCourse.documentId }] },
-      null,
-      undefined,
-      [],
-      { set: [] },
-      { connect: [], disconnect: [] },
     ]) {
       expect(await blocks(course), JSON.stringify(course)).toEqual([]);
     }
+  });
+
+  it("requires a lesson course but keeps the wiki parent optional", async () => {
+    const { strapi } = stub();
+    expect(await publishBlockers(strapi, LESSON, { title: "L" })).toEqual(["course"]);
+    expect(
+      await publishBlockers(strapi, WIKI_PAGE, { title: "W", slug: "w", parent: null }),
+    ).toEqual([]);
   });
 
   it("checks lesson.course and wiki-page.parent only", () => {
@@ -187,8 +198,11 @@ describe("the middleware on the real document service (C23)", () => {
   });
 
   it("refuses a draft without its required title", async () => {
-    const { lessons } = await training();
-    const lesson = await lessons.create({ data: { body: "no title yet" } });
+    const { lessons, courses } = await training();
+    const course = await courses.create({ data: { title: "C", slug: "c" }, status: "published" });
+    const lesson = await lessons.create({
+      data: { body: "no title yet", course: course.documentId },
+    });
     const error = await refusal(lessons.publish({ documentId: lesson.documentId }));
     expect(error).toMatchObject({ details: { keys: ["title"] } });
   });

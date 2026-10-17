@@ -8,6 +8,7 @@ import {
   departmentAuthorOwns,
   loadAuthoringRows,
   loadCallerDepartment,
+  normaliseRow,
   roleClassFor,
   rowInDepartmentScope,
   scopeClassifier,
@@ -365,4 +366,11 @@ describe("global::can-author", () => {
     expect(result).toBe(true);
     expect(strapi.calls).toEqual([]);
   });
+});
+
+it("preserves quiz objects and order while normalising relations for scheduled readiness", () => {
+  const quiz = [{ question: "First?", options: ["A", "B"], correctIndex: 1 }];
+  expect(
+    normaliseRow({ id: 1, documentId: "lesson1", quiz, course: { id: 2, documentId: "course1" } }),
+  ).toMatchObject({ quiz, course: "course1" });
 });

@@ -10,6 +10,8 @@ import {
   POLL_MODERATOR_FIELDS,
   QUICK_LINK_MODERATOR_FIELDS,
   WIKI_FIELDS,
+  TRAINING_FIELDS,
+  ORG_FIELDS,
 } from "@sinnlos/domain";
 import { errors } from "@strapi/utils";
 import { describe, expect, it, vi } from "vitest";
@@ -29,7 +31,6 @@ import {
   applyWriteRule,
   enforceWriteAllowlist,
   hasTargetId,
-  isWriteBypassRole,
   parseToOneRelation,
   targetRowWhere,
   uniqueSlugFrom,
@@ -584,14 +585,18 @@ describe("enforceWriteAllowlist", () => {
   it("replaces request.body.data with the checked payload and keeps other body keys", async () => {
     const body: Record<string, unknown> = { data: { description: "New" }, meta: 1 };
     await expect(
-      enforceWriteAllowlist({ request: { body } }, { ...TEAM, roleClass: "lead" }, { callerId: 1 }),
+      enforceWriteAllowlist(
+        { request: { body } },
+        { ...TEAM, roleClass: "teamLead" },
+        { callerId: 1 },
+      ),
     ).resolves.toBe(true);
     expect(body).toEqual({ data: { description: "New" }, meta: 1 });
   });
 
   it("answers 400 for a missing body, like the core", async () => {
     const error = await refusal(
-      enforceWriteAllowlist({ request: {} }, { ...TEAM, roleClass: "lead" }, { callerId: 1 }),
+      enforceWriteAllowlist({ request: {} }, { ...TEAM, roleClass: "teamLead" }, { callerId: 1 }),
     );
     expect(error.message).toBe(MISSING_DATA_MESSAGE);
   });
@@ -605,7 +610,7 @@ describe("enforceWriteAllowlist", () => {
     };
     const request = { body: { data: { description: "x" } }, query };
     await expect(
-      enforceWriteAllowlist({ request }, { ...TEAM, roleClass: "lead" }, { callerId: 1 }),
+      enforceWriteAllowlist({ request }, { ...TEAM, roleClass: "teamLead" }, { callerId: 1 }),
     ).resolves.toBe(true);
     expect(request.query).toBe(query);
     expect(query).toEqual({
@@ -617,14 +622,22 @@ describe("enforceWriteAllowlist", () => {
   it("pins the status before looking at the payload, and even without a client query", async () => {
     const refused = { body: { data: { members: [1] } }, query: { status: "draft" } };
     await refusal(
-      enforceWriteAllowlist({ request: refused }, { ...TEAM, roleClass: "lead" }, { callerId: 1 }),
+      enforceWriteAllowlist(
+        { request: refused },
+        { ...TEAM, roleClass: "teamLead" },
+        { callerId: 1 },
+      ),
     );
     expect(refused.query).toEqual({ status: "published" });
 
     const bare: { body: unknown; query?: Record<string, unknown> } = {
       body: { data: { description: "x" } },
     };
-    await enforceWriteAllowlist({ request: bare }, { ...TEAM, roleClass: "lead" }, { callerId: 1 });
+    await enforceWriteAllowlist(
+      { request: bare },
+      { ...TEAM, roleClass: "teamLead" },
+      { callerId: 1 },
+    );
     expect(bare.query).toEqual({ status: "published" });
   });
 
@@ -643,21 +656,6 @@ describe("enforceWriteAllowlist", () => {
     expect(writeRuleFor("api::wiki-space.wiki-space", "update", "author")).toBeUndefined();
     expect(writeRuleFor(DEPARTMENT_UID, "create", "head")).toBeUndefined();
   });
-
-  it("isWriteBypassRole covers exactly admin_role and editor", () => {
-    expect(isWriteBypassRole("admin_role")).toBe(true);
-    expect(isWriteBypassRole("editor")).toBe(true);
-    for (const role of [
-      "department_head",
-      "team_lead",
-      "member",
-      "guest",
-      "authenticated",
-      undefined,
-    ]) {
-      expect(isWriteBypassRole(role), String(role)).toBe(false);
-    }
-  });
 });
 
 // ---------------------------------------------------------------------------
@@ -670,8 +668,20 @@ describe("WRITE_ALLOWLIST", () => {
     Object.keys(writeRuleFor(uid, action, roleClass)?.fields ?? {}).sort();
 
   it("grants exactly the documented fields per role class", () => {
-    expect(fieldsOf(DEPARTMENT_UID, "update", "head")).toEqual(["color", "description"]);
-    expect(fieldsOf(TEAM_UID, "update", "lead")).toEqual(["description"]);
+    for (const [type, classes] of Object.entries(TRAINING_FIELDS)) {
+      for (const [roleClass, fields] of Object.entries(classes)) {
+        for (const action of ["create", "update"] as const) {
+          expect(fieldsOf(`api::${type}.${type}`, action, roleClass)).toEqual([...fields].sort());
+        }
+      }
+    }
+    for (const [type, classes] of Object.entries(ORG_FIELDS)) {
+      for (const [roleClass, fields] of Object.entries(classes)) {
+        expect(fieldsOf(`api::${type}.${type}`, "update", roleClass)).toEqual([...fields].sort());
+      }
+    }
+    expect(fieldsOf(DEPARTMENT_UID, "update", "departmentHead")).toEqual(["color", "description"]);
+    expect(fieldsOf(TEAM_UID, "update", "teamLead")).toEqual(["description"]);
     expect(fieldsOf(TEAM_UID, "update", "departmentHead")).toEqual(["description"]);
     const content = ["body", "order", "summary", "tags", "title", "tocEnabled"];
     expect(fieldsOf(WIKI_PAGE_UID, "create", "author")).toEqual(
@@ -720,6 +730,8 @@ describe("WRITE_ALLOWLIST", () => {
         "api::quick-link.quick-link",
         "api::document.document",
         "api::poll.poll",
+        "api::course.course",
+        "api::lesson.lesson",
       ].sort(),
     );
   });

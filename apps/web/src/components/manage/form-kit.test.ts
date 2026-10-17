@@ -9,6 +9,8 @@ import { NoDepartmentExplanation } from "./page-parts";
 import { SinglePicker } from "./pickers";
 import { PublishBar, publishBarButtons } from "./publish-bar";
 import { sameValues } from "./use-item-editor";
+import { metaOf, mergeMeta } from "./use-authoring-editor";
+import { listHref } from "./list";
 import { isChecked, isDisabled, MESSAGES, render, tagById } from "./render.test.helper";
 import { StatusBadges } from "./status-badges";
 
@@ -442,6 +444,23 @@ describe("a department head without a department (§N1)", () => {
 });
 
 describe("unsaved changes (sameValues)", () => {
+  it("detects quiz text, answers and order; saved and reset values become clean", () => {
+    const quiz = [
+      { question: "First?", options: ["A", "B"], correctIndex: 0 },
+      { question: "Second?", options: ["C", "D"], correctIndex: 1 },
+    ];
+    const initial = { quiz };
+    for (const changed of [
+      [{ ...quiz[0], question: "Changed?" }, quiz[1]],
+      [{ ...quiz[0], correctIndex: 1 }, quiz[1]],
+      [{ ...quiz[0], options: ["B", "A"] }, quiz[1]],
+      [...quiz].reverse(),
+    ]) {
+      expect(sameValues(initial, { quiz: changed })).toBe(false);
+      expect(sameValues({ quiz: changed }, structuredClone({ quiz: changed }))).toBe(true);
+    }
+    expect(sameValues(initial, structuredClone(initial))).toBe(true);
+  });
   it("compares id lists as sets, a poll's answers in order", () => {
     expect(
       sameValues({ departments: ["a", "b"], title: "x" }, { departments: ["b", "a"], title: "x" }),
@@ -488,5 +507,40 @@ describe("Save draft on an unchanged item", () => {
       html.match(new RegExp(`<button[^>]*>${common.actions.saveDraft}</button>`))?.[0] ?? "";
     expect(isDisabled(save(bar(false)))).toBe(true);
     expect(isDisabled(save(bar(true)))).toBe(false);
+  });
+});
+
+describe("shared editor boundaries", () => {
+  it("keeps organisation revisions without inventing publication state", () => {
+    const opened = metaOf({ documentId: "org1", version: "2" });
+    expect(opened).toEqual({ documentId: "org1", version: "2" });
+    expect(mergeMeta(opened, { documentId: "org1", version: "3" })).toEqual({
+      documentId: "org1",
+      version: "3",
+    });
+    const published = metaOf({
+      documentId: "course1",
+      version: "2",
+      status: "published",
+      publishedAt: "2026-10-17T08:00:00Z",
+      publishAt: "2026-10-18T08:00:00Z",
+    });
+    expect(
+      mergeMeta(published, {
+        documentId: "course1",
+        version: "3",
+        status: "modified",
+        publishedAt: published.publishedAt!,
+      }),
+    ).toMatchObject({ version: "3", status: "modified", publishAt: "2026-10-18T08:00:00Z" });
+  });
+  it("retains the course in nested lesson filter and pagination URLs", () => {
+    expect(
+      listHref(
+        "lessons",
+        { status: "draft", q: "safety", page: 2 },
+        "/manage/training/course1/lessons",
+      ),
+    ).toBe("/manage/training/course1/lessons?status=draft&q=safety&page=2");
   });
 });

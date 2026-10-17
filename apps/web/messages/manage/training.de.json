@@ -1,0 +1,83 @@
+{
+  "title": "Schulungen",
+  "description": "Kurse, Lektionen und Quizze erstellen. Nach dem Veröffentlichen sind gespeicherte Änderungen für Leser sichtbar.",
+  "course": {
+    "title": "Kurse",
+    "section": "Kurs",
+    "new": "Neuer Kurs",
+    "editTitle": "Kurs bearbeiten",
+    "emptyTitle": "Noch keine Kurse",
+    "emptyHint": "Erstelle einen Kurs und füge anschließend Lektionen hinzu."
+  },
+  "lesson": {
+    "title": "Lektionen",
+    "section": "Lektion",
+    "new": "Neue Lektion",
+    "editTitle": "Lektion bearbeiten",
+    "emptyTitle": "Noch keine Lektionen",
+    "emptyHint": "Füge diesem Kurs eine Lektion hinzu."
+  },
+  "fields": {
+    "title": {
+      "label": "Titel"
+    },
+    "description": {
+      "label": "Beschreibung"
+    },
+    "mandatory": {
+      "label": "Pflichtkurs"
+    },
+    "completionMode": {
+      "label": "Quiz-Rückmeldung"
+    },
+    "coverImage": {
+      "label": "Titelbild",
+      "hint": "JPEG, PNG oder WebP, bis zu 5 MB."
+    },
+    "course": {
+      "label": "Kurs",
+      "hint": "Veröffentliche den Kurs vor seinen Lektionen. Lektionen lassen sich im Admin-Panel verschieben."
+    },
+    "body": {
+      "label": "Lektionsinhalt"
+    },
+    "order": {
+      "label": "Reihenfolge",
+      "hint": "Eine ganze Zahl von 0 bis 10.000. Kleinere Zahlen erscheinen zuerst."
+    },
+    "videoUrl": {
+      "label": "YouTube-Video",
+      "hint": "Optionaler HTTPS-Link zu einem YouTube-Video."
+    }
+  },
+  "modes": {
+    "confirm": "Rückmeldung nach jeder Antwort",
+    "quizGate": "Alle Antworten zusammen prüfen",
+    "exam": "Prüfung: nur Gesamtergebnis"
+  },
+  "modeHint": "Alle Antworten werden auf dem Server geprüft. Die Prüfung meldet nur bestanden oder nicht bestanden. Versuche sind unbegrenzt, es gibt kein Zeitlimit; Raten und das Weitergeben von Antworten bleiben möglich.",
+  "receiptsNotice": "Bisherige Abschlüsse bleiben gültig, wenn du Fragen, ihre Reihenfolge oder den Rückmeldungsmodus änderst.",
+  "quiz": {
+    "title": "Quiz",
+    "limits": "Bis zu {questions} Fragen, 2–{options} Antworten pro Frage und {characters} Zeichen pro Text. Wähle pro Frage eine richtige Antwort.",
+    "questionNumber": "Frage {number}",
+    "questionText": "Fragetext",
+    "optionNumber": "Antwort {number}",
+    "correctAnswer": "Richtige Antwort",
+    "chooseCorrect": "Antwort {number} als richtig markieren",
+    "removeOptionNumber": "Antwort {number} entfernen",
+    "remove": "Entfernen",
+    "addOption": "Antwort hinzufügen",
+    "removeQuestion": "Frage entfernen",
+    "addQuestion": "Frage hinzufügen",
+    "validate": "Quiz prüfen",
+    "invalid": "Fülle alle Fragen und Antworten aus und wähle pro Frage eine richtige Antwort. Beachte die Grenzen oben.",
+    "valid": "Das Quiz ist gültig.",
+    "questionAdded": "Frage hinzugefügt.",
+    "questionRemoved": "Frage entfernt.",
+    "optionAdded": "Antwort hinzugefügt.",
+    "optionRemoved": "Antwort entfernt.",
+    "empty": "Ohne Quizfragen markieren Leser die Lektion manuell als abgeschlossen.",
+    "correct": "richtig"
+  }
+}

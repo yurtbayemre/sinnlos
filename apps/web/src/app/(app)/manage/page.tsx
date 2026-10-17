@@ -1,5 +1,6 @@
 import Link from "next/link";
 import {
+  Activity,
   BarChart3,
   BookOpen,
   Building2,
@@ -39,13 +40,14 @@ export async function generateMetadata() {
   return { title: t("title") };
 }
 
-const AREA_ICONS: Readonly<Record<ManageArea, LucideIcon>> = {
+const AREA_ICONS: Readonly<Record<Exclude<ManageArea, "lessons">, LucideIcon>> = {
   announcements: Megaphone,
   events: CalendarDays,
   polls: Vote,
   quickLinks: Link2,
   documents: FileText,
   wiki: BookOpen,
+  courses: GraduationCap,
 };
 
 const ROLE_COLORS = [
@@ -59,12 +61,6 @@ const ROLE_COLORS = [
 
 /** The Strapi admin shortcuts; label and description keys of the `admin` namespace. */
 const QUICK_LINK_META = [
-  {
-    href: "/admin/content-manager",
-    labelKey: "contentManager",
-    descKey: "contentManagerDesc",
-    icon: BookOpen,
-  },
   {
     href: "/admin/settings/users-permissions/roles",
     labelKey: "rolesPermissions",
@@ -113,10 +109,11 @@ export default async function ManagePage() {
     lacksDepartment(areaAccess(capabilities, area), viewer.department),
   );
 
-  const [t, tAdmin, tCommon, view] = await Promise.all([
+  const [t, tAdmin, tCommon, tActivity, view] = await Promise.all([
     getTranslations("manage.common"),
     getTranslations("admin"),
     getTranslations("common"),
+    getTranslations("manage.activity"),
     noDepartment ? null : loadManageLanding(areas),
   ]);
 
@@ -145,7 +142,13 @@ export default async function ManagePage() {
       icon: GraduationCap,
       label: tAdmin("trainingReportLink"),
       description: tAdmin("trainingReportLinkDesc"),
-      href: "/manage/training" as const,
+      href: "/manage/training/report" as const,
+    },
+    capabilities.reports.activity && {
+      icon: Activity,
+      label: tActivity("title"),
+      description: tActivity("description"),
+      href: "/manage/activity" as const,
     },
   ].filter((report) => !!report);
 

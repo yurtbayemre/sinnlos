@@ -1,3 +1,5 @@
+import { errors } from "@strapi/utils";
+
 /**
  * Returns the REAL, mutable query object that Strapi's core controllers
  * will read, from inside a policy handler.
@@ -84,6 +86,10 @@ export function narrowFilters(
   query: Record<string, unknown>,
   clause: Record<string, unknown>,
 ): void {
+  // A scalar wrapped in $and bypasses Strapi's root shape check and fails as a database 500.
+  if (query.filters && typeof query.filters !== "object") {
+    throw new errors.ValidationError("The filters parameter must be an object or an array");
+  }
   query.filters = query.filters ? { $and: [query.filters, clause] } : clause;
 }
 

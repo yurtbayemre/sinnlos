@@ -32,6 +32,10 @@
     "wiki": {
       "title": "Wiki",
       "description": "Bereiche, wer sie liest, und die Entwürfe, Veröffentlichungen und Planungen aller Seiten. Gezählt werden Seiten."
+    },
+    "courses": {
+      "title": "Schulungen",
+      "description": "Kurse, Lektionen und Quizze erstellen, planen und veröffentlichen."
     }
   },
   "counts": {
@@ -108,7 +112,8 @@
     "closeNow": "Jetzt beenden",
     "working": "Wird ausgeführt…",
     "backToList": "Zurück zur Liste",
-    "toolbar": "Aktionen"
+    "toolbar": "Aktionen",
+    "removeImage": "Bild entfernen"
   },
   "confirm": {
     "publishTitle": "Jetzt veröffentlichen?",

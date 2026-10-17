@@ -8,11 +8,10 @@ import { factories } from "@strapi/strapi";
  * department router.
  */
 export default factories.createCoreRouter("api::team.team", {
+  only: ["find", "findOne", "update"],
   config: {
     find: { policies: ["global::published-only"] },
     findOne: { policies: ["global::published-only"] },
-    create: { policies: ["global::is-admin-or-editor"] },
     update: { policies: ["global::can-edit-team"] },
-    delete: { policies: ["global::is-admin-or-editor"] },
   },
 });

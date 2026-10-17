@@ -93,6 +93,24 @@ function respond(url: string): Response {
       },
     });
   }
+  if (/^\/api\/lessons\/[^/?]+\/player$/.test(path)) {
+    return json({
+      data: {
+        documentId: "lesson-doc-1",
+        title: "Lesson",
+        body: null,
+        order: 1,
+        videoUrl: null,
+        course: {
+          documentId: "course-doc-1",
+          title: "Course",
+          slug: "course",
+          completionMode: "confirm",
+        },
+        quiz: [],
+      },
+    });
+  }
   if (path.startsWith("/api/users/")) return json({ id: 7, displayName: "Person" });
   if (path.startsWith("/api/users?")) return json([]);
   if (path.startsWith("/api/search-logs/summary")) {
@@ -165,7 +183,7 @@ const { PRELOAD_KINDS, loadPreload, searchLive } = await import("./search-action
 const { getCommentSection, getCommentSections } = await import("./comment-actions");
 const { default: AckReportPage } = await import("@/app/(app)/manage/acknowledgements/page");
 const { default: AnalyticsPage } = await import("@/app/(app)/manage/analytics/page");
-const { default: TrainingReportPage } = await import("@/app/(app)/manage/training/page");
+const { default: TrainingReportPage } = await import("@/app/(app)/manage/training/report/page");
 const { default: PersonPage } = await import("@/app/(app)/people/[id]/page");
 const { default: ProfilePage } = await import("@/app/(app)/profile/page");
 
@@ -255,7 +273,7 @@ const DIRECT_READS: Record<string, () => Promise<unknown>> = {
     getCommentSection({ type: "announcement", documentId: OVERFLOW_DOC }),
   "page.manage/acknowledgements": () => AckReportPage(),
   "page.manage/analytics": () => AnalyticsPage(),
-  "page.manage/training": () => TrainingReportPage(),
+  "page.manage/training/report": () => TrainingReportPage(),
   "page.people/[id]": () => PersonPage({ params: Promise.resolve({ id: "7" }) }),
   "page.profile": () => ProfilePage(),
 };

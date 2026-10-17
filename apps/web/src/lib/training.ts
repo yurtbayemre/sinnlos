@@ -9,6 +9,7 @@ import {
   type MyProgressRow,
   type ProgressReportRow,
 } from "@/lib/api/training";
+import { StrapiError } from "@/lib/strapi-error";
 import { walkAllPages, type WalkResult } from "@/lib/paginate";
 
 /**
@@ -33,14 +34,18 @@ export async function fetchCourseBySlug(slug: string): Promise<CourseView | null
 }
 
 export async function fetchLessonByDocumentId(documentId: string): Promise<LessonView | null> {
-  const res = await lessonByDocumentId(documentId);
-  return res.data?.[0] ?? null;
+  try {
+    return (await lessonByDocumentId(documentId)).data;
+  } catch (error) {
+    if (error instanceof StrapiError && error.status === 404) return null;
+    throw error;
+  }
 }
 
 /**
  * Every progress row for the given lessons, across ALL users — only useful
  * for admin_role (the lesson-progress-visibility policy scopes everyone
- * else to their own rows). The /manage/training report walks it PER COURSE
+ * else to their own rows). The /manage/training/report report walks it PER COURSE
  * (`targetDocumentId $in <lesson ids>`), so the walk cap scales with the
  * course size, not with the global row count. Sorted by id: without an
  * ORDER BY, Postgres may return rows in a different order per page, and

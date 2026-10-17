@@ -24,7 +24,6 @@ import {
   DEPARTMENT_AUTHOR_CLASS,
   MODERATOR_CLASS,
   WRITE_ALLOWLIST,
-  isWriteBypassRole,
   writeClassesFor,
   type WriteAllowlist,
 } from "./utils/write-allowlist";
@@ -349,12 +348,16 @@ const GOLDEN: Record<string, PolicySpec[]> = {
 
   "api::course.course.find": training("course"),
   "api::course.course.findOne": training("course"),
+  "api::course.course.create": canAuthorAction("api::course.course", "create"),
+  "api::course.course.update": canAuthorAction("api::course.course", "update"),
+  ...authoringRoutes("api::course.course", DP_INTENTS),
 
   "api::department.department.find": ["global::published-only"],
   "api::department.department.findOne": ["global::published-only"],
-  "api::department.department.create": ADMIN_OR_EDITOR,
   "api::department.department.update": ["global::can-edit-department"],
-  "api::department.department.delete": ADMIN_OR_EDITOR,
+  "api::department.department.editable": [
+    { name: "global::can-edit-department", config: { intent: "editable" } },
+  ],
 
   // D-ENTRA-01: auth:false, authenticated in the controller (shared secret +
   // ID-token verification), 404 while ENTRA_ENABLED is not '1'.
@@ -390,6 +393,12 @@ const GOLDEN: Record<string, PolicySpec[]> = {
 
   "api::lesson.lesson.find": training("lesson"),
   "api::lesson.lesson.findOne": training("lesson"),
+  "api::lesson.lesson.create": canAuthorAction("api::lesson.lesson", "create"),
+  "api::lesson.lesson.update": canAuthorAction("api::lesson.lesson", "update"),
+  ...authoringRoutes("api::lesson.lesson", DP_INTENTS),
+  // Fixed learner actions enforce published targets inside the controller.
+  "api::lesson.lesson.player": [],
+  "api::lesson.lesson.check": [],
 
   "api::lesson-progress.lesson-progress.find": ["global::lesson-progress-visibility"],
   "api::lesson-progress.lesson-progress.findOne": ["global::lesson-progress-visibility"],
@@ -413,6 +422,7 @@ const GOLDEN: Record<string, PolicySpec[]> = {
   "api::poll-vote.poll-vote.vote": [],
   "api::poll-vote.poll-vote.results": [],
 
+  "api::audit-event.audit-event.list": [],
   "api::profile.profile.me": [],
   "api::profile.profile.updateMe": [],
 
@@ -433,9 +443,8 @@ const GOLDEN: Record<string, PolicySpec[]> = {
 
   "api::team.team.find": ["global::published-only"],
   "api::team.team.findOne": ["global::published-only"],
-  "api::team.team.create": ADMIN_OR_EDITOR,
   "api::team.team.update": ["global::can-edit-team"],
-  "api::team.team.delete": ADMIN_OR_EDITOR,
+  "api::team.team.editable": [{ name: "global::can-edit-team", config: { intent: "editable" } }],
 
   "api::wiki-page.wiki-page.find": wiki("page"),
   "api::wiki-page.wiki-page.findOne": wiki("page"),
@@ -574,12 +583,11 @@ const KNOWN_RELATION_LEAKS = new Set<string>([]);
 // ---------------------------------------------------------------------------
 // Write allowlists (FX07). The relation guard TRUSTS wiki-page.parent/
 // children, wiki-space.pages and wiki-revision.page to stay inside one wiki
-// space; that only holds while no role without the admin_role/editor bypass
-// can write them freely. The same goes for department.pages and team.pages
+// space; that only holds while no caller can write them freely. The same goes for department.pages and team.pages
 // (they move pages between owners, which feeds can-edit-wiki). So every
 // relation that touches the wiki filter domain is checked per write route:
-// either only bypass roles hold the grant, or the route's policy enforces
-// utils/write-allowlist.ts and no role class may write the relation except
+// the route's policy enforces utils/write-allowlist.ts and no role class
+// may write the relation except
 // through a named relation check.
 // ---------------------------------------------------------------------------
 
@@ -590,8 +598,18 @@ const KNOWN_RELATION_LEAKS = new Set<string>([]);
  * (uid, action).
  */
 const WRITE_ALLOWLIST_ENFORCERS: Record<string, { policy: string; classes: readonly string[] }> = {
-  "api::department.department.update": { policy: "global::can-edit-department", classes: ["head"] },
-  "api::team.team.update": { policy: "global::can-edit-team", classes: ["departmentHead", "lead"] },
+  "api::lesson.lesson.create": { policy: "global::can-author", classes: ["moderator"] },
+  "api::lesson.lesson.update": { policy: "global::can-author", classes: ["moderator"] },
+  "api::course.course.create": { policy: "global::can-author", classes: ["moderator"] },
+  "api::course.course.update": { policy: "global::can-author", classes: ["moderator"] },
+  "api::department.department.update": {
+    policy: "global::can-edit-department",
+    classes: ["departmentHead", "moderator"],
+  },
+  "api::team.team.update": {
+    policy: "global::can-edit-team",
+    classes: ["departmentHead", "moderator", "teamLead"],
+  },
   "api::wiki-page.wiki-page.create": {
     policy: "global::can-edit-wiki",
     classes: ["author", "moderator"],
@@ -631,17 +649,6 @@ const WRITE_ALLOWLIST_ENFORCERS: Record<string, { policy: string; classes: reado
   "api::poll.poll.create": { policy: "global::can-author", classes: ["moderator"] },
   "api::poll.poll.update": { policy: "global::can-author", classes: ["moderator"] },
 };
-
-/**
- * Authored types (decision 06 §A) whose moderator payloads are still open:
- * admin_role/editor bypass their FX07 gate. Batch 17 rebuilds the
- * department and team gates; the set shrinks to empty. wiki-revision left it
- * in batch 15.1 (no route at all, rule 4), wiki-page and wiki-space in batch
- * 16 (the rebuilt can-edit-wiki and can-author). Every other authored type
- * with a moderator create/update route enforces the `moderator` class (S01
- * v2 rule 1).
- */
-const KNOWN_OPEN_PAYLOADS = new Set<string>(["api::department.department", "api::team.team"]);
 
 const WIKI_REVISION = "api::wiki-revision.wiki-revision";
 
@@ -982,9 +989,8 @@ describe("route → policy matrix (S01)", async () => {
   describe("write allowlists (FX07)", () => {
     const allowlist: WriteAllowlist = WRITE_ALLOWLIST;
     const WRITE_ACTIONS = ["create", "update"] as const;
-    /** Roles without the bypass that hold the grant for `action`. */
-    const restrictedHolders = (action: string) =>
-      (matrixGrants.get(action) ?? []).filter((role) => !isWriteBypassRole(role));
+    /** Every role holding the grant is subject to the field rules. */
+    const grantHolders = (action: string) => matrixGrants.get(action) ?? [];
     const enforcedBy = (action: string) =>
       policiesOf(action)
         .map(policyName)
@@ -1013,7 +1019,7 @@ describe("route → policy matrix (S01)", async () => {
     const draftWrites = [...schemas]
       .filter(([, schema]) => schema.options?.draftAndPublish)
       .flatMap(([uid]) => WRITE_ACTIONS.map((write) => `${uid}.${write}`))
-      .filter((action) => routes.has(action) && restrictedHolders(action).length > 0);
+      .filter((action) => routes.has(action) && grantHolders(action).length > 0);
 
     it("sees the wiki-page writes (rule sanity)", () => {
       expect(draftWrites).toEqual(
@@ -1031,7 +1037,7 @@ describe("route → policy matrix (S01)", async () => {
     it("keeps the department and team updates enforced outside the draft & publish set", () => {
       for (const action of ["api::department.department.update", "api::team.team.update"]) {
         expect(draftWrites, action).not.toContain(action);
-        expect(restrictedHolders(action).length, action).toBeGreaterThan(0);
+        expect(grantHolders(action).length, action).toBeGreaterThan(0);
         expect(enforcedBy(action), action).toBe(true);
       }
     });
@@ -1042,7 +1048,7 @@ describe("route → policy matrix (S01)", async () => {
     // populate on a write response; authoring-controller.test.ts), so its
     // routes must be overridden by that controller.
     for (const action of draftWrites) {
-      it(`${action} is enforced for [${restrictedHolders(action).join(", ")}] (status pinned or explicit)`, () => {
+      it(`${action} is enforced for [${grantHolders(action).join(", ")}] (status pinned or explicit)`, () => {
         expect(action in WRITE_ALLOWLIST_ENFORCERS, `${action} allowlist entry`).toBe(true);
         expect(enforcedBy(action), `${action} policy`).toBe(true);
         const policy = WRITE_ALLOWLIST_ENFORCERS[action].policy;
@@ -1056,7 +1062,7 @@ describe("route → policy matrix (S01)", async () => {
       for (const uid of Object.keys(allowlist)) {
         for (const write of WRITE_ACTIONS) {
           const action = `${uid}.${write}`;
-          if (!routes.has(action) || restrictedHolders(action).length === 0) continue;
+          if (!routes.has(action) || grantHolders(action).length === 0) continue;
           expect(enforcedBy(action), action).toBe(true);
         }
       }
@@ -1085,7 +1091,7 @@ describe("route → policy matrix (S01)", async () => {
         .flatMap(([attr]) =>
           WRITE_ACTIONS.filter((write) => {
             const action = `${uid}.${write}`;
-            return routes.has(action) && restrictedHolders(action).length > 0;
+            return routes.has(action) && grantHolders(action).length > 0;
           }).map((write) => ({ uid, attr, write })),
         ),
     );
@@ -1109,12 +1115,12 @@ describe("route → policy matrix (S01)", async () => {
       const writes = [...WRITE_ACTIONS, "delete"].map(
         (write) => `api::wiki-space.wiki-space.${write}`,
       );
-      expect(writes.filter((action) => restrictedHolders(action).length > 0)).toEqual([]);
+      for (const action of writes) expect(grantHolders(action), action).toEqual([...MODERATORS]);
     });
 
     for (const { uid, attr, write } of guardedWrites) {
       const action = `${uid}.${write}`;
-      const holders = restrictedHolders(action).join(", ");
+      const holders = grantHolders(action).join(", ");
       it(`${uid}.${attr} has no unchecked ${write} path [${holders}]`, () => {
         expect(enforcedBy(action), `${action} policy`).toBe(true);
         const classes = allowlist[uid]?.[write];
@@ -1123,7 +1129,13 @@ describe("route → policy matrix (S01)", async () => {
           const spec = Object.prototype.hasOwnProperty.call(rule.fields, attr)
             ? rule.fields[attr]
             : undefined;
-          expect(spec === undefined || spec.kind === "relation", `${roleClass}.${attr}`).toBe(true);
+          expect(
+            spec === undefined ||
+              spec.kind === "relation" ||
+              (spec.kind === "roleTypes" &&
+                schemas.get(uid)?.attributes[attr].target === "plugin::users-permissions.role"),
+            `${roleClass}.${attr}`,
+          ).toBe(true);
         }
       });
     }
@@ -1134,7 +1146,6 @@ describe("route → policy matrix (S01)", async () => {
     const NEVER = ["guest", "authenticated"];
 
     it("rule 1: every create/update a moderator holds on an authored type enforces the moderator class", () => {
-      const open: string[] = [];
       for (const uid of AUTHORED_TYPES_V2) {
         for (const write of writes) {
           const action = `${uid}.${write}`;
@@ -1148,15 +1159,9 @@ describe("route → policy matrix (S01)", async () => {
             enforcer !== undefined &&
             enforcer.classes.includes(MODERATOR_CLASS) &&
             policiesOf(action).map(policyName).includes(enforcer.policy);
-          if (KNOWN_OPEN_PAYLOADS.has(uid)) {
-            if (!enforced) open.push(uid);
-          } else {
-            expect(enforced, action).toBe(true);
-          }
+          expect(enforced, action).toBe(true);
         }
       }
-      // KNOWN_OPEN_PAYLOADS has no stale entry: each still has an open write.
-      expect([...new Set(open)].sort()).toEqual([...KNOWN_OPEN_PAYLOADS].sort());
     });
 
     it("the bypass ends on the authored types: no route of theirs is is-admin-or-editor but delete", () => {
@@ -1165,6 +1170,10 @@ describe("route → policy matrix (S01)", async () => {
         const gate = uid === WIKI_PAGE ? "global::can-edit-wiki" : "global::can-author";
         for (const write of writes) {
           expect(policiesOf(`${uid}.${write}`).map(policyName), `${uid}.${write}`).toEqual([gate]);
+        }
+        if (uid === "api::course.course" || uid === "api::lesson.lesson") {
+          expect(routes.has(`${uid}.delete`), `${uid}.delete`).toBe(false);
+          continue;
         }
         expect(policiesOf(`${uid}.delete`).map(policyName), `${uid}.delete`).toEqual([
           "global::is-admin-or-editor",
@@ -1256,7 +1265,12 @@ describe("route → policy matrix (S01)", async () => {
           const config = typeof spec === "string" ? undefined : spec.config;
           const [uid, action] = splitAction(entry.action);
           expect(config?.uid, entry.action).toBe(uid);
-          if (entry.kind === "custom") expect(config?.intent, entry.action).toBe(action);
+          if (
+            entry.kind === "custom" ||
+            uid === "api::course.course" ||
+            uid === "api::lesson.lesson"
+          )
+            expect(config?.intent, entry.action).toBe(action);
           else expect(config?.intent, entry.action).toBeUndefined();
         }
       }
@@ -1352,7 +1366,9 @@ describe("route → policy matrix (S01)", async () => {
       ]) {
         const authoring = [...grants].filter(
           (action) =>
-            action.startsWith(`${uid}.`) && !["find", "findOne"].includes(splitAction(action)[1]),
+            action.startsWith(`${uid}.`) &&
+            !["find", "findOne"].includes(splitAction(action)[1]) &&
+            !["api::lesson.lesson.player", "api::lesson.lesson.check"].includes(action),
         );
         expect(authoring, uid).toEqual([]);
       }
@@ -1373,6 +1389,15 @@ describe("route → policy matrix (S01)", async () => {
   });
 
   describe("fixed holes (regressions)", () => {
+    it("player and feedback are granted exactly to lesson readers", () => {
+      const readers = [...(matrixGrants.get("api::lesson.lesson.find") ?? [])].sort();
+      for (const action of ["api::lesson.lesson.player", "api::lesson.lesson.check"]) {
+        expect(matrixRoles.filter((role) => effectiveGrants(role).has(action)).sort()).toEqual(
+          readers,
+        );
+      }
+    });
+
     it("FX01: POST/PUT/DELETE /api/poll-votes are gone or gated (forged votes)", () => {
       for (const write of ["create", "update", "delete"]) {
         const action = `api::poll-vote.poll-vote.${write}`;

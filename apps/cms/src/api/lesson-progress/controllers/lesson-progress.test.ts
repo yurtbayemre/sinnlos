@@ -88,7 +88,7 @@ function lessons(): Row[] {
       id: 18,
       documentId: BROKEN_QUIZ_LESSON,
       publishedAt: "2026-09-01T00:00:00.000Z",
-      // Only malformed questions (a db-level write past the lifecycle): no quiz.
+      // Corrupt stored content must never become a manual-completion lesson.
       quiz: [{ question: "Q", options: ["only one"], correctIndex: 0 }, "garbage"],
       course: PUBLISHED_COURSE,
     },
@@ -103,7 +103,10 @@ function matches(row: Row, where: Where): boolean {
 }
 
 function setup(body: unknown, progress: Row[] = []) {
-  const tables: Record<string, Row[]> = { [LESSON_UID]: lessons(), [PROGRESS_UID]: progress };
+  const tables: Record<string, Row[]> = {
+    [LESSON_UID]: lessons().map((row) => ({ quiz: null, ...row })),
+    [PROGRESS_UID]: progress,
+  };
   const calls: { uid: string; op: string; params: Row }[] = [];
   const query = (uid: string) => ({
     findOne: vi.fn(async (params: { where: Where }) => {
@@ -126,7 +129,7 @@ function setup(body: unknown, progress: Row[] = []) {
   const ctx = {
     state: { user: MEMBER as typeof MEMBER | undefined },
     request: { body },
-    badRequest: vi.fn((message: string) => ({ status: 400, message })),
+    badRequest: vi.fn((message: string, details?: unknown) => ({ status: 400, message, details })),
     unauthorized: vi.fn(() => ({ status: 401 })),
     send: vi.fn((payload: unknown) => payload),
   };
@@ -170,7 +173,10 @@ describe("lesson-progress create: target rules (S09)", () => {
       op: "findOne",
       params: {
         where: { documentId: PUBLISHED_LESSON, publishedAt: { $notNull: true } },
-        populate: { course: { select: ["id", "publishedAt"] } },
+        select: ["documentId", "title", "body", "order", "videoUrl", "quiz"],
+        populate: {
+          course: { select: ["documentId", "title", "slug", "completionMode", "publishedAt"] },
+        },
       },
     });
   });
@@ -261,10 +267,22 @@ describe("lesson-progress create: a quiz lesson needs the correct answers (#70)"
     expect(ctx.badRequest.mock.calls).toEqual([[NOT_AVAILABLE]]);
   });
 
-  it("completes a lesson whose quiz holds no valid question by click (no dead lock)", async () => {
+  it("refuses corrupt stored quiz content before any receipt lookup", async () => {
     const { ctx, calls } = await complete({ data: { targetDocumentId: BROKEN_QUIZ_LESSON } });
-    expect(ctx.badRequest).not.toHaveBeenCalled();
-    expect(created(calls)).toHaveLength(1);
+    expect(ctx.badRequest).toHaveBeenCalledWith("Invalid quiz content", {
+      code: "quizContentInvalid",
+    });
+    expect(calls.filter((c) => c.uid === PROGRESS_UID)).toEqual([]);
+  });
+
+  it("bounds submitted answers even for a manual-completion lesson", async () => {
+    for (const answers of [null, "0", [-1], [1.5], [8], Array(21).fill(0)]) {
+      const { ctx, calls } = await complete({
+        data: { targetDocumentId: PUBLISHED_LESSON, answers },
+      });
+      expect(ctx.badRequest).toHaveBeenCalledWith(QUIZ_NOT_PASSED);
+      expect(created(calls)).toEqual([]);
+    }
   });
 
   it("still answers 'Already completed' for a second, correct completion", async () => {

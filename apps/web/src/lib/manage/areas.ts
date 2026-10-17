@@ -1,22 +1,6 @@
-/**
- * The /manage areas of v2 authoring (deep-dive decision 06 §L1; batch 15
- * plan, lane 15C; batch 16 plan, lane 16C): announcements, events, polls,
- * quick links, documents and the wiki. Pure data, usable from server and
- * client code.
- *
- * Every area reads one capability area of lib/roles.ts (SH02,
- * AREA_CAPABILITY): the wiki area is `wikiSpaces`, the moderators' space
- * management, under which /manage/wiki also shows each space's page tree.
- * Every area but the wiki is one authored type of the K7 contract
- * (@sinnlos/domain authoring/*, AREA_TYPE): those share the generic list,
- * editor and Server Action helpers. The wiki has its own contract
- * (@sinnlos/domain authoring/wiki.ts) and its own helpers (lib/manage/
- * wiki-*.ts). Training (17C) joins later; its capability areas exist
- * already, so nothing here may assume that every AuthoringArea is a
- * /manage area.
- */
+/** Shared authoring areas; lessons are nested under courses and have no landing tile. */
 import type { Route } from "next";
-import { AUTHORING_STATUS_MODES, type AuthoringType } from "@sinnlos/domain";
+import { type AuthoringType, type TrainingAuthoringType } from "@sinnlos/domain";
 import type { AuthoringArea } from "@/lib/roles";
 
 /** The /manage areas, in landing and nav order. */
@@ -27,9 +11,10 @@ export const MANAGE_AREAS = [
   "quickLinks",
   "documents",
   "wiki",
+  "courses",
 ] as const;
 
-export type ManageArea = (typeof MANAGE_AREAS)[number];
+export type ManageArea = (typeof MANAGE_AREAS)[number] | "lessons";
 
 /** The areas whose items are one K7 authored type (every area but the wiki). */
 export type TypedArea = Exclude<ManageArea, "wiki">;
@@ -42,15 +27,19 @@ export const AREA_CAPABILITY: Readonly<Record<ManageArea, AuthoringArea>> = {
   quickLinks: "quickLinks",
   documents: "documents",
   wiki: "wikiSpaces",
+  courses: "courses",
+  lessons: "lessons",
 };
 
 /** The K7 authored type behind each typed area. */
-export const AREA_TYPE: Readonly<Record<TypedArea, AuthoringType>> = {
+export const AREA_TYPE: Readonly<Record<TypedArea, AuthoringType | TrainingAuthoringType>> = {
   announcements: "announcement",
   events: "event",
   polls: "poll",
   quickLinks: "quickLink",
   documents: "document",
+  courses: "course",
+  lessons: "lesson",
 };
 
 /** The list page of each area (the wiki: its spaces). */
@@ -61,6 +50,8 @@ export const AREA_PATH: Readonly<Record<ManageArea, Route>> = {
   quickLinks: "/manage/quick-links",
   documents: "/manage/documents",
   wiki: "/manage/wiki",
+  courses: "/manage/training",
+  lessons: "/manage/training",
 };
 
 /** The create page of each area (the wiki: a new space). */
@@ -71,6 +62,8 @@ export const AREA_NEW_PATH: Readonly<Record<ManageArea, Route>> = {
   quickLinks: "/manage/quick-links/new",
   documents: "/manage/documents/new",
   wiki: "/manage/wiki/new",
+  courses: "/manage/training/new",
+  lessons: "/manage/training",
 };
 
 /** The page of one item: its editor (the wiki: the space's page tree). */
@@ -79,7 +72,7 @@ export function areaItemPath(area: ManageArea, documentId: string): Route {
 }
 
 export function isManageArea(value: unknown): value is ManageArea {
-  return (MANAGE_AREAS as readonly unknown[]).includes(value);
+  return value === "lessons" || (MANAGE_AREAS as readonly unknown[]).includes(value);
 }
 
 /**
@@ -88,7 +81,7 @@ export function isManageArea(value: unknown): value is ManageArea {
  * and close through `closesAt` (§A).
  */
 export function hasDrafts(area: TypedArea): boolean {
-  return AUTHORING_STATUS_MODES[AREA_TYPE[area]] === "explicit";
+  return area !== "polls";
 }
 
 /**
@@ -106,6 +99,8 @@ export const SCHEDULE_FIELDS: Readonly<
   quickLinks: ["publishAt", "unpublishAt"],
   documents: ["publishAt", "unpublishAt"],
   wiki: ["publishAt"],
+  courses: ["publishAt"],
+  lessons: ["publishAt"],
 };
 
 /**

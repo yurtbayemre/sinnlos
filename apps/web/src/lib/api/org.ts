@@ -13,10 +13,10 @@ import type { Department, Team, UserLite } from "@/lib/types";
 export type UserName = Pick<UserLite, "id" | "displayName" | "jobTitle">;
 
 /** A department as a plain `populate[...]=true` delivers it: own fields, no relations. */
-export type DepartmentRow = Omit<Department, "head" | "members" | "teams">;
+export type DepartmentRow = Omit<Department, "head" | "members" | "teams" | "headerImage">;
 
 /** A team as a plain `populate[...]=true` delivers it: own fields, no relations. */
-export type TeamRow = Omit<Team, "department" | "lead" | "members">;
+export type TeamRow = Omit<Team, "department" | "lead" | "members" | "avatar">;
 
 /** A department of the list: `head` field-limited, teams without their relations. */
 export type DepartmentListItem = DepartmentRow & {
@@ -37,8 +37,7 @@ export type TeamListItem = TeamRow & {
  * head/member contact field. The `head` user relation is field-limited to
  * non-sensitive columns so NO sensitive field (email/phone/hireDate/
  * officeLocation/microsoftOid) is in the payload: data minimisation, the
- * list never needs them (issue #10 / F1). No headerImage (WD05): no page
- * renders it, here or on the detail page.
+ * list never needs them (issue #10 / F1). Header images are detail-only.
  *
  * Walks every page: without an explicit pageSize Strapi serves only
  * `api.rest.defaultLimit` = 25 rows, so department #26 silently vanished
@@ -82,6 +81,7 @@ export function departmentBySlug(slug: string): Promise<StrapiListResponse<Depar
       strapiQuery()
         .filter("slug", "$eq", slug)
         .populate("head")
+        .populate("headerImage")
         .populate(["teams", "lead"])
         .populate("members"),
     ),
@@ -137,6 +137,7 @@ export function teamBySlug(slug: string): Promise<StrapiListResponse<Team>> {
         .filter("slug", "$eq", slug)
         .populate("department")
         .populate("lead")
+        .populate("avatar")
         .populate("members"),
     ),
   );
