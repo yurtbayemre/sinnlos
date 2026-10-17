@@ -232,8 +232,8 @@ export function publishBarButtons(
   }
   if (!creating && !dirty && can("publish") && meta.status !== "published") buttons.push("publish");
   if (can("schedule") && (creating ? can("create") : can("edit"))) buttons.push("schedule");
-  if (!creating && can("unpublish") && meta.publishedAt !== null) buttons.push("unpublish");
-  if (!creating && can("discard") && meta.publishedAt !== null && meta.status === "modified") {
+  if (!creating && can("unpublish") && meta.publishedAt != null) buttons.push("unpublish");
+  if (!creating && can("discard") && meta.publishedAt != null && meta.status === "modified") {
     buttons.push("discard");
   }
   if (!creating && can("delete")) buttons.push("delete");

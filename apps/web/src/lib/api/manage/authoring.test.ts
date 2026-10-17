@@ -89,3 +89,29 @@ describe("fetchAuthoringList and fetchEditable", () => {
     expect(strapiMock.mock.calls[0]).toEqual([`/api/polls/${DOC}/editable`]);
   });
 });
+
+describe("training shares the guarded authoring transport", () => {
+  it.each(["course", "lesson"] as const)(
+    "%s sends explicit status and revision, and never delete",
+    async (type) => {
+      await sendAuthoringWrite(type, "update", {
+        documentId: DOC,
+        version: "4",
+        status: "draft",
+        data: { title: "Changed" },
+      });
+      expect(strapiMock).toHaveBeenCalledWith(
+        `/api/${type}s/${DOC}?status=draft`,
+        expect.objectContaining({ method: "PUT", headers: { "If-Match": '\"4\"' } }),
+      );
+      expect(() => sendAuthoringWrite(type, "create", { data: {} })).toThrow(/status/);
+      expect(() => sendAuthoringWrite(type, "delete", { documentId: DOC, version: "4" })).toThrow(
+        /delete/,
+      );
+    },
+  );
+  it("filters lessons by course on the server and omits training owner overrides", async () => {
+    await fetchAuthoringList("lesson", { course: DOC, page: 2, owner: "moderators" });
+    expect(strapiMock).toHaveBeenCalledWith(`/api/lessons/authoring?page=2&course=${DOC}`);
+  });
+});

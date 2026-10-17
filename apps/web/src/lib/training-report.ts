@@ -2,8 +2,8 @@ import { courseCompletion, sortLessons } from "@/lib/training-shared";
 import type { Course, Lesson, LessonProgress } from "@/lib/types";
 
 /**
- * Completion report per mandatory course for /manage/training (issue #29;
- * WD02: moved out of app/(app)/manage/training/page.tsx, the fetches stay
+ * Completion report per mandatory course for /manage/training/report (issue #29;
+ * WD02: moved out of app/(app)/manage/training/report/page.tsx, the fetches stay
  * in the page and lib/training.ts). Fail-closed: any truncated or failed
  * input suppresses the numbers ("–"), never a false green.
  */

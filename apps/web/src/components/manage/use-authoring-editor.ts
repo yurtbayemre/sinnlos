@@ -3,8 +3,7 @@
 import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import type { AuthoringDocumentStatus, AuthoringResult } from "@sinnlos/domain";
-import { startCmsAction, type CommonCode } from "@/lib/action-result";
-import type { AuthoringActionResult } from "@/lib/manage/authoring-action";
+import { startCmsAction, type CommonCode, type ActionResult } from "@/lib/action-result";
 import { fieldInputId, sortFieldErrors, type ManageErrorCode } from "@/lib/manage/errors";
 
 /**
@@ -32,23 +31,25 @@ import { fieldInputId, sortFieldErrors, type ManageErrorCode } from "@/lib/manag
 export interface ItemMeta {
   documentId: string;
   version: string;
-  status: AuthoringDocumentStatus;
-  publishedAt: string | null;
-  publishAt: string | null;
-  unpublishAt: string | null;
-  scheduleError: string | null;
+  status?: AuthoringDocumentStatus;
+  publishedAt?: string | null;
+  publishAt?: string | null;
+  unpublishAt?: string | null;
+  scheduleError?: string | null;
 }
 
 /** The meta of an `editable` answer. */
 export function metaOf(source: {
   documentId: string;
   version: string;
-  status: AuthoringDocumentStatus;
-  publishedAt: string | null;
+  status?: AuthoringDocumentStatus;
+  publishedAt?: string | null;
   publishAt?: string | null;
   unpublishAt?: string | null;
   scheduleError?: string | null;
 }): ItemMeta {
+  if (source.status === undefined)
+    return { documentId: source.documentId, version: source.version };
   return {
     documentId: source.documentId,
     version: source.version,
@@ -61,7 +62,11 @@ export function metaOf(source: {
 }
 
 /** The meta after a write answer (fields the answer leaves out keep their value). */
-export function mergeMeta(meta: ItemMeta | null, data: AuthoringResult): ItemMeta {
+export type EditorResult = Pick<AuthoringResult, "documentId" | "version"> &
+  Partial<AuthoringResult>;
+
+export function mergeMeta(meta: ItemMeta | null, data: EditorResult): ItemMeta {
+  if (data.status === undefined) return { documentId: data.documentId, version: data.version };
   return {
     documentId: data.documentId,
     version: data.version,
@@ -99,7 +104,9 @@ export type EditorIntent =
   | "delete"
   | "close";
 
-export type ActionCall = (version: string | undefined) => Promise<AuthoringActionResult>;
+export type ActionCall = (
+  version: string | undefined,
+) => Promise<ActionResult<never, EditorResult | null>>;
 
 /** The intents that send the form's values. */
 const SAVE_INTENTS: readonly EditorIntent[] = [
@@ -112,7 +119,7 @@ const SAVE_INTENTS: readonly EditorIntent[] = [
 
 export interface RunOptions {
   /** After `ok: true`, with the answer's data (null: the document is gone). */
-  onSuccess?: (data: AuthoringResult | null) => void | Promise<void>;
+  onSuccess?: (data: EditorResult | null) => void | Promise<void>;
   /**
    * After a refusal other than a conflict, with the refused fields (empty
    * for a failure without fields): a dialog that started the action can

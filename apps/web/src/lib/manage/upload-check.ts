@@ -25,7 +25,8 @@ import {
 /** The extensions of the `accept` list, lower case with the dot. */
 export const DOCUMENT_UPLOAD_EXTENSIONS: readonly string[] = DOCUMENT_UPLOAD_ACCEPT.split(",");
 
-const IMAGE_EXTENSIONS = new Set([".jpg", ".jpeg", ".png", ".webp"]);
+export const IMAGE_UPLOAD_ACCEPT = ".jpg,.jpeg,.png,.webp";
+const IMAGE_EXTENSIONS = new Set(IMAGE_UPLOAD_ACCEPT.split(","));
 
 /** The extension of a file name, lower case with the dot ("" without one). */
 export function fileExtension(name: string): string {
@@ -41,7 +42,11 @@ export function uploadCapOf(name: string): number | null {
 }
 
 /** The refusal code of a picked file, or null when it may be sent. */
-export function checkUploadFile(file: { name: string; size: number }): UploadFileCode | null {
+export function checkUploadFile(
+  file: { name: string; size: number },
+  imageOnly = false,
+): UploadFileCode | null {
+  if (imageOnly && !IMAGE_EXTENSIONS.has(fileExtension(file.name))) return "fileType";
   const cap = uploadCapOf(file.name);
   if (cap === null || !(file.size > 0)) return "fileType";
   return file.size > cap ? "fileTooLarge" : null;

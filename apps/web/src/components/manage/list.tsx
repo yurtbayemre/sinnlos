@@ -31,14 +31,18 @@ import { StatusBadges } from "./status-badges";
  */
 
 /** The list URL with `filters`; an unset filter is left out, page 1 has no page. */
-export function listHref(area: ManageArea, filters: Partial<ListFilters>): Route {
+export function listHref(
+  area: ManageArea,
+  filters: Partial<ListFilters>,
+  basePath: Route = AREA_PATH[area],
+): Route {
   const params = new URLSearchParams();
   if (filters.status) params.set("status", filters.status);
   if (filters.q) params.set("q", filters.q);
   if (filters.owner) params.set("owner", filters.owner);
   if (filters.page && filters.page > 1) params.set("page", String(filters.page));
   const qs = params.toString();
-  return (qs ? `${AREA_PATH[area]}?${qs}` : AREA_PATH[area]) as Route;
+  return (qs ? `${basePath}?${qs}` : basePath) as Route;
 }
 
 const pillClass = (active: boolean) =>
@@ -54,12 +58,14 @@ export function ListToolbar({
   filters,
   tabs,
   ownerFilter,
+  basePath = AREA_PATH[area],
 }: {
   area: ManageArea;
   filters: ListFilters;
   tabs: ("all" | AuthoringListStatusFilter)[];
   /** Show the owner filter (moderators on announcements and events). */
   ownerFilter: boolean;
+  basePath?: Route;
 }) {
   const t = useTranslations("manage.common.list");
   const owners: (AuthoringOwnerFilter | null)[] = [null, "department", "moderators"];
@@ -74,7 +80,7 @@ export function ListToolbar({
               return (
                 <li key={tab}>
                   <Link
-                    href={listHref(area, { ...filters, status, page: 1 })}
+                    href={listHref(area, { ...filters, status, page: 1 }, basePath)}
                     aria-current={active ? "page" : undefined}
                     className={pillClass(active)}
                   >
@@ -94,7 +100,7 @@ export function ListToolbar({
               return (
                 <li key={owner ?? "all"}>
                   <Link
-                    href={listHref(area, { ...filters, owner, page: 1 })}
+                    href={listHref(area, { ...filters, owner, page: 1 }, basePath)}
                     aria-current={active ? "page" : undefined}
                     className={pillClass(active)}
                   >
@@ -106,7 +112,7 @@ export function ListToolbar({
           </ul>
         </nav>
       )}
-      <form action={AREA_PATH[area]} method="get" role="search" className="flex flex-wrap gap-2">
+      <form action={basePath} method="get" role="search" className="flex flex-wrap gap-2">
         {filters.status && <input type="hidden" name="status" value={filters.status} />}
         {filters.owner && <input type="hidden" name="owner" value={filters.owner} />}
         <label htmlFor={`${area}-q`} className="sr-only">
@@ -127,7 +133,7 @@ export function ListToolbar({
         </button>
         {filters.q && (
           <Link
-            href={listHref(area, { ...filters, q: "", page: 1 })}
+            href={listHref(area, { ...filters, q: "", page: 1 }, basePath)}
             className={buttonVariants({ variant: "ghost" })}
           >
             {t("clear")}
@@ -142,10 +148,12 @@ export function AuthoringList({
   area,
   rows,
   showOwner,
+  itemPath = (documentId: string) => areaItemPath(area, documentId),
 }: {
   area: TypedArea;
   rows: AuthoringListRow[];
   showOwner: boolean;
+  itemPath?: (documentId: string) => Route;
 }) {
   const t = useTranslations("manage.common.list");
   const format = useFormatter();
@@ -163,7 +171,7 @@ export function AuthoringList({
           <li key={row.documentId} className="flex flex-col gap-2 p-4 sm:flex-row sm:items-start">
             <div className="min-w-0 flex-1 space-y-1.5">
               <Link
-                href={areaItemPath(area, row.documentId)}
+                href={itemPath(row.documentId)}
                 className="block break-words font-medium outline-none hover:text-primary hover:underline focus-visible:rounded focus-visible:ring-2 focus-visible:ring-ring"
               >
                 {row.label || "–"}
@@ -185,10 +193,12 @@ export function ListPagination({
   area,
   filters,
   pagination,
+  basePath = AREA_PATH[area],
 }: {
   area: ManageArea;
   filters: ListFilters;
   pagination: AuthoringPagination;
+  basePath?: Route;
 }) {
   const t = useTranslations("manage.common.list");
   const { page, pageCount, total } = pagination;
@@ -202,7 +212,7 @@ export function ListPagination({
         <div className="flex items-center gap-2">
           {page > 1 ? (
             <Link
-              href={listHref(area, { ...filters, page: page - 1 })}
+              href={listHref(area, { ...filters, page: page - 1 }, basePath)}
               className={buttonVariants({ variant: "outline", size: "sm" })}
               rel="prev"
             >
@@ -213,7 +223,7 @@ export function ListPagination({
           <span aria-current="page">{t("page", { page, pageCount })}</span>
           {page < pageCount ? (
             <Link
-              href={listHref(area, { ...filters, page: page + 1 })}
+              href={listHref(area, { ...filters, page: page + 1 }, basePath)}
               className={buttonVariants({ variant: "outline", size: "sm" })}
               rel="next"
             >

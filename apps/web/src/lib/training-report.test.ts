@@ -9,7 +9,7 @@ import {
 import type { Course, Lesson, LessonProgress } from "./types";
 
 /**
- * The /manage/training completion report (WD02: moved out of the page
+ * The /manage/training/report completion report (WD02: moved out of the page
  * unchanged). Fail closed: a failed or truncated input never renders a
  * number.
  */

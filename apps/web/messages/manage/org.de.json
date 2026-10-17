@@ -1,0 +1,24 @@
+{
+  "departmentTitle": "Abteilung bearbeiten",
+  "teamTitle": "Team bearbeiten",
+  "edit": "Bearbeiten",
+  "back": "Zurück zur Detailseite",
+  "scopeHint": "Hier bearbeitest du Beschreibung und Darstellung. Namen, Mitgliedschaften und Organisationsstruktur werden im Admin-Panel verwaltet.",
+  "imageHint": "JPEG, PNG oder WebP, bis zu 5 MB.",
+  "fields": {
+    "description": {
+      "label": "Beschreibung",
+      "hint": "Markdown wird unterstützt. Bestehende HTML-Beschreibungen bleiben unverändert, solange du dieses Feld nicht bearbeitest."
+    },
+    "color": {
+      "label": "Farbe",
+      "invalid": "Wähle eine sechsstellige Hex-Farbe."
+    },
+    "headerImage": {
+      "label": "Kopfbild"
+    },
+    "avatar": {
+      "label": "Teambild"
+    }
+  }
+}

@@ -1,0 +1,67 @@
+{
+  "title": "Inhaltsaktivität",
+  "description": "Letzte Inhaltsänderungen. Es gilt die bestehende Aufbewahrungsfrist.",
+  "filters": "Aktivität filtern",
+  "target": "Inhaltstyp",
+  "all": "Alle",
+  "actorKind": "Akteurstyp",
+  "actorId": "Akteurs-ID",
+  "actorHint": "Für eine ID Benutzer oder Panel-Administrator auswählen. Die IDs sind getrennt.",
+  "actorClass": "Bearbeitungsrolle",
+  "from": "Von (einschließlich)",
+  "to": "Bis (einschließlich)",
+  "apply": "Filter anwenden",
+  "reset": "Zurücksetzen",
+  "invalidFilters": "Bitte die Filter prüfen: Akteurs-IDs benötigen den Typ Benutzer oder Administrator. Datumsgrenzen brauchen Datum und Uhrzeit, müssen in der richtigen Reihenfolge liegen und dürfen keine bei der Zeitumstellung übersprungene oder doppelte Uhrzeit verwenden.",
+  "emptyTitle": "Keine Aktivität gefunden",
+  "emptyHint": "Andere Filter auswählen oder nach einer Inhaltsänderung erneut nachsehen.",
+  "contentId": "Inhalt: {id}",
+  "revision": "Revision {version}",
+  "changedFields": "Geänderte Felder: {fields}",
+  "targets": {
+    "announcement": "Mitteilung",
+    "event": "Veranstaltung",
+    "quickLink": "Schnelllink",
+    "document": "Dokument",
+    "poll": "Abstimmung",
+    "wikiSpace": "Wiki-Bereich",
+    "wikiPage": "Wiki-Seite",
+    "course": "Kurs",
+    "lesson": "Lektion",
+    "department": "Abteilung",
+    "team": "Team",
+    "classified": "Kleinanzeige",
+    "file": "Datei"
+  },
+  "kinds": {
+    "user": "Benutzer",
+    "admin": "Panel-Administrator",
+    "system": "System"
+  },
+  "classes": {
+    "moderator": "Moderator",
+    "departmentAuthor": "Abteilungsautor",
+    "author": "Autor",
+    "departmentHead": "Abteilungsleitung",
+    "teamLead": "Teamleitung"
+  },
+  "sources": {
+    "content-api": "Web / API",
+    "admin": "Admin-Panel",
+    "cron": "Zeitplanung",
+    "system": "System"
+  },
+  "actions": {
+    "create": "Erstellt",
+    "update": "Bearbeitet",
+    "delete": "Gelöscht",
+    "clone": "Dupliziert",
+    "publish": "Veröffentlicht",
+    "unpublish": "Zurückgezogen",
+    "discardDraft": "Entwurf verworfen",
+    "restore": "Wiederhergestellt",
+    "schedulePublish": "Veröffentlichung geplant",
+    "scheduleUnpublish": "Zurückziehen geplant",
+    "scheduleFailed": "Zeitplanung fehlgeschlagen"
+  }
+}

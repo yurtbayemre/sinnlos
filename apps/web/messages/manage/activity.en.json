@@ -1,0 +1,67 @@
+{
+  "title": "Content activity",
+  "description": "Recent content changes. The existing retention period applies.",
+  "filters": "Filter activity",
+  "target": "Content type",
+  "all": "All",
+  "actorKind": "Actor type",
+  "actorId": "Actor ID",
+  "actorHint": "For an ID, select a user or panel administrator. Their IDs are separate.",
+  "actorClass": "Editing role",
+  "from": "From (inclusive)",
+  "to": "To (inclusive)",
+  "apply": "Apply filters",
+  "reset": "Reset",
+  "invalidFilters": "Check the filters: actor IDs need a user or administrator type. Date bounds need both date and time, must be in order, and cannot use a skipped or repeated time during a clock change.",
+  "emptyTitle": "No activity found",
+  "emptyHint": "Try a different filter or come back after content has changed.",
+  "contentId": "Content: {id}",
+  "revision": "Revision {version}",
+  "changedFields": "Changed fields: {fields}",
+  "targets": {
+    "announcement": "Announcement",
+    "event": "Event",
+    "quickLink": "Quick link",
+    "document": "Document",
+    "poll": "Poll",
+    "wikiSpace": "Wiki space",
+    "wikiPage": "Wiki page",
+    "course": "Course",
+    "lesson": "Lesson",
+    "department": "Department",
+    "team": "Team",
+    "classified": "Classified",
+    "file": "File"
+  },
+  "kinds": {
+    "user": "User",
+    "admin": "Panel administrator",
+    "system": "System"
+  },
+  "classes": {
+    "moderator": "Moderator",
+    "departmentAuthor": "Department author",
+    "author": "Author",
+    "departmentHead": "Department head",
+    "teamLead": "Team lead"
+  },
+  "sources": {
+    "content-api": "Web / API",
+    "admin": "Admin panel",
+    "cron": "Scheduler",
+    "system": "System"
+  },
+  "actions": {
+    "create": "Created",
+    "update": "Updated",
+    "delete": "Deleted",
+    "clone": "Duplicated",
+    "publish": "Published",
+    "unpublish": "Unpublished",
+    "discardDraft": "Draft discarded",
+    "restore": "Restored",
+    "schedulePublish": "Publication scheduled",
+    "scheduleUnpublish": "Unpublication scheduled",
+    "scheduleFailed": "Schedule failed"
+  }
+}
