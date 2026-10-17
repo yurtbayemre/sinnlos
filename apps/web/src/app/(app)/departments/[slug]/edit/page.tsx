@@ -1,3 +1,4 @@
+import type { Route } from "next";
 import { notFound } from "next/navigation";
 import { getTranslations } from "next-intl/server";
 import { FetchErrorBanner } from "@/components/fetch-error";
@@ -21,7 +22,7 @@ export default async function EditPage({ params }: Props) {
     <div className="space-y-8">
       <ManagePageHeader
         title={t("departmentTitle")}
-        back={`/departments/${slug}`}
+        back={`/departments/${slug}` as Route}
         backLabel={load.state === "ok" ? load.editable.name : t("back")}
       />
       {load.state === "failed" ? (
