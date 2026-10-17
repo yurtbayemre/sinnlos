@@ -1,7 +1,7 @@
 # Batch 17 implementation plan
 
 > Phase 3 of v2 frontend authoring (plan 12). Written 2026-10-16 against main 2f47b84fcadfd6f63ecffac1c78cdf388c5ea44d, released as v0.16.2.
-> Status: the 17B web remainder is implemented locally (section 15), on top of the org probe/contracts (section 12), shared player/API (section 13) and backend remainder (section 14). Combined integration and rehearsal are next. Decision 06 remains the approved scope; section 3 records the accepted lean exam-mode amendment, unlimited retries and no timer. Review corrections are recorded in section 11.
+> Status: all implementation steps are merged into main afcbd51 through PR #90. The combined Ponytail review is complete with no confirmed new findings (section 16). Rollback instructions, browser acceptance and the deploy/rollback/roll-forward rehearsal remain next. Decision 06 remains the approved scope; section 3 records the accepted lean exam-mode amendment, unlimited retries and no timer. Review corrections are recorded in section 11.
 > Paths: cms/ = apps/cms/src/, web/ = apps/web/src/, domain/ = packages/domain/src/. Paths outside those roots are written in full.
 > This plan records the implementation baseline and local evidence; it does not verify or change the running server.
 
@@ -327,3 +327,22 @@ The web remainder builds on backend commit fc6e656 and PR #88:
 Focused tests, production/test typechecks, lint, formatting and independent training, organisation, activity and shared-helper reviews passed. The complete local unit run passed 7,212 tests with 153 intentional skips; six existing Windows bash/SWC-cache failures remain, and the same SWC cache validation blocks the local web build. Exact-head Linux CI evidence is recorded in the follow-up PR. No dependencies, authentication transport, CI concurrency or existing completion receipts changed.
 
 Combined browser acceptance and the deploy/rollback/roll-forward rehearsal remain the integration step. No staging/production deployment or release has been performed; the accepted limits in section 10 remain.
+
+## 16. Combined integration review on 2026-10-17
+
+Reviewed main `afcbd51a817236d2259153e0354466e371697640`, covering the complete Batch 17 change from `36c62cf` and its connected callers. PR #90 brought every current Batch 17 branch into main; its tree is identical to the tested web commit `e0429ad`. [All seven checks on main passed](https://github.com/yurtbayemre/sinnlos/actions/runs/39008026613), including the real HTTP suites on SQLite/PostgreSQL 16, the three-zone matrix and both production images.
+
+The review assumes the planned alpha instance with a few dozen users. Four parallel review areas traced input, storage and output, inspected the relevant regressions and ran focused checks:
+
+| Review area               | Checked paths                                                                                                                                                                                                           | Focused checks             |
+| ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------- |
+| Quiz/player               | Published lesson and parent, answerless responses, current server mode, strict stored-quiz validation, independent feedback/completion, completed exam review, stale/out-of-order/unmount responses, demo/error callers | 8 files, 117 tests passed  |
+| Training authoring        | Form through CMS gate, draft/publish/schedule/discard, parent readiness and nested URLs, filter before pagination/count, quiz dirty/save/reset, upload reuse after conflict, existing shared-helper callers             | 17 files, 683 tests passed |
+| Organisation/media        | Role and row scope, lead precedence, locked revision checks, status-free saves, structural/query restrictions and revocations, raw legacy text, MIME/ownership/claims/tombstones and cleanup after commit               | 12 files, 179 tests passed |
+| Activity/report/contracts | Admin-only fixed activity query/response, bounded actor reads and namespaces, timezone filters, escaped output, pagination/failure/session states, report relocation, navigation, route/grant and message/URL contracts | 10 files, 355 tests passed |
+
+These are per-area results; shared tests occur in more than one selection and are not a unique aggregate. No reproducible new correctness, access-control, data-loss or load issue was found. No application fix, dependency change or speculative refactoring was warranted. This review changes documentation only.
+
+The existing HTTP integration coverage was inspected; the full database/build suites were not repeated locally because the exact reviewed main commit already has green CI and application code is unchanged. No browser walkthrough, staging rehearsal or production operation was performed. The accepted limits in section 10 remain decisions, not new review findings.
+
+Next: prepare and review the exam mode downgrade/restore SQL and deployment instructions, then execute the browser acceptance and complete local staging cycle in section 8. Production deployment and the v0.17.0 release remain gated on that evidence and the owner's deployment go.
