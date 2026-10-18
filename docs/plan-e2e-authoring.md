@@ -1,6 +1,6 @@
 # E2E-Erweiterung: Kurs, Lektion und Quiz im Browser bearbeiten
 
-Stand: 18.10.2026. Basis: `main` nach Merge von PR #97 (`68daf5a`). Diese Erweiterung ergänzt einen Browserfall `training-authoring` im bestehenden Playwright-/Docker-Stack. Status: lokal umgesetzt und abgenommen. Aktuelle GitHub-Nachweise werden in den Prüfungen und der Beschreibung des zugehörigen PR festgehalten.
+Stand: 18.10.2026. Basis: `main` nach Merge von PR #97 (`68daf5a`). Diese Erweiterung ergänzt einen Browserfall `training-authoring` im bestehenden Playwright-/Docker-Stack. Status: lokal und auf GitHub abgenommen; [PR #98](https://github.com/yurtbayemre/sinnlos/pull/98) ist seit 18.10.2026 als `e50cc359c94924e99747eae588c7bcf95fe552df` in Main. Die anschließende [lokale Staging-Browserabnahme](./batch-17-browser-acceptance.md) einschließlich Schlussreview ist abgeschlossen; Produktionsbrief und Deployment bleiben offen.
 
 ## Umfang
 
@@ -30,3 +30,4 @@ Kurs und Lektion dieses Falls entstehen vollständig über die Oberfläche. Die 
 - Nach Wiederherstellung bestanden alle sechs Browserfälle gemeinsam: Run `sinnlos-e2e-e6d5127b0b1fc6b287cf9c8b`, 32,5 Sekunden, Authoringfall 10,7 Sekunden. Ein Worker, keine Wiederholungen, frische Datenbank und Browsersitzungen; native Login-Limits unverändert.
 - E2E-Typecheck, Lint, alle fünf Runner-Tests, Format und Diff-Check sind grün. Der unabhängige Review fand keine bestätigten Probleme. Die gefilterten Restprüfungen aller drei Läufe fanden keine Container, Netzwerke, laufbezogenen Images oder privaten Laufdateien mehr.
 - Anwendungscode, Abhängigkeiten, CI-Workflow, Auslöser und Zeitlimits bleiben unverändert. Staging und Produktion wurden nicht verändert. Die vollständige Batch-17-Abnahme wird dadurch nicht ersetzt.
+- [CI-Lauf 39134740110](https://github.com/yurtbayemre/sinnlos/actions/runs/39134740110) auf `f66b095425a4dd4ad3d57538c7b633a0a33c6cba` bestand alle acht Jobs. Alle sechs Browserfälle bestanden in 38,4 Sekunden ohne Wiederholungen; Authoring dauerte 12,477 Sekunden. [Artefakt 12138962870](https://github.com/yurtbayemre/sinnlos/actions/runs/39134740110/artifacts/12138962870) wurde heruntergeladen und geprüft: Runner-Logs redigiert, private Dateien ausgeschlossen und Cleanup vollständig. HTML-Berichte können die kurzlebigen Fixture-Passwörter in Fill-Schritten enthalten; es wurden ausschließlich Wegwerfzugänge verwendet.

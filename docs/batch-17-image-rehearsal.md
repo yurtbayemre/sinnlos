@@ -4,7 +4,7 @@ The complete local image cycle passed: v0.16.2 → Batch 17 → v0.16.2 → Batc
 The final CMS and web containers are healthy and run the Batch 17 pair. This was
 local Compose project `b12i-staging`, using PostgreSQL 16, Traefik and the existing
 deployment/backup/live-smoke scripts. Production was not accessed or changed.
-Browser acceptance remains separate and outstanding.
+Browser acceptance was separate from this image cycle; its completion on 2026-10-18 is linked in the follow-up below.
 
 ## Images and deploy evidence
 
@@ -67,7 +67,7 @@ to append during the operations; unchanged audit counts were not expected.
   `admin_permissions_role_lnk` and `admin_roles` for the five relevant content
   types. This inventory is not proof of effective panel authorization; real
   authenticated HTTP checks covered the exercised paths, including panel saves
-  and publishing. A comprehensive panel-role browser check remains outstanding.
+  and publishing. The subsequent panel-role browser evidence is recorded in the follow-up below.
 - The first Batch 17 scheduler observation was early; a later admin login hit
   Strapi's HTTP 429 limit. The scheduled publication was instead verified by a
   read-only SQL assertion (new published row, exam mode, cleared schedule/error)
@@ -91,8 +91,12 @@ scheduler/live-smoke evidence, final image health and both mode-schema dumps
 with the review decisions and checksums. Protected full backups remain in the
 existing backup storage. Labelled rehearsal fixtures remain in local staging.
 
-Complete the browser acceptance from a client that can resolve and trust the
-local staging origin. Before any production operation, obtain the actual live
+The subsequent browser acceptance is complete within its documented local scope
+(see the follow-up below). Before any production operation, obtain the actual live
 image tag, current backup, final-commit CI and the owner's deployment go in the
 deployment session. No production deployment, merge or v0.17.0 release was made
 as part of this rehearsal.
+
+### Browser follow-up on 2026-10-18
+
+[Browser acceptance phases 1–5](batch-17-browser-acceptance.md) now verify TLS access, eight role entries, training workflows, organisation roles, media replacement, activity/report and the specified panel-role paths against these same staging images. An isolated client on the existing Docker network uses the public local CA with certificate checking and browser sandbox enabled; the host/In-App DNS was not changed. Training draft isolation, quiz-only edits, conflict Reload/Overwrite, actual scheduled publication and all three quiz completions passed. Phase 3 additionally verified Head/Lead edits, nine refused editor accesses, three image replacements and unchanged legacy HTML during an image-only save. Three labelled optional courses/lessons and three member receipts from phase 2 remain in staging; phase 3 retains new cover/header/avatar images on the existing rehearsal fixtures, with original descriptions/colour restored. The deployment was unchanged. The temporary client and private credentials/profile were removed after the checks. Phase 4 verified activity filters/pagination, report navigation, eight refused non-admin routes, restored Admin/Editor organisation name edits and Author-owned versus foreign panel access. Four labelled Author fixtures remain, including an optional draft course and draft lesson, with no assigned parent/person relations. Panel Publish controls were checked; actual panel publishing, deletion and relation changes were not exercised in that phase. Phase 5 independently reconciled the evidence, retained changes, source/CI mapping and healthy unchanged images with no open findings. The local acceptance is complete within its stated scope; production briefing, current deployment checks and owner go remain outstanding.
