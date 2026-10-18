@@ -189,3 +189,90 @@ test("training-exam-completion", async ({ page }) => {
     await expect(main.getByRole("alert")).toHaveCount(0);
   });
 });
+
+test("training-confirm-completion", async ({ page }) => {
+  const fixtures = loadFixtures();
+  const main = page.getByRole("main");
+  const https = main.getByRole("group", { name: "Which port is used for HTTPS?", exact: true });
+  const phishing = main.getByRole("group", {
+    name: "Should you report a phishing email?",
+    exact: true,
+  });
+  const check = main.getByRole("button", { name: "Check answers", exact: true });
+  const complete = main.getByRole("button", { name: "Complete lesson", exact: true });
+  const completed = main.getByText(/^Completed on .+/);
+  const correct = main.getByText("Correct!", { exact: true });
+  const wrong = main.getByText("Not quite — try again.", { exact: true });
+  const passed = main.getByText("All correct!", { exact: true });
+
+  await test.step("Member opens a confirm lesson without a check button", async () => {
+    await signIn(page, fixtures.users.member);
+    await openLesson(page, fixtures.confirm);
+    await expect(
+      main.getByText(
+        "Answer every question correctly to complete the lesson — retrying is expressly allowed.",
+        { exact: true },
+      ),
+    ).toBeVisible();
+    await expect(check).toHaveCount(0);
+    await expect(complete).toBeDisabled();
+  });
+
+  await test.step("Each selection gets immediate feedback while missing or wrong answers stay locked", async () => {
+    await https.getByRole("button", { name: "80", exact: true }).click();
+    await expect(wrong).toBeVisible();
+    await expect(correct).toHaveCount(0);
+    await expect(complete).toBeDisabled();
+    await https.getByRole("button", { name: "443", exact: true }).click();
+    await expect(correct).toHaveCount(1);
+    await expect(wrong).toHaveCount(0);
+    await expect(passed).toHaveCount(0);
+    await expect(complete).toBeDisabled();
+    await phishing.getByRole("button", { name: "No", exact: true }).click();
+    await expect(wrong).toBeVisible();
+    await expect(correct).toHaveCount(1);
+    await expect(complete).toBeDisabled();
+    await expect(check).toHaveCount(0);
+    await expect(main.getByRole("alert")).toHaveCount(0);
+  });
+
+  await test.step("Only all correct answers unlock completion and a wrong edit locks it again", async () => {
+    await phishing.getByRole("button", { name: "Yes", exact: true }).click();
+    await expect(passed).toBeVisible();
+    await expect(correct).toHaveCount(2);
+    await expect(wrong).toHaveCount(0);
+    await expect(complete).toBeEnabled();
+    await https.getByRole("button", { name: "80", exact: true }).click();
+    await expect(wrong).toBeVisible();
+    await expect(correct).toHaveCount(1);
+    await expect(passed).toHaveCount(0);
+    await expect(complete).toBeDisabled();
+    await https.getByRole("button", { name: "443", exact: true }).click();
+    await expect(passed).toBeVisible();
+    await expect(correct).toHaveCount(2);
+    await expect(complete).toBeEnabled();
+    await expect(check).toHaveCount(0);
+    await page.reload();
+    await expect(complete).toBeDisabled();
+    await expect(completed).toHaveCount(0);
+    await expect(correct).toHaveCount(0);
+    await expect(passed).toHaveCount(0);
+  });
+
+  await test.step("Explicit completion survives a full reload", async () => {
+    await https.getByRole("button", { name: "443", exact: true }).click();
+    await expect(correct).toHaveCount(1);
+    await expect(complete).toBeDisabled();
+    await phishing.getByRole("button", { name: "Yes", exact: true }).click();
+    await expect(passed).toBeVisible();
+    await expect(correct).toHaveCount(2);
+    await expect(complete).toBeEnabled();
+    await complete.click();
+    await expect(main.getByText(/^Completed(?: on .+)?$/)).toBeVisible();
+    await page.reload();
+    await expect(completed).toBeVisible();
+    await expect(complete).toHaveCount(0);
+    await expect(check).toHaveCount(0);
+    await expect(main.getByRole("alert")).toHaveCount(0);
+  });
+});

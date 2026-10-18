@@ -1,6 +1,6 @@
 # E2E-Erweiterung: Exam-Abschluss und Nachbetrachtung
 
-Stand: 18.10.2026. Basis: `main` nach Merge von PR #95 (`42290d6`). Teams und `quizGate` sind umgesetzt und auf GitHub abgenommen. Diese Erweiterung ergänzt genau einen Browserfall `training-exam-completion` im bestehenden Playwright-/Docker-Stack. Status: lokal umgesetzt und abgenommen; der aktuelle GitHub-Nachweis wird in den Prüfungen und der Beschreibung des zugehörigen PR festgehalten.
+Stand: 18.10.2026. Basis: `main` nach Merge von PR #95 (`42290d6`). Teams und `quizGate` sind umgesetzt und auf GitHub abgenommen. Diese Erweiterung ergänzt genau einen Browserfall `training-exam-completion` im bestehenden Playwright-/Docker-Stack. Status: lokal und in GitHub abgenommen; [PR #96](https://github.com/yurtbayemre/sinnlos/pull/96) ist als `e409f74` nach `main` gemergt. Die [Confirm-Erweiterung](./plan-e2e-confirm.md) führt den Browserumfang fort.
 
 ## Umfang
 
@@ -27,3 +27,5 @@ Der bestehende `quizGate`-Kurs bleibt unabhängig. Dieselben zwei Fixture-Nutzer
 - Der vollständige Lauf nach Wiederherstellung und Review-Fix bestand mit allen vier Fällen: `sinnlos-e2e-0426a118dcc7daf3a066f86a`, 18,2 Sekunden, Examfall 4,2 Sekunden. Ein Worker, keine Wiederholung, neue Datenbank und Browsersitzungen; native Login-Limits unverändert.
 - E2E-Typecheck, Lint, fünf Runner-Tests, Formatprüfung und Diff-Check sind grün. Das Review-Finding ist geschlossen; keine weiteren bestätigten Probleme. Alle drei lokalen Läufe haben ihre eigenen Ressourcen und privaten Laufverzeichnisse entfernt. Die 15 Credential-Felder der Negativprobe sind redigiert; keine privaten Env-/Fixture-Dateien im archivierten Bericht.
 - Anwendungscode, Abhängigkeiten, CI-Workflow, Auslöser und Zeitlimits bleiben unverändert. Staging und Produktion wurden nicht verändert. Eigene Browserfälle für `confirm` und Authoring sowie die vollständige Staging-Browserabnahme bleiben weitere Schritte.
+
+- [GitHub-Abnahme](https://github.com/yurtbayemre/sinnlos/actions/runs/39130906853) auf `97ce840`: acht CI-Jobs grün, vier Browserfälle in 19,5 Sekunden, keine Wiederholungen, Fehler oder Flakes. Bericht, Artefaktgrenzen, Redigierung und Cleanup sind geprüft; Nachweise in PR #96.
