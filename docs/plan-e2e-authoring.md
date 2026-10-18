@@ -1,6 +1,6 @@
 # E2E-Erweiterung: Kurs, Lektion und Quiz im Browser bearbeiten
 
-Stand: 18.10.2026. Basis: `main` nach Merge von PR #97 (`68daf5a`). Diese Erweiterung ergänzt einen Browserfall `training-authoring` im bestehenden Playwright-/Docker-Stack. Status: lokal und auf GitHub abgenommen; [PR #98](https://github.com/yurtbayemre/sinnlos/pull/98) ist seit 18.10.2026 als `e50cc359c94924e99747eae588c7bcf95fe552df` in Main. Als Nächstes folgt die [Staging-Browserabnahme](./batch-17-browser-acceptance.md).
+Stand: 18.10.2026. Basis: `main` nach Merge von PR #97 (`68daf5a`). Diese Erweiterung ergänzt einen Browserfall `training-authoring` im bestehenden Playwright-/Docker-Stack. Status: lokal und auf GitHub abgenommen; [PR #98](https://github.com/yurtbayemre/sinnlos/pull/98) ist seit 18.10.2026 als `e50cc359c94924e99747eae588c7bcf95fe552df` in Main. Die anschließende [lokale Staging-Browserabnahme](./batch-17-browser-acceptance.md) einschließlich Schlussreview ist abgeschlossen; Produktionsbrief und Deployment bleiben offen.
 
 ## Umfang
 

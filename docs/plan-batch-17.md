@@ -1,7 +1,7 @@
 # Batch 17 implementation plan
 
 > Phase 3 of v2 frontend authoring (plan 12). Written 2026-10-16 against main 2f47b84fcadfd6f63ecffac1c78cdf388c5ea44d, released as v0.16.2.
-> Status: all implementation steps are merged into main afcbd51 through PR #90. The combined Ponytail review is complete with no confirmed new findings (section 16). Rollback preparation and the complete local image rehearsal are complete (sections 17–18). Browser acceptance phases 1–4 passed: TLS/role entry, training, organisation/media and activity/report/panel checks (sections 19–22); final review and production deployment are pending. Decision 06 remains the approved scope; section 3 records the accepted lean exam-mode amendment, unlimited retries and no timer. Review corrections are recorded in section 11.
+> Status: all implementation steps are merged into main afcbd51 through PR #90. The combined Ponytail review is complete with no confirmed new findings (section 16). Rollback preparation and the complete local image rehearsal are complete (sections 17–18). Local browser acceptance and its independent final review are complete (sections 19–23): TLS/role entry, training, organisation/media and activity/report/panel passed within the documented scope. Production briefing, deployment and release remain pending. Decision 06 remains the approved scope; section 3 records the accepted lean exam-mode amendment, unlimited retries and no timer. Review corrections are recorded in section 11.
 > Paths: cms/ = apps/cms/src/, web/ = apps/web/src/, domain/ = packages/domain/src/. Paths outside those roots are written in full.
 > This plan records the implementation baseline and local evidence; it does not verify or change production.
 
@@ -251,7 +251,7 @@ The lane lists are responsibilities, not a request to create every named file:
 
 ## 10. Completion gates for the plan and implementation
 
-Implementation follows the accepted section 3 decision: exam remains as overall-only feedback, all learner modes are answerless, retries are unlimited and there is no timer. The single-row org prerequisite passed on SQLite and Postgres (section 12); guarded org endpoints and their HTTP tests are implemented (section 14). Privacy is a normal lane regression, not a pre-contract gate; real HTTP exposure still blocks release. The shared player/API privacy regression passed on SQLite and Postgres (section 13); production release and combined rehearsal remain pending.
+Implementation follows the accepted section 3 decision: exam remains as overall-only feedback, all learner modes are answerless, retries are unlimited and there is no timer. The single-row org prerequisite passed on SQLite and Postgres (section 12); guarded org endpoints and their HTTP tests are implemented (section 14). Privacy is a normal lane regression, not a pre-contract gate; real HTTP exposure still blocks release. The shared player/API privacy regression passed on SQLite and Postgres (section 13); the completed combined rehearsal and local browser acceptance are recorded in sections 18–23; production release remains pending.
 
 Before production deployment, exact-commit CI and the complete rehearsal with the previous CMS/web pair and mode downgrade/restore are mandatory. Accepted limits remain: panel saves lack If-Match and may overwrite a web change; panel structural/media privileges remain; quiz edits do not revoke receipts; current-published grading is not bound to previously displayed questions and retains concurrent publish/reparent availability races; unlimited retries permit guessing; in-flight role/team changes retain the existing request race. Rollback restores the old answer exposure and media/org boundaries described in section 3.4.
 
@@ -357,7 +357,7 @@ The [exam-mode runbook](../infra/rollback/exam-mode/README.md) now supplies the 
 
 All 15 focused PostgreSQL regressions passed against disposable schemas, including replaced row IDs, mixed modes, deliberate exclusions, revision advances, retries and atomic rollback after a revision-write failure. The deploy-preflight suite passed 69 tests (7 existing skips), including the hint ordering and absence of automatic mode writes. The CMS test typecheck, formatting and Bash syntax checks passed. A separate psql/pg_dump smoke check verified downgrade, snapshot export, refusal before review and targeted restore in the disposable database. Independent review found no remaining issue. This is preparation and SQL verification; the real old/new image cycle and browser acceptance have not been performed.
 
-The subsequent local image cycle is recorded in section 18. Browser acceptance remains outstanding; production deployment and v0.17.0 still require that evidence and the owner's deployment go.
+The subsequent local image cycle is recorded in section 18 and the completed local browser acceptance in sections 19–23. Production deployment and v0.17.0 still require the owner's deployment go and current production checks.
 
 ## 18. Local image rehearsal on 2026-10-17
 
@@ -383,10 +383,11 @@ the accepted media attachment limit. The old permission diagnostic also reported
 report distinguishes code inspection, HTTP evidence and the read-only panel-grant
 inventory used because the planned named panel diagnostic does not exist.
 
-Browser acceptance remains outstanding: the in-app browser could not resolve
-the local staging hostname. Production is unchanged. Next is browser acceptance
-from a client with working staging DNS/TLS, then the production brief, final CI
-and the owner's deployment go. No merge or release is implied by this evidence.
+At this checkpoint browser acceptance was outstanding because the in-app browser
+could not resolve the local staging hostname. Sections 19–23 record its subsequent
+completion from an isolated client with working DNS/TLS. Production remains
+unchanged; the production brief, final CI and owner's deployment go are still
+required. No merge or release is implied by this evidence.
 
 ## 19. Browser acceptance started on 2026-10-18
 
@@ -402,7 +403,7 @@ Phase 1 changed no content, roles or application configuration. Its temporary br
 
 The actual scheduler published the exam lesson scheduled for 18:28 UTC; the browser first observed it at 18:28:02 UTC after proving it unavailable before due. All three quiz modes blocked missing/wrong answers and newly changed wrong answers, created no receipt from feedback alone, and retained explicit completion after reload in the lesson, course and overview. Completed exam review remained overall-only with its existing receipt intact.
 
-The evidence records one corrected schedule-badge locator, not a product defect. Three labelled optional courses, three lessons and three member receipts remain in local staging; older rehearsal fixtures, roles, application settings and product code were unchanged. The temporary browser client and private credentials/profile were removed; staging remains healthy. Sections 21–22 record the subsequent organisation/media and activity/report/panel acceptance; final review remains. Production deployment and release remain pending.
+The evidence records one corrected schedule-badge locator, not a product defect. Three labelled optional courses, three lessons and three member receipts remain in local staging; older rehearsal fixtures, roles, application settings and product code were unchanged. The temporary browser client and private credentials/profile were removed; staging remains healthy. Sections 21–22 record the subsequent organisation/media and activity/report/panel acceptance; section 23 records the completed final review. Production deployment and release remain pending.
 
 ## 21. Organisation and media browser acceptance completed on 2026-10-18
 
@@ -410,7 +411,7 @@ The evidence records one corrected schedule-badge locator, not a product defect.
 
 Admin replaced the existing rehearsal course cover, department header and team avatar through the file inputs. Saved links survived reload and loaded in member views, including the team thumbnail. The course's published image stayed unchanged until Publish. A controlled legacy HTML description prepared through the panel retained its exact raw value during an image-only web save and rendered as plain text; the original description was then restored through the panel.
 
-Original descriptions/colour and visible names/person/team links are restored or unchanged; this is not a complete database-relation census. Three labelled image replacements remain on the rehearsal fixtures. The evidence records probe-only corrections for the panel introduction overlay, text/temporary-avatar comparisons and a screenshot transition copy. Product code, roles and deployment configuration were unchanged. The temporary browser client and private session files were removed; staging remains healthy. Section 22 records the subsequent activity/report/panel acceptance; the final acceptance review remains. Production deployment and release remain pending.
+Original descriptions/colour and visible names/person/team links are restored or unchanged; this is not a complete database-relation census. Three labelled image replacements remain on the rehearsal fixtures. The evidence records probe-only corrections for the panel introduction overlay, text/temporary-avatar comparisons and a screenshot transition copy. Product code, roles and deployment configuration were unchanged. The temporary browser client and private session files were removed; staging remains healthy. Section 22 records the subsequent activity/report/panel acceptance; section 23 records the completed final acceptance review. Production deployment and release remain pending.
 
 ## 22. Activity, report and panel browser acceptance completed on 2026-10-18
 
@@ -418,4 +419,12 @@ Original descriptions/colour and visible names/person/team links are restored or
 
 Separate panel sessions verified the existing Super Admin, Editor and Author accounts against their actual grants. Admin/Editor saved, reloaded and restored the existing rehearsal department/team names. Both could open Author-owned course/lesson drafts with Publish enabled; schedule controls matched the differing field grants. Author created, edited and reloaded four own entries, while foreign direct reads returned four HTTP 403 responses and no form. Author Publish remained disabled. This is evidence for the named actions, not every CRUD/relation permutation; panel publishing, deletion and relation changes were not exercised in this phase.
 
-Four labelled Author-owned fixtures remain: department, team, optional draft course and draft lesson, without assigned parent/person relations. Original rehearsal organisation names were restored and confirmed in member views; the draft course remained unreadable to the member. The report records probe-only locator/navigation/control-state corrections, independent review and credential scanning. The temporary browser client and private session files were removed; staging remains healthy on unchanged images. Next is phase 5, the overall evidence and final acceptance review. Production deployment and release remain pending.
+Four labelled Author-owned fixtures remain: department, team, optional draft course and draft lesson, without assigned parent/person relations. Original rehearsal organisation names were restored and confirmed in member views; the draft course remained unreadable to the member. The report records probe-only locator/navigation/control-state corrections, independent review and credential scanning. The temporary browser client and private session files were removed; staging remains healthy on unchanged images. Section 23 records the completed overall evidence and final acceptance review. Production deployment and release remain pending.
+
+## 23. Local browser acceptance closed on 2026-10-18
+
+[Browser acceptance phase 5](batch-17-browser-acceptance.md#phase-5-am-18102026-gesamt-review-und-abschluss) closes the five-phase matrix within its documented local staging scope. Two independent reviews checked the actual assertions, original/corrected results, selected screenshots, fixture changes and cleanup against plan sections 7–8. No findings remain. An assert-based evidence check reconciled eight role entries and 53 recorded checks across phases 2–4, indexed 165 evidence files and confirmed source/CI/image identity. This did not repeat the browser, HTTP or database suites or modify staging content.
+
+The existing image-source CI (seven jobs), current main CI (eight jobs including E2E) and phase-4 documentation CI were revalidated against their exact commits. The final documentation commit and its CI are recorded in PR #99 and the local phase-5 result. All three staging services remain healthy on the rehearsed images; the temporary browser client is absent. Retained test data and limits are listed in the acceptance report, including Chromium/en-US coverage, no separate keyboard/screen-reader walkthrough, and the narrower panel/report checks.
+
+The next step is merging the acceptance documentation and preparing the production brief. The deployment session must establish the actual live/rollback tag, current backup, clean preflight, target-commit CI and owner deployment go. No production deployment or v0.17.0 release is implied by local acceptance.

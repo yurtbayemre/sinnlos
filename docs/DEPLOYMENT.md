@@ -1963,8 +1963,11 @@ republishing may have changed numeric row IDs. Neither script touches quiz
 content, receipts or files. The old release exposes answers and restores its
 previous org-write/media limits; roll-forward cannot undo disclosed answers.
 
-These files prepare the operation. Browser acceptance and the complete image
-rehearsal in the Batch 17 plan remain required before production deployment.
+The [local image rehearsal](batch-17-image-rehearsal.md) and
+[browser acceptance with final review](batch-17-browser-acceptance.md) are complete
+within their documented scope. Before production deployment, the deployment
+session still needs the actual live/rollback tag, a current backup, clean
+preflight, exact-target green CI and the owner's deployment go.
 
 #### Deploying batch 16.1 (fixes from the batch 16 walkthrough)
 
