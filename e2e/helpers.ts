@@ -3,14 +3,16 @@ import { expect, type Page } from "@playwright/test";
 
 export type Account = { email: string; password: string };
 export type Team = { name: string; slug: string; description: string };
+export type TrainingFixture = {
+  course: { title: string; slug: string; documentId: string };
+  lesson: { title: string; documentId: string };
+};
 type Fixtures = {
   runId: string;
   users: { lead: Account; member: Account };
   teams: { editable: Team; readonly: Team };
-  training: {
-    course: { title: string; slug: string; documentId: string };
-    lesson: { title: string; documentId: string };
-  };
+  training: TrainingFixture;
+  exam: TrainingFixture;
 };
 
 export function loadFixtures(): Fixtures {
