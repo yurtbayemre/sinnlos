@@ -8,9 +8,11 @@ import { setTimeout as delay } from "node:timers/promises";
  * @typedef {{id: number, documentId: string, email?: string, provider?: string,
  * confirmed?: boolean, blocked?: boolean, slug?: string, name?: string,
  * description?: string, role?: {type: string}, department?: Row | null,
- * lead?: Row | null, teams?: Row[], members?: Row[]}} Row
+ * lead?: Row | null, teams?: Row[], members?: Row[], title?: string, body?: string,
+ * order?: number, mandatory?: boolean, completionMode?: string, publishedAt?: string | null,
+ * course?: Row | null, quiz?: unknown}} Row
  * @typedef {{
- * documents(uid: string): {create(params: {data: Record<string, unknown>}): Promise<Row>},
+ * documents(uid: string): {create(params: {data: Record<string, unknown>, status?: "published"}): Promise<Row>},
  * db: {query(uid: string): {count(): Promise<number>, findOne(params: Record<string, unknown>): Promise<Row | null>},
  * connection?: {client?: {pool?: {numUsed(): number, numPendingAcquires(): number}}}},
  * plugin(name: string): {service(name: string): {add(data: Record<string, unknown>): Promise<Row>}},
@@ -24,6 +26,9 @@ const fixturePath = "/tmp/e2e-fixtures.json";
 const userUid = "plugin::users-permissions.user";
 const departmentUid = "api::department.department";
 const teamUid = "api::team.team";
+const courseUid = "api::course.course";
+const lessonUid = "api::lesson.lesson";
+const progressUid = "api::lesson-progress.lesson-progress";
 let phase = "environment check";
 /** @type {Cms | undefined} */
 let strapi;
@@ -101,6 +106,10 @@ async function start() {
         documentId: "",
       },
     },
+    training: {
+      course: { title: "E2E Quiz Course", slug: "e2e-quiz-course", documentId: "" },
+      lesson: { title: "E2E Quiz Lesson", documentId: "" },
+    },
   };
   assert.notEqual(
     fixtures.users.lead.password,
@@ -162,7 +171,7 @@ async function start() {
   if (stopping) return;
 
   phase = "fixture creation";
-  for (const uid of [userUid, departmentUid, teamUid]) {
+  for (const uid of [userUid, departmentUid, teamUid, courseUid, lessonUid, progressUid]) {
     assert.equal(await cms.db.query(uid).count(), 0, `Unexpected bootstrap fixtures: ${uid}`);
   }
   const department = await cms.documents(departmentUid).create({
@@ -204,6 +213,32 @@ async function start() {
     });
     fixture.documentId = team.documentId;
   }
+
+  const quiz = [
+    { question: "Which port is used for HTTPS?", options: ["80", "443"], correctIndex: 1 },
+    { question: "Should you report a phishing email?", options: ["Yes", "No"], correctIndex: 0 },
+  ];
+  const course = await cms.documents(courseUid).create({
+    data: {
+      title: fixtures.training.course.title,
+      slug: fixtures.training.course.slug,
+      mandatory: false,
+      completionMode: "quizGate",
+    },
+    status: "published",
+  });
+  fixtures.training.course.documentId = course.documentId;
+  const lesson = await cms.documents(lessonUid).create({
+    data: {
+      title: fixtures.training.lesson.title,
+      body: "Complete this security check before finishing the lesson.",
+      order: 0,
+      course: course.documentId,
+      quiz,
+    },
+    status: "published",
+  });
+  fixtures.training.lesson.documentId = lesson.documentId;
 
   phase = "fixture relationship assertions";
   assert.equal(await cms.db.query(departmentUid).count(), 1, "Expected one department");
@@ -280,6 +315,47 @@ async function start() {
       "Fixture team members differ",
     );
   }
+  const publishedCourse = await cms.db.query(courseUid).findOne({
+    where: { documentId: course.documentId, publishedAt: { $notNull: true } },
+    select: ["title", "slug", "mandatory", "completionMode"],
+  });
+  assert.ok(publishedCourse, "Published fixture course missing");
+  assert.equal(
+    publishedCourse.title,
+    fixtures.training.course.title,
+    "Fixture course title differs",
+  );
+  assert.equal(publishedCourse.slug, fixtures.training.course.slug, "Fixture course slug differs");
+  assert.equal(publishedCourse.mandatory, false, "Fixture course must not be mandatory");
+  assert.equal(publishedCourse.completionMode, "quizGate", "Fixture course must use quizGate");
+  const publishedLesson = await cms.db.query(lessonUid).findOne({
+    where: { documentId: lesson.documentId, publishedAt: { $notNull: true } },
+    select: ["title", "body", "order", "quiz"],
+    populate: { course: { select: ["documentId", "publishedAt"] } },
+  });
+  assert.ok(publishedLesson, "Published fixture lesson missing");
+  assert.equal(
+    publishedLesson.title,
+    fixtures.training.lesson.title,
+    "Fixture lesson title differs",
+  );
+  assert.equal(
+    publishedLesson.body,
+    "Complete this security check before finishing the lesson.",
+    "Fixture lesson body differs",
+  );
+  assert.equal(publishedLesson.order, 0, "Fixture lesson order differs");
+  assert.equal(
+    publishedLesson.course?.documentId,
+    course.documentId,
+    "Fixture lesson course differs",
+  );
+  assert.ok(
+    publishedLesson.course?.publishedAt,
+    "Fixture lesson must reference a published course",
+  );
+  assert.deepEqual(publishedLesson.quiz, quiz, "Fixture lesson quiz differs");
+  assert.equal(await cms.db.query(progressUid).count(), 0, "Fixture lessons must not be completed");
   if (stopping) return;
   writeFileSync(fixturePath, JSON.stringify(fixtures), { mode: 0o600, flag: "wx" });
   phase = "HTTP listener";
@@ -291,7 +367,7 @@ async function start() {
     });
   });
   console.log(
-    "[e2e-cms] Ready: normal bootstrap and fixture assertions passed (1 department, 2 users, 2 teams).",
+    "[e2e-cms] Ready: normal bootstrap and fixture assertions passed (1 department, 2 users, 2 teams, 1 published quiz course and lesson).",
   );
 }
 

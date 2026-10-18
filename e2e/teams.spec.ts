@@ -1,28 +1,8 @@
-import { readFileSync } from "node:fs";
 import { expect, test, type Page } from "@playwright/test";
-
-type Account = { email: string; password: string };
-type Team = { name: string; slug: string; description: string };
-type Fixtures = {
-  runId: string;
-  users: { lead: Account; member: Account };
-  teams: { editable: Team; readonly: Team };
-};
-
-function loadFixtures(): Fixtures {
-  const fixturePath = process.env.SINNLOS_E2E_FIXTURES;
-  if (!fixturePath)
-    throw new Error("Run this test through pnpm test:e2e to create fresh fixtures.");
-  return JSON.parse(readFileSync(fixturePath, "utf8"));
-}
+import { loadFixtures, signIn, type Account, type Team } from "./helpers";
 
 async function signInAndOpenTeam(page: Page, account: Account, team: Team) {
-  await page.goto("/sign-in");
-  await page.getByLabel("Email", { exact: true }).fill(account.email);
-  await page.getByLabel("Password", { exact: true }).fill(account.password);
-  await page.getByRole("button", { name: "Sign in", exact: true }).click();
-  await expect(page).toHaveURL("/");
-  await expect(page.getByRole("banner").getByText(account.email, { exact: true })).toBeVisible();
+  await signIn(page, account);
   await page
     .getByRole("navigation", { name: "Main navigation" })
     .getByRole("link", { name: "Teams", exact: true })

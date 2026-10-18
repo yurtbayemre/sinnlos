@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 
 const script = fileURLToPath(new URL("./ci-scope.mjs", import.meta.url));
 
-test("CI scopes use the whole change and keep the team E2E exclusions narrow", (t) => {
+test("CI scopes use the whole change and keep the browser E2E exclusions narrow", (t) => {
   const temp = mkdtempSync(join(tmpdir(), "sinnlos-ci-scope-"));
   t.after(() => rmSync(temp, { recursive: true, force: true }));
   const repo = join(temp, "repo");

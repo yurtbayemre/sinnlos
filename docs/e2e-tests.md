@@ -1,11 +1,12 @@
 # Browser E2E tests
 
-The Teams pilot follows the [E2E plan](./plan-e2e-tests.md). Tooling, the
-isolated runtime and both browser cases run locally and on GitHub. The two-run
-local acceptance and the first complete hosted run passed. See the
-[hosted evidence](./plan-e2e-tests.md#github-abnahme)
-for CI links, scope probes, failure artifacts and cold-build timings.
-This is Teams coverage, not a full Batch 17 browser acceptance.
+The suite covers team editing, member read-only access and quiz completion.
+It uses one isolated runtime and three independent browser cases. The
+[Teams pilot](./plan-e2e-tests.md#github-abnahme) passed local and hosted
+acceptance and is merged into main. The
+[quiz extension](./plan-e2e-quiz.md) records its separate implementation and
+validation status. This suite is a focused browser check, not a complete
+Batch 17 browser acceptance.
 
 ## Prerequisites and commands
 
@@ -42,15 +43,24 @@ must show the unchanged description. A generic error page does not pass;
 the HTTP status alone is insufficient because Next.js can stream status 200
 before rendering the not-found view.
 
-Both cases live in `e2e/teams.spec.ts` and share only fixture reading and UI
-login/navigation code. They assert the signed-in email and use separate
-browser sessions and team data; neither depends on the other running first.
+The `training-quiz-completion` case in `e2e/training.spec.ts` signs in as a
+member and opens a published, optional `quizGate` course through Training.
+Its two questions have different correct option indices. Missing and wrong
+answers keep completion locked; correct feedback alone does not persist a
+receipt. After explicitly completing the lesson, a full reload must show a
+dated completion, and both the course detail and overview must show Completed.
 
-To run either case alone against a new disposable stack:
+The two Teams cases live in `e2e/teams.spec.ts`. All three cases reuse only
+fixture reading and visible-form login from `e2e/helpers.ts`, including the
+signed-in email assertion. They use fresh browser sessions and independent
+mutable targets; the quiz case does not modify the teams.
+
+To run any case alone against a new disposable stack:
 
 ```bash
 pnpm test:e2e --grep teams-edit-description
 pnpm test:e2e --grep teams-member-read-only
+pnpm test:e2e --grep training-quiz-completion
 ```
 
 `check:setup` is a runtime smoke check, not a browser E2E pass. An empty
@@ -62,7 +72,7 @@ runner tests after Vitest. App compilation and Vitest collection stay separate.
 
 ## CI execution and scope
 
-The `e2e · teams` job in `.github/workflows/ci.yml` runs on Ubuntu for
+The `e2e · browser` job in `.github/workflows/ci.yml` runs on Ubuntu for
 relevant pull requests, pushes to `main`, and every manual workflow run.
 It installs the pinned dependencies and Chromium with its system libraries,
 then runs the same `pnpm test:e2e` entry point. Typecheck and lint already
@@ -74,7 +84,7 @@ are `docs/**/*.md` and these two module-local files:
 - `apps/web/src/app/(app)/polls/page.tsx`
 - `apps/web/src/app/(app)/polls/loading.tsx`
 
-Teams, shared helpers, auth, layouts, UI, translations, dependencies,
+Teams, Training, shared helpers, auth, layouts, UI, translations, dependencies,
 CMS, E2E files and unknown paths run E2E. New Poll files are not automatically
 excluded. Both sides of renames and the whole PR diff are considered.
 A failed scope calculation fails the existing build check.
@@ -94,7 +104,7 @@ tree before cleanup finishes; canceled runs do not upload artifacts. The
 GitHub-hosted VM is disposable. See the
 [GitHub cancellation sequence](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-cancellation).
 
-After success or failure, `e2e-teams-<run_id>-<run_attempt>` contains only
+After success or failure, `e2e-browser-<run_id>-<run_attempt>` contains only
 `.e2e/report/`, `.e2e/results/` and `.e2e/logs/`, retained for seven days.
 `include-hidden-files` permits the `.e2e` parent, while the explicit paths
 exclude `.e2e/runs/`, private env/fixture files and separate auth files.
@@ -110,9 +120,15 @@ Known generated secrets are redacted from the runner logs before upload.
 As checked on 2026-10-18, `main` has no branch protection and no applicable
 branch rules. This check therefore reports CI failures but is not an enforced
 merge requirement. No repository protection settings were changed. Hosted
-acceptance passed: full green pilot run, docs-only skip, deliberate red E2E
+acceptance of the Teams pilot passed: full green pilot run, docs-only skip, deliberate red E2E
 with downloaded and inspected artifacts, then green E2E after restoring the
-test. The [plan records each commit and CI run](./plan-e2e-tests.md#github-abnahme).
+test. The [pilot plan records each commit and CI run](./plan-e2e-tests.md#github-abnahme).
+Its historical job/artifacts were named `e2e · teams` / `e2e-teams-…`.
+The quiz extension's [hosted run](https://github.com/yurtbayemre/sinnlos/actions/runs/39120220734)
+passed all three browser cases. Its downloaded `e2e-browser-39120220734-1`
+artifact contains the report, results and redacted logs; private env and
+fixture files are excluded, and cleanup succeeded. The
+[quiz plan records the implementation and acceptance evidence](./plan-e2e-quiz.md#nachweise).
 
 ## One disposable stack per run
 
@@ -142,15 +158,19 @@ Europe/Berlin, and the web locale is English.
 `e2e/cms-start.mjs` refuses a nonempty database before loading Strapi. It uses
 the normal User Service and Document Service to create one department, two
 confirmed users (`team_lead`, `member`) and two teams. Only the editable team
-has a lead; the member belongs to both. It asserts all fixture relationships
-before opening the HTTP listener. The runner then checks the web sign-in
+has a lead; the member belongs to both. A published optional `quizGate` course
+contains one published lesson with two questions and no pre-created progress.
+The starter asserts publication, course/lesson links, quiz contents and fixture
+relationships before opening the HTTP listener. The runner then checks the web sign-in
 page/providers and verifies both users' real CMS login and `/api/me` roles.
 These preflight JWTs stay in memory; browser cases must log in through the UI.
 
 Playwright receives `SINNLOS_E2E_BASE_URL` and `SINNLOS_E2E_FIXTURES` from
 the runner. The private fixture JSON contains `runId`, `users.lead/member`
 (email/password/documentId) and `teams.editable/readonly`
-(slug/name/description/documentId). Tests must not print those credentials.
+(slug/name/description/documentId), plus `training.course` (title/slug/documentId)
+and `training.lesson` (title/documentId). The quiz answer key stays in the CMS
+fixture setup and is not exported to that file. Tests must not print credentials.
 The config selects Chromium, one worker, no retries, English, a 1280×720
 viewport, a 30-second test timeout and a five-minute test-run deadline.
 CI rejects `test.only`.
