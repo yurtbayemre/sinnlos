@@ -758,7 +758,7 @@ pnpm typecheck:tests   # type-check every *.test.ts (tsconfig.test.json, tsconfi
 pnpm test              # Vitest unit tests (apps, packages, infra), then E2E runner checks
 pnpm test:tz           # the same suite under TZ=UTC, Europe/Berlin and Pacific/Auckland
 pnpm test:integration  # build:domain, then the real cms booted in process, per role, over HTTP
-pnpm test:e2e          # disposable Docker stack + Chromium: teams and all three quiz modes E2E
+pnpm test:e2e          # disposable Docker stack + Chromium: teams, three quiz modes and authoring
 pnpm format            # prettier --write over the tree
 pnpm format:check      # prettier --check (blocking in CI)
 ```
@@ -786,8 +786,8 @@ at `critical`, advisory at `high`), `datetime` (`pnpm test:tz` with Postgres
 16), `integration` (`pnpm test:integration` on SQLite and Postgres 16),
 `infra` (shellcheck, `docker compose config` of every compose variant) and
 `images` (both Dockerfiles built, not pushed), plus `e2e · browser` (Chromium
-testing team editing/permissions and all three quiz modes against its own disposable
-CMS/web/Postgres stack). Docs-only changes under
+testing team editing/permissions, all three quiz modes and training authoring
+in six cases against its own disposable CMS/web/Postgres stack). Docs-only changes under
 `docs/**/*.md` skip application/database/E2E runs. E2E has its own path scope;
 relevant web-only changes start its private DB without enabling the other
 database suites. See [E2E scope and artifacts](./docs/e2e-tests.md#ci-execution-and-scope).
