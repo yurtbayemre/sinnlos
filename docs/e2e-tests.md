@@ -124,8 +124,11 @@ acceptance of the Teams pilot passed: full green pilot run, docs-only skip, deli
 with downloaded and inspected artifacts, then green E2E after restoring the
 test. The [pilot plan records each commit and CI run](./plan-e2e-tests.md#github-abnahme).
 Its historical job/artifacts were named `e2e · teams` / `e2e-teams-…`.
-The quiz extension uses the same job with the broader browser name; its hosted
-acceptance follows its first push.
+The quiz extension's [hosted run](https://github.com/yurtbayemre/sinnlos/actions/runs/39120220734)
+passed all three browser cases. Its downloaded `e2e-browser-39120220734-1`
+artifact contains the report, results and redacted logs; private env and
+fixture files are excluded, and cleanup succeeded. The
+[quiz plan records the implementation and acceptance evidence](./plan-e2e-quiz.md#nachweise).
 
 ## One disposable stack per run
 

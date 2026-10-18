@@ -1,6 +1,6 @@
 # E2E-Erweiterung: Quiz-Abschluss im Browser
 
-Stand: 18.10.2026. Basis: `main` nach Merge von PR #93 (`f7f74c9`). Der Teams-Pilot ist abgeschlossen. Diese Erweiterung nutzt denselben Playwright-/Docker-Stack und ergänzt genau einen Browserfall `training-quiz-completion`. Status: alle drei Schritte lokal umgesetzt und abgenommen; die Quiz-Erweiterung ist noch nicht gepusht.
+Stand: 18.10.2026. Basis: `main` nach Merge von PR #93 (`f7f74c9`). Der Teams-Pilot ist abgeschlossen. Diese Erweiterung nutzt denselben Playwright-/Docker-Stack und ergänzt genau einen Browserfall `training-quiz-completion`. Status: alle drei Schritte umgesetzt, lokal und in GitHub abgenommen. Die Quiz-Erweiterung ist als [PR #95](https://github.com/yurtbayemre/sinnlos/pull/95) gepusht und noch nicht gemergt.
 
 ## Umfang
 
@@ -33,7 +33,7 @@ Abnahme: Der Fall besteht allein auf frischen Daten. Eine vorübergehende Störu
 - [x] Den bestehenden CI-Job und Artefaktnamen auf Browser-E2E verallgemeinern; alle drei Fälle laufen mit einem Worker und ohne Wiederholung im bestehenden Budget. Scope und Datenbankauslöser bleiben fachlich unverändert.
 - [x] Anleitung und README um Quiz-Ablauf und Einzelaufruf ergänzen; den alten Teams-Plan als abgeschlossene Historie behalten.
 - [x] Alle drei Fälle zweimal auf jeweils frischen Daten ausführen, Typecheck/Lint/Format und die betroffenen CI-Prüfungen ausführen. Cleanup sowie Fehlerbericht/Screenshot/Trace der Störungsprobe prüfen.
-- [x] Unabhängigen Review und lokale Commit-/Laufnachweise dokumentieren. Neue Implementierung zunächst lokal abschließen; ein späterer Push liefert den GitHub-Nachweis für die Quiz-Erweiterung.
+- [x] Unabhängigen Review sowie lokale und GitHub-Commit-/Laufnachweise dokumentieren. Die Implementierung wurde zuerst lokal abgeschlossen und anschließend als PR #95 auf GitHub abgenommen.
 
 ## Nachweise
 
@@ -44,5 +44,7 @@ Abnahme: Der Fall besteht allein auf frischen Daten. Eine vorübergehende Störu
 - Schritt 3: Zwei aufeinanderfolgende vollständige Läufe unter `CI=true`, einem Worker und ohne Wiederholung bestanden mit jeweils drei Browserfällen: `sinnlos-e2e-e75633725f4889b2489ac4dd` (14,7 Sekunden) und `sinnlos-e2e-5f54760a204ff095cd7d68ce` (14,6 Sekunden). Beide verwendeten neue Datenbanken und Testsitzungen. Die nativen Login-Limits blieben unverändert; keine 429-Antwort trat auf.
 - Alle fünf Läufe dieser Erweiterung hinterließen keine eigenen Container, Netzwerke, privaten Laufdateien oder CMS-/Web-Image-Tags. Der negative Bericht, Screenshot und gültige Trace sind lokal gesichert; die 15 Credential-Felder der Containerdiagnose sind redigiert. Der Screenshot zeigt nach Reload wieder das gesperrte Quiz statt eines gespeicherten Abschlusses.
 - E2E-Typecheck und Lint, fünf Runner-Tests, die Git-basierte CI-Scope-Suite, 21 Build-/Action-Pin-Tests, Actionlint und die Formatprüfung aller betroffenen Dateien sind grün. Der unabhängige Review fand keine bestätigten Probleme. Anwendungscode, Domain-Regeln, Abhängigkeiten und Lockfile bleiben unverändert; deren vollständige Unit-/HTTP-Basis ist durch den grünen Main-Lauf belegt.
-- Lokale Commits vor dem Abschluss: `7ae0620` (Plan), `1ba19bf` (Fixtures und gemeinsamer Login), `9f77d09` (Quizfall und Persistenzprobe). Der CI-Job und neue Artefakte heißen künftig `e2e · browser` und `e2e-browser-<run_id>-<run_attempt>`; nur die Namen ändern sich, Scope und Laufzeitbudgets bleiben erhalten.
-- Offen ist der GitHub-Nachweis der Quiz-Erweiterung nach ihrem Push. Es gibt noch keinen Quiz-PR oder Merge dieser Erweiterung; Staging und Produktion wurden nicht verändert.
+- Implementierungscommits: `7ae0620` (Plan), `1ba19bf` (Fixtures und gemeinsamer Login), `9f77d09` (Quizfall und Persistenzprobe), `00f7af8` (CI-Namen und lokale Abnahme). Der CI-Job und neue Artefakte heißen `e2e · browser` und `e2e-browser-<run_id>-<run_attempt>`; nur die Namen ändern sich, Scope und Laufzeitbudgets bleiben erhalten.
+- GitHub-Abnahme: [CI-Lauf 39120220734](https://github.com/yurtbayemre/sinnlos/actions/runs/39120220734) auf `00f7af82776a19c8734dc237b2e6840314db0b25`, Versuch 1, alle acht CI-Jobs grün. Alle drei Browserfälle bestanden in 18,1 Sekunden mit einem Worker; der dekodierte HTML-Bericht bestätigt genau einen erfolgreichen Versuch pro Fall, `retry: 0`, keine Fehler, Flakes oder übersprungenen Tests. Der Quizfall dauerte 6,388 Sekunden.
+- Das heruntergeladene [Artefakt `e2e-browser-39120220734-1`](https://github.com/yurtbayemre/sinnlos/actions/runs/39120220734/artifacts/12134445234) enthält ausschließlich Bericht, Ergebnisse und Logs. Keine privaten Env-/Fixture-Dateien; alle 15 Credential-Felder der Containerdiagnose sind redigiert. Cleanup der drei Container, des Netzwerks und beider Image-Tags ist bestätigt; die abschließende Containerprüfung war leer. Aufbewahrung bis 25.10.2026.
+- Die GitHub-Abnahme ist abgeschlossen. Offen bleibt der Merge von PR #95; Staging und Produktion wurden nicht verändert.
