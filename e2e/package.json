@@ -4,9 +4,11 @@
   "version": "0.1.0",
   "description": "Browser E2E tests for the Sinnlos intranet",
   "scripts": {
-    "test": "playwright test",
+    "test": "node run.mjs",
     "lint": "eslint .",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "check:setup": "node run.mjs --check",
+    "test:runner": "node --test run.test.mjs"
   },
   "devDependencies": {
     "@playwright/test": "1.64.1",

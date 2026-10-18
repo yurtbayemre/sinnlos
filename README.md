@@ -755,10 +755,10 @@ pnpm start             # every workspace's start script in parallel (strapi star
 pnpm lint              # ESLint in every workspace
 pnpm typecheck         # build:domain, tsc for all workspaces, then typecheck:tests
 pnpm typecheck:tests   # type-check every *.test.ts (tsconfig.test.json, tsconfig.test.cms.json)
-pnpm test              # vitest unit tests (apps, packages, infra)
+pnpm test              # Vitest unit tests (apps, packages, infra), then E2E runner checks
 pnpm test:tz           # the same suite under TZ=UTC, Europe/Berlin and Pacific/Auckland
 pnpm test:integration  # build:domain, then the real cms booted in process, per role, over HTTP
-pnpm test:e2e          # Playwright scaffold; fails with No tests found until browser cases land
+pnpm test:e2e          # disposable Docker stack + Playwright; No tests found until browser cases land
 pnpm format            # prettier --write over the tree
 pnpm format:check      # prettier --check (blocking in CI)
 ```

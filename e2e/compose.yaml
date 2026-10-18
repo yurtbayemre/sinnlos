@@ -1,0 +1,67 @@
+# Per-run project name and env files are supplied only by run.mjs.
+services:
+  db:
+    image: postgres:16-alpine
+    env_file: ${E2E_RUNTIME:?}/db.env
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sinnlos_e2e -d sinnlos_e2e"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  cms:
+    image: ${E2E_RUN_ID:?}-cms
+    build:
+      context: ..
+      dockerfile: apps/cms/Dockerfile
+    init: true
+    entrypoint: ["node", "/e2e/cms-start.mjs"]
+    command: []
+    env_file: ${E2E_RUNTIME:?}/cms.env
+    volumes:
+      - type: bind
+        source: ./cms-start.mjs
+        target: /e2e/cms-start.mjs
+        read_only: true
+    ports:
+      - "127.0.0.1::1337"
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:1337/_health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 2s
+      timeout: 3s
+      retries: 60
+
+  web:
+    image: ${E2E_RUN_ID:?}-web
+    build:
+      context: ..
+      dockerfile: apps/web/Dockerfile
+    init: true
+    env_file: ${E2E_RUNTIME:?}/web.env
+    ports:
+      - "127.0.0.1:${E2E_WEB_PORT:?}:3000"
+    depends_on:
+      cms:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3000/sign-in').then(r=>process.exit(r.status===200?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 2s
+      timeout: 3s
+      retries: 30

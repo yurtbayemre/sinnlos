@@ -1,6 +1,6 @@
 # Implementierungsplan für automatische E2E Tests
 
-Stand: 18.10.2026. Ausgangspunkt: Main `c2bce321`, nach dem Merge von Batch 17 und der Rollback-Rehearsal. Status: Schritt 1 umgesetzt; Schritte 2–6 sind offen.
+Stand: 18.10.2026. Ausgangspunkt: Main `c2bce321`, nach dem Merge von Batch 17 und der Rollback-Rehearsal. Status: Schritte 1–2 umgesetzt; Schritte 3–6 sind offen.
 
 Der erste Pilot prüft das Modul **Teams** im Browser: Ein Team-Lead ändert die Beschreibung seines Teams, und ein Mitglied kann den gespeicherten Text lesen. Zwei Tests sollen automatisch in der CI laufen und die Strecke vom sichtbaren Login über Next.js und Strapi bis zur Datenbank abdecken.
 
@@ -30,13 +30,13 @@ Wir arbeiten die nummerierten Schritte einzeln ab. Nach jedem Schritt werden die
 
 Ein kleiner, separat ausgeführter Teststarter lädt das gebaute CMS, legt die Fixtures über Strapis User Service und Document Service an und öffnet anschließend den HTTP-Server. Er nutzt die vorhandenen Compiler-/Bootstrap-Muster. Das Vitest-Harness mit seinem `inject`-Kontext wird dafür nicht in ein neues allgemeines Testframework umgebaut.
 
-- [ ] PostgreSQL 16 für den Lauf isoliert starten. Der Runner erzeugt und kennt seine eigene Datenbank, Ports und Prozess-/Container-Identitäten; beliebige externe Datenbankadressen sind kein Eingang für den Piloten.
-- [ ] Die Anwendung einmal pro Lauf bauen und CMS/Web mit begrenzten Bereitschaftsprüfungen starten. Keine Übernahme bereits laufender Entwicklungs- oder Staging-Server.
-- [ ] Eine Abteilung, zwei bestätigte lokale Benutzer (`team_lead`, `member`) und je Browserfall ein eigenes Team anlegen. Den Lead nur dem Team des Erfolgstests zuweisen: `team.lead` ist eine `oneToOne`-Relation. Das Team des Rechtefalls bleibt ohne Lead; das Mitglied wird beiden Teams zugeordnet. Der Ausgangstext unterscheidet sich ausdrücklich vom späteren Testtext.
-- [ ] Zufällige Testpasswörter und gültige Secrets erzeugen. Keine vorhandenen Projekt-`.env`-Dateien laden; auch Next.js darf keine lokale Konfiguration unbeabsichtigt übernehmen. Laufdaten nur temporär speichern und Zugangsdaten nicht in Runner-Logs ausgeben. Für die Aufzeichnung temporärer Testsitzungen gilt die Artefaktregel in Schritt 5.
-- [ ] `DEMO_MODE=0`, `SEED_DEMO_DATA=0`, `ENTRA_ENABLED=0`, `AUTH_LOCAL_ENABLED=1`, `TZ=UTC` und feste App-/Browser-Zeitzone setzen. Cron-/Mail-Nebeneffekte abschalten; die getestete Authentifizierung und Rechteprüfung bleiben aktiv.
-- [ ] `AUTH_URL` exakt auf die Browser-Origin und `STRAPI_URL` auf den CMS-Port setzen. `AUTH_TRUST_HOST` nur für diese isolierte lokale Umgebung setzen. Keine Abhängigkeit von `sinnlos.b12i.test`, Traefik oder Produktionszertifikaten.
-- [ ] Bei Erfolg, Startfehler und Abbruch alle eigenen Prozesse stoppen und nur die eigenen Daten entfernen. Vor Bereinigung Identität und Zielpfade prüfen. Diagnoseausgaben bleiben erhalten; Projektsecrets, private Laufdateien und separate Auth-Dateien werden nicht als CI-Artefakte hochgeladen.
+- [x] PostgreSQL 16 für den Lauf isoliert starten. Der Runner erzeugt und kennt seine eigene Datenbank, Ports und Prozess-/Container-Identitäten; beliebige externe Datenbankadressen sind kein Eingang für den Piloten.
+- [x] Die Anwendung einmal pro Lauf bauen und CMS/Web mit begrenzten Bereitschaftsprüfungen starten. Keine Übernahme bereits laufender Entwicklungs- oder Staging-Server.
+- [x] Eine Abteilung, zwei bestätigte lokale Benutzer (`team_lead`, `member`) und je Browserfall ein eigenes Team anlegen. Den Lead nur dem Team des Erfolgstests zuweisen: `team.lead` ist eine `oneToOne`-Relation. Das Team des Rechtefalls bleibt ohne Lead; das Mitglied wird beiden Teams zugeordnet. Der Ausgangstext unterscheidet sich ausdrücklich vom späteren Testtext.
+- [x] Zufällige Testpasswörter und gültige Secrets erzeugen. Keine vorhandenen Projekt-`.env`-Dateien laden; auch Next.js darf keine lokale Konfiguration unbeabsichtigt übernehmen. Laufdaten nur temporär speichern und Zugangsdaten nicht in Runner-Logs ausgeben. Für die Aufzeichnung temporärer Testsitzungen gilt die Artefaktregel in Schritt 5.
+- [x] `DEMO_MODE=0`, `SEED_DEMO_DATA=0`, `ENTRA_ENABLED=0`, `AUTH_LOCAL_ENABLED=1`, `TZ=UTC` und feste App-/Browser-Zeitzone setzen. Cron-/Mail-Nebeneffekte abschalten; die getestete Authentifizierung und Rechteprüfung bleiben aktiv.
+- [x] `AUTH_URL` exakt auf die Browser-Origin und `STRAPI_URL` auf den CMS-Port setzen. `AUTH_TRUST_HOST` nur für diese isolierte lokale Umgebung setzen. Keine Abhängigkeit von `sinnlos.b12i.test`, Traefik oder Produktionszertifikaten.
+- [x] Bei Erfolg, Startfehler und Abbruch alle eigenen Prozesse stoppen und nur die eigenen Daten entfernen. Vor Bereinigung Identität und Zielpfade prüfen. Diagnoseausgaben bleiben erhalten; Projektsecrets, private Laufdateien und separate Auth-Dateien werden nicht als CI-Artefakte hochgeladen.
 
 **Abnahme:** Zwei Start-/Stop-Proben mit frischer Datenbank funktionieren. Eine absichtlich fehlgeschlagene Bereitschaftsprüfung endet mit Fehlercode und brauchbarem Log; der Runner hinterlässt keine laufenden eigenen Dienste. Testbenutzer, Teamzuordnung und Bereitschaft werden konkret geprüft.
 
@@ -125,7 +125,7 @@ Die Liste grenzt die Arbeiten ein; beim Umsetzen wird der kleinste passende Zusc
 | Schritt                            | Status   | Nachweis                                     |
 | ---------------------------------- | -------- | -------------------------------------------- |
 | 1 Werkzeug und Projektanbindung    | Erledigt | Nachweise unten; [Anleitung](./e2e-tests.md) |
-| 2 Isolierte Testumgebung           | Offen    | —                                            |
+| 2 Isolierte Testumgebung           | Erledigt | Nachweise unten; nur lokal                   |
 | 3 Beschreibung bearbeiten          | Offen    | —                                            |
 | 4 Mitglied ohne Bearbeitungsrechte | Offen    | —                                            |
 | 5 Automatische CI Ausführung       | Offen    | —                                            |
@@ -140,6 +140,18 @@ Die Liste grenzt die Arbeiten ein; beim Umsetzen wird der kleinste passende Zusc
 - Temporäre, anschließend entfernte Negativproben bestätigen: Typecheck und Lint erfassen `*.spec.ts`, CI verweigert `test.only`, Vitest sammelt die Browserfälle nicht. `pnpm test:e2e` endet erwartungsgemäß mit `No tests found` und Status 1.
 - Git und Prettier ignorieren `.e2e/`. Beide Docker-Abhängigkeitsstufen wurden mit gefrorener Lockfile gebaut und auf fehlende Playwrightpakete, Browsercache und E2E-Quellen geprüft. Auch beide vollständigen App-Images wurden erfolgreich gebaut und auf dieselben Ausschlüsse geprüft.
 - Echte Browserabläufe und ein E2E-CI-Job sind noch nicht enthalten; sie gehören zu den folgenden Schritten.
+
+### Nachweise zu Schritt 2 (18.10.2026, lokal)
+
+- `e2e/run.mjs` und `e2e/compose.yaml` bauen die bestehenden Produktions-Dockerfiles je Lauf und starten ausschließlich ein eigenes Compose-Projekt mit PostgreSQL 16, CMS und Web. Die Datenbank liegt in tmpfs; CMS/Web veröffentlichen nur eigene Loopback-Ports. Es gibt keine zusätzliche Compiler-Implementierung oder Änderung am Vitest-Harness.
+- `e2e/cms-start.mjs` verweigert eine nicht leere Datenbank vor Bootstrap, erzeugt die vereinbarten Fixtures über die vorhandenen Strapi-Services und prüft Rollen, Bestätigung, Abteilung und Teambeziehungen. Erst danach öffnet er HTTP. Echte CMS-Logins und `/api/me` bestätigen beide Rollen; die Web-Seite und der lokale Auth-Provider sind erreichbar.
+- Mehrere frische `pnpm --filter @sinnlos/e2e check:setup`-Läufe bestanden einschließlich Bereinigung. Die wiederholten Prüfungen verwenden jeweils neue Datenbanken, Projekte, Ports und Zugangsdaten.
+- Eine temporär auf einen unerreichbaren Erfolgsstatus gesetzte Web-Readiness ließ den Start mit Status 1 scheitern; die Störung wurde zurückgenommen. Ein echter Strg+C-Abbruch während des Starts führte ebenfalls zur Bereinigung. Container, Netzwerk und private Laufdateien fehlten danach; Diagnose-Logs blieben erhalten. Das gemeinsame PostgreSQL-Image wurde nicht entfernt.
+- Der reguläre Einstieg `pnpm test:e2e` startet denselben frischen Stack, endet mangels Browserfällen erwartungsgemäß mit `No tests found` und Status 1 und bereinigt danach ebenfalls alle eigenen Ressourcen.
+- Die fünf Node-Tests prüfen Umgebungstrennung, Secret-Redaktion, Fremd-Container-/Fremdpfad-Abwehr und echte HTTP-Readiness-Fehler/Timeouts. Sie sind in `pnpm test` eingebunden. Typecheck und Lint des gesamten Repositories bestanden; Lint hat nur die vorhandenen App-Warnungen.
+- Der Standard-Bridge des eigenen Compose-Projekts wird verwendet: `internal: true` ließ auf dem geprüften Docker Desktop zwar interne Healthchecks bestehen, verhinderte aber den Host-Zugriff auf den veröffentlichten Web-Port. Keine Verbindung zu bestehenden Projektnetzwerken; SMTP, Digests, App- und Plugin-Crons sind deaktiviert.
+- Laufdaten liegen ausschließlich unter `.e2e/`; private Env-/Fixturedateien werden gelöscht, bekannte zufällige Secrets in gespeicherten Logs redigiert. Bei hartem Prozessabbruch oder nicht erreichbarem Docker-Daemon kann eine manuelle Bereinigung anhand der protokollierten Run-ID nötig sein; siehe [Anleitung](./e2e-tests.md).
+- Auf Wunsch bleibt dieser Schritt lokal: kein Push, keine Änderung an Staging oder Produktion. Browserfälle und E2E-CI folgen weiterhin erst in Schritten 3–5.
 
 ## Technische Bezugspunkte
 

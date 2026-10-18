@@ -12,7 +12,7 @@
     "lint": "pnpm -r lint",
     "typecheck": "pnpm build:domain && pnpm -r typecheck && pnpm typecheck:tests",
     "typecheck:tests": "pnpm --filter @sinnlos/web exec tsc -p ../../tsconfig.test.json && pnpm --filter @sinnlos/cms exec tsc -p ../../tsconfig.test.cms.json",
-    "test": "vitest run",
+    "test": "vitest run && pnpm --filter @sinnlos/e2e test:runner",
     "test:tz": "node scripts/test-tz.mjs",
     "test:integration": "pnpm build:domain && vitest run --config vitest.integration.config.ts",
     "format": "prettier --write .",

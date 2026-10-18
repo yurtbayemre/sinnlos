@@ -13,6 +13,7 @@ export default defineConfig({
   reporter: [["list"], ["html", { outputFolder: "../.e2e/report", open: "never" }]],
   outputDir: "../.e2e/results",
   use: {
+    baseURL: process.env.SINNLOS_E2E_BASE_URL,
     browserName: "chromium",
     viewport: { width: 1280, height: 720 },
     locale: "en-US",

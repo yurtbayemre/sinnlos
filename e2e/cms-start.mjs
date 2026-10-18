@@ -1,0 +1,336 @@
+import assert, { AssertionError } from "node:assert/strict";
+import { existsSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
+import { join } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
+
+/**
+ * @typedef {{id: number, documentId: string, email?: string, provider?: string,
+ * confirmed?: boolean, blocked?: boolean, slug?: string, name?: string,
+ * description?: string, role?: {type: string}, department?: Row | null,
+ * lead?: Row | null, teams?: Row[], members?: Row[]}} Row
+ * @typedef {{
+ * documents(uid: string): {create(params: {data: Record<string, unknown>}): Promise<Row>},
+ * db: {query(uid: string): {count(): Promise<number>, findOne(params: Record<string, unknown>): Promise<Row | null>},
+ * connection?: {client?: {pool?: {numUsed(): number, numPendingAcquires(): number}}}},
+ * plugin(name: string): {service(name: string): {add(data: Record<string, unknown>): Promise<Row>}},
+ * log: {level: string}, cron: {stop(): void}, load(): Promise<unknown>, destroy(): Promise<void>,
+ * server: {httpServer: import("node:http").Server, listen(port: number, host: string, callback: () => void): unknown}
+ * }} Cms
+ */
+
+const appDir = "/app/apps/cms";
+const fixturePath = "/tmp/e2e-fixtures.json";
+const userUid = "plugin::users-permissions.user";
+const departmentUid = "api::department.department";
+const teamUid = "api::team.team";
+let phase = "environment check";
+/** @type {Cms | undefined} */
+let strapi;
+let stopping = false;
+
+/** @param {string} key */
+function fixturePassword(key) {
+  const value = process.env[key];
+  assert.ok(
+    typeof value === "string" && /^[a-f0-9]{64}$/.test(value),
+    `${key} must be 32 random bytes encoded as hex`,
+  );
+  return value;
+}
+
+async function start() {
+  assert.equal(process.cwd(), appDir, "Run this starter only in the CMS image");
+  assert.ok(existsSync("/.dockerenv"), "The E2E starter requires its disposable Docker container");
+  const expected = {
+    NODE_ENV: "production",
+    TZ: "UTC",
+    DATABASE_CLIENT: "postgres",
+    DATABASE_HOST: "db",
+    DATABASE_NAME: "sinnlos_e2e",
+    DATABASE_USERNAME: "sinnlos_e2e",
+    ENV_PATH: "/tmp/no-such-e2e.env",
+    CRON_ENABLED: "0",
+    DIGESTS_DISABLED: "1",
+    LIVE_EVENTS_DISABLED: "1",
+    ENTRA_ENABLED: "0",
+    AUTH_LOCAL_ENABLED: "1",
+    SEED_DEMO_DATA: "0",
+    STRAPI_TELEMETRY_DISABLED: "true",
+    HOST: "0.0.0.0",
+    PORT: "1337",
+  };
+  for (const [key, value] of Object.entries(expected)) {
+    assert.equal(process.env[key], value, `Unexpected E2E setting: ${key}`);
+  }
+  assert.ok(!process.env.DATABASE_URL, "DATABASE_URL is not supported by the E2E starter");
+  assert.equal(process.env.DATABASE_SCHEMA ?? "public", "public", "E2E uses a fresh public schema");
+  assert.ok(process.env.DATABASE_PASSWORD, "The disposable database requires a password");
+  assert.ok(!existsSync("/tmp/no-such-e2e.env"), "The E2E dotenv path must not exist");
+  assert.ok(!existsSync(fixturePath), "Fixtures already exist; start a fresh E2E run");
+  const runId = process.env.E2E_RUN_ID;
+  assert.ok(
+    typeof runId === "string" && /^sinnlos-e2e-[a-f0-9]{24}$/.test(runId),
+    "Missing E2E runner identity",
+  );
+  const fixtures = {
+    runId,
+    users: {
+      lead: {
+        email: "lead@e2e.test",
+        password: fixturePassword("E2E_LEAD_PASSWORD"),
+        documentId: "",
+      },
+      member: {
+        email: "member@e2e.test",
+        password: fixturePassword("E2E_MEMBER_PASSWORD"),
+        documentId: "",
+      },
+    },
+    teams: {
+      editable: {
+        slug: "e2e-editable",
+        name: "E2E Editable Team",
+        description: "Initial editable team description.",
+        documentId: "",
+      },
+      readonly: {
+        slug: "e2e-readonly",
+        name: "E2E Readonly Team",
+        description: "Initial readonly team description.",
+        documentId: "",
+      },
+    },
+  };
+  assert.notEqual(
+    fixtures.users.lead.password,
+    fixtures.users.member.password,
+    "Each fixture user needs a separate password",
+  );
+
+  const requireFromCms = createRequire(join(appDir, "package.json"));
+  const { Client } = requireFromCms("pg");
+  const db = new Client({
+    host: process.env.DATABASE_HOST,
+    port: Number(process.env.DATABASE_PORT ?? "5432"),
+    database: process.env.DATABASE_NAME,
+    user: process.env.DATABASE_USERNAME,
+    password: process.env.DATABASE_PASSWORD,
+    application_name: runId,
+    connectionTimeoutMillis: 5_000,
+  });
+  phase = "empty database check";
+  try {
+    await db.connect();
+    const result = await db.query(
+      "SELECT count(*)::int AS count FROM information_schema.tables WHERE table_schema NOT IN ('pg_catalog', 'information_schema')",
+    );
+    assert.equal(
+      result.rows[0].count,
+      0,
+      "Refusing to bootstrap a database that already contains tables",
+    );
+  } finally {
+    await db.end();
+  }
+
+  phase = "CMS bootstrap";
+  // Prevent Strapi's daily update lookup in this isolated test container.
+  writeFileSync(
+    join(appDir, ".strapi-updater.json"),
+    JSON.stringify({ lastUpdateCheck: Date.now() }),
+  );
+  const { createStrapi } = requireFromCms("@strapi/strapi");
+  /** @type {Cms} */
+  const cms = createStrapi({
+    appDir,
+    distDir: join(appDir, "dist"),
+    autoReload: false,
+    serveAdminPanel: false,
+  });
+  strapi = cms;
+  // createStrapi installs immediate shutdown handlers; finish in-flight startup first.
+  for (const signal of ["SIGTERM", "SIGINT"]) {
+    process.removeAllListeners(signal);
+    process.once(signal, () => {
+      void stop();
+    });
+  }
+  cms.log.level = "error";
+  await cms.load();
+  cms.cron.stop();
+  if (stopping) return;
+
+  phase = "fixture creation";
+  for (const uid of [userUid, departmentUid, teamUid]) {
+    assert.equal(await cms.db.query(uid).count(), 0, `Unexpected bootstrap fixtures: ${uid}`);
+  }
+  const department = await cms.documents(departmentUid).create({
+    data: { name: "E2E Department", slug: "e2e-department" },
+  });
+  const userService = cms.plugin("users-permissions").service("user");
+  for (const [key, fixture] of Object.entries(fixtures.users)) {
+    const roleType = key === "lead" ? "team_lead" : "member";
+    const role = await cms.db
+      .query("plugin::users-permissions.role")
+      .findOne({ where: { type: roleType } });
+    assert.ok(role, `Role missing after normal bootstrap: ${roleType}`);
+    const user = await userService.add({
+      username: `e2e-${key}`,
+      email: fixture.email,
+      displayName: `E2E ${key}`,
+      provider: "local",
+      password: fixture.password,
+      confirmed: true,
+      blocked: false,
+      role: role.id,
+      department: department.id,
+    });
+    fixture.documentId = user.documentId;
+  }
+  for (const [key, fixture] of Object.entries(fixtures.teams)) {
+    const team = await cms.documents(teamUid).create({
+      data: {
+        name: fixture.name,
+        slug: fixture.slug,
+        description: fixture.description,
+        department: department.documentId,
+        ...(key === "editable" ? { lead: fixtures.users.lead.documentId } : {}),
+        members:
+          key === "editable"
+            ? [fixtures.users.lead.documentId, fixtures.users.member.documentId]
+            : [fixtures.users.member.documentId],
+      },
+    });
+    fixture.documentId = team.documentId;
+  }
+
+  phase = "fixture relationship assertions";
+  assert.equal(await cms.db.query(departmentUid).count(), 1, "Expected one department");
+  assert.equal(await cms.db.query(userUid).count(), 2, "Expected two local users");
+  assert.equal(await cms.db.query(teamUid).count(), 2, "Expected two teams");
+  for (const [key, fixture] of Object.entries(fixtures.users)) {
+    const user = await cms.db.query(userUid).findOne({
+      where: { documentId: fixture.documentId },
+      select: ["email", "provider", "confirmed", "blocked"],
+      populate: {
+        role: { select: ["type"] },
+        department: { select: ["documentId"] },
+        teams: { select: ["documentId"] },
+      },
+    });
+    assert.ok(user, "Fixture user missing");
+    assert.equal(user.email, fixture.email, "Fixture user email differs");
+    assert.equal(user.provider, "local", "Fixture user must use local login");
+    assert.equal(user.confirmed, true, "Fixture user must be confirmed");
+    assert.equal(user.blocked, false, "Fixture user must not be blocked");
+    assert.equal(
+      user.role?.type,
+      key === "lead" ? "team_lead" : "member",
+      "Fixture user role differs",
+    );
+    assert.equal(
+      user.department?.documentId,
+      department.documentId,
+      "Fixture user department differs",
+    );
+    assert.ok(Array.isArray(user.teams), "Fixture user's team memberships are missing");
+    const expectedTeams =
+      key === "lead"
+        ? [fixtures.teams.editable.documentId]
+        : Object.values(fixtures.teams).map((team) => team.documentId);
+    assert.deepEqual(
+      new Set(user.teams.map((team) => team.documentId)),
+      new Set(expectedTeams),
+      "Fixture user team memberships differ",
+    );
+  }
+  for (const [key, fixture] of Object.entries(fixtures.teams)) {
+    const team = await cms.db.query(teamUid).findOne({
+      where: { documentId: fixture.documentId },
+      select: ["slug", "name", "description"],
+      populate: {
+        department: { select: ["documentId"] },
+        lead: { select: ["documentId"] },
+        members: { select: ["documentId"] },
+      },
+    });
+    assert.ok(team, "Fixture team missing");
+    assert.equal(team.slug, fixture.slug, "Fixture team slug differs");
+    assert.equal(team.name, fixture.name, "Fixture team name differs");
+    assert.equal(team.description, fixture.description, "Fixture team description differs");
+    assert.equal(
+      team.department?.documentId,
+      department.documentId,
+      "Fixture team department differs",
+    );
+    assert.equal(
+      team.lead?.documentId ?? null,
+      key === "editable" ? fixtures.users.lead.documentId : null,
+      "Only the editable team may have the lead",
+    );
+    assert.ok(Array.isArray(team.members), "Fixture team members are missing");
+    const expectedMembers =
+      key === "editable"
+        ? Object.values(fixtures.users).map((user) => user.documentId)
+        : [fixtures.users.member.documentId];
+    assert.deepEqual(
+      new Set(team.members.map((user) => user.documentId)),
+      new Set(expectedMembers),
+      "Fixture team members differ",
+    );
+  }
+  if (stopping) return;
+  writeFileSync(fixturePath, JSON.stringify(fixtures), { mode: 0o600, flag: "wx" });
+  phase = "HTTP listener";
+  await new Promise((resolve, reject) => {
+    cms.server.httpServer.once("error", reject);
+    cms.server.listen(1337, "0.0.0.0", () => {
+      cms.server.httpServer.removeListener("error", reject);
+      resolve(undefined);
+    });
+  });
+  console.log(
+    "[e2e-cms] Ready: normal bootstrap and fixture assertions passed (1 department, 2 users, 2 teams).",
+  );
+}
+
+/** @param {number} [exitCode] */
+async function stop(exitCode = 0) {
+  if (stopping) return;
+  stopping = true;
+  await started.catch(() => {
+    exitCode = 1;
+  });
+  try {
+    if (strapi) {
+      // Document Service entry events re-read rows after commit without awaiting them.
+      const pool = strapi.db?.connection?.client?.pool;
+      let quiet = 0;
+      for (let check = 0; pool && check < 400 && quiet < 3; check += 1) {
+        await delay(25);
+        quiet = pool.numUsed() === 0 && pool.numPendingAcquires() === 0 ? quiet + 1 : 0;
+      }
+      await strapi.destroy();
+    }
+  } catch {
+    console.error("[e2e-cms] CMS shutdown failed.");
+    exitCode = 1;
+  }
+  process.exit(exitCode);
+}
+
+const started = start();
+try {
+  await started;
+} catch (error) {
+  // Never print database errors, user-service input, or credential-bearing objects.
+  const reason =
+    error instanceof AssertionError
+      ? error.message.split("\n")[0]
+      : error instanceof Error
+        ? error.name
+        : "Unknown error";
+  console.error(`[e2e-cms] Failed during ${phase}: ${reason}`);
+  await stop(1);
+}
