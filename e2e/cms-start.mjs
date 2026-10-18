@@ -114,6 +114,10 @@ async function start() {
       course: { title: "E2E Exam Course", slug: "e2e-exam-course", documentId: "" },
       lesson: { title: "E2E Exam Lesson", documentId: "" },
     },
+    confirm: {
+      course: { title: "E2E Confirm Course", slug: "e2e-confirm-course", documentId: "" },
+      lesson: { title: "E2E Confirm Lesson", documentId: "" },
+    },
   };
   assert.notEqual(
     fixtures.users.lead.password,
@@ -225,6 +229,7 @@ async function start() {
   const trainingFixtures = [
     { fixture: fixtures.training, mode: "quizGate" },
     { fixture: fixtures.exam, mode: "exam" },
+    { fixture: fixtures.confirm, mode: "confirm" },
   ];
   for (const { fixture, mode } of trainingFixtures) {
     const course = await cms.documents(courseUid).create({
@@ -325,15 +330,15 @@ async function start() {
       "Fixture team members differ",
     );
   }
-  assert.notEqual(
-    fixtures.training.course.documentId,
-    fixtures.exam.course.documentId,
-    "QuizGate and exam need separate courses",
+  assert.equal(
+    new Set(trainingFixtures.map(({ fixture }) => fixture.course.documentId)).size,
+    trainingFixtures.length,
+    "Each quiz mode needs a separate course",
   );
-  assert.notEqual(
-    fixtures.training.lesson.documentId,
-    fixtures.exam.lesson.documentId,
-    "QuizGate and exam need separate lessons",
+  assert.equal(
+    new Set(trainingFixtures.map(({ fixture }) => fixture.lesson.documentId)).size,
+    trainingFixtures.length,
+    "Each quiz mode needs a separate lesson",
   );
   for (const { fixture, mode } of trainingFixtures) {
     const publishedCourse = await cms.db.query(courseUid).findOne({
@@ -381,7 +386,7 @@ async function start() {
     });
   });
   console.log(
-    "[e2e-cms] Ready: normal bootstrap and fixture assertions passed (1 department, 2 users, 2 teams, 2 published quiz courses and lessons).",
+    "[e2e-cms] Ready: normal bootstrap and fixture assertions passed (1 department, 2 users, 2 teams, 3 published quiz courses and lessons).",
   );
 }
 

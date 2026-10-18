@@ -13,6 +13,7 @@ type Fixtures = {
   teams: { editable: Team; readonly: Team };
   training: TrainingFixture;
   exam: TrainingFixture;
+  confirm: TrainingFixture;
 };
 
 export function loadFixtures(): Fixtures {
