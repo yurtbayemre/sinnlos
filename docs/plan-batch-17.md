@@ -1,7 +1,7 @@
 # Batch 17 implementation plan
 
 > Phase 3 of v2 frontend authoring (plan 12). Written 2026-10-16 against main 2f47b84fcadfd6f63ecffac1c78cdf388c5ea44d, released as v0.16.2.
-> Status: all implementation steps are merged into main afcbd51 through PR #90. The combined Ponytail review is complete with no confirmed new findings (section 16). Rollback preparation and the complete local image rehearsal are complete (sections 17–18). Browser acceptance has started: TLS and role entry checks passed (section 19); the remaining browser phases and production deployment are pending. Decision 06 remains the approved scope; section 3 records the accepted lean exam-mode amendment, unlimited retries and no timer. Review corrections are recorded in section 11.
+> Status: all implementation steps are merged into main afcbd51 through PR #90. The combined Ponytail review is complete with no confirmed new findings (section 16). Rollback preparation and the complete local image rehearsal are complete (sections 17–18). Browser acceptance has started: TLS/role entry and training checks passed (sections 19–20); organisation/media, activity/report/panel, final review and production deployment are pending. Decision 06 remains the approved scope; section 3 records the accepted lean exam-mode amendment, unlimited retries and no timer. Review corrections are recorded in section 11.
 > Paths: cms/ = apps/cms/src/, web/ = apps/web/src/, domain/ = packages/domain/src/. Paths outside those roots are written in full.
 > This plan records the implementation baseline and local evidence; it does not verify or change production.
 
@@ -394,4 +394,12 @@ PR #98 is merged into main `e50cc359c94924e99747eae588c7bcf95fe552df`, with all 
 
 [Browser acceptance phase 1](batch-17-browser-acceptance.md) passed against the existing local Batch 17 images: a separate non-root Chromium client in `b12i-frontend` reached the unchanged staging origin with valid TLS and its sandbox enabled. Five web personas and three separate Strapi panel accounts signed in through their visible forms. The exercised authoring/organisation entry points and field restrictions matched their roles; direct member/editor organisation access was refused.
 
-No content, roles or application configuration changed. The temporary browserclient and its private credentials/profile were removed; existing staging services remain healthy. The in-app browser's host DNS remains unchanged. Training writes/publication/scheduling/conflicts, organisation/media writes, activity/report/panel rights and the final acceptance review remain phases 2–5. Phase 2 (Training) is next; production still requires completed acceptance and the owner's deployment go.
+Phase 1 changed no content, roles or application configuration. Its temporary browser client and private credentials/profile were removed; existing staging services remained healthy. The in-app browser's host DNS remains unchanged. Section 20 records the subsequent training acceptance; production still requires completed acceptance and the owner's deployment go.
+
+## 20. Training browser acceptance completed on 2026-10-18
+
+[Browser acceptance phase 2](batch-17-browser-acceptance.md#phase-2-am-18102026) passed all 14 recorded checks against the same staging images. Admin/editor created and reloaded course/lesson drafts through the visible UI, published them for a separate member, and verified published-version isolation for course text and quiz-only changes. Two independent editor sessions proved conflict Reload and Overwrite, including preservation of the other author's untouched field.
+
+The actual scheduler published the exam lesson scheduled for 18:28 UTC; the browser first observed it at 18:28:02 UTC after proving it unavailable before due. All three quiz modes blocked missing/wrong answers and newly changed wrong answers, created no receipt from feedback alone, and retained explicit completion after reload in the lesson, course and overview. Completed exam review remained overall-only with its existing receipt intact.
+
+The evidence records one corrected schedule-badge locator, not a product defect. Three labelled optional courses, three lessons and three member receipts remain in local staging; older rehearsal fixtures, roles, application settings and product code were unchanged. The temporary browser client and private credentials/profile were removed; staging remains healthy. Next is phase 3 (organisation/media), followed by activity/report/panel and final review. Production deployment and release remain pending.
