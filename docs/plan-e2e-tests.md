@@ -1,6 +1,6 @@
 # Implementierungsplan für automatische E2E Tests
 
-Stand: 18.10.2026. Ausgangspunkt: Main `c2bce321`, nach dem Merge von Batch 17 und der Rollback-Rehearsal. Status: Schritte 1–2 umgesetzt; Schritte 3–6 sind offen.
+Stand: 18.10.2026. Ausgangspunkt: Main `c2bce321`, nach dem Merge von Batch 17 und der Rollback-Rehearsal. Status: Schritte 1–3 umgesetzt; Schritte 4–6 sind offen.
 
 Der erste Pilot prüft das Modul **Teams** im Browser: Ein Team-Lead ändert die Beschreibung seines Teams, und ein Mitglied kann den gespeicherten Text lesen. Zwei Tests sollen automatisch in der CI laufen und die Strecke vom sichtbaren Login über Next.js und Strapi bis zur Datenbank abdecken.
 
@@ -51,9 +51,9 @@ Testfall `teams-edit-description`:
 5. Zur Teamdetailseite navigieren und die gespeicherte Beschreibung prüfen.
 6. In einem getrennten Browser-Kontext das Mitglied anmelden, dasselbe Team öffnen und denselben gespeicherten Text prüfen.
 
-- [ ] Elemente über Rollen, Labels und sichtbare Namen ansprechen. Vorhandene zugängliche Beschriftungen nutzen; neue Test-IDs nur bei einer nachgewiesenen Mehrdeutigkeit.
-- [ ] Auf erwartete UI-Zustände warten, keine festen Schlafzeiten verwenden. Weder Save noch Login durch API-Aufrufe ersetzen.
-- [ ] Nach dem Speichern tatsächlich neu laden und mit der zweiten Sitzung lesen, damit ein bloß lokal geänderter React-Zustand den Test nicht bestehen lässt.
+- [x] Elemente über Rollen, Labels und sichtbare Namen ansprechen. Vorhandene zugängliche Beschriftungen nutzen; neue Test-IDs nur bei einer nachgewiesenen Mehrdeutigkeit.
+- [x] Auf erwartete UI-Zustände warten, keine festen Schlafzeiten verwenden. Weder Save noch Login durch API-Aufrufe ersetzen.
+- [x] Nach dem Speichern tatsächlich neu laden und mit der zweiten Sitzung lesen, damit ein bloß lokal geänderter React-Zustand den Test nicht bestehen lässt.
 
 **Abnahme:** Der Fall besteht allein auf frischen Daten. Eine lokale, anschließend zurückgenommene Störung des Speicherns lässt ihn zuverlässig scheitern. Der Test beweist Login, Navigation, Speichern und erneutes Lesen zusammen.
 
@@ -126,7 +126,7 @@ Die Liste grenzt die Arbeiten ein; beim Umsetzen wird der kleinste passende Zusc
 | ---------------------------------- | -------- | -------------------------------------------- |
 | 1 Werkzeug und Projektanbindung    | Erledigt | Nachweise unten; [Anleitung](./e2e-tests.md) |
 | 2 Isolierte Testumgebung           | Erledigt | Nachweise unten; nur lokal                   |
-| 3 Beschreibung bearbeiten          | Offen    | —                                            |
+| 3 Beschreibung bearbeiten          | Erledigt | Nachweise unten; nur lokal                   |
 | 4 Mitglied ohne Bearbeitungsrechte | Offen    | —                                            |
 | 5 Automatische CI Ausführung       | Offen    | —                                            |
 | 6 Abnahme und Anleitung            | Offen    | —                                            |
@@ -152,6 +152,14 @@ Die Liste grenzt die Arbeiten ein; beim Umsetzen wird der kleinste passende Zusc
 - Der Standard-Bridge des eigenen Compose-Projekts wird verwendet: `internal: true` ließ auf dem geprüften Docker Desktop zwar interne Healthchecks bestehen, verhinderte aber den Host-Zugriff auf den veröffentlichten Web-Port. Keine Verbindung zu bestehenden Projektnetzwerken; SMTP, Digests, App- und Plugin-Crons sind deaktiviert.
 - Laufdaten liegen ausschließlich unter `.e2e/`; private Env-/Fixturedateien werden gelöscht, bekannte zufällige Secrets in gespeicherten Logs redigiert. Bei hartem Prozessabbruch oder nicht erreichbarem Docker-Daemon kann eine manuelle Bereinigung anhand der protokollierten Run-ID nötig sein; siehe [Anleitung](./e2e-tests.md).
 - Auf Wunsch bleibt dieser Schritt lokal: kein Push, keine Änderung an Staging oder Produktion. Browserfälle und E2E-CI folgen weiterhin erst in Schritten 3–5.
+
+### Nachweise zu Schritt 3 (18.10.2026, lokal)
+
+- `e2e/teams-edit-description.spec.ts` meldet den Lead über das sichtbare Formular an, öffnet sein Team über die Übersicht, ändert die Beschreibung und prüft die Erfolgsmeldung. Der bekannte Ausgangstext und der neue Text mit Run-ID unterscheiden sich ausdrücklich.
+- Ein vollständiger Reload prüft das gespeicherte Bearbeitungsfeld. Anschließend wird derselbe Text auf der Detailseite und nach einem eigenen Formularlogin als Mitglied in einem getrennten Browser-Kontext gelesen. Rollen-/Label-Locators reichen aus; keine zusätzlichen Test-IDs, API-Abkürzungen oder festen Wartezeiten.
+- `pnpm test:e2e --grep teams-edit-description` bestand auf einer frischen Datenbank mit Chromium. E2E-Typecheck und Lint bestanden; ein unabhängiger Review fand keine relevanten Probleme.
+- Für die Negativprobe wurde ausschließlich in der lokalen CMS-Testversion die neue Beschreibung durch den bisherigen Datenbankwert ersetzt. Trotz sichtbarem „Saved.“ scheiterte der Test zuverlässig beim Reload am alten Feldinhalt und lieferte Status 1, Screenshot und Trace. Die einzelne Störungszeile wurde vollständig zurückgenommen. Der anschließende reguläre Lauf `pnpm test:e2e` bestand erneut auf frischen Daten. Nach allen drei Läufen fehlten eigene Container, Netzwerke und private Laufdateien.
+- Die dokumentierten Browser-Installations- und Einzeltestbefehle stehen in der [Anleitung](./e2e-tests.md). Punkt 4 (Mitglied ohne Bearbeitungsrechte) und Punkt 5 (automatische CI) bleiben offen. Kein Push, keine Änderung an Staging oder Produktion.
 
 ## Technische Bezugspunkte
 

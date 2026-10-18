@@ -758,7 +758,7 @@ pnpm typecheck:tests   # type-check every *.test.ts (tsconfig.test.json, tsconfi
 pnpm test              # Vitest unit tests (apps, packages, infra), then E2E runner checks
 pnpm test:tz           # the same suite under TZ=UTC, Europe/Berlin and Pacific/Auckland
 pnpm test:integration  # build:domain, then the real cms booted in process, per role, over HTTP
-pnpm test:e2e          # disposable Docker stack + Playwright; No tests found until browser cases land
+pnpm test:e2e          # disposable Docker stack + Chromium: team description edit/read E2E
 pnpm format            # prettier --write over the tree
 pnpm format:check      # prettier --check (blocking in CI)
 ```

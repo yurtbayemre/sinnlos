@@ -1,8 +1,8 @@
 # Browser E2E tests
 
 The Teams pilot follows the [E2E plan](./plan-e2e-tests.md). Tooling and the
-isolated runtime are implemented. Browser cases follow in steps 3–4, their
-CI job in step 5.
+isolated runtime and the successful edit browser case are implemented. The
+read-only member case follows in step 4, the CI job in step 5.
 
 ## Prerequisites and commands
 
@@ -15,15 +15,30 @@ From the repository root:
 
 ```bash
 pnpm install --frozen-lockfile
+pnpm --filter @sinnlos/e2e exec playwright install chromium
 pnpm --filter @sinnlos/e2e test:runner  # small runner safety/readiness checks
 pnpm --filter @sinnlos/e2e check:setup  # build, start, verify fixtures/auth, clean up
 pnpm test:e2e                         # same stack, then Playwright
 ```
 
-`test:e2e` currently exits with **No tests found** and a nonzero status,
-then cleans up. There are no placeholder browser tests. Browser installation
-will be documented with the first real browser case. `check:setup` is a
-runtime smoke check, not a browser E2E pass.
+On Linux, use `playwright install --with-deps chromium` for the installation
+command above to include Chromium's system libraries. Reinstall the browser
+after upgrading Playwright.
+
+The `teams-edit-description` case signs in through the visible form as a
+team lead, navigates through the Teams overview, edits the description and
+checks the save confirmation. It verifies the persisted text after a full
+reload, on the detail page and as a member in a separate browser session.
+No login or save API calls replace these browser actions.
+
+To run just this case against a new disposable stack:
+
+```bash
+pnpm test:e2e --grep teams-edit-description
+```
+
+`check:setup` is a runtime smoke check, not a browser E2E pass. An empty
+browser test selection fails with a nonzero status and still cleans up.
 
 `pnpm lint` and `pnpm typecheck` include configuration, `*.spec.ts` files
 and `.mjs` helpers in this workspace. `pnpm test` includes the small Node
