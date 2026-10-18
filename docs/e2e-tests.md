@@ -1,8 +1,8 @@
 # Browser E2E tests
 
-The Teams pilot follows the [E2E plan](./plan-e2e-tests.md). Tooling and the
-isolated runtime and the successful edit browser case are implemented. The
-read-only member case follows in step 4, the CI job in step 5.
+The Teams pilot follows the [E2E plan](./plan-e2e-tests.md). Tooling, the
+isolated runtime and both browser cases are implemented. The CI job follows
+in step 5.
 
 ## Prerequisites and commands
 
@@ -31,10 +31,23 @@ checks the save confirmation. It verifies the persisted text after a full
 reload, on the detail page and as a member in a separate browser session.
 No login or save API calls replace these browser actions.
 
-To run just this case against a new disposable stack:
+The `teams-member-read-only` case uses its own team and a fresh member
+session. It checks the original description and absence of an Edit link,
+then directly opens the edit URL and requires the specific not-found view
+without editor fields or a Save button. A new navigation to the detail page
+must show the unchanged description. A generic error page does not pass;
+the HTTP status alone is insufficient because Next.js can stream status 200
+before rendering the not-found view.
+
+Both cases live in `e2e/teams.spec.ts` and share only fixture reading and UI
+login/navigation code. They assert the signed-in email and use separate
+browser sessions and team data; neither depends on the other running first.
+
+To run either case alone against a new disposable stack:
 
 ```bash
 pnpm test:e2e --grep teams-edit-description
+pnpm test:e2e --grep teams-member-read-only
 ```
 
 `check:setup` is a runtime smoke check, not a browser E2E pass. An empty

@@ -6,8 +6,15 @@ type Team = { name: string; slug: string; description: string };
 type Fixtures = {
   runId: string;
   users: { lead: Account; member: Account };
-  teams: { editable: Team };
+  teams: { editable: Team; readonly: Team };
 };
+
+function loadFixtures(): Fixtures {
+  const fixturePath = process.env.SINNLOS_E2E_FIXTURES;
+  if (!fixturePath)
+    throw new Error("Run this test through pnpm test:e2e to create fresh fixtures.");
+  return JSON.parse(readFileSync(fixturePath, "utf8"));
+}
 
 async function signInAndOpenTeam(page: Page, account: Account, team: Team) {
   await page.goto("/sign-in");
@@ -15,6 +22,7 @@ async function signInAndOpenTeam(page: Page, account: Account, team: Team) {
   await page.getByLabel("Password", { exact: true }).fill(account.password);
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await expect(page).toHaveURL("/");
+  await expect(page.getByRole("banner").getByText(account.email, { exact: true })).toBeVisible();
   await page
     .getByRole("navigation", { name: "Main navigation" })
     .getByRole("link", { name: "Teams", exact: true })
@@ -30,10 +38,7 @@ async function signInAndOpenTeam(page: Page, account: Account, team: Team) {
 }
 
 test("teams-edit-description", async ({ page, browser }) => {
-  const fixturePath = process.env.SINNLOS_E2E_FIXTURES;
-  if (!fixturePath)
-    throw new Error("Run this test through pnpm test:e2e to create fresh fixtures.");
-  const fixtures: Fixtures = JSON.parse(readFileSync(fixturePath, "utf8"));
+  const fixtures = loadFixtures();
   const team = fixtures.teams.editable;
   const description = `Updated team description for ${fixtures.runId}.`;
 
@@ -70,5 +75,37 @@ test("teams-edit-description", async ({ page, browser }) => {
     } finally {
       await memberContext.close();
     }
+  });
+});
+
+test("teams-member-read-only", async ({ page }) => {
+  const fixtures = loadFixtures();
+  const team = fixtures.teams.readonly;
+  const main = page.getByRole("main");
+
+  await test.step("Member can read the team but has no edit link", async () => {
+    await signInAndOpenTeam(page, fixtures.users.member, team);
+    await expect(main.getByText(team.description, { exact: true })).toBeVisible();
+    await expect(main.getByRole("link", { name: "Edit", exact: true })).toHaveCount(0);
+  });
+
+  await test.step("Direct editor navigation shows the not-found view", async () => {
+    await page.goto(`/teams/${team.slug}/edit`);
+    await expect(page).toHaveURL(`/teams/${team.slug}/edit`);
+    await expect(main.getByText("Page not found", { exact: true })).toBeVisible();
+    await expect(
+      main.getByText("The page you requested does not exist or has moved.", { exact: true }),
+    ).toBeVisible();
+    await expect(main.getByRole("link", { name: "Back to dashboard", exact: true })).toBeVisible();
+    await expect(main.getByRole("textbox", { name: "Description", exact: true })).toHaveCount(0);
+    await expect(main.getByRole("button", { name: "Save", exact: true })).toHaveCount(0);
+  });
+
+  await test.step("Returning to the team shows the unchanged description", async () => {
+    await page.goto(`/teams/${team.slug}`);
+    await expect(
+      main.getByRole("heading", { name: team.name, level: 1, exact: true }),
+    ).toBeVisible();
+    await expect(main.getByText(team.description, { exact: true })).toBeVisible();
   });
 });

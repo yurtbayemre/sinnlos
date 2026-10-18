@@ -1,6 +1,6 @@
 # Implementierungsplan für automatische E2E Tests
 
-Stand: 18.10.2026. Ausgangspunkt: Main `c2bce321`, nach dem Merge von Batch 17 und der Rollback-Rehearsal. Status: Schritte 1–3 umgesetzt; Schritte 4–6 sind offen.
+Stand: 18.10.2026. Ausgangspunkt: Main `c2bce321`, nach dem Merge von Batch 17 und der Rollback-Rehearsal. Status: Schritte 1–4 umgesetzt; Schritte 5–6 sind offen.
 
 Der erste Pilot prüft das Modul **Teams** im Browser: Ein Team-Lead ändert die Beschreibung seines Teams, und ein Mitglied kann den gespeicherten Text lesen. Zwei Tests sollen automatisch in der CI laufen und die Strecke vom sichtbaren Login über Next.js und Strapi bis zur Datenbank abdecken.
 
@@ -61,10 +61,10 @@ Testfall `teams-edit-description`:
 
 Testfall `teams-member-read-only` verwendet sein eigenes vorbereitetes Team und eine neue Mitgliedssitzung. Er benötigt keinen vorher erfolgreichen Bearbeitungstest.
 
-- [ ] Als normales Mitglied anmelden, das Team öffnen und den bekannten Ausgangstext sehen.
-- [ ] Prüfen, dass der Bearbeiten-Link für dieses Team fehlt.
-- [ ] `/teams/<slug>/edit` direkt aufrufen: Die vorgesehene Nicht-gefunden-Ansicht muss erscheinen; Editor und Speichern-Aktion müssen fehlen.
-- [ ] Zur Leseseite zurückkehren und den unveränderten Ausgangstext prüfen.
+- [x] Als normales Mitglied anmelden, das Team öffnen und den bekannten Ausgangstext sehen.
+- [x] Prüfen, dass der Bearbeiten-Link für dieses Team fehlt.
+- [x] `/teams/<slug>/edit` direkt aufrufen: Die vorgesehene Nicht-gefunden-Ansicht muss erscheinen; Editor und Speichern-Aktion müssen fehlen.
+- [x] Zur Leseseite zurückkehren und den unveränderten Ausgangstext prüfen.
 
 **Abnahme:** Beide Tests bestehen einzeln sowie zusammen und funktionieren auch in umgekehrter Reihenfolge. Der Rechtefall prüft die konkrete verweigerte Ansicht; ein beliebiger Serverfehler genügt nicht. Er verlangt nicht ausschließlich HTTP 404, weil die vorhandene Next.js-Streaming-Grenze bereits Status 200 gesendet haben kann. Direkte unbefugte CMS-Schreibversuche bleiben durch die vorhandenen HTTP-Integrationstests abgedeckt.
 
@@ -127,7 +127,7 @@ Die Liste grenzt die Arbeiten ein; beim Umsetzen wird der kleinste passende Zusc
 | 1 Werkzeug und Projektanbindung    | Erledigt | Nachweise unten; [Anleitung](./e2e-tests.md) |
 | 2 Isolierte Testumgebung           | Erledigt | Nachweise unten; nur lokal                   |
 | 3 Beschreibung bearbeiten          | Erledigt | Nachweise unten; nur lokal                   |
-| 4 Mitglied ohne Bearbeitungsrechte | Offen    | —                                            |
+| 4 Mitglied ohne Bearbeitungsrechte | Erledigt | Nachweise unten; nur lokal                   |
 | 5 Automatische CI Ausführung       | Offen    | —                                            |
 | 6 Abnahme und Anleitung            | Offen    | —                                            |
 
@@ -155,11 +155,20 @@ Die Liste grenzt die Arbeiten ein; beim Umsetzen wird der kleinste passende Zusc
 
 ### Nachweise zu Schritt 3 (18.10.2026, lokal)
 
-- `e2e/teams-edit-description.spec.ts` meldet den Lead über das sichtbare Formular an, öffnet sein Team über die Übersicht, ändert die Beschreibung und prüft die Erfolgsmeldung. Der bekannte Ausgangstext und der neue Text mit Run-ID unterscheiden sich ausdrücklich.
+- `e2e/teams.spec.ts` meldet den Lead über das sichtbare Formular an, öffnet sein Team über die Übersicht, ändert die Beschreibung und prüft die Erfolgsmeldung. Der bekannte Ausgangstext und der neue Text mit Run-ID unterscheiden sich ausdrücklich.
 - Ein vollständiger Reload prüft das gespeicherte Bearbeitungsfeld. Anschließend wird derselbe Text auf der Detailseite und nach einem eigenen Formularlogin als Mitglied in einem getrennten Browser-Kontext gelesen. Rollen-/Label-Locators reichen aus; keine zusätzlichen Test-IDs, API-Abkürzungen oder festen Wartezeiten.
 - `pnpm test:e2e --grep teams-edit-description` bestand auf einer frischen Datenbank mit Chromium. E2E-Typecheck und Lint bestanden; ein unabhängiger Review fand keine relevanten Probleme.
 - Für die Negativprobe wurde ausschließlich in der lokalen CMS-Testversion die neue Beschreibung durch den bisherigen Datenbankwert ersetzt. Trotz sichtbarem „Saved.“ scheiterte der Test zuverlässig beim Reload am alten Feldinhalt und lieferte Status 1, Screenshot und Trace. Die einzelne Störungszeile wurde vollständig zurückgenommen. Der anschließende reguläre Lauf `pnpm test:e2e` bestand erneut auf frischen Daten. Nach allen drei Läufen fehlten eigene Container, Netzwerke und private Laufdateien.
 - Die dokumentierten Browser-Installations- und Einzeltestbefehle stehen in der [Anleitung](./e2e-tests.md). Punkt 4 (Mitglied ohne Bearbeitungsrechte) und Punkt 5 (automatische CI) bleiben offen. Kein Push, keine Änderung an Staging oder Produktion.
+
+### Nachweise zu Schritt 4 (18.10.2026, lokal)
+
+- `teams-member-read-only` meldet das Mitglied im frischen Browser-Kontext an, öffnet sein separates Readonly-Team über die Übersicht und prüft den Ausgangstext sowie den fehlenden Bearbeiten-Link. Beide Fälle liegen in `e2e/teams.spec.ts`; nur Fixture-Lesen und Formularlogin/Navigation werden geteilt. Die sichtbare Account-E-Mail bestätigt jeweils die verwendete Sitzung.
+- Der direkte Aufruf der Edit-URL muss die konkreten Texte der Nicht-gefunden-Ansicht und ihren Dashboard-Rücklink zeigen. Erst danach werden fehlende Description-Textbox und Save-Button geprüft. Ein Loading-Skeleton, ein generischer Fehler oder eine Umleitung zum Login genügt nicht; HTTP 200 durch Streaming bleibt zulässig.
+- Ein erneuter Dokumentabruf der Teamdetailseite bestätigt den unveränderten Text. Der Rechtefall benötigt weder den Bearbeitungsfall noch dessen veränderte Daten.
+- Beide Fälle bestanden einzeln über `pnpm test:e2e --grep <Testname>`. Auch der gemeinsame Lauf mit zuerst `teams-member-read-only` bestand. Dafür wurden nur vorübergehend die beiden Testblöcke vertauscht und anschließend vollständig zurückgestellt; ein dauerhafter Reihenfolge-Schalter wurde nicht ergänzt. Abschließend bestand `pnpm test:e2e` in der normalen Reihenfolge ebenfalls (2 Tests, 8,7 Sekunden). Alle vier Läufe verwendeten frische Datenbanken; danach waren eigene Container, Netzwerke und private Laufdateien entfernt.
+- E2E-Typecheck, Lint und Formatprüfung bestanden; der unabhängige Review fand keine relevanten Probleme. Anwendungscode, Fixtures und Runner bleiben unverändert. Die [Anleitung](./e2e-tests.md) beschreibt beide Fälle und ihre Einzelaufrufe.
+- Dieser Schritt bleibt lokal: kein Push und keine Änderung an Staging oder Produktion. Als Nächstes folgt Punkt 5, die automatische CI-Ausführung.
 
 ## Technische Bezugspunkte
 
