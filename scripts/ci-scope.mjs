@@ -40,4 +40,4 @@ if (range) {
 }
 
 appendFileSync(process.env.GITHUB_OUTPUT, `full=${full}\ndatabase=${database}\ne2e=${e2e}\n`);
-console.log(`Application checks: ${full}; database tests: ${database}; team E2E: ${e2e}`);
+console.log(`Application checks: ${full}; database tests: ${database}; browser E2E: ${e2e}`);

@@ -1,6 +1,6 @@
 # E2E-Erweiterung: Quiz-Abschluss im Browser
 
-Stand: 18.10.2026. Basis: `main` nach Merge von PR #93 (`f7f74c9`). Der Teams-Pilot ist abgeschlossen. Diese Erweiterung nutzt denselben Playwright-/Docker-Stack und ergänzt genau einen Browserfall `training-quiz-completion`.
+Stand: 18.10.2026. Basis: `main` nach Merge von PR #93 (`f7f74c9`). Der Teams-Pilot ist abgeschlossen. Diese Erweiterung nutzt denselben Playwright-/Docker-Stack und ergänzt genau einen Browserfall `training-quiz-completion`. Status: alle drei Schritte lokal umgesetzt und abgenommen; die Quiz-Erweiterung ist noch nicht gepusht.
 
 ## Umfang
 
@@ -30,14 +30,19 @@ Abnahme: Der Fall besteht allein auf frischen Daten. Eine vorübergehende Störu
 
 ## 3 Gemeinsame Ausführung und Anleitung abschließen
 
-- [ ] Den bestehenden CI-Job und Artefaktnamen auf Browser-E2E verallgemeinern; alle drei Fälle laufen mit einem Worker und ohne Wiederholung im bestehenden Budget. Scope und Datenbankauslöser bleiben fachlich unverändert.
-- [ ] Anleitung und README um Quiz-Ablauf und Einzelaufruf ergänzen; den alten Teams-Plan als abgeschlossene Historie behalten.
-- [ ] Alle drei Fälle zweimal auf jeweils frischen Daten ausführen, Typecheck/Lint/Format und die betroffenen CI-Prüfungen ausführen. Cleanup sowie Fehlerbericht/Screenshot/Trace der Störungsprobe prüfen.
-- [ ] Unabhängigen Review und lokale Commit-/Laufnachweise dokumentieren. Neue Implementierung zunächst lokal abschließen; ein späterer Push liefert den GitHub-Nachweis für die Quiz-Erweiterung.
+- [x] Den bestehenden CI-Job und Artefaktnamen auf Browser-E2E verallgemeinern; alle drei Fälle laufen mit einem Worker und ohne Wiederholung im bestehenden Budget. Scope und Datenbankauslöser bleiben fachlich unverändert.
+- [x] Anleitung und README um Quiz-Ablauf und Einzelaufruf ergänzen; den alten Teams-Plan als abgeschlossene Historie behalten.
+- [x] Alle drei Fälle zweimal auf jeweils frischen Daten ausführen, Typecheck/Lint/Format und die betroffenen CI-Prüfungen ausführen. Cleanup sowie Fehlerbericht/Screenshot/Trace der Störungsprobe prüfen.
+- [x] Unabhängigen Review und lokale Commit-/Laufnachweise dokumentieren. Neue Implementierung zunächst lokal abschließen; ein späterer Push liefert den GitHub-Nachweis für die Quiz-Erweiterung.
 
 ## Nachweise
 
 - PR #93 ist nach `main` gemergt; [Main-CI](https://github.com/yurtbayemre/sinnlos/actions/runs/39119203517) für `f7f74c94e4e7e4b8c618bd7cdf0d37c59dc395b8` ist vollständig grün (8/8 Jobs, beide Teamtests bestanden).
-- Schritt 1 lokal abgenommen: E2E-Typecheck und Lint grün; beide bestehenden Teamfälle bestanden mit den neuen veröffentlichten Kurs-Fixtures auf frischen Daten (2 Tests, 9,6 Sekunden, Run `sinnlos-e2e-843c19295d8681abf829770c`). Cleanup erfolgreich. Der gemeinsame Dreierlauf folgt in Schritt 3.
+- Schritt 1 lokal abgenommen: E2E-Typecheck und Lint grün; beide bestehenden Teamfälle bestanden mit den neuen veröffentlichten Kurs-Fixtures auf frischen Daten (2 Tests, 9,6 Sekunden, Run `sinnlos-e2e-843c19295d8681abf829770c`). Cleanup erfolgreich. Die gemeinsamen Dreierläufe sind unter Schritt 3 nachgewiesen.
 
 - Schritt 2: `training-quiz-completion` bestand allein mit frischen Daten (1 Test, 6,4 Sekunden, Run `sinnlos-e2e-c2c016fabc08e9d995f59c76`). Typecheck und Lint grün. Die lokale Störung des CMS-Abschlusscontrollers meldete Erfolg ohne Datenbankschreibzugriff; der Test scheiterte im Run `sinnlos-e2e-be38c8fd3e926459cfae59ab` genau nach dem Neuladen am fehlenden datierten Abschluss (Status 1). HTML-Bericht, Screenshot und Trace wurden vor dem nächsten Lauf gesichert. Der Controller wurde bytegenau wiederhergestellt; kein Anwendungscode gehört zur Erweiterung.
+- Schritt 3: Zwei aufeinanderfolgende vollständige Läufe unter `CI=true`, einem Worker und ohne Wiederholung bestanden mit jeweils drei Browserfällen: `sinnlos-e2e-e75633725f4889b2489ac4dd` (14,7 Sekunden) und `sinnlos-e2e-5f54760a204ff095cd7d68ce` (14,6 Sekunden). Beide verwendeten neue Datenbanken und Testsitzungen. Die nativen Login-Limits blieben unverändert; keine 429-Antwort trat auf.
+- Alle fünf Läufe dieser Erweiterung hinterließen keine eigenen Container, Netzwerke, privaten Laufdateien oder CMS-/Web-Image-Tags. Der negative Bericht, Screenshot und gültige Trace sind lokal gesichert; die 15 Credential-Felder der Containerdiagnose sind redigiert. Der Screenshot zeigt nach Reload wieder das gesperrte Quiz statt eines gespeicherten Abschlusses.
+- E2E-Typecheck und Lint, fünf Runner-Tests, die Git-basierte CI-Scope-Suite, 21 Build-/Action-Pin-Tests, Actionlint und die Formatprüfung aller betroffenen Dateien sind grün. Der unabhängige Review fand keine bestätigten Probleme. Anwendungscode, Domain-Regeln, Abhängigkeiten und Lockfile bleiben unverändert; deren vollständige Unit-/HTTP-Basis ist durch den grünen Main-Lauf belegt.
+- Lokale Commits vor dem Abschluss: `7ae0620` (Plan), `1ba19bf` (Fixtures und gemeinsamer Login), `9f77d09` (Quizfall und Persistenzprobe). Der CI-Job und neue Artefakte heißen künftig `e2e · browser` und `e2e-browser-<run_id>-<run_attempt>`; nur die Namen ändern sich, Scope und Laufzeitbudgets bleiben erhalten.
+- Offen ist der GitHub-Nachweis der Quiz-Erweiterung nach ihrem Push. Es gibt noch keinen Quiz-PR oder Merge dieser Erweiterung; Staging und Produktion wurden nicht verändert.

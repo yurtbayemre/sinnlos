@@ -1,6 +1,6 @@
 # Implementierungsplan für automatische E2E Tests
 
-Stand: 18.10.2026. Ausgangspunkt: Main `c2bce321`, nach dem Merge von Batch 17 und der Rollback-Rehearsal. Status: Schritte 1–6 umgesetzt und lokal sowie auf GitHub abgenommen. Die CI-Belege stehen unter GitHub-Abnahme; der Pilot-PR ist noch nicht gemergt.
+Stand: 18.10.2026. Ausgangspunkt: Main `c2bce321`, nach dem Merge von Batch 17 und der Rollback-Rehearsal. Status: Schritte 1–6 umgesetzt und lokal sowie auf GitHub abgenommen. Die CI-Belege stehen unter GitHub-Abnahme; PR #93 ist als `f7f74c9` nach Main gemergt. Die [Quiz-Erweiterung](./plan-e2e-quiz.md) führt den Browserumfang separat fort.
 
 Der erste Pilot prüft das Modul **Teams** im Browser: Ein Team-Lead ändert die Beschreibung seines Teams, und ein Mitglied kann den gespeicherten Text lesen. Zwei Tests sollen automatisch in der CI laufen und die Strecke vom sichtbaren Login über Next.js und Strapi bis zur Datenbank abdecken.
 
