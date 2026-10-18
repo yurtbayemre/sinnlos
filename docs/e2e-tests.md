@@ -1,8 +1,8 @@
 # Browser E2E tests
 
 The Teams pilot follows the [E2E plan](./plan-e2e-tests.md). Tooling, the
-isolated runtime and both browser cases are implemented. The CI job follows
-in step 5.
+isolated runtime and both browser cases are implemented. The CI job is configured
+locally; its first GitHub run and artifact-upload acceptance await a push.
 
 ## Prerequisites and commands
 
@@ -56,6 +56,59 @@ browser test selection fails with a nonzero status and still cleans up.
 `pnpm lint` and `pnpm typecheck` include configuration, `*.spec.ts` files
 and `.mjs` helpers in this workspace. `pnpm test` includes the small Node
 runner tests after Vitest. App compilation and Vitest collection stay separate.
+
+## CI execution and scope
+
+The `e2e · teams` job in `.github/workflows/ci.yml` runs on Ubuntu for
+relevant pull requests, pushes to `main`, and every manual workflow run.
+It installs the pinned dependencies and Chromium with its system libraries,
+then runs the same `pnpm test:e2e` entry point. Typecheck and lint already
+include the E2E workspace in the existing build job.
+
+`scripts/ci-scope.mjs` emits an independent `e2e` flag. Its only exclusions
+are `docs/**/*.md` and these two module-local files:
+
+- `apps/web/src/app/(app)/polls/page.tsx`
+- `apps/web/src/app/(app)/polls/loading.tsx`
+
+Teams, shared helpers, auth, layouts, UI, translations, dependencies,
+CMS, E2E files and unknown paths run E2E. New Poll files are not automatically
+excluded. Both sides of renames and the whole PR diff are considered.
+A failed scope calculation fails the existing build check.
+
+The existing `full` and `database` flags keep their meaning. A web-only
+change can start the E2E job's private PostgreSQL without enabling the
+separate integration or timezone database suites. A change containing only
+`docs/**/*.md` starts neither E2E nor any database tests.
+
+The job budget is 50 minutes, with at most five minutes each for dependency
+and browser installation, 36 minutes for the runner and three minutes for
+upload. Within the runner, builds have 15 minutes, startup has 210 seconds
+(including a 180-second readiness limit), and Playwright has five minutes
+with an outer six-minute limit. These limits leave time for normal failure
+cleanup and diagnostics. A forced GitHub cancellation can kill the process
+tree before cleanup finishes; canceled runs do not upload artifacts. The
+GitHub-hosted VM is disposable. See the
+[GitHub cancellation sequence](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-cancellation).
+
+After success or failure, `e2e-teams-<run_id>-<run_attempt>` contains only
+`.e2e/report/`, `.e2e/results/` and `.e2e/logs/`, retained for seven days.
+`include-hidden-files` permits the `.e2e` parent, while the explicit paths
+exclude `.e2e/runs/`, private env/fixture files and separate auth files.
+Startup failures retain runner/service/build logs even without a browser
+report. Test failures retain screenshots and traces; no retries or
+`continue-on-error` turn them green.
+
+This repository is public: artifacts are not a private storage boundary.
+Traces may contain only disposable test credentials and sessions; production
+credentials and real user data must never enter this stack or its artifacts.
+Known generated secrets are redacted from the runner logs before upload.
+
+As checked on 2026-10-18, `main` has no branch protection and no applicable
+branch rules. This check therefore reports CI failures but is not an enforced
+merge requirement. No repository protection settings were changed. Hosted
+acceptance is still pending: green run, docs-only skip, deliberate red run
+with downloadable artifacts, then green again after restoring the test.
 
 ## One disposable stack per run
 

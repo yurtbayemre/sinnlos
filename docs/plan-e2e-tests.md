@@ -1,6 +1,6 @@
 # Implementierungsplan für automatische E2E Tests
 
-Stand: 18.10.2026. Ausgangspunkt: Main `c2bce321`, nach dem Merge von Batch 17 und der Rollback-Rehearsal. Status: Schritte 1–4 umgesetzt; Schritte 5–6 sind offen.
+Stand: 18.10.2026. Ausgangspunkt: Main `c2bce321`, nach dem Merge von Batch 17 und der Rollback-Rehearsal. Status: Schritte 1–4 umgesetzt; Schritt 5 lokal implementiert, GitHub-Abnahme ausstehend; Schritt 6 offen.
 
 Der erste Pilot prüft das Modul **Teams** im Browser: Ein Team-Lead ändert die Beschreibung seines Teams, und ein Mitglied kann den gespeicherten Text lesen. Zwei Tests sollen automatisch in der CI laufen und die Strecke vom sichtbaren Login über Next.js und Strapi bis zur Datenbank abdecken.
 
@@ -88,12 +88,14 @@ Neben `full` und `database` bekommt die vorhandene Scope-Erkennung ein eigenes `
 
 Ausnahmen für unabhängige Seiten werden eng und ausdrücklich geführt. Gemeinsam verwendete Helfer dürfen dabei nicht mit ausgeschlossen werden. Ein Fehler beim Bestimmen des Scopes muss die CI fehlschlagen lassen.
 
-- [ ] `scripts/ci-scope.mjs` und seine bestehenden Tests gemeinsam erweitern: Docs, Teams, gemeinsame Web-Helfer, unabhängige Seite, CMS, Abhängigkeiten, E2E-Dateien, Umbenennungen, Löschungen, gemischter PR und manueller Start.
-- [ ] Typecheck/Lint der E2E-Dateien sowie den vollständigen Start-/Test-/Cleanup-Ablauf einbinden. Laufzeitbudgets für Start, Tests und CI-Job setzen; Cleanup und Artefaktsicherung brauchen darin Reserve.
-- [ ] Bei einem Testfehler Screenshot und Trace behalten (`only-on-failure` / `retain-on-failure`); bei Startfehlern CMS-/Web-/Runner-Logs bereitstellen. HTML-Bericht und Fehlerartefakte mit kurzer Aufbewahrung, beispielsweise sieben Tagen, hochladen.
-- [ ] Keine Produktionszugänge oder persistierten Auth-Dateien hochladen. Traces können ausschließlich temporäre Testzugänge und Testsitzungen enthalten; sie bleiben interne Diagnoseartefakte mit begrenzter Aufbewahrung.
-- [ ] Neue GitHub Actions gemäß Repository-Konvention auf vollständige Commit-SHAs pinnen. Keine aus einem Beispiel übernommenen beweglichen Action-Tags verwenden.
-- [ ] E2E-Fehler dürfen nicht durch `continue-on-error`, leere Testsammlung oder automatische Wiederholungen grün werden. Einen erforderlichen Merge-Check nur passend zur tatsächlich bestehenden Branch-Regel konfigurieren; dessen Status ausdrücklich dokumentieren.
+- [x] `scripts/ci-scope.mjs` und seine bestehenden Tests gemeinsam erweitern: Docs, Teams, gemeinsame Web-Helfer, unabhängige Seite, CMS, Abhängigkeiten, E2E-Dateien, Umbenennungen, Löschungen, gemischter PR und manueller Start.
+- [x] Typecheck/Lint der E2E-Dateien sowie den vollständigen Start-/Test-/Cleanup-Ablauf einbinden. Laufzeitbudgets für Start, Tests und CI-Job setzen; Cleanup und Artefaktsicherung brauchen darin Reserve.
+- [x] Bei einem Testfehler Screenshot und Trace behalten (`only-on-failure` / `retain-on-failure`); bei Startfehlern CMS-/Web-/Runner-Logs bereitstellen. HTML-Bericht und Fehlerartefakte mit kurzer Aufbewahrung, beispielsweise sieben Tagen, hochladen.
+- [x] Keine Produktionszugänge oder persistierten Auth-Dateien hochladen. Traces können ausschließlich temporäre Testzugänge und Testsitzungen enthalten; sie bleiben Diagnoseartefakte mit begrenzter Aufbewahrung und den Zugriffsrechten des Repositories. Das Repository ist öffentlich; diese Artefakte sind deshalb keine private Ablage.
+- [x] Neue GitHub Actions gemäß Repository-Konvention auf vollständige Commit-SHAs pinnen. Keine aus einem Beispiel übernommenen beweglichen Action-Tags verwenden.
+- [x] E2E-Fehler dürfen nicht durch `continue-on-error`, leere Testsammlung oder automatische Wiederholungen grün werden. Einen erforderlichen Merge-Check nur passend zur tatsächlich bestehenden Branch-Regel konfigurieren; dessen Status ausdrücklich dokumentieren.
+
+**Stand:** Die folgenden Nachweise bestätigen die lokale Implementierung. Die GitHub-Abnahme bleibt bis zu einem separat beauftragten Push offen.
 
 **Abnahme:** Ein passender PR startet den E2E-Check und besteht beide Fälle. Ein ausschließlich dokumentarischer Lauf startet weder E2E noch dessen Datenbank. Ein absichtlich scheiternder Test lässt den Check rot werden und liefert verwertbare Artefakte; nach Rücknahme der Störung ist der Check wieder grün.
 
@@ -122,14 +124,14 @@ Die Liste grenzt die Arbeiten ein; beim Umsetzen wird der kleinste passende Zusc
 
 ## Fortschritt
 
-| Schritt                            | Status   | Nachweis                                     |
-| ---------------------------------- | -------- | -------------------------------------------- |
-| 1 Werkzeug und Projektanbindung    | Erledigt | Nachweise unten; [Anleitung](./e2e-tests.md) |
-| 2 Isolierte Testumgebung           | Erledigt | Nachweise unten; nur lokal                   |
-| 3 Beschreibung bearbeiten          | Erledigt | Nachweise unten; nur lokal                   |
-| 4 Mitglied ohne Bearbeitungsrechte | Erledigt | Nachweise unten; nur lokal                   |
-| 5 Automatische CI Ausführung       | Offen    | —                                            |
-| 6 Abnahme und Anleitung            | Offen    | —                                            |
+| Schritt                            | Status              | Nachweis                                     |
+| ---------------------------------- | ------------------- | -------------------------------------------- |
+| 1 Werkzeug und Projektanbindung    | Erledigt            | Nachweise unten; [Anleitung](./e2e-tests.md) |
+| 2 Isolierte Testumgebung           | Erledigt            | Nachweise unten; nur lokal                   |
+| 3 Beschreibung bearbeiten          | Erledigt            | Nachweise unten; nur lokal                   |
+| 4 Mitglied ohne Bearbeitungsrechte | Erledigt            | Nachweise unten; nur lokal                   |
+| 5 Automatische CI Ausführung       | Lokal implementiert | GitHub-Abnahme nach Push offen               |
+| 6 Abnahme und Anleitung            | Offen               | —                                            |
 
 ### Nachweise zu Schritt 1 (18.10.2026)
 
@@ -169,6 +171,17 @@ Die Liste grenzt die Arbeiten ein; beim Umsetzen wird der kleinste passende Zusc
 - Beide Fälle bestanden einzeln über `pnpm test:e2e --grep <Testname>`. Auch der gemeinsame Lauf mit zuerst `teams-member-read-only` bestand. Dafür wurden nur vorübergehend die beiden Testblöcke vertauscht und anschließend vollständig zurückgestellt; ein dauerhafter Reihenfolge-Schalter wurde nicht ergänzt. Abschließend bestand `pnpm test:e2e` in der normalen Reihenfolge ebenfalls (2 Tests, 8,7 Sekunden). Alle vier Läufe verwendeten frische Datenbanken; danach waren eigene Container, Netzwerke und private Laufdateien entfernt.
 - E2E-Typecheck, Lint und Formatprüfung bestanden; der unabhängige Review fand keine relevanten Probleme. Anwendungscode, Fixtures und Runner bleiben unverändert. Die [Anleitung](./e2e-tests.md) beschreibt beide Fälle und ihre Einzelaufrufe.
 - Dieser Schritt bleibt lokal: kein Push und keine Änderung an Staging oder Produktion. Als Nächstes folgt Punkt 5, die automatische CI-Ausführung.
+
+### Nachweise zu Schritt 5 (18.10.2026, lokal; GitHub-Abnahme offen)
+
+- `scripts/ci-scope.mjs` liefert zusätzlich `e2e`; `full` und `database` behalten ihre bisherige Bedeutung. Neben `docs/**/*.md` sind ausschließlich die konkrete Poll-Leseseite und ihre eigene Ladeansicht ausgenommen. Gemeinsame Helfer, neue Poll-Dateien, Teams, Auth, Styles, Übersetzungen, CMS, Abhängigkeiten, E2E und unbekannte Pfade bleiben relevant. Manuelle Läufe aktivieren alle Prüfungen.
+- Die erweiterten Scope-Tests bestanden mit echten Git-Änderungen: Web ohne bisherige Datenbankreihen, enge Poll-Ausnahmen, gemischte PRs trotz letztem Docs-Commit, beide Seiten von Umbenennungen, Löschungen, mehr als 300 Dateien, manueller/neuer Branch sowie fehlerhafte Vergleichsdaten ohne ausgegebenen Skip-Status.
+- Der neue Ubuntu-Job `e2e · teams` installiert die gefrorenen Abhängigkeiten und ausschließlich Chromium samt Systembibliotheken. Er verwendet `pnpm test:e2e` einschließlich Start, Fixtures und Cleanup. E2E-Typecheck/Lint laufen bereits im bestehenden Build-Job. Joblimit 50 Minuten, Runner-Schritt 36 Minuten, Installation je fünf Minuten, Upload drei Minuten; die engeren Build-/Start-/Browserlimits bleiben im Runner.
+- Der Upload läuft bei Erfolg und Fehler, soweit der Workflow nicht abgebrochen wurde. Die Positivliste enthält ausschließlich `.e2e/report/`, `.e2e/results/` und `.e2e/logs/`, mit explizit erlaubtem verstecktem Elternverzeichnis und sieben Tagen Aufbewahrung. Private `runs/`, Env-/Fixturedateien und separate Auth-Dateien gehören nicht dazu. `actions/upload-artifact` v7.0.2 ist anhand des offiziellen Release-Tags auf `cf430e030ddbb5b0abf93d22962f4752f3646cd9` gepinnt.
+- Actionlint 1.7.12 akzeptierte den Workflow; die 21 Build-/Action-Pin-Tests und fünf Runner-Tests bestanden. Ein unabhängiger Review fand keine relevanten Probleme.
+- Eine temporär falsche Browser-Erwartung unter `CI=true` ließ den echten Lauf mit Status 1 scheitern. HTML-Bericht, Screenshot, Trace und Runner-/Dienst-/Build-Logs waren vorhanden; die Credential-Felder der gespeicherten Containerdiagnose waren vollständig redigiert. Die Störung wurde vollständig zurückgenommen. Anschließend bestanden beide Browserfälle unter `CI=true` wieder (2 Tests, 9,0 Sekunden). Nach beiden Läufen waren eigene Container, Netzwerke und private Laufdateien entfernt.
+- Die GitHub-API bestätigte am 18.10.2026: `main` hat keine Branch Protection und keine anwendbaren Branch Rules. Der neue Check wird deshalb nicht als erzwungene Merge-Sperre ausgegeben; keine Repository-Regel wurde verändert. Das öffentliche Repository macht auch Diagnoseartefakte für Repository-Leser zugänglich; sie enthalten ausschließlich Wegwerfdaten.
+- Kein Push, kein Remote-Workflow-Start und keine Änderung an Staging oder Produktion. Noch offen sind der tatsächliche Ubuntu-Lauf (einschließlich kaltem Image-Build), ein Docs-only-Run ohne E2E/Datenbank sowie die rote/grüne GitHub-Probe mit herunterladbaren Artefakten. Die [Anleitung](./e2e-tests.md#ci-execution-and-scope) beschreibt Scope, Budgets, Abbruchgrenze und Artefakte.
 
 ## Technische Bezugspunkte
 

@@ -85,7 +85,7 @@ Further reading:
 ```
 .
 ├── .github/
-│   ├── workflows/ci.yml    CI (build, datetime, integration, infra, images)
+│   ├── workflows/ci.yml    CI (build, datetime, integration, E2E, infra, images)
 │   └── dependabot.yml      weekly grouped version updates
 ├── apps/
 │   ├── cms/                Strapi 5 backend
@@ -785,7 +785,12 @@ pushes to `main` (other branches through "Run workflow"): `build`
 at `critical`, advisory at `high`), `datetime` (`pnpm test:tz` with Postgres
 16), `integration` (`pnpm test:integration` on SQLite and Postgres 16),
 `infra` (shellcheck, `docker compose config` of every compose variant) and
-`images` (both Dockerfiles built, not pushed). Actions are pinned by commit
+`images` (both Dockerfiles built, not pushed), plus `e2e · teams` (Chromium
+against its own disposable CMS/web/Postgres stack). Docs-only changes under
+`docs/**/*.md` skip application/database/E2E runs. E2E has its own path scope;
+relevant web-only changes start its private DB without enabling the other
+database suites. See [E2E scope and artifacts](./docs/e2e-tests.md#ci-execution-and-scope).
+Actions are pinned by commit
 SHA and the base image by digest (`infra/build-pins.test.ts`); Dependabot
 opens weekly grouped updates. `docs/DEPLOYMENT.md` and
 `docs/architecture.md` are hand-formatted and excluded from prettier.
