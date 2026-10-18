@@ -152,8 +152,8 @@ describe("pnpm", () => {
     ].flatMap((text) =>
       [...text.matchAll(/corepack prepare pnpm@(\S+) --activate/g)].map((m) => m[1]),
     );
-    // Three CI jobs with Node plus the two images.
-    expect(prepared).toHaveLength(5);
+    // Four CI jobs with Node plus the two images.
+    expect(prepared).toHaveLength(6);
     expect(new Set(prepared)).toEqual(new Set([version]));
   });
 
@@ -181,6 +181,8 @@ describe(".dockerignore", () => {
     "apps/cms/public/uploads/*",
     "**/types/generated",
     "**/*.tsbuildinfo",
+    "e2e",
+    ".e2e",
   ])("excludes %s", (pattern) => {
     expect(patterns).toContain(pattern);
   });

@@ -29,3 +29,6 @@ pnpm-lock.yaml
 # `*`/`_` in prose and blockquoted SHAs differently from GitHub.
 docs/DEPLOYMENT.md
 docs/architecture.md
+
+# Browser E2E reports, traces, private sessions and runtime data
+.e2e/

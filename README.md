@@ -85,7 +85,7 @@ Further reading:
 ```
 .
 ├── .github/
-│   ├── workflows/ci.yml    CI (build, datetime, integration, infra, images)
+│   ├── workflows/ci.yml    CI (build, datetime, integration, E2E, infra, images)
 │   └── dependabot.yml      weekly grouped version updates
 ├── apps/
 │   ├── cms/                Strapi 5 backend
@@ -753,14 +753,18 @@ pnpm build             # build every workspace, packages/domain first (the cms b
 pnpm build:domain      # build packages/domain into dist/cjs + dist/esm
 pnpm start             # every workspace's start script in parallel (strapi start, next start -p 3000)
 pnpm lint              # ESLint in every workspace
-pnpm typecheck         # build:domain, tsc for the package and both apps, then typecheck:tests
+pnpm typecheck         # build:domain, tsc for all workspaces, then typecheck:tests
 pnpm typecheck:tests   # type-check every *.test.ts (tsconfig.test.json, tsconfig.test.cms.json)
-pnpm test              # vitest unit tests (apps, packages, infra)
+pnpm test              # Vitest unit tests (apps, packages, infra), then E2E runner checks
 pnpm test:tz           # the same suite under TZ=UTC, Europe/Berlin and Pacific/Auckland
 pnpm test:integration  # build:domain, then the real cms booted in process, per role, over HTTP
+pnpm test:e2e          # disposable Docker stack + Chromium: team editing and member read-only E2E
 pnpm format            # prettier --write over the tree
 pnpm format:check      # prettier --check (blocking in CI)
 ```
+
+Browser E2E setup and its current scope are documented in
+[docs/e2e-tests.md](./docs/e2e-tests.md).
 
 And in `infra/`:
 
@@ -781,7 +785,12 @@ pushes to `main` (other branches through "Run workflow"): `build`
 at `critical`, advisory at `high`), `datetime` (`pnpm test:tz` with Postgres
 16), `integration` (`pnpm test:integration` on SQLite and Postgres 16),
 `infra` (shellcheck, `docker compose config` of every compose variant) and
-`images` (both Dockerfiles built, not pushed). Actions are pinned by commit
+`images` (both Dockerfiles built, not pushed), plus `e2e · teams` (Chromium
+against its own disposable CMS/web/Postgres stack). Docs-only changes under
+`docs/**/*.md` skip application/database/E2E runs. E2E has its own path scope;
+relevant web-only changes start its private DB without enabling the other
+database suites. See [E2E scope and artifacts](./docs/e2e-tests.md#ci-execution-and-scope).
+Actions are pinned by commit
 SHA and the base image by digest (`infra/build-pins.test.ts`); Dependabot
 opens weekly grouped updates. `docs/DEPLOYMENT.md` and
 `docs/architecture.md` are hand-formatted and excluded from prettier.
