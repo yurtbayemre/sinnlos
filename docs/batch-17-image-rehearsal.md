@@ -96,3 +96,7 @@ local staging origin. Before any production operation, obtain the actual live
 image tag, current backup, final-commit CI and the owner's deployment go in the
 deployment session. No production deployment, merge or v0.17.0 release was made
 as part of this rehearsal.
+
+### Browser follow-up on 2026-10-18
+
+[Browser acceptance phase 1](batch-17-browser-acceptance.md) now verifies TLS access and eight role entries against these same staging images. An isolated client on the existing Docker network uses the public local CA with certificate checking and browser sandbox enabled; the host/In-App DNS was not changed. The temporary client was removed after the checks. No content or deployment changed. The remaining training, organisation/media, activity/report/panel and final review phases are still open.

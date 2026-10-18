@@ -1,7 +1,7 @@
 # Batch 17 implementation plan
 
 > Phase 3 of v2 frontend authoring (plan 12). Written 2026-10-16 against main 2f47b84fcadfd6f63ecffac1c78cdf388c5ea44d, released as v0.16.2.
-> Status: all implementation steps are merged into main afcbd51 through PR #90. The combined Ponytail review is complete with no confirmed new findings (section 16). Rollback preparation and the complete local image rehearsal are complete (sections 17–18). Browser acceptance and production deployment remain pending. Decision 06 remains the approved scope; section 3 records the accepted lean exam-mode amendment, unlimited retries and no timer. Review corrections are recorded in section 11.
+> Status: all implementation steps are merged into main afcbd51 through PR #90. The combined Ponytail review is complete with no confirmed new findings (section 16). Rollback preparation and the complete local image rehearsal are complete (sections 17–18). Browser acceptance has started: TLS and role entry checks passed (section 19); the remaining browser phases and production deployment are pending. Decision 06 remains the approved scope; section 3 records the accepted lean exam-mode amendment, unlimited retries and no timer. Review corrections are recorded in section 11.
 > Paths: cms/ = apps/cms/src/, web/ = apps/web/src/, domain/ = packages/domain/src/. Paths outside those roots are written in full.
 > This plan records the implementation baseline and local evidence; it does not verify or change production.
 
@@ -387,3 +387,11 @@ Browser acceptance remains outstanding: the in-app browser could not resolve
 the local staging hostname. Production is unchanged. Next is browser acceptance
 from a client with working staging DNS/TLS, then the production brief, final CI
 and the owner's deployment go. No merge or release is implied by this evidence.
+
+## 19. Browser acceptance started on 2026-10-18
+
+PR #98 is merged into main `e50cc359c94924e99747eae588c7bcf95fe552df`, with all eight main CI jobs green. The six automated E2E cases remain a focused supplement to staging acceptance.
+
+[Browser acceptance phase 1](batch-17-browser-acceptance.md) passed against the existing local Batch 17 images: a separate non-root Chromium client in `b12i-frontend` reached the unchanged staging origin with valid TLS and its sandbox enabled. Five web personas and three separate Strapi panel accounts signed in through their visible forms. The exercised authoring/organisation entry points and field restrictions matched their roles; direct member/editor organisation access was refused.
+
+No content, roles or application configuration changed. The temporary browserclient and its private credentials/profile were removed; existing staging services remain healthy. The in-app browser's host DNS remains unchanged. Training writes/publication/scheduling/conflicts, organisation/media writes, activity/report/panel rights and the final acceptance review remain phases 2–5. Phase 2 (Training) is next; production still requires completed acceptance and the owner's deployment go.
