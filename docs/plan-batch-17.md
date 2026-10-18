@@ -1,7 +1,7 @@
 # Batch 17 implementation plan
 
 > Phase 3 of v2 frontend authoring (plan 12). Written 2026-10-16 against main 2f47b84fcadfd6f63ecffac1c78cdf388c5ea44d, released as v0.16.2.
-> Status: all implementation steps are merged into main afcbd51 through PR #90. The combined Ponytail review is complete with no confirmed new findings (section 16). Rollback preparation and the complete local image rehearsal are complete (sections 17–18). Local browser acceptance and its independent final review are complete (sections 19–23): TLS/role entry, training, organisation/media and activity/report/panel passed within the documented scope. Production briefing, deployment and release remain pending. Decision 06 remains the approved scope; section 3 records the accepted lean exam-mode amendment, unlimited retries and no timer. Review corrections are recorded in section 11.
+> Status: all implementation steps are merged into main afcbd51 through PR #90. The combined Ponytail review is complete with no confirmed new findings (section 16). Rollback preparation and the complete local image rehearsal are complete (sections 17–18). Local browser acceptance and its independent final review are complete (sections 19–23): TLS/role entry, training, organisation/media and activity/report/panel passed within the documented scope. The production brief is prepared (section 24); live/rollback confirmation, deployment and release remain pending. Decision 06 remains the approved scope; section 3 records the accepted lean exam-mode amendment, unlimited retries and no timer. Review corrections are recorded in section 11.
 > Paths: cms/ = apps/cms/src/, web/ = apps/web/src/, domain/ = packages/domain/src/. Paths outside those roots are written in full.
 > This plan records the implementation baseline and local evidence; it does not verify or change production.
 
@@ -427,4 +427,10 @@ Four labelled Author-owned fixtures remain: department, team, optional draft cou
 
 The existing image-source CI (seven jobs), current main CI (eight jobs including E2E) and phase-4 documentation CI were revalidated against their exact commits. The final documentation commit and its CI are recorded in PR #99 and the local phase-5 result. All three staging services remain healthy on the rehearsed images; the temporary browser client is absent. Retained test data and limits are listed in the acceptance report, including Chromium/en-US coverage, no separate keyboard/screen-reader walkthrough, and the narrower panel/report checks.
 
-The next step is merging the acceptance documentation and preparing the production brief. The deployment session must establish the actual live/rollback tag, current backup, clean preflight, target-commit CI and owner deployment go. No production deployment or v0.17.0 release is implied by local acceptance.
+PR #99 merged the acceptance documentation into main `bf781e9e2ae845770704027839cbec1f0dc010d6`. Section 24 records the prepared production brief. The deployment session must establish the actual live/rollback tag, current backup, clean preflight, target-commit CI and owner deployment go. No production deployment or v0.17.0 release is implied by local acceptance.
+
+## 24. Production brief prepared on 2026-10-18
+
+The [production brief](batch-17-production-brief.md) proposes the merged acceptance commit `bf781e9e2ae845770704027839cbec1f0dc010d6` as a concrete target, with green [Main CI 39167674916](https://github.com/yurtbayemre/sinnlos/actions/runs/39167674916). It records the combined CMS/web changes, grant revocations, owner browser checks, the existing deployment/backup procedure and the rehearsed rollback ordering. A different final target requires its own exact SHA, scope comparison and green CI in the deployment record.
+
+The actual production host/checkout, current live SHA and rollback image pair have not been verified in this local session. Those fields, current backup/verification, preflight and owner go remain explicitly open for the deployment session. No production command, content write, deployment, annotated tag or GitHub release was performed. The brief is prepared for review, not a production-ready authorization.

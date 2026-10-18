@@ -173,4 +173,7 @@ or browser acceptance. Record that evidence separately before production deploy.
 The [2026-10-17 local image rehearsal](../../../docs/batch-17-image-rehearsal.md)
 exercised this procedure with the real v0.16.2 and Batch 17 images, including
 panel/scheduler republishing and an intentional mode edit during rollback.
-Browser acceptance and production deployment remain outstanding.
+The [2026-10-18 browser acceptance](../../../docs/batch-17-browser-acceptance.md)
+is also complete within its documented local scope. The
+[production brief](../../../docs/batch-17-production-brief.md) is prepared; actual
+live/rollback confirmation and production deployment remain outstanding.
