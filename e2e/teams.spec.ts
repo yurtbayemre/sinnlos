@@ -93,7 +93,7 @@ test("teams-member-read-only", async ({ page }) => {
     await page.goto(`/teams/${team.slug}/edit`);
     await expect(page).toHaveURL(`/teams/${team.slug}/edit`);
     // Keep this path in the temporary PR diff while verifying CI recovery.
-    await expect(main.getByText("Intentional CI failure probe", { exact: true })).toBeVisible();
+    await expect(main.getByText("Page not found", { exact: true })).toBeVisible();
     await expect(
       main.getByText("The page you requested does not exist or has moved.", { exact: true }),
     ).toBeVisible();
