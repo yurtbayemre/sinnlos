@@ -20,11 +20,11 @@ Abnahme: Frischer Stack startet mit bestätigten Fixtures; Typecheck/Lint und be
 
 ## 2 Einen vollständigen Quiz-Ablauf ergänzen
 
-- [ ] Als bestehendes Mitglied über das Formular anmelden, Training und den Testkurs öffnen. Zunächst `0 of 1 done` prüfen und die Lektion über `Start course` öffnen.
-- [ ] Ohne vollständige Antworten bleiben Prüfung und Abschluss gesperrt. Mit einer falschen und einer richtigen Antwort muss die Prüfung den Fehler anzeigen; der Abschluss bleibt gesperrt.
-- [ ] Nach Neuladen ist die Lektion weiterhin offen. Beide richtigen Antworten auswählen und prüfen; die Erfolgsmeldung schaltet den Abschluss frei.
-- [ ] Erneut laden: Eine erfolgreiche Prüfaktion allein hat noch keinen Abschluss erzeugt. Quiz erneut korrekt beantworten und ausdrücklich `Complete lesson` klicken.
-- [ ] Nach vollständigem Neuladen einen datierten Abschluss und keinen Abschlussbutton sehen. Kursdetail und Kurskarte in der Übersicht zeigen `Completed`; keine Fehlermeldung darf den Erfolg begleiten.
+- [x] Als bestehendes Mitglied über das Formular anmelden, Training und den Testkurs öffnen. Zunächst `0 of 1 done` prüfen und die Lektion über `Start course` öffnen.
+- [x] Ohne vollständige Antworten bleiben Prüfung und Abschluss gesperrt. Mit einer falschen und einer richtigen Antwort muss die Prüfung den Fehler anzeigen; der Abschluss bleibt gesperrt.
+- [x] Nach Neuladen ist die Lektion weiterhin offen. Beide richtigen Antworten auswählen und prüfen; die Erfolgsmeldung schaltet den Abschluss frei.
+- [x] Erneut laden: Eine erfolgreiche Prüfaktion allein hat noch keinen Abschluss erzeugt. Quiz erneut korrekt beantworten und ausdrücklich `Complete lesson` klicken.
+- [x] Nach vollständigem Neuladen einen datierten Abschluss und keinen Abschlussbutton sehen. Kursdetail und Kurskarte in der Übersicht zeigen `Completed`; keine Fehlermeldung darf den Erfolg begleiten.
 
 Abnahme: Der Fall besteht allein auf frischen Daten. Eine vorübergehende Störung, die den Abschluss nur als erfolgreich meldet, ohne den Beleg zu schreiben, muss die Persistenzprüfung scheitern lassen; anschließend wird sie vollständig zurückgenommen.
 
@@ -37,5 +37,7 @@ Abnahme: Der Fall besteht allein auf frischen Daten. Eine vorübergehende Störu
 
 ## Nachweise
 
-- PR #93 ist nach `main` gemergt; [Main-CI](https://github.com/yurtbayemre/sinnlos/actions/runs/39119203517) für `f7f74c94e4e7e4b8c618bd7cdf0d37c59dc395b8` wird während dieser Arbeit geprüft.
-- Schritt 1 lokal abgenommen: E2E-Typecheck und Lint grün; beide bestehenden Teamfälle bestanden mit den neuen veröffentlichten Kurs-Fixtures auf frischen Daten (2 Tests, 9,6 Sekunden, Run `sinnlos-e2e-843c19295d8681abf829770c`). Cleanup erfolgreich. Schritte 2–3 werden anschließend geprüft.
+- PR #93 ist nach `main` gemergt; [Main-CI](https://github.com/yurtbayemre/sinnlos/actions/runs/39119203517) für `f7f74c94e4e7e4b8c618bd7cdf0d37c59dc395b8` ist vollständig grün (8/8 Jobs, beide Teamtests bestanden).
+- Schritt 1 lokal abgenommen: E2E-Typecheck und Lint grün; beide bestehenden Teamfälle bestanden mit den neuen veröffentlichten Kurs-Fixtures auf frischen Daten (2 Tests, 9,6 Sekunden, Run `sinnlos-e2e-843c19295d8681abf829770c`). Cleanup erfolgreich. Der gemeinsame Dreierlauf folgt in Schritt 3.
+
+- Schritt 2: `training-quiz-completion` bestand allein mit frischen Daten (1 Test, 6,4 Sekunden, Run `sinnlos-e2e-c2c016fabc08e9d995f59c76`). Typecheck und Lint grün. Die lokale Störung des CMS-Abschlusscontrollers meldete Erfolg ohne Datenbankschreibzugriff; der Test scheiterte im Run `sinnlos-e2e-be38c8fd3e926459cfae59ab` genau nach dem Neuladen am fehlenden datierten Abschluss (Status 1). HTML-Bericht, Screenshot und Trace wurden vor dem nächsten Lauf gesichert. Der Controller wurde bytegenau wiederhergestellt; kein Anwendungscode gehört zur Erweiterung.
