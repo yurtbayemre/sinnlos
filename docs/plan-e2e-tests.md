@@ -1,6 +1,6 @@
 # Implementierungsplan für automatische E2E Tests
 
-Stand: 18.10.2026. Ausgangspunkt: Main `c2bce321`, nach dem Merge von Batch 17 und der Rollback-Rehearsal. Status: Schritte 1–4 umgesetzt; Schritt 5 lokal implementiert und Schritt 6 lokal abgenommen. Die GitHub-Abnahme zu Schritten 5–6 bleibt bis zum Push offen.
+Stand: 18.10.2026. Ausgangspunkt: Main `c2bce321`, nach dem Merge von Batch 17 und der Rollback-Rehearsal. Status: Schritte 1–6 umgesetzt und lokal sowie auf GitHub abgenommen. Die CI-Belege stehen unter GitHub-Abnahme; der Pilot-PR ist noch nicht gemergt.
 
 Der erste Pilot prüft das Modul **Teams** im Browser: Ein Team-Lead ändert die Beschreibung seines Teams, und ein Mitglied kann den gespeicherten Text lesen. Zwei Tests sollen automatisch in der CI laufen und die Strecke vom sichtbaren Login über Next.js und Strapi bis zur Datenbank abdecken.
 
@@ -95,7 +95,7 @@ Ausnahmen für unabhängige Seiten werden eng und ausdrücklich geführt. Gemein
 - [x] Neue GitHub Actions gemäß Repository-Konvention auf vollständige Commit-SHAs pinnen. Keine aus einem Beispiel übernommenen beweglichen Action-Tags verwenden.
 - [x] E2E-Fehler dürfen nicht durch `continue-on-error`, leere Testsammlung oder automatische Wiederholungen grün werden. Einen erforderlichen Merge-Check nur passend zur tatsächlich bestehenden Branch-Regel konfigurieren; dessen Status ausdrücklich dokumentieren.
 
-**Stand:** Die folgenden Nachweise bestätigen die lokale Implementierung. Die GitHub-Abnahme bleibt bis zu einem separat beauftragten Push offen.
+**Stand:** Lokal und auf GitHub abgenommen. Die getrennten Nachweise unten belegen den vollständigen Pilotlauf, Docs-only-Skip sowie die rote/grüne Fehlerprobe.
 
 **Abnahme:** Ein passender PR startet den E2E-Check und besteht beide Fälle. Ein ausschließlich dokumentarischer Lauf startet weder E2E noch dessen Datenbank. Ein absichtlich scheiternder Test lässt den Check rot werden und liefert verwertbare Artefakte; nach Rücknahme der Störung ist der Check wieder grün.
 
@@ -105,9 +105,9 @@ Ausnahmen für unabhängige Seiten werden eng und ausdrücklich geführt. Gemein
 - [x] Installation, lokale Voraussetzungen, `pnpm test:e2e`, Auswahl eines Einzelfalls, Aufruf des Fehlerberichts und Bereinigung nach einem abgebrochenen Lauf dokumentieren.
 - [x] Laufzeit für Build, Start und Browserfälle getrennt messen. Erst anhand dieser Werte über zusätzliche Caches oder breitere Parallelisierung entscheiden.
 - [x] Unabhängigen Review von Isolation, Testaussagen, CI-Auslösern und Cleanup durchführen. Nur bestätigte Probleme im Umfang des Piloten beheben.
-- [ ] Ergebnisse mit Commit und CI-Link hier vermerken. Danach mögliche weitere Module separat auswählen; ein Quiz-Abschluss ist der vorgesehene Kandidat.
+- [x] Ergebnisse mit Commit und CI-Link hier vermerken. Danach mögliche weitere Module separat auswählen; ein Quiz-Abschluss ist der vorgesehene Kandidat.
 
-**Stand:** Lokal abgenommen; der aktuelle E2E-CI-Link und die GitHub-Abnahme fehlen weiterhin. Der verlinkte frühere CI-Lauf unten belegt nur die unveränderte Unit-/HTTP-Basis.
+**Stand:** Abgenommen. Aktuelle Commit-/CI-Links, heruntergeladene Artefakte und die Messung des kalten Ubuntu-Builds sind unter GitHub-Abnahme dokumentiert.
 
 **Abnahme:** Beide Fälle laufen automatisch, Fehler sind nachvollziehbar und fremde Daten/Dienste werden nicht berührt. Bestehende Unit-/HTTP-Prüfungen bleiben grün. Der Pilot ist als Team-E2E-Abdeckung dokumentiert und wird nicht als vollständige Batch-17-Browser-Abnahme ausgegeben.
 
@@ -126,14 +126,16 @@ Die Liste grenzt die Arbeiten ein; beim Umsetzen wird der kleinste passende Zusc
 
 ## Fortschritt
 
-| Schritt                            | Status              | Nachweis                                     |
-| ---------------------------------- | ------------------- | -------------------------------------------- |
-| 1 Werkzeug und Projektanbindung    | Erledigt            | Nachweise unten; [Anleitung](./e2e-tests.md) |
-| 2 Isolierte Testumgebung           | Erledigt            | Nachweise unten; nur lokal                   |
-| 3 Beschreibung bearbeiten          | Erledigt            | Nachweise unten; nur lokal                   |
-| 4 Mitglied ohne Bearbeitungsrechte | Erledigt            | Nachweise unten; nur lokal                   |
-| 5 Automatische CI Ausführung       | Lokal implementiert | GitHub-Abnahme nach Push offen               |
-| 6 Abnahme und Anleitung            | Lokal abgenommen    | GitHub-Abnahme nach Push offen               |
+| Schritt                            | Status   | Nachweis                                      |
+| ---------------------------------- | -------- | --------------------------------------------- |
+| 1 Werkzeug und Projektanbindung    | Erledigt | Nachweise unten; [Anleitung](./e2e-tests.md)  |
+| 2 Isolierte Testumgebung           | Erledigt | Lokale Nachweise unten; [CI](#github-abnahme) |
+| 3 Beschreibung bearbeiten          | Erledigt | Lokale Nachweise unten; [CI](#github-abnahme) |
+| 4 Mitglied ohne Bearbeitungsrechte | Erledigt | Lokale Nachweise unten; [CI](#github-abnahme) |
+| 5 Automatische CI Ausführung       | Erledigt | [GitHub-Abnahme](#github-abnahme)             |
+| 6 Abnahme und Anleitung            | Erledigt | [GitHub-Abnahme](#github-abnahme)             |
+
+Die folgenden Einträge halten den Stand beim Abschluss jedes Schritts fest; die abschließende GitHub-Abnahme folgt darunter.
 
 ### Nachweise zu Schritt 1 (18.10.2026)
 
@@ -174,7 +176,7 @@ Die Liste grenzt die Arbeiten ein; beim Umsetzen wird der kleinste passende Zusc
 - E2E-Typecheck, Lint und Formatprüfung bestanden; der unabhängige Review fand keine relevanten Probleme. Anwendungscode, Fixtures und Runner bleiben unverändert. Die [Anleitung](./e2e-tests.md) beschreibt beide Fälle und ihre Einzelaufrufe.
 - Dieser Schritt bleibt lokal: kein Push und keine Änderung an Staging oder Produktion. Als Nächstes folgt Punkt 5, die automatische CI-Ausführung.
 
-### Nachweise zu Schritt 5 (18.10.2026, lokal; GitHub-Abnahme offen)
+### Nachweise zu Schritt 5 (18.10.2026, lokale Umsetzung)
 
 - `scripts/ci-scope.mjs` liefert zusätzlich `e2e`; `full` und `database` behalten ihre bisherige Bedeutung. Neben `docs/**/*.md` sind ausschließlich die konkrete Poll-Leseseite und ihre eigene Ladeansicht ausgenommen. Gemeinsame Helfer, neue Poll-Dateien, Teams, Auth, Styles, Übersetzungen, CMS, Abhängigkeiten, E2E und unbekannte Pfade bleiben relevant. Manuelle Läufe aktivieren alle Prüfungen.
 - Die erweiterten Scope-Tests bestanden mit echten Git-Änderungen: Web ohne bisherige Datenbankreihen, enge Poll-Ausnahmen, gemischte PRs trotz letztem Docs-Commit, beide Seiten von Umbenennungen, Löschungen, mehr als 300 Dateien, manueller/neuer Branch sowie fehlerhafte Vergleichsdaten ohne ausgegebenen Skip-Status.
@@ -183,9 +185,9 @@ Die Liste grenzt die Arbeiten ein; beim Umsetzen wird der kleinste passende Zusc
 - Actionlint 1.7.12 akzeptierte den Workflow; die 21 Build-/Action-Pin-Tests und fünf Runner-Tests bestanden. Ein unabhängiger Review fand keine relevanten Probleme.
 - Eine temporär falsche Browser-Erwartung unter `CI=true` ließ den echten Lauf mit Status 1 scheitern. HTML-Bericht, Screenshot, Trace und Runner-/Dienst-/Build-Logs waren vorhanden; die Credential-Felder der gespeicherten Containerdiagnose waren vollständig redigiert. Die Störung wurde vollständig zurückgenommen. Anschließend bestanden beide Browserfälle unter `CI=true` wieder (2 Tests, 9,0 Sekunden). Nach beiden Läufen waren eigene Container, Netzwerke und private Laufdateien entfernt.
 - Die GitHub-API bestätigte am 18.10.2026: `main` hat keine Branch Protection und keine anwendbaren Branch Rules. Der neue Check wird deshalb nicht als erzwungene Merge-Sperre ausgegeben; keine Repository-Regel wurde verändert. Das öffentliche Repository macht auch Diagnoseartefakte für Repository-Leser zugänglich; sie enthalten ausschließlich Wegwerfdaten.
-- Kein Push, kein Remote-Workflow-Start und keine Änderung an Staging oder Produktion. Noch offen sind der tatsächliche Ubuntu-Lauf (einschließlich kaltem Image-Build), ein Docs-only-Run ohne E2E/Datenbank sowie die rote/grüne GitHub-Probe mit herunterladbaren Artefakten. Die [Anleitung](./e2e-tests.md#ci-execution-and-scope) beschreibt Scope, Budgets, Abbruchgrenze und Artefakte.
+- Zum Abschluss der lokalen Umsetzung gab es noch keinen Push oder Remote-Workflow-Start und keine Änderung an Staging/Produktion. Damals offen waren der tatsächliche Ubuntu-Lauf (einschließlich kaltem Image-Build), ein Docs-only-Run ohne E2E/Datenbank sowie die rote/grüne GitHub-Probe mit herunterladbaren Artefakten. Die [Anleitung](./e2e-tests.md#ci-execution-and-scope) beschreibt Scope, Budgets, Abbruchgrenze und Artefakte.
 
-### Nachweise zu Schritt 6 (18.10.2026, lokal; GitHub-Abnahme offen)
+### Nachweise zu Schritt 6 (18.10.2026, lokale Abnahme)
 
 - Referenzstand: `0dd5a04` (CI-Konfiguration), davor `5cd0062` (Rechtefall) und `a305491` (Bearbeitungsfall). Zwei aufeinanderfolgende vollständige `pnpm test:e2e`-Läufe unter `CI=true` bestanden mit jeweils zwei Browserfällen, einem Worker und ohne Wiederholungen. Beide verwendeten neue Projekte, Datenbanken und Zugangsdaten. Einzel- und umgekehrte Reihenfolgeläufe sind bereits in Schritt 4 nachgewiesen.
 - Lauf 1: `sinnlos-e2e-adbcc6d0dabbfe706b25644f`; Lauf 2: `sinnlos-e2e-262fa2e0e332f2b72ce44643`. Danach fehlten alle eigenen Container, Netzwerke, privaten Laufdateien und CMS-/Web-Image-Tags. Gemeinsame Images und Build-Cache wurden beibehalten.
@@ -199,7 +201,25 @@ Die Liste grenzt die Arbeiten ein; beim Umsetzen wird der kleinste passende Zusc
 - Der unabhängige Schlussreview des gesamten Pilot-Diffs `1498786..0dd5a04` fand keine bestätigten Probleme in Isolation, Secrets, Fixtures, Testaussagen, CI-Auslösern, Artefaktgrenzen oder Cleanup.
 - Die [Betriebsanleitung](./e2e-tests.md) enthält Installation, Voraussetzungen, Gesamt-/Einzelaufrufe, Bericht/Trace sowie konkrete Bereinigung nach hartem Abbruch. Dabei werden nur geprüfte Run-IDs und lokale Docker-Endpunkte verwendet; fehlende Env-Dateien werden nicht rekonstruiert. Für private Dateien wird die vorhandene Pfad-/Owner-Prüfung des Runners wiederverwendet.
 - [Letzter bestandener CI-Basislauf](https://github.com/yurtbayemre/sinnlos/actions/runs/39113118307) auf `a30549166b1cf0a40ce265163648b9a58b1e374b`: Unit-/Build-Prüfung, TZ-Matrix und SQLite-/Postgres-HTTP-Integration grün. Anwendungscode, Domain-Paket, Lockfile und Root-Paketmanifest sind seither unverändert. Die aktuellen Scope-/Pin-/Runner-Prüfungen sind in Schritt 5 nachgewiesen. Der alte CI-Link ist ausdrücklich kein Nachweis für den neuen E2E-Job; die vollständigen Unit-/HTTP-Suites wurden lokal nicht erneut ausgeführt.
-- Dieser Schritt ändert nur die Dokumentation und bleibt lokal. Kein Push, kein neuer Remote-CI-Lauf, keine Änderung an Staging/Produktion. Vor Abschluss der gesamten Abnahme fehlen weiterhin die in Schritt 5 genannten GitHub-Läufe und deren Artefakt-Download. Der Pilot deckt Teams ab; Quiz-Abschluss und weitere Module bleiben separate Folgeaufträge, ebenso eine vollständige Batch-17-Browserabnahme.
+- Der lokale Abschluss in `50e746e` änderte nur die Dokumentation; zu diesem Zeitpunkt gab es keinen Push, neuen Remote-CI-Lauf oder Eingriff in Staging/Produktion. Die damals noch fehlenden GitHub-Läufe und Artefakt-Downloads sind im folgenden Abschnitt nachgewiesen. Der Pilot deckt Teams ab; Quiz-Abschluss und weitere Module bleiben separate Folgeaufträge, ebenso eine vollständige Batch-17-Browserabnahme.
+
+### GitHub-Abnahme
+
+Die drei lokalen Commits `5cd0062`, `0dd5a04` und `50e746e` wurden nach der lokalen Abnahme auf den [Pilot-PR #93](https://github.com/yurtbayemre/sinnlos/pull/93) gepusht. Die Scope- und Fehlerproben liefen getrennt im temporären [Prüf-PR #94](https://github.com/yurtbayemre/sinnlos/pull/94), dessen Basis der Pilotbranch ist. Die absichtliche Störung gehört nicht zum Pilot-PR.
+
+| Nachweis                                    | Commit    | CI-Lauf                                                                        | Ergebnis                                                                                          |
+| ------------------------------------------- | --------- | ------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------- |
+| Vollständiger Pilot auf Ubuntu 24.04        | `50e746e` | [39114859538](https://github.com/yurtbayemre/sinnlos/actions/runs/39114859538) | Alle acht Jobs grün; beide Browserfälle ohne Wiederholung bestanden                               |
+| Ausschließlich `docs/**/*.md` geändert      | `7f6b59a` | [39114926403](https://github.com/yurtbayemre/sinnlos/actions/runs/39114926403) | Grün; `full=false`, `database=false`, `e2e=false`; E2E, DB-Testreihen und Images übersprungen     |
+| Absichtlich falsche Erwartung im Rechtefall | `fab3ef9` | [39115093800](https://github.com/yurtbayemre/sinnlos/actions/runs/39115093800) | E2E rot, sieben übrige Jobs grün; ein Browserfall bestanden, einer erwartungsgemäß fehlgeschlagen |
+| Korrekte Erwartung wiederhergestellt        | `a7a3dd5` | [39115586504](https://github.com/yurtbayemre/sinnlos/actions/runs/39115586504) | E2E grün; beide Browserfälle ohne Wiederholung bestanden                                          |
+
+- Der vollständige Pilotlauf bestätigt zusätzlich 7317 bestandene Unit-Tests, fünf Runner-Tests und 1050 bestandene HTTP-Integrationstests sowie die Zeitzonen-Matrix. Die regulären übersprungenen Tests sind keine E2E-Wiederholungen: 72 in der Unit-Suite, 24 in der Integration.
+- Der erste E2E-Job benötigte insgesamt 168 Sekunden: Dependencies 6 Sekunden, Chromium/Systembibliotheken 20 Sekunden, Runner 129 Sekunden. Der kalte Image-Build dauerte 99,738 Sekunden, Start inklusive Fixture-/Auth-Prüfung 16,712 Sekunden, die zwei Browserfälle 9,9 Sekunden. Build-Logs enthalten weder Cache-Importe noch `CACHED`-Schritte. Die bestehenden Zeitbudgets reichen; kein zusätzlicher Cache und keine Parallelisierung ergänzt.
+- [Erfolgsartefakt](https://github.com/yurtbayemre/sinnlos/actions/runs/39114859538/artifacts/12131218970) und [Fehlerartefakt](https://github.com/yurtbayemre/sinnlos/actions/runs/39115093800/artifacts/12132500325) wurden tatsächlich heruntergeladen und geprüft. Beide enthalten nur `logs/`, `report/` und `results/`; keine privaten Lauf-, Env-, Fixture- oder separaten Auth-Dateien. Das Fehlerartefakt enthält einen HTML-Bericht, einen Screenshot und einen gültigen Trace. Der Screenshot zeigt die erwartete Nicht-gefunden-Ansicht, während der Test absichtlich einen anderen Text verlangt.
+- In beiden Downloads sind alle 15 Credential-Felder der gespeicherten Containerdiagnose redigiert. Die Fehlerlogs enthalten weder rohe JWTs noch das im Trace geprüfte temporäre Testpasswort. Traces dürfen weiterhin ausschließlich Wegwerfzugänge und Testsitzungen enthalten; die siebentägige Aufbewahrung endet für diese Artefakte am 25.10.2026.
+- Beide Läufe entfernten ihre drei Container, das Netzwerk und die eigenen CMS-/Web-Image-Tags. Die abschließende Containerprüfung ist leer. Staging und Produktion wurden nicht berührt.
+- Das heruntergeladene Wiederherstellungsartefakt bestätigt zwei bestandene Tests mit `retry=0`, einen erfolgreichen Ergebnisstatus und dieselben Datei-/Redaktionsgrenzen. Es enthält erwartungsgemäß keine Fehlerscreenshots oder Traces. Auch dessen Cleanup ist vollständig nachgewiesen.
 
 ## Technische Bezugspunkte
 

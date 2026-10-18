@@ -1,10 +1,11 @@
 # Browser E2E tests
 
 The Teams pilot follows the [E2E plan](./plan-e2e-tests.md). Tooling, the
-isolated runtime and both browser cases are implemented. The CI job is configured
-locally; its first GitHub run and artifact-upload acceptance await a push.
-The two-run local acceptance is complete; this is Teams coverage, not a full
-Batch 17 browser acceptance.
+isolated runtime and both browser cases run locally and on GitHub. The two-run
+local acceptance and the first complete hosted run passed. See the
+[hosted evidence](./plan-e2e-tests.md#github-abnahme)
+for CI links, scope probes, failure artifacts and cold-build timings.
+This is Teams coverage, not a full Batch 17 browser acceptance.
 
 ## Prerequisites and commands
 
@@ -109,8 +110,9 @@ Known generated secrets are redacted from the runner logs before upload.
 As checked on 2026-10-18, `main` has no branch protection and no applicable
 branch rules. This check therefore reports CI failures but is not an enforced
 merge requirement. No repository protection settings were changed. Hosted
-acceptance is still pending: green run, docs-only skip, deliberate red run
-with downloadable artifacts, then green again after restoring the test.
+acceptance passed: full green pilot run, docs-only skip, deliberate red E2E
+with downloaded and inspected artifacts, then green E2E after restoring the
+test. The [plan records each commit and CI run](./plan-e2e-tests.md#github-abnahme).
 
 ## One disposable stack per run
 
