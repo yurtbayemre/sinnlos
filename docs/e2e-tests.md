@@ -3,6 +3,8 @@
 The Teams pilot follows the [E2E plan](./plan-e2e-tests.md). Tooling, the
 isolated runtime and both browser cases are implemented. The CI job is configured
 locally; its first GitHub run and artifact-upload acceptance await a push.
+The two-run local acceptance is complete; this is Teams coverage, not a full
+Batch 17 browser acceptance.
 
 ## Prerequisites and commands
 
@@ -178,6 +180,68 @@ To open a generated browser report:
 ```bash
 pnpm --filter @sinnlos/e2e exec playwright show-report ../.e2e/report
 ```
+
+To open a retained trace on its own:
+
+```text
+pnpm --filter @sinnlos/e2e exec playwright show-trace ../.e2e/results/TEST_DIRECTORY/trace.zip
+```
+
+Replace `TEST_DIRECTORY` with the directory printed for the failed test.
+Screenshots are normal PNG files. Each run replaces `report/` and `results/`;
+keep needed failure artifacts before starting another run. Run one E2E
+command at a time in a checkout; log directories remain separate per run.
+
+### Manual cleanup after a hard stop
+
+First confirm that the runner is no longer active. From the repository root,
+replace `RUN_ID` below with the exact printed `sinnlos-e2e-` ID followed by
+24 hexadecimal characters. Use the same local Docker endpoint as the run:
+replace `ENDPOINT` with its `unix://…` or `npipe://…` address, recorded in
+`.e2e/logs/RUN_ID/docker-context.log` unless `DOCKER_HOST` was supplied
+explicitly. Do not silently switch to another Docker context.
+
+Inspect only this project:
+
+```text
+docker --host "ENDPOINT" ps -a --filter "label=com.docker.compose.project=RUN_ID"
+docker --host "ENDPOINT" network ls --filter "label=com.docker.compose.project=RUN_ID"
+```
+
+Container names must start with `RUN_ID-`; the network must be
+`RUN_ID_default`. If private files remain, verify that
+`.e2e/runs/RUN_ID/compose.env` identifies this run and its directory, then:
+
+```text
+docker --host "ENDPOINT" compose --project-name RUN_ID --env-file ".e2e/runs/RUN_ID/compose.env" -f e2e/compose.yaml down --volumes --timeout 20
+```
+
+If private env files are missing, Compose may refuse to load. Do not recreate
+them. Stop and remove only the exact container IDs verified above, then
+remove the verified empty network. Replace `CONTAINER_IDS` with those IDs:
+
+```text
+docker --host "ENDPOINT" stop --timeout 20 CONTAINER_IDS
+docker --host "ENDPOINT" rm CONTAINER_IDS
+docker --host "ENDPOINT" network rm RUN_ID_default
+```
+
+Remove only the two run-specific image tags, if present:
+
+```text
+docker --host "ENDPOINT" image rm RUN_ID-cms RUN_ID-web
+```
+
+If the private directory remains, reuse the runner's checked path/owner
+removal instead of a recursive shell delete:
+
+```text
+node --input-type=module -e "import { removePrivateRun } from './e2e/run.mjs'; await removePrivateRun('.e2e/runs', '.e2e/runs/RUN_ID', 'RUN_ID');"
+```
+
+Repeat the filtered listings to confirm cleanup. Keep diagnostic logs, the
+shared PostgreSQL image and Docker build cache. Do not use `--rmi all` or a
+global prune command.
 
 ## Production dependency boundary
 

@@ -1,6 +1,6 @@
 # Implementierungsplan für automatische E2E Tests
 
-Stand: 18.10.2026. Ausgangspunkt: Main `c2bce321`, nach dem Merge von Batch 17 und der Rollback-Rehearsal. Status: Schritte 1–4 umgesetzt; Schritt 5 lokal implementiert, GitHub-Abnahme ausstehend; Schritt 6 offen.
+Stand: 18.10.2026. Ausgangspunkt: Main `c2bce321`, nach dem Merge von Batch 17 und der Rollback-Rehearsal. Status: Schritte 1–4 umgesetzt; Schritt 5 lokal implementiert und Schritt 6 lokal abgenommen. Die GitHub-Abnahme zu Schritten 5–6 bleibt bis zum Push offen.
 
 Der erste Pilot prüft das Modul **Teams** im Browser: Ein Team-Lead ändert die Beschreibung seines Teams, und ein Mitglied kann den gespeicherten Text lesen. Zwei Tests sollen automatisch in der CI laufen und die Strecke vom sichtbaren Login über Next.js und Strapi bis zur Datenbank abdecken.
 
@@ -101,11 +101,13 @@ Ausnahmen für unabhängige Seiten werden eng und ausdrücklich geführt. Gemein
 
 ## 6 Pilot prüfen und Betriebsanleitung abschließen
 
-- [ ] Zwei aufeinanderfolgende vollständige Läufe auf frischen Daten ohne Wiederholung bestehen lassen. Die beiden Fälle zusätzlich einzeln ausführen, soweit der Unabhängigkeitsnachweis aus Schritt 4 noch nicht vorliegt.
-- [ ] Installation, lokale Voraussetzungen, `pnpm test:e2e`, Auswahl eines Einzelfalls, Aufruf des Fehlerberichts und Bereinigung nach einem abgebrochenen Lauf dokumentieren.
-- [ ] Laufzeit für Build, Start und Browserfälle getrennt messen. Erst anhand dieser Werte über zusätzliche Caches oder breitere Parallelisierung entscheiden.
-- [ ] Unabhängigen Review von Isolation, Testaussagen, CI-Auslösern und Cleanup durchführen. Nur bestätigte Probleme im Umfang des Piloten beheben.
+- [x] Zwei aufeinanderfolgende vollständige Läufe auf frischen Daten ohne Wiederholung bestehen lassen. Die beiden Fälle zusätzlich einzeln ausführen, soweit der Unabhängigkeitsnachweis aus Schritt 4 noch nicht vorliegt.
+- [x] Installation, lokale Voraussetzungen, `pnpm test:e2e`, Auswahl eines Einzelfalls, Aufruf des Fehlerberichts und Bereinigung nach einem abgebrochenen Lauf dokumentieren.
+- [x] Laufzeit für Build, Start und Browserfälle getrennt messen. Erst anhand dieser Werte über zusätzliche Caches oder breitere Parallelisierung entscheiden.
+- [x] Unabhängigen Review von Isolation, Testaussagen, CI-Auslösern und Cleanup durchführen. Nur bestätigte Probleme im Umfang des Piloten beheben.
 - [ ] Ergebnisse mit Commit und CI-Link hier vermerken. Danach mögliche weitere Module separat auswählen; ein Quiz-Abschluss ist der vorgesehene Kandidat.
+
+**Stand:** Lokal abgenommen; der aktuelle E2E-CI-Link und die GitHub-Abnahme fehlen weiterhin. Der verlinkte frühere CI-Lauf unten belegt nur die unveränderte Unit-/HTTP-Basis.
 
 **Abnahme:** Beide Fälle laufen automatisch, Fehler sind nachvollziehbar und fremde Daten/Dienste werden nicht berührt. Bestehende Unit-/HTTP-Prüfungen bleiben grün. Der Pilot ist als Team-E2E-Abdeckung dokumentiert und wird nicht als vollständige Batch-17-Browser-Abnahme ausgegeben.
 
@@ -131,7 +133,7 @@ Die Liste grenzt die Arbeiten ein; beim Umsetzen wird der kleinste passende Zusc
 | 3 Beschreibung bearbeiten          | Erledigt            | Nachweise unten; nur lokal                   |
 | 4 Mitglied ohne Bearbeitungsrechte | Erledigt            | Nachweise unten; nur lokal                   |
 | 5 Automatische CI Ausführung       | Lokal implementiert | GitHub-Abnahme nach Push offen               |
-| 6 Abnahme und Anleitung            | Offen               | —                                            |
+| 6 Abnahme und Anleitung            | Lokal abgenommen    | GitHub-Abnahme nach Push offen               |
 
 ### Nachweise zu Schritt 1 (18.10.2026)
 
@@ -182,6 +184,22 @@ Die Liste grenzt die Arbeiten ein; beim Umsetzen wird der kleinste passende Zusc
 - Eine temporär falsche Browser-Erwartung unter `CI=true` ließ den echten Lauf mit Status 1 scheitern. HTML-Bericht, Screenshot, Trace und Runner-/Dienst-/Build-Logs waren vorhanden; die Credential-Felder der gespeicherten Containerdiagnose waren vollständig redigiert. Die Störung wurde vollständig zurückgenommen. Anschließend bestanden beide Browserfälle unter `CI=true` wieder (2 Tests, 9,0 Sekunden). Nach beiden Läufen waren eigene Container, Netzwerke und private Laufdateien entfernt.
 - Die GitHub-API bestätigte am 18.10.2026: `main` hat keine Branch Protection und keine anwendbaren Branch Rules. Der neue Check wird deshalb nicht als erzwungene Merge-Sperre ausgegeben; keine Repository-Regel wurde verändert. Das öffentliche Repository macht auch Diagnoseartefakte für Repository-Leser zugänglich; sie enthalten ausschließlich Wegwerfdaten.
 - Kein Push, kein Remote-Workflow-Start und keine Änderung an Staging oder Produktion. Noch offen sind der tatsächliche Ubuntu-Lauf (einschließlich kaltem Image-Build), ein Docs-only-Run ohne E2E/Datenbank sowie die rote/grüne GitHub-Probe mit herunterladbaren Artefakten. Die [Anleitung](./e2e-tests.md#ci-execution-and-scope) beschreibt Scope, Budgets, Abbruchgrenze und Artefakte.
+
+### Nachweise zu Schritt 6 (18.10.2026, lokal; GitHub-Abnahme offen)
+
+- Referenzstand: `0dd5a04` (CI-Konfiguration), davor `5cd0062` (Rechtefall) und `a305491` (Bearbeitungsfall). Zwei aufeinanderfolgende vollständige `pnpm test:e2e`-Läufe unter `CI=true` bestanden mit jeweils zwei Browserfällen, einem Worker und ohne Wiederholungen. Beide verwendeten neue Projekte, Datenbanken und Zugangsdaten. Einzel- und umgekehrte Reihenfolgeläufe sind bereits in Schritt 4 nachgewiesen.
+- Lauf 1: `sinnlos-e2e-adbcc6d0dabbfe706b25644f`; Lauf 2: `sinnlos-e2e-262fa2e0e332f2b72ce44643`. Danach fehlten alle eigenen Container, Netzwerke, privaten Laufdateien und CMS-/Web-Image-Tags. Gemeinsame Images und Build-Cache wurden beibehalten.
+
+| Lauf | Build   | Start inklusive Vorprüfungen | Browser | Cleanup | Gesamt  |
+| ---- | ------- | ---------------------------- | ------- | ------- | ------- |
+| 1    | 11,56 s | 13,67 s                      | 9,58 s  | 3,45 s  | 40,10 s |
+| 2    | 11,37 s | 13,79 s                      | 9,59 s  | 3,64 s  | 39,62 s |
+
+- Messung am unveränderten Runner über seine Fortschrittsmeldungen, einschließlich Browser-Prozessstart und Berichtserstellung. Die Gesamtdauer enthält zusätzlich pnpm-Aufruf und Vorbereitung. Umgebung: Windows mit Docker Desktop/Linux-Containern und vorhandenem Docker-Build-Cache; beide Datenbanken waren frisch. Diese Werte belegen keinen kalten Ubuntu-CI-Build. Zusätzliche Caches oder Parallelisierung werden vor dessen Messung nicht eingeführt.
+- Der unabhängige Schlussreview des gesamten Pilot-Diffs `1498786..0dd5a04` fand keine bestätigten Probleme in Isolation, Secrets, Fixtures, Testaussagen, CI-Auslösern, Artefaktgrenzen oder Cleanup.
+- Die [Betriebsanleitung](./e2e-tests.md) enthält Installation, Voraussetzungen, Gesamt-/Einzelaufrufe, Bericht/Trace sowie konkrete Bereinigung nach hartem Abbruch. Dabei werden nur geprüfte Run-IDs und lokale Docker-Endpunkte verwendet; fehlende Env-Dateien werden nicht rekonstruiert. Für private Dateien wird die vorhandene Pfad-/Owner-Prüfung des Runners wiederverwendet.
+- [Letzter bestandener CI-Basislauf](https://github.com/yurtbayemre/sinnlos/actions/runs/39113118307) auf `a30549166b1cf0a40ce265163648b9a58b1e374b`: Unit-/Build-Prüfung, TZ-Matrix und SQLite-/Postgres-HTTP-Integration grün. Anwendungscode, Domain-Paket, Lockfile und Root-Paketmanifest sind seither unverändert. Die aktuellen Scope-/Pin-/Runner-Prüfungen sind in Schritt 5 nachgewiesen. Der alte CI-Link ist ausdrücklich kein Nachweis für den neuen E2E-Job; die vollständigen Unit-/HTTP-Suites wurden lokal nicht erneut ausgeführt.
+- Dieser Schritt ändert nur die Dokumentation und bleibt lokal. Kein Push, kein neuer Remote-CI-Lauf, keine Änderung an Staging/Produktion. Vor Abschluss der gesamten Abnahme fehlen weiterhin die in Schritt 5 genannten GitHub-Läufe und deren Artefakt-Download. Der Pilot deckt Teams ab; Quiz-Abschluss und weitere Module bleiben separate Folgeaufträge, ebenso eine vollständige Batch-17-Browserabnahme.
 
 ## Technische Bezugspunkte
 
