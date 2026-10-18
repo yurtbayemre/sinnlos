@@ -1,6 +1,6 @@
 # Implementierungsplan für automatische E2E Tests
 
-Stand: 18.10.2026. Ausgangspunkt: Main `c2bce321`, nach dem Merge von Batch 17 und der Rollback-Rehearsal. Status: Planung; die sechs Umsetzungsschritte sind offen.
+Stand: 18.10.2026. Ausgangspunkt: Main `c2bce321`, nach dem Merge von Batch 17 und der Rollback-Rehearsal. Status: Schritt 1 umgesetzt; Schritte 2–6 sind offen.
 
 Der erste Pilot prüft das Modul **Teams** im Browser: Ein Team-Lead ändert die Beschreibung seines Teams, und ein Mitglied kann den gespeicherten Text lesen. Zwei Tests sollen automatisch in der CI laufen und die Strecke vom sichtbaren Login über Next.js und Strapi bis zur Datenbank abdecken.
 
@@ -18,11 +18,11 @@ Wir arbeiten die nummerierten Schritte einzeln ab. Nach jedem Schritt werden die
 
 ## 1 Testwerkzeug und Projektanbindung vorbereiten
 
-- [ ] `@playwright/test` als Entwicklungsabhängigkeit mit passender Lockfile ergänzen; den vorhandenen Node-/pnpm-Versionen folgen.
-- [ ] Eine Playwright-Konfiguration und `e2e/` außerhalb der Produktionsquellen anlegen. Als späteren Einstieg `pnpm test:e2e` vorsehen.
-- [ ] E2E-Dateien bewusst in Typecheck und Lint aufnehmen. Die vorhandenen Test-Tsconfigs erfassen nur `*.test.ts`; die Workspace-Lint-Aufrufe erfassen ein neues Root-Verzeichnis nicht automatisch. Vorhandene TypeScript-/ESLint-Pakete verwenden.
-- [ ] Playwright-Dateien von der Vitest-Sammlung und App-Builds getrennt halten. Reports, Traces, temporäre Laufdaten und etwaige Sitzungsdateien aus Git, Format-/Lint-Suchen und Docker-Kontext ausschließen.
-- [ ] Einen Worker, zunächst keine automatischen Wiederholungen, feste Zeitlimits und in CI ein Verbot von `test.only` konfigurieren. Ein Lauf ohne gesammelte Tests darf nicht als bestanden gelten.
+- [x] `@playwright/test` als Entwicklungsabhängigkeit mit passender Lockfile ergänzen; den vorhandenen Node-/pnpm-Versionen folgen.
+- [x] Eine Playwright-Konfiguration und `e2e/` außerhalb der Produktionsquellen anlegen. Als späteren Einstieg `pnpm test:e2e` vorsehen.
+- [x] E2E-Dateien bewusst in Typecheck und Lint aufnehmen. Die vorhandenen Test-Tsconfigs erfassen nur `*.test.ts`; die Workspace-Lint-Aufrufe erfassen ein neues Root-Verzeichnis nicht automatisch. Vorhandene TypeScript-/ESLint-Pakete verwenden.
+- [x] Playwright-Dateien von der Vitest-Sammlung und App-Builds getrennt halten. Reports, Traces, temporäre Laufdaten und etwaige Sitzungsdateien aus Git, Format-/Lint-Suchen und Docker-Kontext ausschließen.
+- [x] Einen Worker, zunächst keine automatischen Wiederholungen, feste Zeitlimits und in CI ein Verbot von `test.only` konfigurieren. Ein Lauf ohne gesammelte Tests darf nicht als bestanden gelten.
 
 **Abnahme:** Installation, E2E-Typecheck/Lint und die betroffenen bestehenden Prüfungen funktionieren. Produktionsbuilds ziehen weder Testcode noch Browser-Binaries in die Anwendung. Zu diesem Zeitpunkt wird noch kein bestandener Browser-Test behauptet.
 
@@ -111,25 +111,35 @@ Ausnahmen für unabhängige Seiten werden eng und ausdrücklich geführt. Gemein
 
 Die Liste grenzt die Arbeiten ein; beim Umsetzen wird der kleinste passende Zuschnitt verwendet.
 
-| Bereich                       | Dateien oder vorhandene Anknüpfung                                                                 |
-| ----------------------------- | -------------------------------------------------------------------------------------------------- |
-| Werkzeug und Aufrufe          | `package.json`, `pnpm-lock.yaml`, `playwright.config.ts`                                           |
-| Testumgebung und Browserfälle | `e2e/` mit kleinem Runner/CMS-Starter, Fixtures und zwei Team-Fällen                               |
-| Statische Prüfungen           | E2E-Typecheck-/Lint-Einbindung mit vorhandenen Toolversionen; Test-Sammlung nur ändern, wenn nötig |
-| Generierte Dateien            | `.gitignore`, `.dockerignore`, `.prettierignore` und passende Lint-Ausnahmen                       |
-| CI                            | `.github/workflows/ci.yml`, `scripts/ci-scope.mjs`, `scripts/ci-scope.test.mjs`                    |
-| Dokumentation                 | Dieser Plan, kurze E2E-Anleitung unter `docs/`, Verweis bei den Testbefehlen in `README.md`        |
+| Bereich                       | Dateien oder vorhandene Anknüpfung                                                                      |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------- |
+| Werkzeug und Aufrufe          | `package.json`, `pnpm-workspace.yaml`, `pnpm-lock.yaml`, `e2e/package.json`, `e2e/playwright.config.ts` |
+| Testumgebung und Browserfälle | `e2e/` mit kleinem Runner/CMS-Starter, Fixtures und zwei Team-Fällen                                    |
+| Statische Prüfungen           | E2E-Typecheck-/Lint-Einbindung mit vorhandenen Toolversionen; Test-Sammlung nur ändern, wenn nötig      |
+| Generierte Dateien            | `.gitignore`, `.dockerignore`, `.prettierignore` und passende Lint-Ausnahmen                            |
+| CI                            | `.github/workflows/ci.yml`, `scripts/ci-scope.mjs`, `scripts/ci-scope.test.mjs`                         |
+| Dokumentation                 | Dieser Plan, kurze E2E-Anleitung unter `docs/`, Verweis bei den Testbefehlen in `README.md`             |
 
 ## Fortschritt
 
-| Schritt                            | Status | Nachweis |
-| ---------------------------------- | ------ | -------- |
-| 1 Werkzeug und Projektanbindung    | Offen  | —        |
-| 2 Isolierte Testumgebung           | Offen  | —        |
-| 3 Beschreibung bearbeiten          | Offen  | —        |
-| 4 Mitglied ohne Bearbeitungsrechte | Offen  | —        |
-| 5 Automatische CI Ausführung       | Offen  | —        |
-| 6 Abnahme und Anleitung            | Offen  | —        |
+| Schritt                            | Status   | Nachweis                                     |
+| ---------------------------------- | -------- | -------------------------------------------- |
+| 1 Werkzeug und Projektanbindung    | Erledigt | Nachweise unten; [Anleitung](./e2e-tests.md) |
+| 2 Isolierte Testumgebung           | Offen    | —                                            |
+| 3 Beschreibung bearbeiten          | Offen    | —                                            |
+| 4 Mitglied ohne Bearbeitungsrechte | Offen    | —                                            |
+| 5 Automatische CI Ausführung       | Offen    | —                                            |
+| 6 Abnahme und Anleitung            | Offen    | —                                            |
+
+### Nachweise zu Schritt 1 (18.10.2026)
+
+- Plan vor der Umsetzung separat als `1498786` committed und auf `codex/e2e-team-plan` gepusht.
+- `@sinnlos/e2e` ist ein eigenes Workspacepaket mit Playwright 1.64.1 und den bestehenden TypeScript-/ESLint-Versionen. So greifen die vorhandenen rekursiven Prüfungen ohne zusätzliche Root-Skripte für Lint/Typecheck. Die Konfiguration liegt unter `e2e/`.
+- Ein Root-Dev-Paket würde ins CMS-Image gelangen. Nexts optionaler Playwright-Peer zog die neue Abhängigkeit zunächst auch in den Web-Graphen; der gezielte Override `next>@playwright/test: "-"` verhindert das. Die App-Abhängigkeitsgraphen bleiben ohne Playwright.
+- `pnpm install --frozen-lockfile`, `pnpm typecheck`, `pnpm lint`, `pnpm format:check` und die 21 Tests in `infra/build-pins.test.ts` bestanden. Lint hat ausschließlich die vorhandenen App-Warnungen.
+- Temporäre, anschließend entfernte Negativproben bestätigen: Typecheck und Lint erfassen `*.spec.ts`, CI verweigert `test.only`, Vitest sammelt die Browserfälle nicht. `pnpm test:e2e` endet erwartungsgemäß mit `No tests found` und Status 1.
+- Git und Prettier ignorieren `.e2e/`. Beide Docker-Abhängigkeitsstufen wurden mit gefrorener Lockfile gebaut und auf fehlende Playwrightpakete, Browsercache und E2E-Quellen geprüft. Auch beide vollständigen App-Images wurden erfolgreich gebaut und auf dieselben Ausschlüsse geprüft.
+- Echte Browserabläufe und ein E2E-CI-Job sind noch nicht enthalten; sie gehören zu den folgenden Schritten.
 
 ## Technische Bezugspunkte
 

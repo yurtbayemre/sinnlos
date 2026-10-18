@@ -28,3 +28,7 @@ infra/pgdata
 apps/cms/public/uploads/*
 **/types/generated
 **/*.tsbuildinfo
+
+# Browser tests and their generated/private runtime data
+e2e
+.e2e

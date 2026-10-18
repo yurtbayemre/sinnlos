@@ -753,14 +753,18 @@ pnpm build             # build every workspace, packages/domain first (the cms b
 pnpm build:domain      # build packages/domain into dist/cjs + dist/esm
 pnpm start             # every workspace's start script in parallel (strapi start, next start -p 3000)
 pnpm lint              # ESLint in every workspace
-pnpm typecheck         # build:domain, tsc for the package and both apps, then typecheck:tests
+pnpm typecheck         # build:domain, tsc for all workspaces, then typecheck:tests
 pnpm typecheck:tests   # type-check every *.test.ts (tsconfig.test.json, tsconfig.test.cms.json)
 pnpm test              # vitest unit tests (apps, packages, infra)
 pnpm test:tz           # the same suite under TZ=UTC, Europe/Berlin and Pacific/Auckland
 pnpm test:integration  # build:domain, then the real cms booted in process, per role, over HTTP
+pnpm test:e2e          # Playwright scaffold; fails with No tests found until browser cases land
 pnpm format            # prettier --write over the tree
 pnpm format:check      # prettier --check (blocking in CI)
 ```
+
+Browser E2E setup and its current scope are documented in
+[docs/e2e-tests.md](./docs/e2e-tests.md).
 
 And in `infra/`:
 

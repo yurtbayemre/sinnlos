@@ -181,6 +181,8 @@ describe(".dockerignore", () => {
     "apps/cms/public/uploads/*",
     "**/types/generated",
     "**/*.tsbuildinfo",
+    "e2e",
+    ".e2e",
   ])("excludes %s", (pattern) => {
     expect(patterns).toContain(pattern);
   });
