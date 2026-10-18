@@ -88,11 +88,12 @@ export async function main(args) {
   await writeFile(join(runtime, "owner"), runId, { mode: 0o600, flag: "wx" });
   await mkdir(logs, { recursive: true });
   const secret = () => randomBytes(32).toString("hex");
-  const secrets = Array.from({ length: 13 }, secret);
+  const secrets = Array.from({ length: 14 }, secret);
   const [
     dbPassword,
     leadPassword,
     memberPassword,
+    editorPassword,
     appKey1,
     appKey2,
     apiSalt,
@@ -207,6 +208,7 @@ export async function main(args) {
       E2E_RUN_ID: runId,
       E2E_LEAD_PASSWORD: leadPassword,
       E2E_MEMBER_PASSWORD: memberPassword,
+      E2E_EDITOR_PASSWORD: editorPassword,
       DATABASE_CLIENT: "postgres",
       DATABASE_HOST: "db",
       DATABASE_PORT: "5432",
@@ -284,8 +286,10 @@ export async function main(args) {
     assert.deepEqual(Object.keys(providers), ["local"], "Expected real local sign-in only");
     const cmsAddress = await docker([...compose, "port", "cms", "1337"], "cms-port");
     assert.match(cmsAddress, /^127\.0\.0\.1:\d+$/);
-    assert.deepEqual(Object.keys(fixtures.users).sort(), ["lead", "member"]);
-    for (const [key, user] of Object.entries(fixtures.users)) {
+    assert.deepEqual(Object.keys(fixtures.users).sort(), ["editor", "lead", "member"]);
+    // Two preflight logins leave room for the real UI logins within Strapi's auth limit.
+    for (const key of ["lead", "member"]) {
+      const user = fixtures.users[key];
       const login = await fetch(`http://${cmsAddress}/api/auth/local`, {
         method: "POST",
         headers: { "content-type": "application/json" },

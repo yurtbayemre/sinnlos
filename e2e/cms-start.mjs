@@ -91,6 +91,11 @@ async function start() {
         password: fixturePassword("E2E_MEMBER_PASSWORD"),
         documentId: "",
       },
+      editor: {
+        email: "editor@e2e.test",
+        password: fixturePassword("E2E_EDITOR_PASSWORD"),
+        documentId: "",
+      },
     },
     teams: {
       editable: {
@@ -119,9 +124,9 @@ async function start() {
       lesson: { title: "E2E Confirm Lesson", documentId: "" },
     },
   };
-  assert.notEqual(
-    fixtures.users.lead.password,
-    fixtures.users.member.password,
+  assert.equal(
+    new Set(Object.values(fixtures.users).map((user) => user.password)).size,
+    Object.keys(fixtures.users).length,
     "Each fixture user needs a separate password",
   );
 
@@ -187,7 +192,7 @@ async function start() {
   });
   const userService = cms.plugin("users-permissions").service("user");
   for (const [key, fixture] of Object.entries(fixtures.users)) {
-    const roleType = key === "lead" ? "team_lead" : "member";
+    const roleType = key === "lead" ? "team_lead" : key;
     const role = await cms.db
       .query("plugin::users-permissions.role")
       .findOne({ where: { type: roleType } });
@@ -257,7 +262,7 @@ async function start() {
 
   phase = "fixture relationship assertions";
   assert.equal(await cms.db.query(departmentUid).count(), 1, "Expected one department");
-  assert.equal(await cms.db.query(userUid).count(), 2, "Expected two local users");
+  assert.equal(await cms.db.query(userUid).count(), 3, "Expected three local users");
   assert.equal(await cms.db.query(teamUid).count(), 2, "Expected two teams");
   for (const [key, fixture] of Object.entries(fixtures.users)) {
     const user = await cms.db.query(userUid).findOne({
@@ -274,11 +279,7 @@ async function start() {
     assert.equal(user.provider, "local", "Fixture user must use local login");
     assert.equal(user.confirmed, true, "Fixture user must be confirmed");
     assert.equal(user.blocked, false, "Fixture user must not be blocked");
-    assert.equal(
-      user.role?.type,
-      key === "lead" ? "team_lead" : "member",
-      "Fixture user role differs",
-    );
+    assert.equal(user.role?.type, key === "lead" ? "team_lead" : key, "Fixture user role differs");
     assert.equal(
       user.department?.documentId,
       department.documentId,
@@ -288,7 +289,9 @@ async function start() {
     const expectedTeams =
       key === "lead"
         ? [fixtures.teams.editable.documentId]
-        : Object.values(fixtures.teams).map((team) => team.documentId);
+        : key === "member"
+          ? Object.values(fixtures.teams).map((team) => team.documentId)
+          : [];
     assert.deepEqual(
       new Set(user.teams.map((team) => team.documentId)),
       new Set(expectedTeams),
@@ -322,7 +325,7 @@ async function start() {
     assert.ok(Array.isArray(team.members), "Fixture team members are missing");
     const expectedMembers =
       key === "editable"
-        ? Object.values(fixtures.users).map((user) => user.documentId)
+        ? [fixtures.users.lead.documentId, fixtures.users.member.documentId]
         : [fixtures.users.member.documentId];
     assert.deepEqual(
       new Set(team.members.map((user) => user.documentId)),
@@ -386,7 +389,7 @@ async function start() {
     });
   });
   console.log(
-    "[e2e-cms] Ready: normal bootstrap and fixture assertions passed (1 department, 2 users, 2 teams, 3 published quiz courses and lessons).",
+    "[e2e-cms] Ready: normal bootstrap and fixture assertions passed (1 department, 3 users, 2 teams, 3 published quiz courses and lessons).",
   );
 }
 

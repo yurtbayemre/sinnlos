@@ -9,7 +9,14 @@ import { assertOwnedContainers, redact, removePrivateRun, requireReady, toolEnv 
 const runId = "sinnlos-e2e-0123456789abcdef01234567";
 
 test("host app secrets and runtime/Compose overrides never reach children", () => {
-  const keys = ["AUTH_URL", "DATABASE_URL", "COMPOSE_FILE", "NODE_OPTIONS", "DEMO_MODE"];
+  const keys = [
+    "AUTH_URL",
+    "DATABASE_URL",
+    "COMPOSE_FILE",
+    "NODE_OPTIONS",
+    "DEMO_MODE",
+    "E2E_EDITOR_PASSWORD",
+  ];
   const previous = keys.map((key) => process.env[key]);
   try {
     for (const key of keys) process.env[key] = "must-not-reach-the-stack";
@@ -26,8 +33,11 @@ test("host app secrets and runtime/Compose overrides never reach children", () =
 
 test("diagnostics redact repeated credentials without hiding useful errors", () => {
   assert.equal(
-    redact("password=secret-value; failed secret-value", ["secret-value"]),
-    "password=[redacted]; failed [redacted]",
+    redact("password=secret-value; editor=editor-secret; failed editor-secret secret-value", [
+      "secret-value",
+      "editor-secret",
+    ]),
+    "password=[redacted]; editor=[redacted]; failed [redacted] [redacted]",
   );
 });
 

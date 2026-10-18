@@ -1,14 +1,16 @@
 # Browser E2E tests
 
-The suite covers team editing, member read-only access and all three quiz modes.
-It uses one isolated runtime and five independent browser cases. The
+The suite covers team editing, member read-only access, all three quiz modes
+and training authoring. It uses one isolated runtime and six independent browser cases. The
 [Teams pilot](./plan-e2e-tests.md#github-abnahme) passed local and hosted
 acceptance and is merged into main. The
 [quiz extension](./plan-e2e-quiz.md) records its separate implementation and
 validation status. The [exam extension](./plan-e2e-exam.md) adds overall-only
 feedback and completed review. The [confirm extension](./plan-e2e-confirm.md)
-checks immediate feedback after each selection. This suite is a focused browser check, not a complete
-Batch 17 browser acceptance.
+checks immediate feedback after each selection. The
+[authoring extension](./plan-e2e-authoring.md) adds course/lesson creation and
+quiz editing through the web; its plan records the current acceptance status.
+This suite is a focused browser check, not a complete Batch 17 browser acceptance.
 
 ## Prerequisites and commands
 
@@ -65,11 +67,20 @@ button. Missing or wrong answers keep completion locked; a wrong edit after
 passing locks it again. Passing alone creates no receipt, and explicit
 completion must survive a full reload.
 
-The two Teams cases live in `e2e/teams.spec.ts`. All five cases reuse
+The `training-authoring` case in `e2e/training-authoring.spec.ts` signs in as
+an editor and creates an optional `quizGate` course through the web, saving a
+draft before publishing. It creates a lesson with a quiz, then changes only
+the quiz question and correct option. Saving and a full reload must preserve
+that edit before publication. A member in a separate browser session must see
+the final content and pass the quiz with the new answer. The course and lesson
+are created by browser actions; no authoring target is pre-seeded.
+
+The two Teams cases live in `e2e/teams.spec.ts`. All six cases reuse
 fixture reading and visible-form login from `e2e/helpers.ts`, including the
 signed-in email assertion. They use fresh browser sessions and independent
-mutable targets. The training cases share their course-navigation helper but
-use separate courses and lessons; none modifies the teams.
+mutable targets. The three completion cases in `e2e/training.spec.ts` share
+their course-navigation helper but use separate courses and lessons. The
+authoring case creates its own content; none modifies the teams.
 
 To run any case alone against a new disposable stack:
 
@@ -79,6 +90,7 @@ pnpm test:e2e --grep teams-member-read-only
 pnpm test:e2e --grep training-quiz-completion
 pnpm test:e2e --grep training-exam-completion
 pnpm test:e2e --grep training-confirm-completion
+pnpm test:e2e --grep training-authoring
 ```
 
 `check:setup` is a runtime smoke check, not a browser E2E pass. An empty
@@ -174,18 +186,24 @@ Strapi bootstrap remain active. Process time is UTC, app/browser time is
 Europe/Berlin, and the web locale is English.
 
 `e2e/cms-start.mjs` refuses a nonempty database before loading Strapi. It uses
-the normal User Service and Document Service to create one department, two
-confirmed users (`team_lead`, `member`) and two teams. Only the editable team
-has a lead; the member belongs to both. Three published optional courses use
+the normal User Service and Document Service to create one department, three
+confirmed users (`team_lead`, `member`, `editor`) and two teams. All users belong
+to the same department. Only the editable team has a lead; the member belongs
+to both teams, and the editor belongs to neither. Three published optional courses use
 `quizGate`, `exam` and `confirm`. Each has its own published lesson with the same two
 questions and no pre-created progress; their document IDs must differ.
 The starter asserts publication, course/lesson links, quiz contents and fixture
-relationships before opening the HTTP listener. The runner then checks the web sign-in
-page/providers and verifies both users' real CMS login and `/api/me` roles.
-These preflight JWTs stay in memory; browser cases must log in through the UI.
+relationships before opening the HTTP listener. All three users receive separate
+random passwords that are redacted from runner logs. The runner then checks
+the web sign-in page/providers and verifies real CMS login and `/api/me` roles
+for only the lead and member. These two preflight logins are deliberate: with
+eight browser logins, the suite stays within the unchanged native limit of ten
+logins per minute. The editor's role and lack of team memberships are asserted
+during CMS startup, and its login is tested through the actual browser form.
+Preflight JWTs stay in memory; browser cases must log in through the UI.
 
 Playwright receives `SINNLOS_E2E_BASE_URL` and `SINNLOS_E2E_FIXTURES` from
-the runner. The private fixture JSON contains `runId`, `users.lead/member`
+the runner. The private fixture JSON contains `runId`, `users.lead/member/editor`
 (email/password/documentId) and `teams.editable/readonly`
 (slug/name/description/documentId), plus `training.course` (title/slug/documentId)
 and `training.lesson` (title/documentId). `exam` and `confirm` have
