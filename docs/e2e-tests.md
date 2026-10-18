@@ -1,11 +1,12 @@
 # Browser E2E tests
 
-The suite covers team editing, member read-only access and quiz completion.
-It uses one isolated runtime and three independent browser cases. The
+The suite covers team editing, member read-only access, quiz completion and exam review.
+It uses one isolated runtime and four independent browser cases. The
 [Teams pilot](./plan-e2e-tests.md#github-abnahme) passed local and hosted
 acceptance and is merged into main. The
 [quiz extension](./plan-e2e-quiz.md) records its separate implementation and
-validation status. This suite is a focused browser check, not a complete
+validation status. The [exam extension](./plan-e2e-exam.md) adds overall-only
+feedback and completed review. This suite is a focused browser check, not a complete
 Batch 17 browser acceptance.
 
 ## Prerequisites and commands
@@ -50,10 +51,18 @@ answers keep completion locked; correct feedback alone does not persist a
 receipt. After explicitly completing the lesson, a full reload must show a
 dated completion, and both the course detail and overview must show Completed.
 
-The two Teams cases live in `e2e/teams.spec.ts`. All three cases reuse only
+The `training-exam-completion` case opens a separate optional `exam` course.
+It checks that missing or wrong answers keep completion locked, and both
+failure and success show only an overall result, without individual verdicts.
+Passing alone creates no receipt; explicit completion survives a full reload.
+Completed exam review still shows only the overall result for wrong and right
+answers, while preserving the saved completion.
+
+The two Teams cases live in `e2e/teams.spec.ts`. All four cases reuse
 fixture reading and visible-form login from `e2e/helpers.ts`, including the
 signed-in email assertion. They use fresh browser sessions and independent
-mutable targets; the quiz case does not modify the teams.
+mutable targets. The training cases share their course-navigation helper but
+use separate courses and lessons; neither modifies the teams.
 
 To run any case alone against a new disposable stack:
 
@@ -61,6 +70,7 @@ To run any case alone against a new disposable stack:
 pnpm test:e2e --grep teams-edit-description
 pnpm test:e2e --grep teams-member-read-only
 pnpm test:e2e --grep training-quiz-completion
+pnpm test:e2e --grep training-exam-completion
 ```
 
 `check:setup` is a runtime smoke check, not a browser E2E pass. An empty
@@ -158,8 +168,9 @@ Europe/Berlin, and the web locale is English.
 `e2e/cms-start.mjs` refuses a nonempty database before loading Strapi. It uses
 the normal User Service and Document Service to create one department, two
 confirmed users (`team_lead`, `member`) and two teams. Only the editable team
-has a lead; the member belongs to both. A published optional `quizGate` course
-contains one published lesson with two questions and no pre-created progress.
+has a lead; the member belongs to both. Two published optional courses use
+`quizGate` and `exam`. Each has its own published lesson with the same two
+questions and no pre-created progress; their document IDs must differ.
 The starter asserts publication, course/lesson links, quiz contents and fixture
 relationships before opening the HTTP listener. The runner then checks the web sign-in
 page/providers and verifies both users' real CMS login and `/api/me` roles.
@@ -169,7 +180,8 @@ Playwright receives `SINNLOS_E2E_BASE_URL` and `SINNLOS_E2E_FIXTURES` from
 the runner. The private fixture JSON contains `runId`, `users.lead/member`
 (email/password/documentId) and `teams.editable/readonly`
 (slug/name/description/documentId), plus `training.course` (title/slug/documentId)
-and `training.lesson` (title/documentId). The quiz answer key stays in the CMS
+and `training.lesson` (title/documentId). `exam.course` and `exam.lesson` have
+the same shape for the separate exam. The quiz answer key stays in the CMS
 fixture setup and is not exported to that file. Tests must not print credentials.
 The config selects Chromium, one worker, no retries, English, a 1280×720
 viewport, a 30-second test timeout and a five-minute test-run deadline.

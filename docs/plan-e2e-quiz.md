@@ -1,6 +1,6 @@
 # E2E-Erweiterung: Quiz-Abschluss im Browser
 
-Stand: 18.10.2026. Basis: `main` nach Merge von PR #93 (`f7f74c9`). Der Teams-Pilot ist abgeschlossen. Diese Erweiterung nutzt denselben Playwright-/Docker-Stack und ergänzt genau einen Browserfall `training-quiz-completion`. Status: alle drei Schritte umgesetzt, lokal und in GitHub abgenommen. Die Quiz-Erweiterung ist als [PR #95](https://github.com/yurtbayemre/sinnlos/pull/95) gepusht und noch nicht gemergt.
+Stand: 18.10.2026. Basis: `main` nach Merge von PR #93 (`f7f74c9`). Der Teams-Pilot ist abgeschlossen. Diese Erweiterung nutzt denselben Playwright-/Docker-Stack und ergänzt genau einen Browserfall `training-quiz-completion`. Status: alle drei Schritte umgesetzt, lokal und in GitHub abgenommen. Die Quiz-Erweiterung ist als [PR #95](https://github.com/yurtbayemre/sinnlos/pull/95) nach `main` gemergt (`42290d6`). Die [Exam-Erweiterung](./plan-e2e-exam.md) führt den Browserumfang separat fort.
 
 ## Umfang
 
@@ -47,4 +47,4 @@ Abnahme: Der Fall besteht allein auf frischen Daten. Eine vorübergehende Störu
 - Implementierungscommits: `7ae0620` (Plan), `1ba19bf` (Fixtures und gemeinsamer Login), `9f77d09` (Quizfall und Persistenzprobe), `00f7af8` (CI-Namen und lokale Abnahme). Der CI-Job und neue Artefakte heißen `e2e · browser` und `e2e-browser-<run_id>-<run_attempt>`; nur die Namen ändern sich, Scope und Laufzeitbudgets bleiben erhalten.
 - GitHub-Abnahme: [CI-Lauf 39120220734](https://github.com/yurtbayemre/sinnlos/actions/runs/39120220734) auf `00f7af82776a19c8734dc237b2e6840314db0b25`, Versuch 1, alle acht CI-Jobs grün. Alle drei Browserfälle bestanden in 18,1 Sekunden mit einem Worker; der dekodierte HTML-Bericht bestätigt genau einen erfolgreichen Versuch pro Fall, `retry: 0`, keine Fehler, Flakes oder übersprungenen Tests. Der Quizfall dauerte 6,388 Sekunden.
 - Das heruntergeladene [Artefakt `e2e-browser-39120220734-1`](https://github.com/yurtbayemre/sinnlos/actions/runs/39120220734/artifacts/12134445234) enthält ausschließlich Bericht, Ergebnisse und Logs. Keine privaten Env-/Fixture-Dateien; alle 15 Credential-Felder der Containerdiagnose sind redigiert. Cleanup der drei Container, des Netzwerks und beider Image-Tags ist bestätigt; die abschließende Containerprüfung war leer. Aufbewahrung bis 25.10.2026.
-- Die GitHub-Abnahme ist abgeschlossen. Offen bleibt der Merge von PR #95; Staging und Produktion wurden nicht verändert.
+- Die GitHub-Abnahme ist abgeschlossen. PR #95 ist als `42290d6` nach `main` gemergt; Staging und Produktion wurden nicht verändert.
