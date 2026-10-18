@@ -1,9 +1,9 @@
 # Batch 17 implementation plan
 
 > Phase 3 of v2 frontend authoring (plan 12). Written 2026-10-16 against main 2f47b84fcadfd6f63ecffac1c78cdf388c5ea44d, released as v0.16.2.
-> Status: all implementation steps are merged into main afcbd51 through PR #90. The combined Ponytail review is complete with no confirmed new findings (section 16). Rollback instructions, browser acceptance and the deploy/rollback/roll-forward rehearsal remain next. Decision 06 remains the approved scope; section 3 records the accepted lean exam-mode amendment, unlimited retries and no timer. Review corrections are recorded in section 11.
+> Status: all implementation steps are merged into main afcbd51 through PR #90. The combined Ponytail review is complete with no confirmed new findings (section 16). Rollback preparation and the complete local image rehearsal are complete (sections 17–18). Browser acceptance and production deployment remain pending. Decision 06 remains the approved scope; section 3 records the accepted lean exam-mode amendment, unlimited retries and no timer. Review corrections are recorded in section 11.
 > Paths: cms/ = apps/cms/src/, web/ = apps/web/src/, domain/ = packages/domain/src/. Paths outside those roots are written in full.
-> This plan records the implementation baseline and local evidence; it does not verify or change the running server.
+> This plan records the implementation baseline and local evidence; it does not verify or change production.
 
 ## 1. Outcome and scope
 
@@ -346,3 +346,44 @@ These are per-area results; shared tests occur in more than one selection and ar
 The existing HTTP integration coverage was inspected; the full database/build suites were not repeated locally because the exact reviewed main commit already has green CI and application code is unchanged. No browser walkthrough, staging rehearsal or production operation was performed. The accepted limits in section 10 remain decisions, not new review findings.
 
 Next: prepare and review the exam mode downgrade/restore SQL and deployment instructions, then execute the browser acceptance and complete local staging cycle in section 8. Production deployment and the v0.17.0 release remain gated on that evidence and the owner's deployment go.
+
+## 17. Rollback preparation on 2026-10-17
+
+The [exam-mode runbook](../infra/rollback/exam-mode/README.md) now supplies the downgrade and roll-forward commands for the previously deployed CMS/web pair. `infra/deploy.sh` points to it before printing the retag/start instructions and performs no mode writes itself.
+
+- `downgrade.sql` atomically records only exam variants in a separate operational schema and maps them to quizGate. The saved identity is application schema, course documentId and draft/published state; row IDs and update times are diagnostics. An existing snapshot is never overwritten. The snapshot contains no quiz content or answer keys.
+- `restore.sql` requires an explicit decision for each saved variant. Only approved identities currently in quizGate are restored to exam, including rows replaced by republishing. Missing/ambiguous variants, unreviewed decisions and incompatible modes abort the transaction. Intentional learning modes and deleted variants can be excluded; unrelated courses and new variants are not converted.
+- Both scripts advance the existing authoring revision once per changed course document and leave quiz content, receipts, links and files alone. The runbook covers stopping all writers, archiving the snapshot, panel/scheduler checks, rollback-window reconciliation, repeat attempts and cleanup after verified roll-forward. The accepted answer disclosure, old org-write boundaries and media tombstone limit remain explicit.
+
+All 15 focused PostgreSQL regressions passed against disposable schemas, including replaced row IDs, mixed modes, deliberate exclusions, revision advances, retries and atomic rollback after a revision-write failure. The deploy-preflight suite passed 69 tests (7 existing skips), including the hint ordering and absence of automatic mode writes. The CMS test typecheck, formatting and Bash syntax checks passed. A separate psql/pg_dump smoke check verified downgrade, snapshot export, refusal before review and targeted restore in the disposable database. Independent review found no remaining issue. This is preparation and SQL verification; the real old/new image cycle and browser acceptance have not been performed.
+
+The subsequent local image cycle is recorded in section 18. Browser acceptance remains outstanding; production deployment and v0.17.0 still require that evidence and the owner's deployment go.
+
+## 18. Local image rehearsal on 2026-10-17
+
+The complete local staging cycle passed with the real CMS/web images: v0.16.2
+(`2f47b84fcadf`) → Batch 17 (`b9c5e353ef3a`) → v0.16.2 → Batch 17. The
+[rehearsal report](batch-17-image-rehearsal.md) records exact image IDs, green CI,
+backups, HTTP/live checks, row counts and the remaining browser limitation.
+
+The runbook saved five exam variants and downgraded them before old CMS startup.
+Panel and scheduler republishing on the old image replaced a published row;
+restore correctly matched its document/variant identity. Four variants returned
+to exam, while one intentional rollback-window draft edit stayed confirm.
+Receipts, organisation text and intact linked images survived. Quiz privacy,
+feedback, authoring and organisation/media/activity guards passed again after
+roll-forward; the current permission diagnostic returned zero differences.
+The mode snapshot was archived without quiz content or keys; only its database
+copy was removed after successful checks. Local staging now runs the healthy
+Batch 17 pair.
+
+The rollback really restored readable answers, old organisation write rules and
+the accepted media attachment limit. The old permission diagnostic also reported
+31 inactive Batch 17 grants; the old routes do not expose their actions. The
+report distinguishes code inspection, HTTP evidence and the read-only panel-grant
+inventory used because the planned named panel diagnostic does not exist.
+
+Browser acceptance remains outstanding: the in-app browser could not resolve
+the local staging hostname. Production is unchanged. Next is browser acceptance
+from a client with working staging DNS/TLS, then the production brief, final CI
+and the owner's deployment go. No merge or release is implied by this evidence.

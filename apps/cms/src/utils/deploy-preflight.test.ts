@@ -819,6 +819,25 @@ describe("rollback hint: cms images that start with pnpm", BASH_BUDGET, () => {
   });
 });
 
+describe("rollback hint: batch 17 exam modes", BASH_BUDGET, () => {
+  it.skipIf(!HAS_BASH)(
+    "prints the manual downgrade before retagging and starting an older CMS",
+    () => {
+      const { stdout, stderr } = rollbackHintRun('["node_modules/.bin/strapi","start"]');
+      expectInOrder(stderr, [
+        "If infra-cms:rollback predates batch 17, first stop all CMS/scheduler writers",
+        "/srv/infra/rollback/exam-mode/README.md",
+        "Run /srv/infra/rollback/exam-mode/downgrade.sql before starting the old CMS.",
+        "On roll-forward, review the saved variants before running /srv/infra/rollback/exam-mode/restore.sql.",
+        "docker tag infra-web:rollback infra-web:latest",
+        "docker tag infra-cms:rollback infra-cms:latest",
+        "up -d --no-build web cms",
+      ]);
+      expect(stdout).not.toContain("rollback/exam-mode/");
+    },
+  );
+});
+
 describe("rollback hint: the guest vote permission of poll guest access", BASH_BUDGET, () => {
   const COMPOSE_LINE =
     "docker compose -p infra -f /srv/infra/docker-compose.yml -f /srv/infra/docker-compose.traefik.yml";
