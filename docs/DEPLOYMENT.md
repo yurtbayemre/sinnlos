@@ -1954,6 +1954,10 @@ is degraded while the new cms boots. For the manual production-safe sequence
 
 #### Batch 17 rollback preparation (exam mode)
 
+The [Batch 17 production brief](batch-17-production-brief.md) records the proposed
+target, completed acceptance, changes and owner checks. Actual live/rollback
+images, current backup and the deployment-session go still need confirmation.
+
 Before rolling back Batch 17 to the previous CMS/web pair, follow
 [the exam mode rollback runbook](../infra/rollback/exam-mode/README.md).
 Stop every CMS/scheduler writer, save the affected draft/published course
