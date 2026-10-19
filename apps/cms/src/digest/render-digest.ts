@@ -9,6 +9,7 @@
  * en, the owner's default of 2026-09-29, like the web's DEFAULT_LOCALE).
  */
 
+import { notificationTitle } from "@sinnlos/domain";
 export interface DigestContent {
   announcements: { title: string; author?: string | null }[];
   /**
@@ -16,7 +17,8 @@ export interface DigestContent {
    * 25, FX48); rendered as "+N more" and counted in the subject.
    */
   announcementsMore?: number;
-  mentions: { title: string }[];
+  /** The stored title, and the type and values it is rendered from in the reader's language (AC04). */
+  mentions: { title: string; type?: unknown; titleParams?: unknown }[];
   kudos: { message: string; from?: string | null; value?: string | null }[];
 }
 
@@ -125,7 +127,8 @@ export function renderDigest(
     defaultLocale?: DigestLocale;
   },
 ): RenderedDigest {
-  const t = STR[digestLocale(opts.locale, opts.defaultLocale ?? digestDefaultLocale())];
+  const locale = digestLocale(opts.locale, opts.defaultLocale ?? digestDefaultLocale());
+  const t = STR[locale];
   const n = totalItems(content);
 
   const sections: { heading: string; lines: string[] }[] = [];
@@ -140,7 +143,12 @@ export function renderDigest(
     });
   }
   if (content.mentions.length > 0) {
-    sections.push({ heading: t.mentions, lines: content.mentions.map((m) => `• ${m.title}`) });
+    sections.push({
+      heading: t.mentions,
+      lines: content.mentions.map(
+        (m) => `• ${notificationTitle(m.type, m.titleParams, locale) ?? m.title}`,
+      ),
+    });
   }
   if (content.kudos.length > 0) {
     sections.push({

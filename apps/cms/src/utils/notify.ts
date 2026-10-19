@@ -3,8 +3,12 @@
  * builds its rows here, so titles, fallbacks, the create() rule and the log
  * lines are the same everywhere.
  *
- *  - buildNotification: the row for ONE recipient. The title is assembled
- *    from parts (fixed text and values with a fallback) and never exceeds
+ *  - buildNotification: the row for ONE recipient. It stores the title's
+ *    values (`titleParams`: actor, subject), which the bell and the digest
+ *    render in the reader's language (@sinnlos/domain notificationTitle,
+ *    AC04), and the English title from the same template (`title`, the
+ *    fallback and the title of rows written before AC04). The title is
+ *    assembled from parts (fixed text and values with a fallback) and never exceeds
  *    NOTIFICATION_TITLE_MAX code points. `notification.title` is a Strapi
  *    `string`, i.e. varchar(255) on Postgres, and a source title of up to
  *    255 characters plus "New announcement: " overflowed it: Postgres
@@ -29,6 +33,7 @@
  *    so nothing it does can fail the publish, and a publish that rolls back
  *    notifies nobody.
  */
+import { NOTIFICATION_TITLES, type NotificationTitleParams } from "@sinnlos/domain";
 import { afterCommit, inOwnTransaction, type CommitAwareDb } from "./after-commit";
 import {
   resolveFanout,
@@ -60,9 +65,15 @@ export interface NotificationSource {
   sourceDocumentId: string | null;
 }
 
+/** The title's values as the caller has them (unchecked; buildNotification cleans them). */
+export interface TitleParamsInput {
+  actor?: unknown;
+  subject?: unknown;
+}
+
 export interface NotificationInput {
   type: NotificationType;
-  titleParts: readonly TitlePart[];
+  titleParams: TitleParamsInput;
   link: string;
   recipient: number;
   actor?: number | null;
@@ -73,6 +84,7 @@ export interface NotificationInput {
 export type NotificationData = {
   type: NotificationType;
   title: string;
+  titleParams: NotificationTitleParams;
   link: string;
   recipient: number;
   actor: number | null;
@@ -123,11 +135,28 @@ export function buildTitle(parts: readonly TitlePart[], max = NOTIFICATION_TITLE
   return chars.length <= max ? title : chars.slice(0, max - 1).join("") + ELLIPSIS;
 }
 
+/** The stored values: trimmed non-blank strings, cut to the title's length. */
+function cleanTitleParams(input: TitleParamsInput): NotificationTitleParams {
+  const params: NotificationTitleParams = {};
+  for (const key of ["actor", "subject"] as const) {
+    const value = input[key];
+    if (typeof value === "string" && value.trim() !== "") {
+      params[key] = Array.from(value.trim()).slice(0, NOTIFICATION_TITLE_MAX).join("");
+    }
+  }
+  return params;
+}
+
 /** The notification row for one recipient. */
 export function buildNotification(input: NotificationInput): NotificationData {
+  const titleParams = cleanTitleParams(input.titleParams);
+  const parts: TitlePart[] = NOTIFICATION_TITLES.en[input.type].map((part) =>
+    typeof part === "string" ? part : { value: titleParams[part.param], fallback: part.fallback },
+  );
   const row: NotificationData = {
     type: input.type,
-    title: buildTitle(input.titleParts),
+    title: buildTitle(parts),
+    titleParams,
     link: input.link,
     recipient: input.recipient,
     actor: input.actor ?? null,
@@ -223,7 +252,7 @@ export interface SourceFanoutOptions<TSource extends SourceRow> {
    * lifecycle row only when the re-read found nothing, and then there are
    * no recipients).
    */
-  titleParts: (row: TSource) => readonly TitlePart[];
+  titleParams: (row: TSource) => TitleParamsInput;
   link: string;
 }
 
@@ -250,7 +279,7 @@ export async function runSourceFanout<TSource extends SourceRow>(
     // The title from the row the audience came from: when a second publish
     // committed before this fan-out ran (the fan-outs queue per process),
     // the lifecycle row's title may be one the new audience must not see.
-    const titleParts = options.titleParts(source ?? row);
+    const titleParams = options.titleParams(source ?? row);
     const notificationSource: NotificationSource = {
       sourceType,
       sourceDocumentId: anchor?.sourceDocumentId ?? null,
@@ -258,7 +287,7 @@ export async function runSourceFanout<TSource extends SourceRow>(
     const rows = toNotify.map((recipient) =>
       buildNotification({
         type: sourceType,
-        titleParts,
+        titleParams,
         link: options.link,
         recipient,
         actor: actorId,

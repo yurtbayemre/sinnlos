@@ -31,7 +31,7 @@ async function notifyRecipient(kudosId: number | string): Promise<void> {
 
   const data = buildNotification({
     type: "kudos",
-    titleParts: [{ value: full.from.displayName, fallback: "Someone" }, " gave you kudos!"],
+    titleParams: { actor: full.from.displayName },
     link: "/kudos",
     recipient: full.to.id,
     actor: full.from.id,

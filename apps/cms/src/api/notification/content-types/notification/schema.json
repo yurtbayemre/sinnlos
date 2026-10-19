@@ -15,6 +15,7 @@
       "required": true
     },
     "title": { "type": "string", "required": true },
+    "titleParams": { "type": "json" },
     "link": { "type": "string" },
     "recipient": {
       "type": "relation",

@@ -104,13 +104,14 @@ describe("buildNotification", () => {
     expect(
       buildNotification({
         type: "kudos",
-        titleParts: [{ value: "Ada", fallback: "Someone" }, " gave you kudos!"],
+        titleParams: { actor: "Ada" },
         link: "/kudos",
         recipient: 7,
       }),
     ).toEqual({
       type: "kudos",
       title: "Ada gave you kudos!",
+      titleParams: { actor: "Ada" },
       link: "/kudos",
       recipient: 7,
       actor: null,
@@ -120,7 +121,7 @@ describe("buildNotification", () => {
   it("carries the source anchor of a fan-out row", () => {
     const row = buildNotification({
       type: "announcement",
-      titleParts: ["New announcement: ", { value: "a".repeat(255), fallback: "Untitled" }],
+      titleParams: { subject: "a".repeat(255) },
       link: "/announcements",
       recipient: 7,
       actor: 3,
@@ -134,13 +135,25 @@ describe("buildNotification", () => {
       sourceDocumentId: "doc1",
     });
     expect(codePoints(row.title)).toBe(NOTIFICATION_TITLE_MAX);
+    expect(codePoints(row.titleParams.subject ?? "")).toBe(NOTIFICATION_TITLE_MAX);
+  });
+
+  it("stores trimmed values only and builds the English title from the template (AC04)", () => {
+    const row = buildNotification({
+      type: "comment",
+      titleParams: { actor: "  Ada ", subject: "   " },
+      link: "/announcements",
+      recipient: 7,
+    });
+    expect(row.titleParams).toEqual({ actor: "Ada" });
+    expect(row.title).toBe('Ada commented on "an announcement"');
   });
 });
 
 const row = (recipient: number): NotificationData =>
   buildNotification({
     type: "event",
-    titleParts: ["New event: x"],
+    titleParams: { subject: "x" },
     link: "/events",
     recipient,
     actor: 1,
@@ -241,7 +254,7 @@ describe("scheduleSourceFanout (LF02)", () => {
     sourceType: "announcement" as const,
     row: source,
     loadAudience: async () => ({ source, recipients: [7, 8], actorId: 1 }),
-    titleParts: () => ["New announcement: Town hall"],
+    titleParams: () => ({ subject: "Town hall" }),
     link: "/announcements",
   });
 
@@ -281,7 +294,7 @@ describe("runSourceFanout", () => {
       sourceType: "event",
       row: source,
       loadAudience: async () => ({ source, recipients: [7, 8, 9], actorId: 1 }),
-      titleParts: (r) => ["New event: ", { value: r.title, fallback: "Untitled" }],
+      titleParams: (r) => ({ subject: r.title }),
       link: "/events",
     });
     const written = strapi.tables[NOTIFICATION_UID].slice(1);
@@ -305,7 +318,7 @@ describe("runSourceFanout", () => {
       sourceType: "event",
       row: lifecycleRow,
       loadAudience: async () => ({ source: current, recipients: [7, 8], actorId: 1 }),
-      titleParts: (r) => ["New event: ", { value: r.title, fallback: "Untitled" }],
+      titleParams: (r) => ({ subject: r.title }),
       link: "/events",
     });
     expect(strapi.tables[NOTIFICATION_UID].map((n) => n.title)).toEqual([
@@ -321,7 +334,7 @@ describe("runSourceFanout", () => {
       sourceType: "event",
       row: source,
       loadAudience: async () => ({ source: null, recipients: [7], actorId: null }),
-      titleParts: () => ["New event: x"],
+      titleParams: () => ({ subject: "x" }),
       link: "/events",
     });
     expect(strapi.tables[NOTIFICATION_UID][0]).toMatchObject({
@@ -340,7 +353,7 @@ describe("runSourceFanout", () => {
         loadAudience: async () => {
           throw new Error("db down");
         },
-        titleParts: () => ["x"],
+        titleParams: () => ({}),
         link: "/announcements",
       }),
     ).resolves.toBeUndefined();

@@ -55,12 +55,7 @@ async function notifyAnnouncementAuthor(commentId: number | string): Promise<voi
 
   const data = buildNotification({
     type: "comment",
-    titleParts: [
-      { value: full.author?.displayName, fallback: "Someone" },
-      ' commented on "',
-      { value: announcement.title, fallback: "an announcement" },
-      '"',
-    ],
+    titleParams: { actor: full.author?.displayName, subject: announcement.title },
     link: "/announcements",
     recipient: announcement.author.id,
     actor: full.author?.id ?? null,

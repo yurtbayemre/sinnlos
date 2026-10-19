@@ -233,7 +233,7 @@ function suite(name: string, open: () => Promise<Opened>, postgres: boolean) {
           sourceType: "announcement",
           row,
           loadAudience: async () => ({ source: row, recipients: [1, 2, 3], actorId: null }),
-          titleParts: () => ["New announcement: ", { value: title, fallback: "Untitled" }],
+          titleParams: () => ({ subject: title }),
           link: "/announcements",
         });
         await afterSchedule?.();
@@ -274,7 +274,7 @@ function suite(name: string, open: () => Promise<Opened>, postgres: boolean) {
             sourceType: "announcement",
             row,
             loadAudience: async () => ({ source: row, recipients: [1, 2, 3], actorId: null }),
-            titleParts: () => ["x"],
+            titleParams: () => ({}),
             link: "/announcements",
           });
           throw new Error("relation sync failed");
@@ -426,7 +426,7 @@ function suite(name: string, open: () => Promise<Opened>, postgres: boolean) {
         const rows = [1, 2, 3].map((recipient) => ({
           ...buildNotification({
             type: "announcement",
-            titleParts: ["New announcement: x"],
+            titleParams: { subject: "x" },
             link: "/announcements",
             recipient,
           }),
