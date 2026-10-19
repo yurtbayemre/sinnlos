@@ -260,9 +260,7 @@ export function CommentSectionsProvider({ children }: { children: React.ReactNod
     [refresher, registerChannel],
   );
 
-  return (
-    <CommentSectionsContext.Provider value={registry}>{children}</CommentSectionsContext.Provider>
-  );
+  return <CommentSectionsContext value={registry}>{children}</CommentSectionsContext>;
 }
 
 /**

@@ -62,9 +62,9 @@ export function LiveEventsProvider({
   }, [enabled, client]);
 
   return (
-    <LiveEventsContext.Provider value={{ register: client.register, healthy, streaming: enabled }}>
+    <LiveEventsContext value={{ register: client.register, healthy, streaming: enabled }}>
       {children}
-    </LiveEventsContext.Provider>
+    </LiveEventsContext>
   );
 }
 

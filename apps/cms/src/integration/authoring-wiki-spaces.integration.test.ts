@@ -108,6 +108,11 @@ describe.each(testEngines())("authoring wiki spaces on %s", (engine) => {
     const draft = await wiki.createSpace("editor", { name: "IT Draft" }, "?status=draft");
     expect(draft.status).toBe(400);
     expect(draft.body.error?.details).toEqual({ keys: ["status"], codes: { status: "invalid" } });
+    // Strapi's own unique check on `name` answers a field code, not its bare 400.
+    expect((await wiki.createSpace("editor", { name: "IT Twin" })).status).toBe(201);
+    const twin = await wiki.createSpace("editor", { name: "IT Twin" });
+    expect(twin.status).toBe(400);
+    expect(twin.body.error?.details).toEqual({ keys: ["name"], codes: { name: "taken" } });
   });
 
   it("updates with If-Match: 428 without, 412 stale, 200 with the version; re-targets by department", async () => {

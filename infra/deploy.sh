@@ -1592,12 +1592,18 @@ log "Smoke-checking ${SMOKE_URL}"
 attempts=10
 delay=6
 code=000
+location=
 smoke_ok=0
 for ((i = 1; i <= attempts; i++)); do
   # curl writes 000 itself when there is no answer.
-  code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 15 "${SMOKE_URL}")" || true
+  answer="$(curl -sS -o /dev/null -w '%{http_code} %{redirect_url}' --max-time 15 "${SMOKE_URL}")" || true
+  code="${answer%% *}"
   code="${code:-000}"
-  if [[ "${code}" =~ ^(200|301|302|307|308)$ ]]; then
+  location="${answer#"${code}"}"
+  location="${location# }"
+  # A redirect counts only when it goes to the web's sign-in page: Traefik's
+  # own redirects (http to https) and a wrong path prove nothing about the web.
+  if [[ "${code}" == 200 || ("${code}" =~ ^30[1278]$ && "${location}" =~ ^https?://[^/]+/sign-in([?#].*)?$) ]]; then
     smoke_ok=1
     break
   fi
@@ -1607,7 +1613,7 @@ for ((i = 1; i <= attempts; i++)); do
   fi
 done
 if ! ((smoke_ok)); then
-  echo "ERROR: smoke check failed — ${SMOKE_URL} returned HTTP ${code}" >&2
+  echo "ERROR: smoke check failed — ${SMOKE_URL} returned HTTP ${code}${location:+ to ${location}}" >&2
   echo "       Inspect logs:  ${COMPOSE[*]} logs --tail=100 web cms" >&2
   print_rollback_hint
   exit 1

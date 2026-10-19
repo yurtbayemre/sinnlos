@@ -194,6 +194,7 @@
     "quizInvalid": "Das Quiz ist nicht gültig.",
     "frozenAfterVotes": "Es wurde bereits abgestimmt, daher lässt sich das nicht mehr ändern.",
     "visibilityTarget": "Wählen Sie, wer es sehen darf.",
+    "taken": "Dieser Name ist schon vergeben.",
     "optionCount": "Eine Umfrage braucht 2 bis 20 Antworten.",
     "optionDuplicate": "Zwei Antworten sind gleich.",
     "fileType": "Laden Sie eine PDF-, Word- (.docx), Excel- (.xlsx) oder PowerPoint-Datei (.pptx) oder ein JPEG-, PNG- oder WebP-Bild hoch. Dateien mit Makros, Vorlagen und Bildschirmpräsentationen werden nicht angenommen.",
