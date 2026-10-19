@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 /**
- * The DEMO_MODE contract (DM01-lite, lib/demo.ts): every path template the
+ * The DEMO_MODE contract (DM01, lib/demo/): every path template the
  * web reads through strapi() has a fixture route, answers the envelope the
  * caller expects (a list with a real `meta.pagination`, a bare array for
  * /api/users, the bare user for /api/users/:id and /me, a results body for
@@ -74,10 +74,11 @@ const API_READS: Record<string, () => Promise<unknown>> = {
       zonedDayStart(addDaysToKey(zonedDateKey(NOW, ZONE), -10), ZONE).toISOString(),
       zonedDayStart(addDaysToKey(zonedDateKey(NOW, ZONE), 10), ZONE).toISOString(),
     ),
-  "events.rsvpSummaries": () => api.events.rsvpSummaries(["demo-event-1", "demo-event-2"]),
+  "events.rsvpSummaries": () =>
+    api.events.rsvpSummaries(["demoevent000000000000001", "demoevent000000000000002"]),
   "polls.list": () => api.polls.list(),
-  "polls.results": () => api.polls.results("demo-poll-1"),
-  "polls.resultsMany": () => api.polls.resultsMany([1, "demo-poll-2"]),
+  "polls.results": () => api.polls.results("demopoll0000000000000001"),
+  "polls.resultsMany": () => api.polls.resultsMany([1, "demopoll0000000000000002"]),
   "documents.list": () => api.documents.list(),
   "kudos.list": () => api.kudos.list(),
   "classifieds.list": () => api.classifieds.list(zonedDateKey(NOW, ZONE)),
@@ -94,11 +95,11 @@ const DIRECT_READS: Record<string, () => Promise<unknown>> = {
   "fetchAllUsers(org chart)": () => fetchAllUsers(ORG_CHART_QUERY),
   "fetchAllUsers(kudos)": () => fetchAllUsers(kudosRecipientQuery(1)),
   fetchMyAnnouncementAcks: () => fetchMyAnnouncementAcks(),
-  fetchAnnouncementAckIndex: () => fetchAnnouncementAckIndex(["demo-ann-1"]),
+  fetchAnnouncementAckIndex: () => fetchAnnouncementAckIndex(["demoann00000000000000001"]),
   fetchCourses: () => training.fetchCourses(),
   fetchCourseBySlug: () => training.fetchCourseBySlug("security-awareness-basics"),
-  fetchLessonByDocumentId: () => training.fetchLessonByDocumentId("demo-lesson-1"),
-  fetchCourseProgress: () => training.fetchCourseProgress(["demo-lesson-1"], "demo"),
+  fetchLessonByDocumentId: () => training.fetchLessonByDocumentId("demolesson00000000000001"),
+  fetchCourseProgress: () => training.fetchCourseProgress(["demolesson00000000000001"], "demo"),
   fetchMyProgress: () => training.fetchMyProgress(),
   getNotifications: () => getNotifications(),
   "analytics countPage": () => analytics.countPage("wiki-spaces"),
@@ -149,7 +150,7 @@ describe("DEMO_MODE: every read has a fixture route", () => {
 
   it("warns (outside production) and answers an empty list for an unknown path", () => {
     expect(listOf(demo("/api/nothing-here?x=1")).data).toEqual([]);
-    expect(warnings()).toEqual(["[demo] no fixture for /api/nothing-here?x=1"]);
+    expect(warnings()).toEqual(["[demo] no fixture for GET /api/nothing-here?x=1"]);
   });
 });
 
@@ -233,10 +234,10 @@ describe("DEMO_MODE: filters apply", () => {
     });
     expect((await api.wiki.page("engineering", "welcome")).data).toEqual([]);
     const acks = await api.announcements.requiringAck();
-    expect(acks.data.map((a) => a.documentId)).toEqual(["demo-ann-1"]);
+    expect(acks.data.map((a) => a.documentId)).toEqual(["demoann00000000000000001"]);
     const comments = listOf(
       demo(
-        "/api/comments?filters[targetDocumentId][$in][0]=demo-ann-2&filters[targetDocumentId][$in][1]=demo-ann-9",
+        "/api/comments?filters[targetDocumentId][$in][0]=demoann00000000000000002&filters[targetDocumentId][$in][1]=demoann00000000000000009",
       ),
     );
     expect(comments.data.map((c) => c.id)).toEqual([3]);
@@ -253,10 +254,13 @@ describe("DEMO_MODE: filters apply", () => {
   });
 
   it("summarises RSVPs per event with the demo user's own answer", async () => {
-    const { data } = await api.events.rsvpSummaries(["demo-event-1", "demo-event-2"]);
+    const { data } = await api.events.rsvpSummaries([
+      "demoevent000000000000001",
+      "demoevent000000000000002",
+    ]);
     expect(data).toEqual([
       {
-        targetDocumentId: "demo-event-1",
+        targetDocumentId: "demoevent000000000000001",
         yesCount: 2,
         maybeCount: 1,
         noCount: 1,
@@ -264,7 +268,7 @@ describe("DEMO_MODE: filters apply", () => {
         myStatus: "yes",
       },
       {
-        targetDocumentId: "demo-event-2",
+        targetDocumentId: "demoevent000000000000002",
         yesCount: 0,
         maybeCount: 0,
         noCount: 0,
@@ -277,21 +281,26 @@ describe("DEMO_MODE: filters apply", () => {
 
 describe("DEMO_MODE: poll results", () => {
   it("serves a poll's results by documentId and by row id alike", async () => {
-    const byDocumentId = await api.polls.results("demo-poll-2");
+    const byDocumentId = await api.polls.results("demopoll0000000000000002");
     expect(byDocumentId.poll.id).toBe(2);
     expect(await api.polls.results(2)).toEqual(byDocumentId);
     expect(byDocumentId).toMatchObject({ counts: [14, 5, 1], total: 20, myVoteIndex: 0 });
   });
 
   it("lists many polls' results in one answer, each like the single read, leaving out unknown ones (WD04)", async () => {
-    const many = await api.polls.resultsMany([2, "demo-poll-9", "demo-poll-1", "demo-poll-2"]);
+    const many = await api.polls.resultsMany([
+      2,
+      "demopoll0000000000000009",
+      "demopoll0000000000000001",
+      "demopoll0000000000000002",
+    ]);
     expect(many.map((entry) => entry.poll.id)).toEqual([2, 1]);
     expect(many[0]).toEqual(await api.polls.results(2));
-    expect(many[1]).toEqual(await api.polls.results("demo-poll-1"));
+    expect(many[1]).toEqual(await api.polls.results("demopoll0000000000000001"));
   });
 
   it("answers an unknown poll with a 404, like the cms (the card is dropped)", async () => {
-    for (const ref of ["demo-poll-9", 9, "k3m9x0000000000000000001"]) {
+    for (const ref of ["demopoll0000000000000009", 9, "k3m9x0000000000000000001"]) {
       const error = await api.polls.results(ref).catch((e: unknown) => e);
       expect(error, String(ref)).toBeInstanceOf(StrapiError);
       expect(error).toMatchObject({ status: 404, strapiName: "NotFoundError" });
@@ -301,11 +310,11 @@ describe("DEMO_MODE: poll results", () => {
 
 describe("DEMO_MODE: answerless lesson player", () => {
   it("uses the fixed player envelope, leaving generic course and lesson reads without quiz data", async () => {
-    const lesson = await training.fetchLessonByDocumentId("demo-lesson-1");
+    const lesson = await training.fetchLessonByDocumentId("demolesson00000000000001");
     expect(lesson?.quiz).toHaveLength(1);
     expect(lesson?.quiz[0]).toEqual({ question: expect.any(String), options: expect.any(Array) });
     expect(lesson?.course).toMatchObject({
-      documentId: "demo-course-1",
+      documentId: "democourse00000000000001",
       completionMode: "quizGate",
     });
     expect(JSON.stringify(demo("/api/courses"))).not.toContain('"quiz"');

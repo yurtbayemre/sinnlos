@@ -24,7 +24,7 @@ export async function Topbar() {
   // then shows only the outage note), a failed unread count alone the
   // unread among the loaded items. Only strapi()'s NEXT_REDIRECT to /sign-in
   // escapes, so an expired session navigates the whole page. DEMO_MODE gets
-  // DEMO_SESSION and the fixture notifications (lib/demo.ts).
+  // DEMO_SESSION and the fixture notifications (lib/demo/).
   const [tAuth, tCommon, tProfile, session, notifications] = await Promise.all([
     getTranslations("auth"),
     getTranslations("common"),

@@ -45,7 +45,7 @@ export const ANONYMOUS_VIEWER: Viewer = Object.freeze({
 
 /**
  * DEMO_MODE has no Strapi and no sign-in. The demo viewer is the fixture's
- * Ada Lovelace (lib/demo.ts /api/me), the user of DEMO_SESSION
+ * Ada Lovelace (lib/demo/ /api/me), the user of DEMO_SESSION
  * (lib/session.ts, same id and name), as a plain member — no admin UI, no
  * poll creation — which keeps the demo showing what it showed before.
  */
@@ -55,7 +55,7 @@ export const DEMO_VIEWER: Viewer = Object.freeze({
   role: "member",
   department: Object.freeze({
     id: 1,
-    documentId: "demo-department-1",
+    documentId: "demodepartment0000000001",
     name: "Engineering",
     slug: "engineering",
   }),

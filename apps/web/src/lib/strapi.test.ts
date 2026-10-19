@@ -213,8 +213,8 @@ describe("api.polls (decision 02)", () => {
     expect(pollRef({ id: 7, documentId: "k3m9x0000000000000000001" })).toBe(
       "k3m9x0000000000000000001",
     );
-    // Not in Strapi's documentId shape (e.g. the demo fixtures) or missing.
-    expect(pollRef({ id: 7, documentId: "demo-poll-1" })).toBe(7);
+    // Not in Strapi's documentId shape (a hand-made id) or missing.
+    expect(pollRef({ id: 7, documentId: "poll-1" })).toBe(7);
     expect(pollRef({ id: 7 })).toBe(7);
   });
 
@@ -286,6 +286,6 @@ describe("strapi() — DEMO_MODE", () => {
   it("serves poll results by documentId and by row id alike (DA01)", () => {
     const byId = demo("/api/polls/2/results") as { poll: { id: number } };
     expect(byId.poll.id).toBe(2);
-    expect(demo("/api/polls/demo-poll-2/results")).toEqual(byId);
+    expect(demo("/api/polls/demopoll0000000000000002/results")).toEqual(byId);
   });
 });

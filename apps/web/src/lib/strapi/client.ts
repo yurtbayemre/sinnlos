@@ -73,7 +73,7 @@ export type StrapiInit = Omit<RequestInit, "cache" | "next">;
 export async function strapi<T>(path: string, init: StrapiInit = {}): Promise<T> {
   // DEMO_MODE answers from fixtures before any session read or fetch.
   if (DEMO_MODE) {
-    return demo(path) as T;
+    return demo(path, init) as T;
   }
   const token = await getStrapiToken();
 

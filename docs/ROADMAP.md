@@ -557,8 +557,8 @@ lives at `/manage/analytics` and combines them with Strapi content stats.
 - [ ] Web role gates read `getViewer().role` and use the fail-closed
       allowlist helpers in `apps/web/src/lib/roles.ts`; never
       `role !== "guest"`.
-- [ ] Demo mode: extend `apps/web/src/lib/demo.ts` fixtures so `DEMO_MODE=1`
-      keeps working.
+- [ ] Demo mode: extend the fixtures in `apps/web/src/lib/demo/` (and a
+      member write in `writes.ts`) so `DEMO_MODE=1` keeps working.
 - [ ] Types in `lib/types.ts`, skeleton + `loading.tsx`, `EmptyState`,
       `PageHeader`, mobile nav check.
 - [ ] `pnpm typecheck && pnpm build` before every merge.
