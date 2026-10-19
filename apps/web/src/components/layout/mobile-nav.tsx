@@ -99,7 +99,7 @@ export function MobileNav({ items }: { items: readonly NavItem[] }) {
         paddingRight: "max(env(safe-area-inset-right), 16px)",
       }}
     >
-      <div className="pointer-events-auto mx-auto flex max-w-md rounded-full border bg-background/75 p-1 shadow-lg backdrop-blur-xl">
+      <div className="pointer-events-auto mx-auto flex max-w-md rounded-full border bg-card/85 p-1 shadow-lg backdrop-blur-xl">
         {primary.map((item) => {
           const Icon = ICONS[item.icon];
           const active = isNavActive(pathname, item.href);
