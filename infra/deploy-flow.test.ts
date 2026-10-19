@@ -339,8 +339,14 @@ describe.skipIf(!RUN_SEQUENCES)(
     beforeAll(() => {
       r = deploys([
         /* 0 */ { before: "STUB_NO_VOLUMES=1" },
-        /* 1 */ { before: "STUB_NO_VOLUMES=; commit; STUB_SMOKE_CODE=502" },
-        /* 2 */ { before: "STUB_SMOKE_CODE=200; STUB_LIVE_RC=1" },
+        // A redirect anywhere but the sign-in page fails the smoke check …
+        /* 1 */ {
+          before: `STUB_NO_VOLUMES=; commit; STUB_SMOKE_CODE='308 https://${STUB_HOST}/elsewhere'`,
+        },
+        // … one to the sign-in page passes it (live-smoke then fails).
+        /* 2 */ {
+          before: `STUB_SMOKE_CODE='307 https://${STUB_HOST}/sign-in?from=%2F'; STUB_LIVE_RC=1`,
+        },
         /* 3 */ { before: "STUB_LIVE_RC=0; STUB_TAG_FAIL=1" },
         /* 4 */ { before: "STUB_TAG_FAIL=; STUB_BUILD_FAIL=1" },
         /* 5 */ { before: "STUB_BUILD_FAIL=; STUB_UP_FAIL=1" },
@@ -383,7 +389,7 @@ describe.skipIf(!RUN_SEQUENCES)(
       expect(first.stdout).toContain(`Traefik host: ${STUB_HOST}; smoke URL: https://${STUB_HOST}`);
       expect(first.stdout).toContain(`live-smoke base=https://${STUB_HOST} cms=infra-cms-1`);
       expect(called(first, /^curl /).filter((c) => !c.includes("api.github.com"))).toEqual([
-        `curl -sS -o /dev/null -w %{http_code} --max-time 15 https://${STUB_HOST}`,
+        `curl -sS -o /dev/null -w %{http_code} %{redirect_url} --max-time 15 https://${STUB_HOST}`,
       ]);
       expect(first.stdout).toContain("none: nothing ran here before (first install)");
       expect(first.state).toMatchObject({
@@ -415,7 +421,7 @@ describe.skipIf(!RUN_SEQUENCES)(
       expect(bad.status).toBe(1);
       expect(bad.stdout).toContain(`last-known-good: infra-{web,cms}:${tagOf(good)}`);
       expect(called(bad, /:rollback/)).toEqual([]);
-      expect(bad.stderr).toContain("smoke check failed");
+      expect(bad.stderr).toContain(`returned HTTP 308 to https://${STUB_HOST}/elsewhere`);
       expect(bad.stderr).toContain(`docker tag infra-web:${tagOf(good)} infra-web:latest`);
       expect(bad.stderr).toContain(`docker tag infra-cms:${tagOf(good)} infra-cms:latest`);
       expect(bad.stderr).toContain("up -d --no-build web cms");

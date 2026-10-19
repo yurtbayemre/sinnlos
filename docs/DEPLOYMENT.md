@@ -1042,7 +1042,10 @@ docker compose -p infra -f infra/docker-compose.yml -f infra/docker-compose.trae
 
 The smoke checks follow `DOMAIN`: `deploy.sh` curls `SMOKE_URL`, by default
 `https://$DOMAIN` (the host its preflight checked; `--check` prints both),
-and hands the same URL to `infra/live-smoke.sh` as `BASE_URL`. Run by hand,
+and hands the same URL to `infra/live-smoke.sh` as `BASE_URL`. The smoke
+check passes on a 200 or on a redirect to the web's `/sign-in` page; any
+other redirect (Traefik's http-to-https one, for instance) fails it,
+because it proves nothing about the web. Run by hand,
 live-smoke takes `BASE_URL`, or else `https://$DOMAIN`, with `DOMAIN` from
 the environment or from the `infra/.env` next to it. Until batch 10 both
 defaulted to the owner's `https://sinnlos.yurtbay.dev`, so on another
