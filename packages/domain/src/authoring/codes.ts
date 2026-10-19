@@ -87,6 +87,8 @@ export const AUTHORING_FIELD_CODES = [
    * a loop; a loop that existed before never blocks a save.
    */
   "parentCycle",
+  /** A value another entry already has where it must be unique (a wiki space's `name`). */
+  "taken",
 ] as const;
 
 export type AuthoringFieldCode = (typeof AUTHORING_FIELD_CODES)[number];

@@ -194,6 +194,7 @@
     "quizInvalid": "The quiz is not valid.",
     "frozenAfterVotes": "Someone has voted, so this can no longer change.",
     "visibilityTarget": "Choose who may see it.",
+    "taken": "This name is already taken.",
     "optionCount": "A poll needs between 2 and 20 answers.",
     "optionDuplicate": "Two answers are the same.",
     "fileType": "Upload a PDF, Word (.docx), Excel (.xlsx) or PowerPoint (.pptx) file, or a JPEG, PNG or WebP image. Files with macros, templates and slide shows are not accepted.",

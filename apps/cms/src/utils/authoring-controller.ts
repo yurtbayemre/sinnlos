@@ -336,7 +336,28 @@ function sendLockError(ctx: AuthoringContext, error: DocumentLockError): void {
   };
 }
 
-/** Runs `fn`; a lock refusal becomes its answer, anything else propagates. */
+/** Strapi's unique check (entity validator) answers this text and no code. */
+const STRAPI_UNIQUE_MESSAGE = "This attribute must be unique";
+
+/** The top-level keys Strapi's unique check refused in `error`, if any. */
+function uniqueRefusedKeys(error: unknown): string[] {
+  if (!(error instanceof Error) || error.name !== "ValidationError") return [];
+  const list = (error as { details?: { errors?: unknown } }).details?.errors;
+  if (!Array.isArray(list)) return [];
+  return list.flatMap((entry) =>
+    entry?.message === STRAPI_UNIQUE_MESSAGE &&
+    Array.isArray(entry.path) &&
+    entry.path.length === 1 &&
+    typeof entry.path[0] === "string"
+      ? [entry.path[0]]
+      : [],
+  );
+}
+
+/**
+ * Runs `fn`; a lock refusal becomes its answer, Strapi's unique refusal the
+ * usual 400 with `taken` on its keys, anything else propagates.
+ */
 export async function answering(ctx: AuthoringContext, fn: () => Promise<void>): Promise<void> {
   try {
     await fn();
@@ -345,6 +366,8 @@ export async function answering(ctx: AuthoringContext, fn: () => Promise<void>):
       sendLockError(ctx, error);
       return;
     }
+    const taken = uniqueRefusedKeys(error);
+    if (taken.length > 0) refuseKeys(taken, Object.fromEntries(taken.map((key) => [key, "taken"])));
     throw error;
   }
 }

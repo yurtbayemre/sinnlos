@@ -71,6 +71,7 @@ describe("codes", () => {
         "fileType",
         "fileTooLarge",
         "parentCycle",
+        "taken",
       ].sort(),
     );
     expect([...AUTHORING_FORM_CODES]).toEqual(["neverPublished", "spaceNotEmpty"]);
