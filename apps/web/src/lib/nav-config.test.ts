@@ -83,9 +83,9 @@ describe("NAV_ITEMS", () => {
     for (const item of NAV_ITEMS) expect(Object.keys(ICONS), item.href).toContain(item.icon);
   });
 
-  it("keeps the phone tab bar to five tabs besides More", () => {
+  it("keeps the phone tab bar to four tabs besides More (Apple's five)", () => {
     const primary = NAV_ITEMS.filter((item) => item.mobilePrimary).map((item) => item.href);
-    expect(primary).toEqual(["/", "/people", "/events", "/wiki", "/announcements"]);
+    expect(primary).toEqual(["/", "/events", "/wiki", "/announcements"]);
   });
 });
 
