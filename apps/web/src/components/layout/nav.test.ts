@@ -89,7 +89,7 @@ beforeEach(() => {
 describe("MobileNav", () => {
   it("shows the primary tabs and a More trigger for the rest", () => {
     const html = render(createElement(MobileNav, { items: navItemsFor("member") }));
-    expect(links(html)).toEqual(["/", "/people", "/events", "/wiki", "/announcements"]);
+    expect(links(html)).toEqual(["/", "/events", "/wiki", "/announcements"]);
     expect(html).toContain(`>${en.nav.home}<`);
     expect(html).toContain(`>${en.nav.news}<`);
     expect(html).toContain(`>${en.nav.more}<`);
@@ -123,7 +123,7 @@ describe("MobileNav", () => {
 
   it("leaves the News tab out for a guest", () => {
     const html = render(createElement(MobileNav, { items: navItemsFor("guest") }));
-    expect(links(html)).toEqual(["/", "/people", "/events", "/wiki"]);
+    expect(links(html)).toEqual(["/", "/events", "/wiki"]);
     expect(html).toContain(`>${en.nav.more}<`);
   });
 
@@ -133,12 +133,12 @@ describe("MobileNav", () => {
     expect(html).not.toContain(`>${en.nav.more}<`);
   });
 
-  it("sits above the home indicator: the safe-area insets pad the bar (#71)", () => {
+  it("floats above the home indicator: the safe-area insets place the bar (#71)", () => {
     const html = render(createElement(MobileNav, { items: navItemsFor("member") }));
     const style = /<nav [^>]*style="([^"]*)"/.exec(html)?.[1] ?? "";
-    expect(style).toContain("padding-bottom:env(safe-area-inset-bottom)");
-    expect(style).toContain("padding-left:env(safe-area-inset-left)");
-    expect(style).toContain("padding-right:env(safe-area-inset-right)");
+    expect(style).toContain("padding-bottom:max(env(safe-area-inset-bottom) - 13px, 12px)");
+    expect(style).toContain("padding-left:max(env(safe-area-inset-left), 16px)");
+    expect(style).toContain("padding-right:max(env(safe-area-inset-right), 16px)");
     // Every tab keeps Apple's 44 pt touch target at the least.
     const tabs = html.match(/<(a|button) [^>]*class="[^"]*flex-1[^"]*"/g) ?? [];
     expect(tabs.length).toBeGreaterThan(1);
@@ -234,6 +234,7 @@ describe("MoreSheetLinks", () => {
       createElement(MoreSheetLinks, { items: more("member"), pathname: "/", onChoose() {} }),
     );
     expect(links(member)).toEqual([
+      "/people",
       "/training",
       "/departments",
       "/teams",
@@ -288,7 +289,7 @@ describe("pending feedback (UI05)", () => {
   it("shows the dot in a pending tab, sidebar link and sheet entry", () => {
     state.pending = true;
     const tabs = render(createElement(MobileNav, { items: navItemsFor("member") }));
-    expect(pendingDots(tabs)).toBe(5);
+    expect(pendingDots(tabs)).toBe(4);
     const link = render(createElement(NavLink, { href: "/kudos", label: "Kudos", icon: "Award" }));
     expect(pendingDots(link)).toBe(1);
     expect(link).toMatch(/<span aria-hidden="true" data-pending="true" class="[^"]*animate-pulse/);
@@ -299,7 +300,7 @@ describe("pending feedback (UI05)", () => {
         onChoose() {},
       }),
     );
-    expect(pendingDots(sheet)).toBe(7);
+    expect(pendingDots(sheet)).toBe(8);
   });
 });
 

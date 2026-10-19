@@ -12,14 +12,16 @@ import { cn } from "@/lib/utils";
 import { LinkPendingIndicator } from "./nav-link";
 
 /**
- * min-h-11: Apple's 44 pt touch target at the least; py-1 makes the tabs
- * 49 px, the height of an iOS tab bar above the home indicator (issue #71,
- * F6: at 56 px the bar looked too tall in the installed app).
+ * A tab of the floating bar (iOS 26 tab bars): 24 px icon over a 10 px
+ * label, the current one on a tinted pill; min-h-11 keeps Apple's 44 pt
+ * touch target at the least (issue #71).
  */
 const TAB_CLASS = cn(
-  "flex min-h-11 min-w-0 flex-1 flex-col items-center gap-1 py-1 text-[11px] outline-hidden transition-colors",
+  "flex min-h-11 min-w-0 flex-1 flex-col items-center justify-center gap-0.5 rounded-full py-1.5 text-[10px] font-medium leading-tight outline-hidden transition-colors",
   "focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
 );
+const tabState = (active: boolean) =>
+  active ? "bg-primary/10 text-primary" : "text-muted-foreground";
 
 /** Tailwind `md` (48rem, not overridden in globals.css): the bar and its sheet hide, the sidebar shows. */
 export const DESKTOP_QUERY = "(min-width: 48rem)";
@@ -61,9 +63,10 @@ export function sheetStaysOpen(openedOn: string | null, pathname: string, deskto
  * and its accessible name names that entry ("More: Training"), as the tabs
  * carry aria-current="page".
  *
- * The bar sits above the home indicator (issue #71): it pads by the bottom
- * safe-area inset, which iOS reports since the page sets viewport-fit=cover
- * (app/layout.tsx), and by the side insets; all 0 on other devices.
+ * The bar floats as a glass capsule just above the home indicator, as
+ * iOS 26 tab bars do (issue #71, F6): 21 px above the bottom with the
+ * iPhone's 34 px inset (env(safe-area-inset-bottom), reported since the
+ * page sets viewport-fit=cover in app/layout.tsx), 12 px without one.
  */
 export function MobileNav({ items }: { items: readonly NavItem[] }) {
   const pathname = usePathname();
@@ -89,14 +92,14 @@ export function MobileNav({ items }: { items: readonly NavItem[] }) {
   return (
     <nav
       aria-label={tCommon("bottomNav")}
-      className="fixed inset-x-0 bottom-0 z-40 border-t bg-background/90 backdrop-blur-sm md:hidden"
+      className="pointer-events-none fixed inset-x-0 bottom-0 z-40 md:hidden"
       style={{
-        paddingBottom: "env(safe-area-inset-bottom)",
-        paddingLeft: "env(safe-area-inset-left)",
-        paddingRight: "env(safe-area-inset-right)",
+        paddingBottom: "max(env(safe-area-inset-bottom) - 13px, 12px)",
+        paddingLeft: "max(env(safe-area-inset-left), 16px)",
+        paddingRight: "max(env(safe-area-inset-right), 16px)",
       }}
     >
-      <div className="flex">
+      <div className="pointer-events-auto mx-auto flex max-w-md rounded-full border bg-background/75 p-1 shadow-lg backdrop-blur-xl">
         {primary.map((item) => {
           const Icon = ICONS[item.icon];
           const active = isNavActive(pathname, item.href);
@@ -105,13 +108,10 @@ export function MobileNav({ items }: { items: readonly NavItem[] }) {
               key={item.href}
               href={item.href}
               aria-current={active ? "page" : undefined}
-              className={cn(TAB_CLASS, active ? "text-primary" : "text-muted-foreground")}
+              className={cn(TAB_CLASS, tabState(active))}
             >
               <span className="relative">
-                <Icon
-                  aria-hidden="true"
-                  className={cn("h-5 w-5 transition-transform duration-150", active && "scale-110")}
-                />
+                <Icon aria-hidden="true" className="h-6 w-6" />
                 <LinkPendingIndicator className="absolute -right-1.5 -top-0.5" />
               </span>
               <span className="max-w-full truncate px-0.5">
@@ -124,7 +124,7 @@ export function MobileNav({ items }: { items: readonly NavItem[] }) {
         {more.length > 0 && (
           <Dialog.Root open={open} onOpenChange={(next) => setOpenedOn(next ? pathname : null)}>
             <Dialog.Trigger
-              className={cn(TAB_CLASS, moreActive ? "text-primary" : "text-muted-foreground")}
+              className={cn(TAB_CLASS, tabState(moreActive))}
               data-active={moreActive ? "true" : undefined}
               // "true", not "page": the button is not the page, one of its
               // entries is. The name says which, starting with the visible
@@ -133,13 +133,7 @@ export function MobileNav({ items }: { items: readonly NavItem[] }) {
               aria-current={moreActive ? "true" : undefined}
               aria-label={activeMore ? `${t("more")}: ${t(activeMore.labelKey)}` : undefined}
             >
-              <Ellipsis
-                aria-hidden="true"
-                className={cn(
-                  "h-5 w-5 transition-transform duration-150",
-                  moreActive && "scale-110",
-                )}
-              />
+              <Ellipsis aria-hidden="true" className="h-6 w-6" />
               <span className="max-w-full truncate px-0.5">{t("more")}</span>
             </Dialog.Trigger>
             <Dialog.Portal>
