@@ -75,6 +75,9 @@
  *   - the users-permissions login throttle (10 per minute and IP; every test
  *     login comes from 127.0.0.1) is off; framework-contract.test.ts pins
  *     its key;
+ *   - the admin login throttle (@strapi/admin: 5 per 5 minutes per e-mail
+ *     and IP, in a process-wide store that both engines of a file shared)
+ *     is off;
  *   - crons off and Strapi's own jobs paused (above); the Strapi logger
  *     runs at `error` (set SINNLOS_IT_LOG_LEVEL=info to see the boot).
  *
@@ -710,6 +713,7 @@ async function boot(options: TestStrapiOptions): Promise<TestStrapi> {
     strapi.cron.stop();
     // Plugin config is (re)built during load(); the throttle reads it per request.
     strapi.config.set("plugin::users-permissions.ratelimit", { enabled: false });
+    strapi.config.set("admin.rateLimit", { enabled: false });
   } catch (err) {
     await release().catch(() => undefined);
     throw err;

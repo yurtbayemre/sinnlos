@@ -43,7 +43,7 @@ describe.each(testEngines())("the delete trail on %s", (engine) => {
     await t?.stop();
   });
 
-  /** One admin login per boot: POST /admin/login is rate limited. */
+  /** One admin login per boot (fewer requests; the harness turns the throttle off). */
   let adminJwt: string | undefined;
   const admin = async () => (adminJwt ??= await adminToken(t));
 
@@ -71,6 +71,12 @@ describe.each(testEngines())("the delete trail on %s", (engine) => {
   /** A file's rows, by its documentId (SQLite reuses a deleted row's id). */
   const fileRowsFor = (file: { documentId: string }) =>
     auditRows({ targetUid: FILE, targetDocumentId: file.documentId });
+
+  it("signs in as admin more often than the admin login throttle would allow (the harness turns it off)", async () => {
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+      expect(await adminToken(t)).toEqual(expect.any(String));
+    }
+  });
 
   it("the author deletes their ad: one ad row and one row per image, linked to the ad", async () => {
     const image = await upload("member");

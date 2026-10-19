@@ -57,7 +57,7 @@ describe.each(testEngines())("media claims on %s", (engine) => {
     await t?.stop();
   });
 
-  /** One admin login per boot: POST /admin/login is rate limited. */
+  /** One admin login per boot (fewer requests; the harness turns the throttle off). */
   let adminJwt: string | undefined;
   const admin = async () => (adminJwt ??= await adminToken(t));
 

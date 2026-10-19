@@ -523,9 +523,8 @@ describe.each(testEngines())("wiki revisions are closed on %s", (engine) => {
   describe("the admin panel", () => {
     const ADMIN_PERMISSION = "admin::permission";
     const EXPLORER = "plugin::content-manager.explorer";
-    // One admin sign-in per boot: @strapi/admin throttles POST /admin/login
-    // to 5 per 5 minutes per e-mail and IP, in process memory that both
-    // engines of this file share.
+    // One admin sign-in per boot (fewer requests; the harness turns the
+    // admin login throttle off).
     let signedIn: Promise<ContentManager> | undefined;
     const panelOf = () => (signedIn ??= contentManager(t));
 
