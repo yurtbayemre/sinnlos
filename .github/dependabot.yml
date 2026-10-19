@@ -41,6 +41,17 @@ updates:
       # ^6 in Strapi 5.
       - dependency-name: react-router-dom
         update-types: ["version-update:semver-major"]
+      # The Strapi 5 admin needs React 18 (peer ^18.0.0), so apps/cms stays on
+      # it; a React 19 in apps/cms fails the admin build. apps/web's React
+      # major moves with a Next.js major, not with a weekly bump.
+      - dependency-name: react
+        update-types: ["version-update:semver-major"]
+      - dependency-name: react-dom
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@types/react"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@types/react-dom"
+        update-types: ["version-update:semver-major"]
 
   # The base image of both Dockerfiles (node:24-alpine, pinned by digest):
   # new digests of the same tag. Moving to another Node major is a planned
