@@ -351,7 +351,9 @@ async function namedSpaceExists(strapi: WikiChecksHost, data: unknown): Promise<
 /**
  * A deleted page takes its history with it (Emre, 2026-10-19): once no row of
  * the document is left, its revisions go too, in the delete's transaction.
- * An unpublish or a discard leaves a row, so they keep the history. Row by
+ * An unpublish or a discard that returns to a published row leaves a row,
+ * so they keep the history; a discard of a never-published page does
+ * not, and takes it. Row by
  * row, because the query engine's delete also removes the editor link and
  * deleteMany does not.
  */
@@ -423,7 +425,8 @@ export function createWikiChecks(strapi: WikiChecksHost): DocumentActionMiddlewa
           const documentId = writtenDocumentId(action, params, result);
           if (!documentId || !(await draftHasSpace(strapi, documentId))) refuseKeys(["space"]);
         }
-        if (action === "delete" && isDocumentId(params.documentId)) {
+        // A discard of a never-published page deletes the document as well (Codex).
+        if ((action === "delete" || action === "discardDraft") && isDocumentId(params.documentId)) {
           await deleteRevisionsOfRemovedPage(strapi, params.documentId);
         }
         return result;

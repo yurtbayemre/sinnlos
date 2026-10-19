@@ -228,7 +228,7 @@ describe.each(testEngines())("wiki revisions as after-images on %s", (engine) =>
     ]);
   });
 
-  it("a delete takes the page's revisions and their editor links; unpublish and discard keep them", async () => {
+  it("a delete, or a discard of a never-published page, takes the page's revisions; unpublish and discard keep them", async () => {
     const page = await newPage({ title: "Removed", body: "v1" }, { editorId: memberId });
     await inContext({ editorId }, () =>
       docs(PAGE).update({ documentId: page.documentId, data: { body: "v2" } }),
@@ -266,6 +266,21 @@ describe.each(testEngines())("wiki revisions as after-images on %s", (engine) =>
       )
       .count({ n: "*" });
     expect(Number((links as { n: unknown }).n)).toBe(0);
+    // A discard of a never-published page deletes it, and its history with it.
+    const draftOnly = await inContext({ editorId }, () =>
+      docs(PAGE).create({
+        data: {
+          title: "Never published",
+          body: "d1",
+          slug: "it-history-draft-only",
+          space: spaceId,
+        },
+      }),
+    );
+    expect(await revisionsOf(draftOnly.documentId)).toHaveLength(1);
+    await docs(PAGE).discardDraft({ documentId: draftOnly.documentId });
+    expect(await pageRows(draftOnly.documentId)).toEqual([]);
+    expect(await revisionsOf(draftOnly.documentId)).toEqual([]);
     // Another page's history is untouched.
     expect((await revisionsOf(other.documentId)).map((row) => row.body)).toEqual(["stays"]);
   });
