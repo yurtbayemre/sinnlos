@@ -193,6 +193,7 @@ function fakeHost(world: World): WikiChecksHost {
         },
         count: async (params: Record<string, unknown>) =>
           tableOf(uid).filter((row) => where(row, params.where as Record<string, unknown>)).length,
+        delete: async () => null,
       }),
       metadata: {
         get: (uid: string) =>
