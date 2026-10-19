@@ -29,10 +29,21 @@ export function registerMediaTombstoneGuard(strapi: any): void {
   if (fieldsByUid.size === 0) return;
 
   const guard = async (event: any) => {
+    const uid = event.model?.uid;
     const data = event.params?.data;
     if (!data || typeof data !== "object") return;
-    for (const field of fieldsByUid.get(event.model?.uid) ?? []) {
-      if (!(field in data)) continue;
+    const fields = (fieldsByUid.get(uid) ?? []).filter((field) => field in data);
+    if (fields.length === 0) return;
+    // Rows before files (the attach paths' lock order): an update locks its own
+    // row first, as a password change's token-version bump does (Codex: the
+    // reverse order deadlocked an avatar save against a password save).
+    const where = event.params?.where;
+    if (where) await strapi.db.queryBuilder(uid).select(["id"]).where(where).forUpdate().execute();
+    // shortcut: outside a transaction (a raw db.query write) these locks end
+    // with the check, so a removal can still slip in before the link; every app
+    // path that writes these fields runs in the Document Service's transaction.
+    // Wrap such a write in strapi.db.transaction if one ever appears.
+    for (const field of fields) {
       const fileIds = await resolveFileIds(strapi, mediaReferences(data[field]));
       if (fileIds.length > 0 && !(await lockAttachableFiles(strapi, fileIds))) refuseKeys([field]);
     }
