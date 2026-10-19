@@ -360,19 +360,23 @@ async function collectMentionsAndKudos(
   const nowIso = now.toISOString();
 
   if (user.digestMentions) {
-    const rows = listOf<{ title?: string | null }>(
+    const rows = listOf<{ title?: string | null; type?: unknown; titleParams?: unknown }>(
       await strapi.db.query(NOTIFICATION_UID).findMany({
         where: {
           recipient: user.id,
           type: "comment",
           createdAt: { $gte: sinceIso, $lt: nowIso },
         },
-        select: ["id", "title"],
+        select: ["id", "title", "type", "titleParams"],
         orderBy: { createdAt: "desc" },
         limit: 25,
       }),
     );
-    content.mentions = rows.map((row) => ({ title: row.title ?? "" }));
+    content.mentions = rows.map((row) => ({
+      title: row.title ?? "",
+      type: row.type,
+      titleParams: row.titleParams,
+    }));
   }
 
   // The kudos section needs the kudos read grant (guest never had it).

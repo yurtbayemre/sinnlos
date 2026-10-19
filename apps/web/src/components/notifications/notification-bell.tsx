@@ -17,6 +17,7 @@ import {
   markAllNotificationsRead,
   type NotificationFeed,
 } from "@/lib/notification-actions";
+import { notificationTitle } from "@sinnlos/domain";
 import { DEFAULT_APP_TIME_ZONE } from "@/lib/plain-date";
 import { relativeTime } from "@/lib/relative-time";
 import type { Notification } from "@/lib/types";
@@ -248,7 +249,7 @@ export function NotificationBell({
                           !n.readAt ? "font-medium" : "text-muted-foreground",
                         )}
                       >
-                        {n.title}
+                        {notificationTitle(n.type, n.titleParams, locale) ?? n.title}
                       </div>
                       <div className="mt-0.5 text-xs text-muted-foreground">
                         {relativeTime(n.createdAt, tRel, {

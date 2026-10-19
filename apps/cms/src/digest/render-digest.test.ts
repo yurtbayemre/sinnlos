@@ -26,6 +26,26 @@ describe("renderDigest", () => {
     expect(en.text).toContain("Mentions & replies");
   });
 
+  it("renders a mention in the reader's language from its values; an old row keeps its stored title (AC04)", () => {
+    const content = {
+      announcements: [],
+      kudos: [],
+      mentions: [
+        {
+          title: 'Ada commented on "Town hall"',
+          type: "comment",
+          titleParams: { actor: "Ada", subject: "Town hall" },
+        },
+        { title: "Sam commented on your post" },
+      ],
+    };
+    const de = renderDigest(content, { displayName: "Casey", locale: "de", baseUrl: "https://x" });
+    expect(de.text).toContain("• Ada hat „Town hall“ kommentiert");
+    expect(de.text).toContain("• Sam commented on your post");
+    const en = renderDigest(content, { displayName: "Casey", locale: "en", baseUrl: "https://x" });
+    expect(en.text).toContain('• Ada commented on "Town hall"');
+  });
+
   it("omits empty sections and links the unsubscribe path", () => {
     const only = renderDigest(
       { announcements: [], mentions: [], kudos: CONTENT.kudos },

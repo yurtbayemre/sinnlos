@@ -37,7 +37,10 @@ export interface Notification {
   id: number;
   documentId?: string;
   type: "announcement" | "comment" | "event" | "kudos";
+  /** The English title; the bell shows it only for rows without titleParams. */
   title: string;
+  /** The title's values, rendered in the reader's language (AC04); null on older rows. */
+  titleParams?: { actor?: string; subject?: string } | null;
   link?: string;
   readAt?: string | null;
   createdAt?: string;

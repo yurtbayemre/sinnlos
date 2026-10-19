@@ -120,7 +120,7 @@ function notifyForAnnouncement(announcement: AnnouncementRow): Promise<void> {
     sourceType: "announcement",
     row: announcement,
     loadAudience: () => loadAnnouncementAudience(announcement),
-    titleParts: (row) => ["New announcement: ", { value: row.title, fallback: "Untitled" }],
+    titleParams: (row) => ({ subject: row.title }),
     link: "/announcements",
   });
 }

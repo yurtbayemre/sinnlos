@@ -114,7 +114,7 @@ function notifyForEvent(ev: EventRow): Promise<void> {
     sourceType: "event",
     row: ev,
     loadAudience: () => loadEventAudience(ev),
-    titleParts: (row) => ["New event: ", { value: row.title, fallback: "Untitled" }],
+    titleParams: (row) => ({ subject: row.title }),
     link: "/events",
   });
 }
