@@ -272,7 +272,9 @@ describe.each(testEngines())("media claims on %s", (engine) => {
       images: [image],
     });
     expect(created.status, created.text).toBe(400);
-    // Strings Strapi coerces to the id are refused too (Codex round 3).
+    // Strings that 5.57 coerced to the id are refused too (Codex round 3): by
+    // our guard (details.keys) or, since Strapi 5.58, by Strapi's own relation
+    // lookup ("Document with id ... not found"). Either way nothing is written.
     for (const ref of [` ${image}`, `+${image}`]) {
       await expect(
         t.strapi.documents("api::classified.classified").create({
@@ -284,8 +286,11 @@ describe.each(testEngines())("media claims on %s", (engine) => {
             images: [ref],
           },
         }),
-      ).rejects.toMatchObject({ details: { keys: ["images"] } });
+      ).rejects.toMatchObject({ name: "ValidationError" });
     }
+    expect(
+      await t.strapi.db.query("api::classified.classified").count({ where: { title: "Coerced" } }),
+    ).toBe(0);
     const clean = await upload("member", PNG_1PX);
     const ok = await panel.create("api::classified.classified", {
       title: "Panel ad",
