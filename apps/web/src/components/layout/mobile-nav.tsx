@@ -92,83 +92,81 @@ export function MobileNav({ items }: { items: readonly NavItem[] }) {
   return (
     <nav
       aria-label={tCommon("bottomNav")}
-      className="pointer-events-none fixed inset-x-0 bottom-0 z-40 md:hidden"
+      // The nav is the capsule itself, placed by bottom/left/right: no
+      // pointer-events wrapper that would undo a modal menu's outside lock.
+      className="fixed z-40 mx-auto flex max-w-md rounded-full border bg-card/85 p-1 shadow-lg backdrop-blur-xl md:hidden"
       style={{
-        paddingBottom: "max(env(safe-area-inset-bottom) - 13px, 12px)",
-        paddingLeft: "max(env(safe-area-inset-left), 16px)",
-        paddingRight: "max(env(safe-area-inset-right), 16px)",
+        bottom: "max(env(safe-area-inset-bottom) - 13px, 12px)",
+        left: "max(env(safe-area-inset-left), 16px)",
+        right: "max(env(safe-area-inset-right), 16px)",
       }}
     >
-      <div className="pointer-events-auto mx-auto flex max-w-md rounded-full border bg-card/85 p-1 shadow-lg backdrop-blur-xl">
-        {primary.map((item) => {
-          const Icon = ICONS[item.icon];
-          const active = isNavActive(pathname, item.href);
-          return (
-            <Link
-              key={item.href}
-              href={item.href}
-              aria-current={active ? "page" : undefined}
-              className={cn(TAB_CLASS, tabState(active))}
-            >
-              <span className="relative">
-                <Icon aria-hidden="true" className="h-6 w-6" />
-                <LinkPendingIndicator className="absolute -right-1.5 -top-0.5" />
-              </span>
-              <span className="max-w-full truncate px-0.5">
-                {t(item.mobileLabelKey ?? item.labelKey)}
-              </span>
-            </Link>
-          );
-        })}
+      {primary.map((item) => {
+        const Icon = ICONS[item.icon];
+        const active = isNavActive(pathname, item.href);
+        return (
+          <Link
+            key={item.href}
+            href={item.href}
+            aria-current={active ? "page" : undefined}
+            className={cn(TAB_CLASS, tabState(active))}
+          >
+            <span className="relative">
+              <Icon aria-hidden="true" className="h-6 w-6" />
+              <LinkPendingIndicator className="absolute -right-1.5 -top-0.5" />
+            </span>
+            <span className="max-w-full truncate px-0.5">
+              {t(item.mobileLabelKey ?? item.labelKey)}
+            </span>
+          </Link>
+        );
+      })}
 
-        {more.length > 0 && (
-          <Dialog.Root open={open} onOpenChange={(next) => setOpenedOn(next ? pathname : null)}>
-            <Dialog.Trigger
-              className={cn(TAB_CLASS, tabState(moreActive))}
-              data-active={moreActive ? "true" : undefined}
-              // "true", not "page": the button is not the page, one of its
-              // entries is. The name says which, starting with the visible
-              // label; one aria-label, because an sr-only span is a block
-              // and Chrome named the button "More : Training".
-              aria-current={moreActive ? "true" : undefined}
-              aria-label={activeMore ? `${t("more")}: ${t(activeMore.labelKey)}` : undefined}
+      {more.length > 0 && (
+        <Dialog.Root open={open} onOpenChange={(next) => setOpenedOn(next ? pathname : null)}>
+          <Dialog.Trigger
+            className={cn(TAB_CLASS, tabState(moreActive))}
+            data-active={moreActive ? "true" : undefined}
+            // "true", not "page": the button is not the page, one of its
+            // entries is. The name says which, starting with the visible
+            // label; one aria-label, because an sr-only span is a block
+            // and Chrome named the button "More : Training".
+            aria-current={moreActive ? "true" : undefined}
+            aria-label={activeMore ? `${t("more")}: ${t(activeMore.labelKey)}` : undefined}
+          >
+            <Ellipsis aria-hidden="true" className="h-6 w-6" />
+            <span className="max-w-full truncate px-0.5">{t("more")}</span>
+          </Dialog.Trigger>
+          <Dialog.Portal>
+            <Dialog.Overlay className="fixed inset-0 z-50 animate-fade-in bg-background/60 backdrop-blur-xs md:hidden" />
+            <Dialog.Content
+              // No description: the title and the entries say it all
+              // (Radix warns unless aria-describedby is set explicitly).
+              aria-describedby={undefined}
+              className="fixed inset-x-0 bottom-0 z-50 max-h-[80vh] overflow-y-auto rounded-t-2xl border-t bg-background p-4 shadow-2xl outline-hidden animate-in slide-in-from-bottom duration-200 motion-reduce:animate-none md:hidden"
+              style={{ paddingBottom: "calc(env(safe-area-inset-bottom) + 1rem)" }}
             >
-              <Ellipsis aria-hidden="true" className="h-6 w-6" />
-              <span className="max-w-full truncate px-0.5">{t("more")}</span>
-            </Dialog.Trigger>
-            <Dialog.Portal>
-              <Dialog.Overlay className="fixed inset-0 z-50 animate-fade-in bg-background/60 backdrop-blur-xs md:hidden" />
-              <Dialog.Content
-                // No description: the title and the entries say it all
-                // (Radix warns unless aria-describedby is set explicitly).
-                aria-describedby={undefined}
-                className="fixed inset-x-0 bottom-0 z-50 max-h-[80vh] overflow-y-auto rounded-t-2xl border-t bg-background p-4 shadow-2xl outline-hidden animate-in slide-in-from-bottom duration-200 motion-reduce:animate-none md:hidden"
-                style={{ paddingBottom: "calc(env(safe-area-inset-bottom) + 1rem)" }}
-              >
-                <div className="mb-3 flex items-center justify-between">
-                  <Dialog.Title className="text-base font-semibold">
-                    {t("moreSections")}
-                  </Dialog.Title>
-                  <Dialog.Close
-                    aria-label={tCommon("close")}
-                    className="rounded-lg p-1 outline-hidden transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
-                  >
-                    <X className="h-4 w-4" aria-hidden="true" />
-                  </Dialog.Close>
-                </div>
-                <MoreSheetLinks
-                  items={more}
-                  pathname={pathname}
-                  onChoose={(href) => {
-                    // The current section: no navigation will close it.
-                    if (href === pathname) setOpenedOn(null);
-                  }}
-                />
-              </Dialog.Content>
-            </Dialog.Portal>
-          </Dialog.Root>
-        )}
-      </div>
+              <div className="mb-3 flex items-center justify-between">
+                <Dialog.Title className="text-base font-semibold">{t("moreSections")}</Dialog.Title>
+                <Dialog.Close
+                  aria-label={tCommon("close")}
+                  className="rounded-lg p-1 outline-hidden transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  <X className="h-4 w-4" aria-hidden="true" />
+                </Dialog.Close>
+              </div>
+              <MoreSheetLinks
+                items={more}
+                pathname={pathname}
+                onChoose={(href) => {
+                  // The current section: no navigation will close it.
+                  if (href === pathname) setOpenedOn(null);
+                }}
+              />
+            </Dialog.Content>
+          </Dialog.Portal>
+        </Dialog.Root>
+      )}
     </nav>
   );
 }

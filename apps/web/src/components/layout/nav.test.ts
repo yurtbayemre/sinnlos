@@ -136,9 +136,11 @@ describe("MobileNav", () => {
   it("floats above the home indicator: the safe-area insets place the bar (#71)", () => {
     const html = render(createElement(MobileNav, { items: navItemsFor("member") }));
     const style = /<nav [^>]*style="([^"]*)"/.exec(html)?.[1] ?? "";
-    expect(style).toContain("padding-bottom:max(env(safe-area-inset-bottom) - 13px, 12px)");
-    expect(style).toContain("padding-left:max(env(safe-area-inset-left), 16px)");
-    expect(style).toContain("padding-right:max(env(safe-area-inset-right), 16px)");
+    expect(style).toContain("bottom:max(env(safe-area-inset-bottom) - 13px, 12px)");
+    expect(style).toContain("left:max(env(safe-area-inset-left), 16px)");
+    expect(style).toContain("right:max(env(safe-area-inset-right), 16px)");
+    // No pointer-events override: a modal menu's outside lock covers the bar too.
+    expect(html).not.toContain("pointer-events-");
     // Every tab keeps Apple's 44 pt touch target at the least.
     const tabs = html.match(/<(a|button) [^>]*class="[^"]*flex-1[^"]*"/g) ?? [];
     expect(tabs.length).toBeGreaterThan(1);
