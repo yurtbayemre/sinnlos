@@ -302,6 +302,35 @@ describe.each(testEngines())("media claims on %s", (engine) => {
     expect(ok.status, ok.text).toBe(201);
   });
 
+  it("a user avatar refuses a tombstoned file from the query layer and the Document Service; a clean one links", async () => {
+    const USER = "plugin::users-permissions.user";
+    const member = t.fixtures.users.member;
+    const image = await upload("member", PNG_1PX);
+    await t.strapi.db.query(FILE).update({
+      where: { id: image },
+      data: { provider_metadata: { uploadedBy: member.id, removing: new Date().toISOString() } },
+    });
+    await expect(
+      t.strapi.db.query(USER).update({ where: { id: member.id }, data: { avatar: image } }),
+    ).rejects.toMatchObject({ details: { keys: ["avatar"] } });
+    const row = (await t.strapi.db.query(USER).findOne({ where: { id: member.id } })) as {
+      documentId: string;
+    };
+    await expect(
+      t.strapi
+        .documents(USER)
+        .update({ documentId: row.documentId, data: { avatar: image } as Record<string, unknown> }),
+    ).rejects.toMatchObject({ details: { keys: ["avatar"] } });
+    const clean = await upload("member", PNG_1PX);
+    await t.strapi.db.query(USER).update({ where: { id: member.id }, data: { avatar: clean } });
+    const linked = (await t.strapi.db
+      .query(USER)
+      .findOne({ where: { id: member.id }, populate: { avatar: true } })) as unknown as {
+      avatar: { id: number } | null;
+    };
+    expect(linked.avatar?.id).toBe(clean);
+  });
+
   it("publish and clone do not copy a tombstoned file (a removal that failed after its reservation)", async () => {
     const file = await upload();
     const doc = await create({ file });
@@ -356,7 +385,7 @@ describe.each(testEngines())("media claims on %s", (engine) => {
     expect((published?.file as { id: number }).id).toBe(fresh);
   });
 
-  it("org image attachment refuses a reserved file; unclaimed user avatars retain the relink fallback", async () => {
+  it("org image attachment and the user avatar refuse a reserved file; the removal then completes", async () => {
     const file = await upload("admin_role", PNG_1PX);
     expect((await orphans.reserveRemoval(t.strapi, file)).file).toBeDefined();
     await expect(
@@ -365,16 +394,14 @@ describe.each(testEngines())("media claims on %s", (engine) => {
         data: { headerImage: file },
       }),
     ).rejects.toMatchObject({ details: { keys: ["headerImage"] } });
+    // The unclaimed avatar used to link it, and the removal then left it as
+    // "linked" with its tombstone; the generic guard (v0.17.9) refuses it too.
     const user = t.fixtures.users.member.id;
-    await t.strapi.db
-      .query("plugin::users-permissions.user")
-      .update({ where: { id: user }, data: { avatar: file } });
-    expect(await orphans.removeReserved(t.strapi, file)).toBe("linked");
-    const row = await t.strapi.db.query(FILE).findOne({ where: { id: file } });
-    expect(row?.provider_metadata).toMatchObject({ removing: expect.any(String) });
-    await t.strapi.db
-      .query("plugin::users-permissions.user")
-      .update({ where: { id: user }, data: { avatar: null } });
+    await expect(
+      t.strapi.db
+        .query("plugin::users-permissions.user")
+        .update({ where: { id: user }, data: { avatar: file } }),
+    ).rejects.toMatchObject({ details: { keys: ["avatar"] } });
     expect(await orphans.removeReserved(t.strapi, file)).toBe("removed");
     expect(await exists(file)).toBe(false);
   });
