@@ -30,11 +30,11 @@ import { defineConfig } from "vitest/config";
  */
 export default defineConfig({
   // apps/web's tsconfig says `jsx: "preserve"` (Next.js compiles JSX
-  // itself), which would leave Vite's esbuild on the classic
-  // `React.createElement` transform. Tests that render a component
-  // (react-dom/server, e.g. components/polls/poll-card.test.ts) need the
-  // automatic runtime Next uses.
-  esbuild: { jsx: "automatic" },
+  // itself), which Vite's transformer (oxc since Vite 8; the old
+  // `esbuild` option is ignored) would otherwise follow. Tests that render
+  // a component (react-dom/server, e.g. components/polls/poll-card.test.ts)
+  // need the automatic runtime Next uses.
+  oxc: { jsx: { runtime: "automatic" } },
   resolve: {
     alias: {
       "@": fileURLToPath(new URL("./apps/web/src", import.meta.url)),

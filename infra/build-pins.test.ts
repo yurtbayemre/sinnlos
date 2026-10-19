@@ -158,7 +158,7 @@ describe("pnpm", () => {
   });
 
   it("runs install scripts only for the dependencies that need them", () => {
-    expect(manifest.pnpm.onlyBuiltDependencies).toEqual(["better-sqlite3", "esbuild", "sharp"]);
+    expect(manifest.pnpm.onlyBuiltDependencies).toEqual(["esbuild", "sharp"]);
     for (const name of manifest.pnpm.ignoredBuiltDependencies) {
       expect(manifest.pnpm.onlyBuiltDependencies).not.toContain(name);
     }

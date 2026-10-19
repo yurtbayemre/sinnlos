@@ -6,14 +6,15 @@
 FROM node:24-alpine@sha256:44fce696f38ba8c987c4db89954051000bbd05ffd8d8659ba15ed4a8602e937f AS node-base
 
 FROM node-base AS base
-# build-base + python3: node-gyp fallback for better-sqlite3 when its prebuilt
-# binary cannot be fetched. No system libvips: sharp 0.35 has no install
-# script and always loads its bundled @img/sharp-libvips-linuxmusl-x64.
-RUN apk add --no-cache libc6-compat build-base python3
+# No compiler: better-sqlite3 13 ships its N-API binaries in the package
+# (prebuilds/linuxmusl-x64.node) and is not built. No system libvips: sharp
+# 0.35 has no install script and always loads its bundled
+# @img/sharp-libvips-linuxmusl-x64.
+RUN apk add --no-cache libc6-compat
 WORKDIR /app
 # pnpm = package.json packageManager. Dependency build scripts run only for
-# the root package.json's pnpm.onlyBuiltDependencies (better-sqlite3's
-# native binding, esbuild, sharp); pnpm 10 skips all others.
+# the root package.json's pnpm.onlyBuiltDependencies (esbuild, sharp); pnpm
+# 10 skips all others.
 RUN corepack enable && corepack prepare pnpm@10.34.6 --activate
 
 FROM base AS deps
