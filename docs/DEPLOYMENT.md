@@ -663,12 +663,14 @@ DEMO_MODE=1 pnpm --filter @sinnlos/web dev
 ```
 
 Bypasses auth and Strapi entirely. Uses the in-memory fixture dataset in
-`apps/web/src/lib/demo.ts`. Useful for UI tweaking without network setup.
-It is a best-effort preview, not a second backend: you are signed in as the
-fixture user Ada Lovelace (a member of Engineering, with a populated
-notification bell); list reads apply their filters, sort and paging to the
-fixtures; writes are not stored (a path without a fixture logs
-`[demo] no fixture for …` and answers an empty list). A production server
+`apps/web/src/lib/demo/`. Useful for UI tweaking without network setup.
+You are signed in as the fixture user Ada Lovelace (a member of
+Engineering, with a populated notification bell); list reads apply their
+filters, sort and paging to the fixtures, and the member actions change them
+until the dev server restarts or the day in `APP_TIME_ZONE` changes (DM01).
+The admin area and image uploads need a cms; a path without a fixture logs
+`[demo] no fixture for …` (a read answers an empty list, a write a 404).
+A production server
 (`NODE_ENV=production`) with `DEMO_MODE=1` comes up but answers every page
 and API route with a 500 (`apps/web/src/auth.ts` throws on its first load,
 and the log names `DEMO_MODE`), so the web healthcheck fails; only the

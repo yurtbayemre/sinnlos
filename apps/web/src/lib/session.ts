@@ -20,7 +20,7 @@ import { getStrapiJwt } from "@/lib/strapi-token";
 
 /**
  * The session every DEMO_MODE request gets (the demo has no sign-in): the
- * fixture's Ada Lovelace (lib/demo.ts, user id 1), the same person as
+ * fixture's Ada Lovelace (lib/demo/, user id 1), the same person as
  * DEMO_VIEWER in lib/viewer.ts. The id makes the per-user reads work in
  * the preview (the notification bell, "my ads", the kudos picker without
  * the caller). No provider: the demo offers neither sign-out nor a password

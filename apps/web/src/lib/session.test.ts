@@ -14,7 +14,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
  *
  * Mocked: `@/auth` (auth() counts its calls), `@/lib/strapi-token` (the JWT
  * from the cookie), `@/lib/config` (DEMO_MODE toggle, CMS URL) and fetch.
- * lib/session.ts, lib/viewer.ts, lib/strapi.ts, lib/demo.ts and
+ * lib/session.ts, lib/viewer.ts, lib/strapi.ts, lib/demo/ and
  * lib/notification-actions.ts are the real modules.
  */
 const scope = vi.hoisted(() => ({ memo: new Map<unknown, unknown>(), demo: false }));

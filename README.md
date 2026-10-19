@@ -458,16 +458,16 @@ instance runs.
   their notifications. It seeds no acknowledgements, classifieds, quick
   links, RSVPs, courses, lessons, lesson progress, search logs or wiki
   revisions, and no `department_head`, `team_lead` or `guest` user.
-- **`DEMO_MODE=1` (web only)** is a different thing: a best-effort UI
-  preview without a cms (decision DM01-lite). `DEMO_MODE=1 pnpm web:dev`
-  skips sign-in and answers reads from the in-memory fixtures in
-  `apps/web/src/lib/demo.ts`, signed in as the fixture user Ada Lovelace (a
-  `member` of Engineering). List reads apply their filters, sort and paging
-  to the fixtures; quiz feedback and completion need a running cms. Writes are
-  not stored, and a path without a fixture logs
-  `[demo] no fixture for …` and answers an empty list. It is not a second
-  backend, and a production server with `DEMO_MODE=1` answers every page
-  with a 500
+- **`DEMO_MODE=1` (web only)** is a different thing: the web without a
+  cms (DM01). `DEMO_MODE=1 pnpm web:dev` skips sign-in and answers from
+  in-memory fixtures in `apps/web/src/lib/demo/`, signed in as the fixture
+  user Ada Lovelace (a `member` of Engineering). List reads apply their
+  filters, sort and paging; the member actions work and stay until the dev
+  server restarts or the day changes (kudos, RSVPs, comments, reactions,
+  votes, acknowledgements, notifications, the profile, lessons and quizzes,
+  own ads without images). The admin area and uploads need a cms. A path
+  without a fixture logs `[demo] no fixture for …`. A production server with
+  `DEMO_MODE=1` answers every page with a 500
   ([details](./docs/DEPLOYMENT.md#16-demo-mode-no-microsoft-account-needed)).
 
 To offer local sign-in **next to** Microsoft, set `AUTH_LOCAL_ENABLED=1` for
