@@ -299,6 +299,9 @@
      padding while it is open (react-remove-scroll-bar), and the page
      behind it would slide under the notch. */
   html {
+    /* Its own background, not only body's: iOS may tint an installed app's
+       status bar from <html>, and an overscroll shows it (v0.17.7). */
+    @apply bg-background;
     padding-left: env(safe-area-inset-left);
     padding-right: env(safe-area-inset-right);
   }

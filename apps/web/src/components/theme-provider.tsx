@@ -9,17 +9,18 @@ import { ThemeProvider as NextThemesProvider } from "next-themes";
  * the phone's system mode (v0.17.6). It watches <html>'s class and style,
  * which next-themes sets, instead of the theme state: next-themes applies
  * the class in its own effect, after a child's effect would have run.
+ * Each change inserts a new element instead of editing the old one's
+ * content: iOS kept the launch colour while the app was open (v0.17.7).
  */
 function ThemeColorMeta() {
   React.useEffect(() => {
-    const existing = document.querySelector<HTMLMetaElement>('meta[name="theme-color"]');
-    const meta = existing ?? document.createElement("meta");
-    if (!existing) {
-      meta.name = "theme-color";
-      document.head.append(meta);
-    }
     const sync = () => {
+      const meta = document.createElement("meta");
+      meta.name = "theme-color";
       meta.content = getComputedStyle(document.body).backgroundColor;
+      const old = document.querySelector('meta[name="theme-color"]');
+      if (old) old.replaceWith(meta);
+      else document.head.append(meta);
     };
     sync();
     const observer = new MutationObserver(sync);
