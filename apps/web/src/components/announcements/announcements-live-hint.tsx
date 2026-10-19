@@ -56,7 +56,7 @@ export function AnnouncementsLiveHint({ initialIds }: { initialIds: string[] }) 
   if (!hydrated || !showHint) return null;
 
   return createPortal(
-    <div className="fixed inset-x-0 bottom-[calc(1.5rem+env(safe-area-inset-bottom))] z-50 flex justify-center px-4">
+    <div className="fixed inset-x-0 bottom-[calc(6rem+env(safe-area-inset-bottom))] z-50 flex justify-center px-4 md:bottom-6">
       <button
         type="button"
         onClick={() => {

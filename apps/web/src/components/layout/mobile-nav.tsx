@@ -11,9 +11,13 @@ import { isNavActive, type NavItem } from "@/lib/nav-config";
 import { cn } from "@/lib/utils";
 import { LinkPendingIndicator } from "./nav-link";
 
-/** min-h-11: Apple's 44 pt touch target at the least (issue #71; the tabs measure 56 px). */
+/**
+ * min-h-11: Apple's 44 pt touch target at the least; py-1 makes the tabs
+ * 49 px, the height of an iOS tab bar above the home indicator (issue #71,
+ * F6: at 56 px the bar looked too tall in the installed app).
+ */
 const TAB_CLASS = cn(
-  "flex min-h-11 min-w-0 flex-1 flex-col items-center gap-1 py-2 text-[11px] outline-hidden transition-colors",
+  "flex min-h-11 min-w-0 flex-1 flex-col items-center gap-1 py-1 text-[11px] outline-hidden transition-colors",
   "focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
 );
 
