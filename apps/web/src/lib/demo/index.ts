@@ -210,7 +210,12 @@ export function demo(path: string, init: { method?: string; body?: unknown } = {
   const method = (init.method ?? "GET").toUpperCase();
   for (const [verb, pattern, handler] of ROUTES) {
     const match = verb === method ? pathname.match(pattern) : null;
-    if (match) return handler({ data: current(), params, match, body: jsonBody(init.body) });
+    // A copy, like a parsed response: a later write must not change what a caller already holds.
+    if (match) {
+      return structuredClone(
+        handler({ data: current(), params, match, body: jsonBody(init.body) }),
+      );
+    }
   }
   warn(`no fixture for ${method} ${path}`);
   if (method !== "GET") throw cmsError(404, "Not Found");

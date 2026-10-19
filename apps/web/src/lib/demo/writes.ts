@@ -29,14 +29,19 @@ function payload(body: unknown): Record<string, unknown> {
   return data;
 }
 
-/** The comment or reaction target the payload names (announcement or wiki page). */
-function target(data: Record<string, unknown>) {
-  const { targetType, targetDocumentId } = data;
-  const anchor = text(targetDocumentId);
-  if (!isCommentTargetType(targetType) || !anchor) {
+/**
+ * The comment or reaction target the payload names: an existing
+ * announcement or wiki page. Like the cms, a missing and an unknown target
+ * get the same refusal (no existence oracle).
+ */
+function target(data: DemoData, input: Record<string, unknown>) {
+  const { targetType, targetDocumentId } = input;
+  if (!isCommentTargetType(targetType)) throw cmsError(400, "Invalid targetType");
+  const rows = targetType === "announcement" ? data.announcements : data.wikiPages;
+  if (!rows.some((row) => row.documentId != null && row.documentId === targetDocumentId)) {
     throw cmsError(400, "targetDocumentId required");
   }
-  return { targetType, targetDocumentId: anchor };
+  return { targetType, targetDocumentId: String(targetDocumentId) };
 }
 
 export const sendKudos: DemoHandler = ({ data, body }) => {
@@ -89,7 +94,7 @@ export const addComment: DemoHandler = ({ data, body }) => {
   const row = {
     id: nextId(data.comments),
     body: note,
-    ...target(input),
+    ...target(data, input),
     author: data.users.ada,
     createdAt: now(),
   };
@@ -108,7 +113,7 @@ export const deleteComment: DemoHandler = ({ data, match }) => {
 /** The desired end state (FX28), not a toggle. */
 export const setReaction: DemoHandler = ({ data, body }) => {
   const input = payload(body);
-  const { targetType, targetDocumentId } = target(input);
+  const { targetType, targetDocumentId } = target(data, input);
   if (typeof input.emoji !== "string") throw cmsError(400, "Invalid emoji");
   const emoji = input.emoji as EmojiType;
   const index = data.reactions.findIndex(
@@ -159,18 +164,18 @@ export const vote: DemoHandler = ({ data, body, match }) => {
   return { data: { id: tally.total, optionIndex } };
 };
 
-/** Idempotent: a second acknowledgement answers the first. */
+/** The cms's checks in its order (acknowledgement.ts); one receipt per announcement. */
 export const acknowledge: DemoHandler = ({ data, body }) => {
   const { targetType, targetDocumentId } = payload(body);
-  const announcement =
-    targetType === "announcement"
-      ? data.announcements.find((a) => a.documentId === targetDocumentId && a.requiresAck)
-      : undefined;
-  if (!announcement) throw cmsError(400, "targetDocumentId required");
-  const existing = data.acknowledgements.find(
-    (row) => row.targetDocumentId === announcement.documentId,
+  if (targetType !== "announcement") throw cmsError(400, "Invalid targetType");
+  if (!text(targetDocumentId)) throw cmsError(400, "targetDocumentId required");
+  const announcement = data.announcements.find(
+    (a) => a.documentId === targetDocumentId && a.requiresAck,
   );
-  if (existing) return { data: existing };
+  if (!announcement) throw cmsError(400, "Target not available for acknowledgement");
+  if (data.acknowledgements.some((row) => row.targetDocumentId === announcement.documentId)) {
+    throw cmsError(400, "Already acknowledged");
+  }
   const row = {
     id: nextId(data.acknowledgements),
     targetType: "announcement" as const,

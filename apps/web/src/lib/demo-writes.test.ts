@@ -106,6 +106,13 @@ describe("DEMO_MODE writes change what the reads show", () => {
     expect(await addComment({ type: "announcement", documentId: null }, "x")).toMatchObject({
       ok: false,
     });
+    // An unknown target is gone, like the cms answers it (no orphan rows).
+    const gone = { type: "announcement" as const, documentId: "demoann00000000000000099" };
+    expect(await addComment(gone, "Hello")).toMatchObject({ ok: false, code: "notFound" });
+    expect(await toggleReaction(gone, "heart", true)).toMatchObject({
+      ok: false,
+      code: "notFound",
+    });
   });
 
   it("reactions: set and unset the demo user's own", async () => {
@@ -138,11 +145,29 @@ describe("DEMO_MODE writes change what the reads show", () => {
   });
 
   it("acknowledgement: recorded once, read back as the demo user's own", async () => {
-    expect(await acknowledgeAnnouncement("demoann00000000000000001")).toEqual({ ok: true });
-    expect(await acknowledgeAnnouncement("demoann00000000000000001")).toEqual({ ok: true });
-    const { acks } = await fetchMyAnnouncementAcks();
-    expect(acks.filter((a) => a.targetDocumentId === "demoann00000000000000001")).toHaveLength(1);
-    expect(await acknowledgeAnnouncement("demoann00000000000000002")).toMatchObject({ ok: false });
+    const acked = async () =>
+      (await fetchMyAnnouncementAcks()).acks.filter(
+        (a) => a.targetDocumentId === "demoann00000000000000001",
+      );
+    if ((await acked()).length === 0) {
+      expect(await acknowledgeAnnouncement("demoann00000000000000001")).toEqual({ ok: true });
+    }
+    expect(await acked()).toHaveLength(1);
+    // Like the cms: a second receipt is refused, an announcement without one is gone.
+    expect(await acknowledgeAnnouncement("demoann00000000000000001")).toMatchObject({
+      ok: false,
+      code: "invalid",
+    });
+    for (const id of ["demoann00000000000000002", "demoann00000000000000099"]) {
+      expect(await acknowledgeAnnouncement(id)).toMatchObject({ ok: false, code: "notFound" });
+    }
+  });
+
+  it("a read is a copy: a later write does not change what a caller holds", async () => {
+    const before = await getNotifications();
+    const unreadBefore = before.items.filter((n) => !n.readAt).length;
+    expect(await markAllNotificationsRead()).toEqual({ ok: true });
+    expect(before.items.filter((n) => !n.readAt)).toHaveLength(unreadBefore);
   });
 
   it("notifications: mark one read, then all", async () => {
