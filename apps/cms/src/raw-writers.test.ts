@@ -138,6 +138,9 @@ const OTHER_RAW_WRITERS: Readonly<Record<string, string>> = {
   // Batch 16, lane 16B.
   "utils/wiki-authoring.ts":
     "wiki pages only through the Document Service (createDraft, saveDraft, restore inside an authoring scope); the query layer only reads",
+  // v0.17.8.
+  "utils/wiki-checks.ts":
+    "wiki revisions (not a guarded type): a deleted page's revisions, in the delete's transaction",
 };
 
 const SRC = __dirname;

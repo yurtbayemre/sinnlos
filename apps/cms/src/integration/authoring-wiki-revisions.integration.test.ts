@@ -228,6 +228,63 @@ describe.each(testEngines())("wiki revisions as after-images on %s", (engine) =>
     ]);
   });
 
+  it("a delete, or a discard of a never-published page, takes the page's revisions; unpublish and discard keep them", async () => {
+    const page = await newPage({ title: "Removed", body: "v1" }, { editorId: memberId });
+    await inContext({ editorId }, () =>
+      docs(PAGE).update({ documentId: page.documentId, data: { body: "v2" } }),
+    );
+    // A discard (back to the published v1) and an unpublish leave a row: the history stays.
+    await docs(PAGE).discardDraft({ documentId: page.documentId });
+    await docs(PAGE).unpublish({ documentId: page.documentId });
+    const before = await revisionsOf(page.documentId);
+    expect(before.map((row) => row.body)).toEqual(["v1", "v2", "v1"]);
+
+    const other = await newPage({ title: "Kept", body: "stays" });
+    await docs(PAGE).delete({ documentId: page.documentId });
+    expect(await pageRows(page.documentId)).toEqual([]);
+    expect(await revisionsOf(page.documentId)).toEqual([]);
+    // No editor link points at a deleted revision.
+    const db = t.strapi.db as unknown as {
+      metadata: {
+        get(uid: string): {
+          attributes: { editor: { joinTable: { name: string; joinColumn: { name: string } } } };
+        };
+      };
+      connection(table: string): {
+        whereIn(
+          column: string,
+          values: unknown[],
+        ): { count(spec: { n: string }): Promise<unknown[]> };
+      };
+    };
+    const { name, joinColumn } = db.metadata.get(REVISION).attributes.editor.joinTable;
+    const [links] = await db
+      .connection(name)
+      .whereIn(
+        joinColumn.name,
+        before.map((row) => row.id),
+      )
+      .count({ n: "*" });
+    expect(Number((links as { n: unknown }).n)).toBe(0);
+    // A discard of a never-published page deletes it, and its history with it.
+    const draftOnly = await inContext({ editorId }, () =>
+      docs(PAGE).create({
+        data: {
+          title: "Never published",
+          body: "d1",
+          slug: "it-history-draft-only",
+          space: spaceId,
+        },
+      }),
+    );
+    expect(await revisionsOf(draftOnly.documentId)).toHaveLength(1);
+    await docs(PAGE).discardDraft({ documentId: draftOnly.documentId });
+    expect(await pageRows(draftOnly.documentId)).toEqual([]);
+    expect(await revisionsOf(draftOnly.documentId)).toEqual([]);
+    // Another page's history is untouched.
+    expect((await revisionsOf(other.documentId)).map((row) => row.body)).toEqual(["stays"]);
+  });
+
   it("S5.6 a failing revision insert fails the save; both page rows keep their content", async () => {
     const page = await newPage({ title: "Atomic", body: "kept" });
     const before = await revisionsOf(page.documentId);

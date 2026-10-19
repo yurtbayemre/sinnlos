@@ -8,6 +8,7 @@ import {
   type DocumentLockHost,
 } from "./document-lock";
 import { relationLinkTable } from "./targeting-flags";
+import { WIKI_REVISION_UID } from "./wiki-revisions";
 import { lockWikiStructure } from "./wiki-structure-lock";
 import { parseToOneRelation, refuseKeys } from "./write-allowlist";
 
@@ -118,6 +119,7 @@ export type WikiChecksHost = {
       findOne(params: Record<string, unknown>): Promise<Record<string, unknown> | null>;
       findMany(params: Record<string, unknown>): Promise<unknown>;
       count(params: Record<string, unknown>): Promise<number>;
+      delete(params: Record<string, unknown>): Promise<unknown>;
     };
   };
 } & DocumentLockHost;
@@ -346,6 +348,28 @@ async function namedSpaceExists(strapi: WikiChecksHost, data: unknown): Promise<
   return (await strapi.db.query(WIKI_SPACE_UID).count({ where })) > 0;
 }
 
+/**
+ * A deleted page takes its history with it (Emre, 2026-10-19): once no row of
+ * the document is left, its revisions go too, in the delete's transaction.
+ * An unpublish or a discard that returns to a published row leaves a row,
+ * so they keep the history; a discard of a never-published page does
+ * not, and takes it. Row by
+ * row, because the query engine's delete also removes the editor link and
+ * deleteMany does not.
+ */
+async function deleteRevisionsOfRemovedPage(strapi: WikiChecksHost, documentId: string) {
+  if ((await strapi.db.query(WIKI_PAGE_UID).count({ where: { documentId } })) > 0) return;
+  const revisions = listOf(
+    await strapi.db
+      .query(WIKI_REVISION_UID)
+      .findMany({ where: { pageDocumentId: documentId }, select: ["id"] }),
+  );
+  for (const revision of revisions) {
+    const id = isRecord(revision) ? rowId(revision.id) : null;
+    if (id !== null) await strapi.db.query(WIKI_REVISION_UID).delete({ where: { id } });
+  }
+}
+
 /** The document an action writes (create and clone: the new one, from the result). */
 function writtenDocumentId(action: string, params: Record<string, unknown>, result: unknown) {
   if (action === "create" || action === "clone") {
@@ -400,6 +424,10 @@ export function createWikiChecks(strapi: WikiChecksHost): DocumentActionMiddlewa
         if (namesItsSpace) {
           const documentId = writtenDocumentId(action, params, result);
           if (!documentId || !(await draftHasSpace(strapi, documentId))) refuseKeys(["space"]);
+        }
+        // A discard of a never-published page deletes the document as well (Codex).
+        if ((action === "delete" || action === "discardDraft") && isDocumentId(params.documentId)) {
+          await deleteRevisionsOfRemovedPage(strapi, params.documentId);
         }
         return result;
       });
