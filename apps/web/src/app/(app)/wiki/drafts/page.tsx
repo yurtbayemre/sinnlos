@@ -73,12 +73,12 @@ export default async function WikiDraftsPage({
                 {row.space ? (
                   <Link
                     href={wikiEditPath(row.space.slug, row.slug, row.documentId)}
-                    className="break-words font-medium outline-none hover:text-primary hover:underline focus-visible:rounded focus-visible:ring-2 focus-visible:ring-ring"
+                    className="wrap-break-word font-medium outline-hidden hover:text-primary hover:underline focus-visible:rounded focus-visible:ring-2 focus-visible:ring-ring"
                   >
                     {row.title || t("untitled")}
                   </Link>
                 ) : (
-                  <span className="break-words font-medium">{row.title || t("untitled")}</span>
+                  <span className="wrap-break-word font-medium">{row.title || t("untitled")}</span>
                 )}
                 <StatusBadges item={{ status: row.status }} />
                 <div className="flex flex-wrap gap-x-3 text-xs text-muted-foreground">

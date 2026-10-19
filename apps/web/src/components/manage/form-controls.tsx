@@ -15,10 +15,10 @@ import { cn } from "@/lib/utils";
  */
 
 export const inputClass =
-  "h-10 w-full rounded-xl border bg-muted/40 px-3 text-sm outline-none transition-colors placeholder:text-muted-foreground focus:bg-background focus:ring-2 focus:ring-ring aria-[invalid=true]:border-destructive disabled:cursor-not-allowed disabled:opacity-60";
+  "h-10 w-full rounded-xl border bg-muted/40 px-3 text-sm outline-hidden transition-colors placeholder:text-muted-foreground focus:bg-background focus:ring-2 focus:ring-ring aria-invalid:border-destructive disabled:cursor-not-allowed disabled:opacity-60";
 
 export const textareaClass =
-  "min-h-40 w-full rounded-xl border bg-muted/40 px-3 py-2 font-mono text-sm leading-relaxed outline-none transition-colors placeholder:text-muted-foreground focus:bg-background focus:ring-2 focus:ring-ring aria-[invalid=true]:border-destructive disabled:cursor-not-allowed disabled:opacity-60";
+  "min-h-40 w-full rounded-xl border bg-muted/40 px-3 py-2 font-mono text-sm leading-relaxed outline-hidden transition-colors placeholder:text-muted-foreground focus:bg-background focus:ring-2 focus:ring-ring aria-invalid:border-destructive disabled:cursor-not-allowed disabled:opacity-60";
 
 const checkboxClass =
   "mt-0.5 h-4 w-4 shrink-0 rounded border accent-primary disabled:cursor-not-allowed";
@@ -257,7 +257,7 @@ export function CheckboxList({
                 />
                 <label
                   htmlFor={optionId}
-                  className={cn("min-w-0 break-words text-sm", disabled && "opacity-60")}
+                  className={cn("min-w-0 wrap-break-word text-sm", disabled && "opacity-60")}
                 >
                   {option.label}
                 </label>

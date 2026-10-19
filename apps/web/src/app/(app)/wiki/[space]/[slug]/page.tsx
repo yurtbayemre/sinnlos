@@ -65,7 +65,7 @@ export default async function WikiPage({ params }: Props) {
           <ArrowLeft className="h-3.5 w-3.5" aria-hidden="true" />
           {entry.space?.name ?? t("backToSpace")}
         </Link>
-        <h1 className="break-words text-4xl font-semibold tracking-tight">{entry.title}</h1>
+        <h1 className="wrap-break-word text-4xl font-semibold tracking-tight">{entry.title}</h1>
         {entry.summary ? (
           <p className="mt-2 text-lg text-muted-foreground">{entry.summary}</p>
         ) : null}

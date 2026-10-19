@@ -103,7 +103,7 @@ export function WikiHistoryList({
                 <span className="font-medium">{t("version", { id: entry.id })}</span>
                 <KindBadge kind={entry.kind} />
               </div>
-              <p className="break-words text-sm">
+              <p className="wrap-break-word text-sm">
                 {entry.title ?? <span className="italic">{t("untitled")}</span>}
               </p>
               <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
@@ -114,7 +114,7 @@ export function WikiHistoryList({
                 )}
               </div>
               {entry.changeSummary && (
-                <p className="break-words text-sm text-muted-foreground">
+                <p className="wrap-break-word text-sm text-muted-foreground">
                   {t("note", { note: entry.changeSummary })}
                 </p>
               )}
@@ -226,10 +226,12 @@ export function WikiRevisionPreview({
       )}
       <article className="space-y-3 rounded-2xl border border-dashed p-4 sm:p-6">
         {revision.title && (
-          <h3 className="break-words text-2xl font-semibold tracking-tight">{revision.title}</h3>
+          <h3 className="wrap-break-word text-2xl font-semibold tracking-tight">
+            {revision.title}
+          </h3>
         )}
         {revision.pageSummary && (
-          <p className="break-words text-muted-foreground">{revision.pageSummary}</p>
+          <p className="wrap-break-word text-muted-foreground">{revision.pageSummary}</p>
         )}
         {revision.body && revision.body.trim() !== "" ? (
           <Markdown className="prose prose-slate max-w-none dark:prose-invert">

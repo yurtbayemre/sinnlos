@@ -119,7 +119,7 @@ export function FormAlert({
       ref={alertRef}
       role="alert"
       tabIndex={-1}
-      className="flex items-start gap-2 rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      className="flex items-start gap-2 rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
     >
       <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
       <span>{text}</span>
@@ -133,7 +133,7 @@ export function ActionBar({ children, label }: { children: ReactNode; label: str
     <div
       role="group"
       aria-label={label}
-      className="flex flex-wrap items-center gap-2 border-t bg-background/95 py-4 backdrop-blur md:sticky md:bottom-0 md:z-10"
+      className="flex flex-wrap items-center gap-2 border-t bg-background/95 py-4 backdrop-blur-sm md:sticky md:bottom-0 md:z-10"
     >
       {children}
     </div>

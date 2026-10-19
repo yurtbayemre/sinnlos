@@ -197,7 +197,7 @@ export function ActivityList({ rows }: { rows: ActivityListRow[] }) {
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-2 text-sm">
-              <p className="break-words font-medium">
+              <p className="wrap-break-word font-medium">
                 {row.actor.displayName}{" "}
                 <span className="font-normal text-muted-foreground">
                   ({t(`kinds.${row.actor.kind}`)}
@@ -212,9 +212,11 @@ export function ActivityList({ rows }: { rows: ActivityListRow[] }) {
                   : ""} · {t(`sources.${row.source}`)}
               </p>
               {row.keys.length > 0 && (
-                <p className="break-words">{t("changedFields", { fields: row.keys.join(", ") })}</p>
+                <p className="wrap-break-word">
+                  {t("changedFields", { fields: row.keys.join(", ") })}
+                </p>
               )}
-              {row.detail && <p className="break-words text-muted-foreground">{row.detail}</p>}
+              {row.detail && <p className="wrap-break-word text-muted-foreground">{row.detail}</p>}
             </CardContent>
           </Card>
         </li>

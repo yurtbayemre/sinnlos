@@ -18,7 +18,7 @@ export function SectionUnavailable() {
     <EmptyState icon={Lock} title={t("sectionUnavailableTitle")} hint={t("sectionUnavailableHint")}>
       <Link
         href="/"
-        className="rounded-lg text-sm font-medium text-primary outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+        className="rounded-lg text-sm font-medium text-primary outline-hidden hover:underline focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
       >
         {t("backToDashboard")}
       </Link>

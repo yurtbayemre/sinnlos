@@ -23,7 +23,7 @@ import type { ClassifiedCategory } from "@/lib/types";
 import { SelectMenu } from "@/components/ui/select-menu";
 
 const inputClass =
-  "h-10 w-full rounded-xl border bg-muted/40 px-4 text-sm outline-none placeholder:text-muted-foreground focus:bg-background focus:ring-2 focus:ring-ring";
+  "h-10 w-full rounded-xl border bg-muted/40 px-4 text-sm outline-hidden placeholder:text-muted-foreground focus:bg-background focus:ring-2 focus:ring-ring";
 
 export type ClassifiedFormInitial = {
   id: number;
@@ -150,7 +150,7 @@ export function ClassifiedForm({ initial }: { initial?: ClassifiedFormInitial })
           rows={6}
           defaultValue={v ? v.description : (initial?.description ?? "")}
           placeholder={t("descriptionPlaceholder")}
-          className="w-full rounded-xl border bg-muted/40 px-4 py-2.5 text-sm outline-none placeholder:text-muted-foreground focus:bg-background focus:ring-2 focus:ring-ring"
+          className="w-full rounded-xl border bg-muted/40 px-4 py-2.5 text-sm outline-hidden placeholder:text-muted-foreground focus:bg-background focus:ring-2 focus:ring-ring"
         />
       </div>
 
@@ -218,7 +218,7 @@ export function ClassifiedForm({ initial }: { initial?: ClassifiedFormInitial })
                   type="button"
                   onClick={() => setKeptImages(keptImages.filter((k) => k.id !== img.id))}
                   aria-label={t("removeImage")}
-                  className="absolute -right-2 -top-2 rounded-full border bg-background p-1 shadow outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                  className="absolute -right-2 -top-2 rounded-full border bg-background p-1 shadow-sm outline-hidden transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
                 >
                   <X className="h-3 w-3" aria-hidden="true" />
                 </button>
@@ -284,7 +284,7 @@ export function ClassifiedForm({ initial }: { initial?: ClassifiedFormInitial })
         <button
           type="submit"
           disabled={isPending}
-          className="inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground outline-none transition-colors hover:bg-primary/90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:opacity-50"
+          className="inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground outline-hidden transition-colors hover:bg-primary/90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:opacity-50"
         >
           {isPending
             ? initial
@@ -296,7 +296,7 @@ export function ClassifiedForm({ initial }: { initial?: ClassifiedFormInitial })
         </button>
         <Link
           href={initial ? `/marketplace/${initial.id}` : "/marketplace"}
-          className="rounded-xl border px-4 py-2.5 text-sm outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+          className="rounded-xl border px-4 py-2.5 text-sm outline-hidden transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
         >
           {tCommon("cancel")}
         </Link>

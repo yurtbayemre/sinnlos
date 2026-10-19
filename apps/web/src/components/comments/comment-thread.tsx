@@ -102,7 +102,7 @@ export function CommentThread({
                         type="button"
                         onClick={() => handleDelete(c.id)}
                         disabled={isPending}
-                        className="ml-auto rounded-md text-muted-foreground outline-none transition-colors hover:text-destructive focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                        className="ml-auto rounded-md text-muted-foreground outline-hidden transition-colors hover:text-destructive focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
                         aria-label={tComments("deleteComment")}
                       >
                         <Trash2 className="h-3.5 w-3.5" />
@@ -135,12 +135,12 @@ export function CommentThread({
             value={body}
             onChange={(e) => setBody(e.target.value)}
             disabled={isPending || !canWrite}
-            className="h-10 flex-1 rounded-xl border bg-muted/40 px-4 text-sm outline-none transition-colors placeholder:text-muted-foreground focus:bg-background focus:ring-2 focus:ring-ring disabled:opacity-50"
+            className="h-10 flex-1 rounded-xl border bg-muted/40 px-4 text-sm outline-hidden transition-colors placeholder:text-muted-foreground focus:bg-background focus:ring-2 focus:ring-ring disabled:opacity-50"
           />
           <button
             type="submit"
             disabled={isPending || !canWrite || !body.trim()}
-            className="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-primary text-primary-foreground outline-none transition-colors hover:bg-primary/90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:opacity-50"
+            className="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-primary text-primary-foreground outline-hidden transition-colors hover:bg-primary/90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:opacity-50"
             aria-label={tComments("sendComment")}
           >
             <Send className="h-4 w-4" />

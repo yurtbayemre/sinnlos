@@ -45,7 +45,7 @@ export function WikiSpaceList({ rows }: { rows: WikiSpaceListRow[] }) {
             <div className="min-w-0 flex-1 space-y-1.5">
               <Link
                 href={areaItemPath("wiki", row.documentId)}
-                className="block break-words font-medium outline-none hover:text-primary hover:underline focus-visible:rounded focus-visible:ring-2 focus-visible:ring-ring"
+                className="block wrap-break-word font-medium outline-hidden hover:text-primary hover:underline focus-visible:rounded focus-visible:ring-2 focus-visible:ring-ring"
               >
                 {row.label || "–"}
               </Link>
@@ -125,7 +125,7 @@ function TreeItems({
               <div className="min-w-0 flex-1 space-y-1">
                 <Link
                   href={wikiEditPath(spaceSlug, row.slug, row.documentId)}
-                  className="block break-words font-medium outline-none hover:text-primary hover:underline focus-visible:rounded focus-visible:ring-2 focus-visible:ring-ring"
+                  className="block wrap-break-word font-medium outline-hidden hover:text-primary hover:underline focus-visible:rounded focus-visible:ring-2 focus-visible:ring-ring"
                   aria-label={t("editPage", { title })}
                 >
                   {title}

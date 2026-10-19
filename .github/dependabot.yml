@@ -32,11 +32,6 @@ updates:
       # The type definitions follow the Node line of the images (Node 24).
       - dependency-name: "@types/node"
         update-types: ["version-update:semver-major"]
-      # tailwind-merge 3 supports Tailwind CSS v4 only; apps/web is on
-      # Tailwind 3 (v3 merges `bg-gradient-to-br` as a background colour).
-      # Moves together with a Tailwind 4 migration.
-      - dependency-name: tailwind-merge
-        update-types: ["version-update:semver-major"]
       # Only in apps/cms for the Strapi admin's peer dependency, which is
       # ^6 in Strapi 5.
       - dependency-name: react-router-dom

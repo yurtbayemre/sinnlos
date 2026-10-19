@@ -126,7 +126,7 @@ export function QuizBlock({
                     type="button"
                     aria-pressed={isPicked}
                     onClick={() => pick(qi, oi)}
-                    className={`flex items-center justify-between gap-2 rounded-lg border px-3 py-2 text-left text-sm outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background ${
+                    className={`flex items-center justify-between gap-2 rounded-lg border px-3 py-2 text-left text-sm outline-hidden transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background ${
                       state === "right"
                         ? "border-emerald-500/60 bg-emerald-500/10"
                         : state === "wrong"
@@ -171,7 +171,7 @@ export function QuizBlock({
               type="button"
               onClick={checkAll}
               disabled={!answeredAll || isPending}
-              className="inline-flex items-center justify-center rounded-xl bg-primary px-4 py-2 text-sm font-medium text-primary-foreground outline-none transition-colors hover:bg-primary/90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:opacity-50"
+              className="inline-flex items-center justify-center rounded-xl bg-primary px-4 py-2 text-sm font-medium text-primary-foreground outline-hidden transition-colors hover:bg-primary/90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:opacity-50"
             >
               {isPending ? t("quizChecking") : t("quizCheckButton")}
             </button>

@@ -169,7 +169,7 @@ export function NotificationBell({
       <DropdownMenu.Trigger asChild>
         <button
           type="button"
-          className="relative inline-flex h-9 w-9 items-center justify-center rounded-xl border bg-muted/40 text-muted-foreground outline-none transition-colors hover:bg-muted/60 focus-visible:bg-background focus-visible:ring-2 focus-visible:ring-ring"
+          className="relative inline-flex h-9 w-9 items-center justify-center rounded-xl border bg-muted/40 text-muted-foreground outline-hidden transition-colors hover:bg-muted/60 focus-visible:bg-background focus-visible:ring-2 focus-visible:ring-ring"
           aria-label={`${t("title")}${unreadCount > 0 ? ` (${unreadCount} ${t("unread")})` : ""}`}
           aria-describedby={unavailable ? unavailableNoteId : undefined}
         >
@@ -197,7 +197,7 @@ export function NotificationBell({
               <DropdownMenu.Item
                 onSelect={handleMarkAll}
                 disabled={isPending}
-                className="cursor-pointer rounded-md text-xs text-primary outline-none hover:underline data-[disabled]:opacity-50 data-[highlighted]:underline data-[highlighted]:ring-2 data-[highlighted]:ring-ring data-[highlighted]:ring-offset-2 data-[highlighted]:ring-offset-background"
+                className="cursor-pointer rounded-md text-xs text-primary outline-hidden hover:underline data-disabled:opacity-50 data-highlighted:underline data-highlighted:ring-2 data-highlighted:ring-ring data-highlighted:ring-offset-2 data-highlighted:ring-offset-background"
               >
                 {t("markAllRead")}
               </DropdownMenu.Item>
@@ -229,8 +229,8 @@ export function NotificationBell({
                     key={n.id}
                     onSelect={() => handleClick(n)}
                     className={cn(
-                      "flex w-full cursor-pointer items-start gap-3 px-4 py-3 text-left outline-none transition-colors hover:bg-muted data-[highlighted]:bg-muted",
-                      !n.readAt && "bg-primary/[0.04]",
+                      "flex w-full cursor-pointer items-start gap-3 px-4 py-3 text-left outline-hidden transition-colors hover:bg-muted data-highlighted:bg-muted",
+                      !n.readAt && "bg-primary/4",
                     )}
                   >
                     <div

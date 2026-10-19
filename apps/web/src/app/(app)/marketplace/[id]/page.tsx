@@ -214,7 +214,7 @@ export default async function ClassifiedDetailPage({ params }: Params) {
                   href={`mailto:${ad.author.email}?subject=${encodeURIComponent(
                     t("mailSubject", { title: ad.title }),
                   )}`}
-                  className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground outline-none transition-colors hover:bg-primary/90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                  className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground outline-hidden transition-colors hover:bg-primary/90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
                 >
                   <Mail className="h-4 w-4" aria-hidden="true" />
                   {t("contact")}
@@ -226,7 +226,7 @@ export default async function ClassifiedDetailPage({ params }: Params) {
           {canEdit && (
             <Link
               href={`/marketplace/${ad.id}/edit`}
-              className="inline-flex w-full items-center justify-center gap-2 rounded-xl border px-4 py-2.5 text-sm font-medium outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+              className="inline-flex w-full items-center justify-center gap-2 rounded-xl border px-4 py-2.5 text-sm font-medium outline-hidden transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
             >
               <Pencil className="h-4 w-4" aria-hidden="true" />
               {t("editAd")}

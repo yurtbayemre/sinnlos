@@ -99,7 +99,7 @@ export default async function DepartmentPage({ params }: Props) {
                 <Link
                   key={tm.id}
                   href={`/teams/${tm.slug}`}
-                  className="focus-card group rounded-xl border p-4 transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/30 hover:bg-accent hover:shadow-sm"
+                  className="focus-card group rounded-xl border p-4 transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/30 hover:bg-accent hover:shadow-xs"
                 >
                   <div className="flex items-center gap-2 font-medium transition-colors group-hover:text-primary">
                     <Users2 className="h-4 w-4 text-muted-foreground" aria-hidden="true" />

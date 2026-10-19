@@ -21,7 +21,7 @@ export async function Sidebar({ className }: { className?: string }) {
   return (
     <aside
       className={cn(
-        "sticky top-0 hidden h-screen w-64 shrink-0 flex-col border-r bg-card/40 backdrop-blur md:flex",
+        "sticky top-0 hidden h-screen w-64 shrink-0 flex-col border-r bg-card/40 backdrop-blur-sm md:flex",
         className,
       )}
     >

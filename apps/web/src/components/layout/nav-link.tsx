@@ -49,7 +49,7 @@ export function NavLink({ href, label, icon }: { href: Route; label: string; ico
       href={href}
       aria-current={active ? "page" : undefined}
       className={cn(
-        "group relative flex items-center gap-3 rounded-xl px-3 py-2 text-sm outline-none transition-colors duration-150",
+        "group relative flex items-center gap-3 rounded-xl px-3 py-2 text-sm outline-hidden transition-colors duration-150",
         "focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background",
         active
           ? "bg-primary/10 font-medium text-primary"

@@ -83,7 +83,7 @@ export function ReactionBar({
               aria-pressed={reacted}
               aria-label={`${EMOJI_MAP[emoji]} ${count}`}
               className={cn(
-                "inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
+                "inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs outline-hidden transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
                 reacted
                   ? "border-primary/40 bg-primary/10 text-primary"
                   : "border-transparent hover:border-border hover:bg-muted",

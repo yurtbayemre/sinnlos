@@ -60,7 +60,7 @@ function TreeNode({ node, level }: { node: PersonNode; level: number }) {
           {hasChildren ? (
             <button
               onClick={() => setExpanded(!expanded)}
-              className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+              className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md outline-hidden transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
               aria-expanded={expanded}
               aria-label={t("expand")}
             >
@@ -75,7 +75,7 @@ function TreeNode({ node, level }: { node: PersonNode; level: number }) {
           )}
           <Link
             href={`/people/${person.id}`}
-            className="flex items-center gap-3 rounded-lg outline-none transition-opacity hover:opacity-80 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+            className="flex items-center gap-3 rounded-lg outline-hidden transition-opacity hover:opacity-80 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
           >
             <Avatar className="h-9 w-9">
               {avatarUrl ? <AvatarImage src={avatarUrl} alt={name} /> : null}

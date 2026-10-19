@@ -67,7 +67,7 @@ export function PeopleGrid({ people }: { people: PersonCard[] }) {
               setSearch(e.target.value);
               setPages(1);
             }}
-            className="h-10 w-full rounded-xl border bg-muted/40 pl-9 pr-3 text-sm outline-none transition-colors placeholder:text-muted-foreground focus:bg-background focus:ring-2 focus:ring-ring"
+            className="h-10 w-full rounded-xl border bg-muted/40 pl-9 pr-3 text-sm outline-hidden transition-colors placeholder:text-muted-foreground focus:bg-background focus:ring-2 focus:ring-ring"
           />
         </div>
         {departments.length > 1 && (
@@ -130,7 +130,7 @@ export function PeopleGrid({ people }: { people: PersonCard[] }) {
           <button
             type="button"
             onClick={() => setPages((current) => current + 1)}
-            className="rounded-xl border px-4 py-2 text-sm font-medium outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+            className="rounded-xl border px-4 py-2 text-sm font-medium outline-hidden transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
           >
             + {tCommon("person", { count: next })}
           </button>

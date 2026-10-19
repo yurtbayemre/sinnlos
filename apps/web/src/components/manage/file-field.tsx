@@ -85,7 +85,7 @@ export function FileField({
                 : t("current")}
             </div>
             {!uploadedForSave && (
-              <div className="break-words text-sm font-medium">
+              <div className="wrap-break-word text-sm font-medium">
                 {current.name}
                 {current.size > 0 && (
                   <span className="ml-2 font-normal text-muted-foreground">
@@ -113,7 +113,7 @@ export function FileField({
 
       {picked && (
         <div className="flex flex-wrap items-center gap-2 text-sm">
-          <span className="min-w-0 break-words">
+          <span className="min-w-0 wrap-break-word">
             {t("picked", { name: picked.name, size: formatBytes(picked.size) })}
           </span>
           <button
