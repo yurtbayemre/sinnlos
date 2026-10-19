@@ -19,6 +19,7 @@ import { backfillDepartmentAudience } from "./utils/department-audience-backfill
 import { ensureDraftTwins } from "./utils/draft-twins";
 import { enforceSecretGuard } from "./utils/env-guard";
 import { registerLiveEventSubscriber } from "./utils/live-events";
+import { registerMediaTombstoneGuard } from "./utils/media-tombstone-guard";
 import { assertNoOrgDrafts } from "./utils/org-dp-guard";
 import { backfillPollAudience } from "./utils/poll-audience-backfill";
 import { backfillRevisions } from "./utils/revision-backfill";
@@ -123,6 +124,8 @@ export default {
     // before any seeding so bulk writes exercise the batching path; the
     // emitter itself no-ops unless WEB_INTERNAL_URL is set.
     registerLiveEventSubscriber(strapi);
+    // Every media field without its own claim refuses a tombstoned file.
+    registerMediaTombstoneGuard(strapi);
 
     // Roles before the permission sync, which grants per role.
     await ensureRoles(strapi);
