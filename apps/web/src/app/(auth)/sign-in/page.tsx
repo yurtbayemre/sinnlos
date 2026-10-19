@@ -106,7 +106,7 @@ export default async function SignInPage({
             </p>
           )}
 
-          <p className="mt-2 text-center text-xs text-muted-foreground">{t("itPolicy")}</p>
+          <p className="text-center text-xs text-muted-foreground">{t("itPolicy")}</p>
         </CardContent>
       </Card>
     </div>
