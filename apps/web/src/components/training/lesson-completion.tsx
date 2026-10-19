@@ -62,7 +62,7 @@ export function LessonCompletion({
         {nextHref && (
           <Link
             href={nextHref}
-            className="inline-flex items-center gap-1.5 text-sm font-medium text-primary outline-none transition-colors hover:underline focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+            className="inline-flex items-center gap-1.5 text-sm font-medium text-primary outline-hidden transition-colors hover:underline focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
           >
             {t("nextLesson")}
             <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />

@@ -47,7 +47,7 @@ export function listHref(
 
 const pillClass = (active: boolean) =>
   cn(
-    "inline-flex items-center rounded-full border px-3 py-1 text-sm outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
+    "inline-flex items-center rounded-full border px-3 py-1 text-sm outline-hidden transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
     active
       ? "border-primary/40 bg-primary/10 font-medium text-primary"
       : "text-muted-foreground hover:bg-muted/60 hover:text-foreground",
@@ -172,7 +172,7 @@ export function AuthoringList({
             <div className="min-w-0 flex-1 space-y-1.5">
               <Link
                 href={itemPath(row.documentId)}
-                className="block break-words font-medium outline-none hover:text-primary hover:underline focus-visible:rounded focus-visible:ring-2 focus-visible:ring-ring"
+                className="block wrap-break-word font-medium outline-hidden hover:text-primary hover:underline focus-visible:rounded focus-visible:ring-2 focus-visible:ring-ring"
               >
                 {row.label || "–"}
               </Link>

@@ -53,7 +53,7 @@ export default async function EventsPage({
   const switchLinkClass = (active: boolean) =>
     cn(
       "inline-flex items-center gap-1.5 rounded-[10px] px-3 py-1.5 text-sm font-medium transition-colors",
-      "outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
+      "outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
       active ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted",
     );
 
@@ -197,7 +197,7 @@ function EventCard({
         </div>
         <a
           href={icsHref(event)}
-          className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border transition-colors hover:bg-muted outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+          className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border transition-colors hover:bg-muted outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
           title={t("downloadIcs")}
           aria-label={t("downloadIcs")}
         >

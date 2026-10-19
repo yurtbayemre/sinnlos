@@ -31,7 +31,7 @@ describe("(app)/error.tsx (UI04)", () => {
     // The outermost element, the card, carries the role.
     expect(html).toMatch(/^<div [^>]*role="alert"[^>]*>/);
     expect(html).toContain(
-      `<h2 tabindex="-1" class="font-medium outline-none">${en.errors.somethingWrong}</h2>`,
+      `<h2 tabindex="-1" class="font-medium outline-hidden">${en.errors.somethingWrong}</h2>`,
     );
   });
 

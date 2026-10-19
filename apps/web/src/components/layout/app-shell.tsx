@@ -16,7 +16,7 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
           takes focus through tabIndex -1 without joining the Tab order. */}
       <a
         href={`#${MAIN_ID}`}
-        className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[70] focus:rounded-xl focus:bg-background focus:px-4 focus:py-2 focus:text-sm focus:font-medium focus:text-foreground focus:shadow-lg focus:outline-none focus:ring-2 focus:ring-ring"
+        className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-70 focus:rounded-xl focus:bg-background focus:px-4 focus:py-2 focus:text-sm focus:font-medium focus:text-foreground focus:shadow-lg focus:outline-hidden focus:ring-2 focus:ring-ring"
       >
         {tCommon("skipToContent")}
       </a>
@@ -28,7 +28,7 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
         <main
           id={MAIN_ID}
           tabIndex={-1}
-          className="flex-1 px-4 pb-[calc(5rem_+_env(safe-area-inset-bottom))] pt-6 outline-none sm:px-6 md:pb-8 md:pt-8"
+          className="flex-1 px-4 pb-[calc(5rem+env(safe-area-inset-bottom))] pt-6 outline-hidden sm:px-6 md:pb-8 md:pt-8"
         >
           <div className="mx-auto w-full max-w-6xl">
             <PageFade>{children}</PageFade>

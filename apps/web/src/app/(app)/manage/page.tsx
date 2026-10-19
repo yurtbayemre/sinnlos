@@ -196,7 +196,7 @@ export default async function ManagePage() {
                         {/* The whole card is the link's target (stretched link). */}
                         <Link
                           href={AREA_PATH[area]}
-                          className="outline-none after:absolute after:inset-0 after:rounded-2xl focus-visible:after:ring-2 focus-visible:after:ring-ring"
+                          className="outline-hidden after:absolute after:inset-0 after:rounded-2xl focus-visible:after:ring-2 focus-visible:after:ring-ring"
                         >
                           {t(`areas.${area}.title`)}
                         </Link>
@@ -221,7 +221,7 @@ export default async function ManagePage() {
                                 {href ? (
                                   <Link
                                     href={href}
-                                    className="outline-none after:absolute after:-inset-x-1 after:-inset-y-0.5 after:rounded-md hover:text-foreground hover:underline focus-visible:after:ring-2 focus-visible:after:ring-ring"
+                                    className="outline-hidden after:absolute after:-inset-x-1 after:-inset-y-0.5 after:rounded-md hover:text-foreground hover:underline focus-visible:after:ring-2 focus-visible:after:ring-ring"
                                   >
                                     {label}
                                   </Link>

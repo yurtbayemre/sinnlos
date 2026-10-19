@@ -37,7 +37,7 @@ export function ManagePageHeader({
           <ArrowLeft className="h-3.5 w-3.5" aria-hidden="true" />
           {backLabel ?? t("back")}
         </Link>
-        <h1 className="mt-2 break-words text-3xl font-semibold tracking-tight">{title}</h1>
+        <h1 className="mt-2 wrap-break-word text-3xl font-semibold tracking-tight">{title}</h1>
         {description ? <p className="mt-1 max-w-2xl text-muted-foreground">{description}</p> : null}
       </div>
       {action ? (

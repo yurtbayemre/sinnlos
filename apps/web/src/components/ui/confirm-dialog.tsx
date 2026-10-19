@@ -62,7 +62,7 @@ export function ModalDialog({
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       {trigger && <Dialog.Trigger asChild>{trigger}</Dialog.Trigger>}
       <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-50 flex animate-fade-in items-center justify-center overflow-y-auto bg-background/60 p-4 backdrop-blur-sm">
+        <Dialog.Overlay className="fixed inset-0 z-50 flex animate-fade-in items-center justify-center overflow-y-auto bg-background/60 p-4 backdrop-blur-xs">
           <Dialog.Content
             // Without a Description the dialog has no description at all
             // (Radix would point aria-describedby at a missing element and
@@ -88,7 +88,7 @@ export function ModalDialog({
                 : undefined
             }
             className={cn(
-              "w-full max-w-md animate-scale-in rounded-2xl border bg-background p-6 shadow-2xl outline-none",
+              "w-full max-w-md animate-scale-in rounded-2xl border bg-background p-6 shadow-2xl outline-hidden",
               className,
             )}
           >
@@ -98,7 +98,7 @@ export function ModalDialog({
                 <button
                   type="button"
                   aria-label={tCommon("close")}
-                  className="rounded-lg p-1 outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                  className="rounded-lg p-1 outline-hidden transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
                 >
                   <X className="h-4 w-4" aria-hidden="true" />
                 </button>
@@ -194,7 +194,7 @@ export function ConfirmDialog({
           <button
             ref={cancelRef}
             type="button"
-            className="rounded-xl border px-4 py-2 text-sm outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+            className="rounded-xl border px-4 py-2 text-sm outline-hidden transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
           >
             {tCommon("cancel")}
           </button>
@@ -205,7 +205,7 @@ export function ConfirmDialog({
           disabled={pending}
           data-tone={tone}
           className={cn(
-            "inline-flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:opacity-50",
+            "inline-flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-medium outline-hidden transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:opacity-50",
             CONFIRM_TONE_CLASS[tone],
           )}
         >

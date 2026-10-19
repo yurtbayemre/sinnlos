@@ -489,7 +489,7 @@ export function SearchCommand() {
           rememberOpener();
           setOpen(true);
         }}
-        className="relative flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border bg-muted/40 text-sm text-muted-foreground outline-none transition-colors hover:bg-muted/60 focus-visible:bg-background focus-visible:ring-2 focus-visible:ring-ring sm:h-10 sm:w-full sm:max-w-xl sm:justify-start sm:pl-9 sm:pr-3"
+        className="relative flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border bg-muted/40 text-sm text-muted-foreground outline-hidden transition-colors hover:bg-muted/60 focus-visible:bg-background focus-visible:ring-2 focus-visible:ring-ring sm:h-10 sm:w-full sm:max-w-xl sm:justify-start sm:pl-9 sm:pr-3"
       >
         <Search
           aria-hidden="true"
@@ -507,7 +507,7 @@ export function SearchCommand() {
           focusReturnTarget: cmdk renders no Dialog.Trigger) — the
           previous hand-rolled portal announced aria-modal without making
           the background inert. Radix portals to <body>, which the repo
-          requires anyway: the sticky topbar's backdrop-blur turns the
+          requires anyway: the sticky topbar's backdrop-blur-sm turns the
           header into the containing block for fixed descendants. Items
           carry their unique key as cmdk `value` and are matched on title
           and subtitle (`keywords`); from 2 characters the server's results
@@ -524,8 +524,8 @@ export function SearchCommand() {
         label={tSearch("globalSearch")}
         shouldFilter={!searching}
         filter={matchText}
-        overlayClassName="fixed inset-0 z-50 animate-fade-in bg-background/60 backdrop-blur-sm"
-        contentClassName="fixed inset-x-3 top-[4.5rem] z-50 mx-auto max-w-lg animate-scale-in"
+        overlayClassName="fixed inset-0 z-50 animate-fade-in bg-background/60 backdrop-blur-xs"
+        contentClassName="fixed inset-x-3 top-18 z-50 mx-auto max-w-lg animate-scale-in"
         className="overflow-hidden rounded-2xl border bg-background shadow-2xl"
       >
         <DialogTitle className="sr-only">{tSearch("globalSearch")}</DialogTitle>
@@ -536,7 +536,7 @@ export function SearchCommand() {
             value={query}
             onValueChange={onQueryChange}
             placeholder={tSearch("searchPlaceholder")}
-            className="flex h-12 w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+            className="flex h-12 w-full bg-transparent text-sm outline-hidden placeholder:text-muted-foreground"
           />
         </div>
         <Command.List className="max-h-80 overflow-y-auto p-2">
@@ -556,7 +556,7 @@ export function SearchCommand() {
             <Command.Group
               key={kind}
               heading={groupLabel[kind]}
-              className="[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground"
+              className="**:[[cmdk-group-heading]]:px-2 **:[[cmdk-group-heading]]:py-1.5 **:[[cmdk-group-heading]]:text-xs **:[[cmdk-group-heading]]:font-medium **:[[cmdk-group-heading]]:text-muted-foreground"
             >
               {groupItems.map((item) => (
                 <Command.Item

@@ -32,14 +32,20 @@ updates:
       # The type definitions follow the Node line of the images (Node 24).
       - dependency-name: "@types/node"
         update-types: ["version-update:semver-major"]
-      # tailwind-merge 3 supports Tailwind CSS v4 only; apps/web is on
-      # Tailwind 3 (v3 merges `bg-gradient-to-br` as a background colour).
-      # Moves together with a Tailwind 4 migration.
-      - dependency-name: tailwind-merge
-        update-types: ["version-update:semver-major"]
       # Only in apps/cms for the Strapi admin's peer dependency, which is
       # ^6 in Strapi 5.
       - dependency-name: react-router-dom
+        update-types: ["version-update:semver-major"]
+      # The Strapi 5 admin needs React 18 (peer ^18.0.0), so apps/cms stays on
+      # it; a React 19 in apps/cms fails the admin build. apps/web's React
+      # major moves with a Next.js major, not with a weekly bump.
+      - dependency-name: react
+        update-types: ["version-update:semver-major"]
+      - dependency-name: react-dom
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@types/react"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@types/react-dom"
         update-types: ["version-update:semver-major"]
 
   # The base image of both Dockerfiles (node:24-alpine, pinned by digest):

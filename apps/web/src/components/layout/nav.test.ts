@@ -1,5 +1,3 @@
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { createElement, isValidElement, type ReactElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { NextIntlClientProvider } from "next-intl";
@@ -8,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import de from "../../../messages/de.json";
 import en from "../../../messages/en.json";
 import { navItemsFor, type NavItem } from "@/lib/nav-config";
+import { GLOBALS_CSS } from "@/lib/tailwind-css.test.helper";
 
 /**
  * FX30: the sidebar and the phone nav map the same entries (lib/nav-config.ts
@@ -213,12 +212,10 @@ describe("More sheet: open only on its route and below md", () => {
     expect(isDesktopViewport()).toBe(false);
   });
 
-  it("uses Tailwind's md, which tailwind.config.ts does not override", () => {
+  it("uses Tailwind's md, which globals.css does not override", () => {
     expect(DESKTOP_QUERY).toBe(`(min-width: ${defaultTheme.screens.md})`);
-    const config = readFileSync(join(__dirname, "..", "..", "..", "tailwind.config.ts"), "utf8");
-    // The only `screens` there is the container's.
-    expect(config.match(/\bscreens\s*:/g)).toHaveLength(1);
-    expect(config).toMatch(/container:\s*{[^}]*screens:\s*{\s*"2xl"/);
+    // No --breakpoint-* is declared; the container's 1400px is its own @utility.
+    expect(GLOBALS_CSS).not.toMatch(/--breakpoint-[\w-]+\s*:/);
   });
 
   it("renders closed in server markup (the server snapshot, no window)", () => {

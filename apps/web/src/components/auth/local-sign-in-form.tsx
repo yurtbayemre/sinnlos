@@ -6,7 +6,7 @@ import { signInWithCredentials, type SignInFormState } from "@/lib/auth-actions"
 import { AUTH_FORM_MESSAGES } from "@/lib/auth/form-messages";
 
 const inputClass =
-  "h-10 w-full rounded-xl border bg-muted/40 px-4 text-sm outline-none placeholder:text-muted-foreground focus:bg-background focus:ring-2 focus:ring-ring";
+  "h-10 w-full rounded-xl border bg-muted/40 px-4 text-sm outline-hidden placeholder:text-muted-foreground focus:bg-background focus:ring-2 focus:ring-ring";
 
 export function LocalSignInForm({ from = "/" }: { from?: string }) {
   const t = useTranslations("auth");
@@ -57,7 +57,7 @@ export function LocalSignInForm({ from = "/" }: { from?: string }) {
       <button
         type="submit"
         disabled={isPending}
-        className="inline-flex w-full items-center justify-center rounded-xl bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground outline-none transition-colors hover:bg-primary/90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:opacity-50"
+        className="inline-flex w-full items-center justify-center rounded-xl bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground outline-hidden transition-colors hover:bg-primary/90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:opacity-50"
       >
         {isPending ? t("signingIn") : t("signIn")}
       </button>

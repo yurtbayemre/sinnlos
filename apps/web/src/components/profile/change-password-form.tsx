@@ -6,7 +6,7 @@ import { changePassword, type PasswordFormState } from "@/lib/profile-actions";
 import { PASSWORD_MIN_LENGTH, PROFILE_FORM_MESSAGES } from "@/lib/auth/form-messages";
 
 const inputClass =
-  "h-10 w-full rounded-xl border bg-muted/40 px-4 text-sm outline-none placeholder:text-muted-foreground focus:bg-background focus:ring-2 focus:ring-ring";
+  "h-10 w-full rounded-xl border bg-muted/40 px-4 text-sm outline-hidden placeholder:text-muted-foreground focus:bg-background focus:ring-2 focus:ring-ring";
 
 export function ChangePasswordForm() {
   const t = useTranslations("profile");
@@ -76,7 +76,7 @@ export function ChangePasswordForm() {
       <button
         type="submit"
         disabled={isPending}
-        className="inline-flex items-center justify-center rounded-xl bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground outline-none transition-colors hover:bg-primary/90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:opacity-50"
+        className="inline-flex items-center justify-center rounded-xl bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground outline-hidden transition-colors hover:bg-primary/90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:opacity-50"
       >
         {isPending ? tCommon("saving") : t("changePassword")}
       </button>

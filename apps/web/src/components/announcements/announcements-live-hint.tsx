@@ -56,14 +56,14 @@ export function AnnouncementsLiveHint({ initialIds }: { initialIds: string[] }) 
   if (!hydrated || !showHint) return null;
 
   return createPortal(
-    <div className="fixed inset-x-0 bottom-[calc(1.5rem_+_env(safe-area-inset-bottom))] z-50 flex justify-center px-4">
+    <div className="fixed inset-x-0 bottom-[calc(1.5rem+env(safe-area-inset-bottom))] z-50 flex justify-center px-4">
       <button
         type="button"
         onClick={() => {
           setShowHint(false);
           router.refresh();
         }}
-        className="flex items-center gap-2 rounded-full border border-border bg-card px-4 py-2 text-sm font-medium text-foreground shadow-lg outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+        className="flex items-center gap-2 rounded-full border border-border bg-card px-4 py-2 text-sm font-medium text-foreground shadow-lg outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
       >
         <Megaphone className="h-4 w-4" aria-hidden />
         {t("liveNewHint")}

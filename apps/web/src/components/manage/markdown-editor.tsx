@@ -83,9 +83,9 @@ export function MarkdownEditor({
   };
   const tabClass = (active: boolean) =>
     cn(
-      "rounded-lg px-3 py-1.5 text-sm outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
+      "rounded-lg px-3 py-1.5 text-sm outline-hidden transition-colors focus-visible:ring-2 focus-visible:ring-ring",
       active
-        ? "bg-background font-medium shadow-sm"
+        ? "bg-background font-medium shadow-xs"
         : "text-muted-foreground hover:text-foreground",
     );
 
@@ -152,7 +152,7 @@ export function MarkdownEditor({
         aria-labelledby={previewTabId}
         hidden={tab !== "preview"}
         tabIndex={0}
-        className="min-h-40 rounded-xl border bg-background px-4 py-3 outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        className="min-h-40 rounded-xl border bg-background px-4 py-3 outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
       >
         {value.trim() === "" ? (
           <p className="text-sm text-muted-foreground">{t("emptyPreview")}</p>

@@ -21,7 +21,7 @@ export default async function RegisterPage() {
   const t = await getTranslations("auth");
 
   return (
-    <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-gradient-to-br from-background via-background to-primary/5 p-6">
+    <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-linear-to-br from-background via-background to-primary/5 p-6">
       {/* Decorative background glow */}
       <div
         aria-hidden="true"

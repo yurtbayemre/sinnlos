@@ -47,7 +47,7 @@ export default function AppError({
           <AlertTriangle className="h-6 w-6" aria-hidden="true" />
         </div>
         <div className="space-y-1">
-          <h2 ref={headingRef} tabIndex={-1} className="font-medium outline-none">
+          <h2 ref={headingRef} tabIndex={-1} className="font-medium outline-hidden">
             {t("somethingWrong")}
           </h2>
           <p className="max-w-sm text-sm text-muted-foreground">{t("somethingWrongHint")}</p>

@@ -93,7 +93,7 @@ export default async function CoursePage({ params }: Params) {
           {firstOpen?.documentId && (
             <Link
               href={`/training/${course.slug}/${firstOpen.documentId}`}
-              className="inline-flex items-center gap-1.5 rounded-xl bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground outline-none transition-colors hover:bg-primary/90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+              className="inline-flex items-center gap-1.5 rounded-xl bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground outline-hidden transition-colors hover:bg-primary/90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
             >
               {doneCount > 0 ? t("continueCourse") : t("startCourse")}
               <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />

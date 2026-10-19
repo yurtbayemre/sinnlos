@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { compileTailwind, ruleBody, themeValue } from "./tailwind-css.test.helper";
 
 /**
  * WCAG contrast of the colour tokens in globals.css, both themes (FX31).
@@ -9,7 +10,7 @@ import { describe, expect, it } from "vitest";
  * `bg-primary` 4.4:1.
  *
  * The pairs mirror how the UI combines the tokens: `text-primary` and
- * `text-destructive` read the *-text tokens (tailwind.config.ts textColor),
+ * `text-destructive` read the *-text tokens (--text-color-* in the globals.css @theme),
  * fills carry their *-foreground, the error line of the fetch-error
  * banner is `text-destructive/80` on `bg-destructive/5`, and secondary
  * text also sits on the accent/muted fills and the bell's unread tint. The tokens are
@@ -76,23 +77,30 @@ describe("the contrast helper", () => {
 
 describe("tailwind text colours (FX31)", () => {
   it("map text-primary / text-destructive to the text tokens and keep the rest", async () => {
-    const { default: resolveConfig } = await import("tailwindcss/resolveConfig");
-    const { default: config } = await import("../../tailwind.config");
-    const theme = resolveConfig(config).theme as unknown as {
-      colors: Record<string, Record<string, string>>;
-      textColor: Record<string, Record<string, string>>;
-    };
-    expect(theme.textColor.primary).toMatchObject({
-      DEFAULT: "hsl(var(--primary-text))",
-      foreground: "hsl(var(--primary-foreground))",
-    });
-    expect(theme.textColor.destructive).toMatchObject({
-      DEFAULT: "hsl(var(--destructive-text))",
-      foreground: "hsl(var(--destructive-foreground))",
-    });
-    // Fills (bg-, border-, ring-) keep the fill tokens.
-    expect(theme.colors.primary!.DEFAULT).toBe("hsl(var(--primary))");
-    expect(theme.colors.destructive!.DEFAULT).toBe("hsl(var(--destructive))");
+    const css = await compileTailwind([
+      "text-primary",
+      "text-destructive",
+      "text-primary-foreground",
+      "text-destructive-foreground",
+      "bg-primary",
+      "bg-destructive",
+      "border-primary",
+      "ring-destructive",
+    ]);
+    for (const name of ["primary", "destructive"]) {
+      expect(ruleBody(css, `.text-${name}`)).toBe(`color: var(--text-color-${name});`);
+      expect(themeValue(css, `--text-color-${name}`)).toBe(`hsl(var(--${name}-text))`);
+      // text-*-foreground falls through to the shared colour.
+      expect(ruleBody(css, `.text-${name}-foreground`)).toBe(
+        `color: var(--color-${name}-foreground);`,
+      );
+      expect(themeValue(css, `--color-${name}-foreground`)).toBe(`hsl(var(--${name}-foreground))`);
+      // Fills (bg-, border-, ring-) keep the fill tokens.
+      expect(ruleBody(css, `.bg-${name}`)).toBe(`background-color: var(--color-${name});`);
+      expect(themeValue(css, `--color-${name}`)).toBe(`hsl(var(--${name}))`);
+    }
+    expect(ruleBody(css, ".border-primary")).toBe("border-color: var(--color-primary);");
+    expect(ruleBody(css, ".ring-destructive")).toBe("--tw-ring-color: var(--color-destructive);");
   });
 });
 

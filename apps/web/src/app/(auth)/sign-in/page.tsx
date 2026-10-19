@@ -47,7 +47,7 @@ export default async function SignInPage({
     : t("signInDescLocal");
 
   return (
-    <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-gradient-to-br from-background via-background to-primary/5 p-6">
+    <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-linear-to-br from-background via-background to-primary/5 p-6">
       {/* Decorative background glow */}
       <div
         aria-hidden="true"
@@ -106,7 +106,7 @@ export default async function SignInPage({
             </p>
           )}
 
-          <p className="mt-2 text-center text-xs text-muted-foreground">{t("itPolicy")}</p>
+          <p className="text-center text-xs text-muted-foreground">{t("itPolicy")}</p>
         </CardContent>
       </Card>
     </div>

@@ -36,7 +36,7 @@ export async function Topbar() {
   const email = session?.user?.email ?? "";
 
   return (
-    <header className="sticky top-0 z-30 flex h-16 items-center gap-2 border-b bg-background/80 px-3 backdrop-blur sm:gap-4 sm:px-6">
+    <header className="sticky top-0 z-30 flex h-16 items-center gap-2 border-b bg-background/80 px-3 backdrop-blur-sm sm:gap-4 sm:px-6">
       <div className="hidden flex-1 md:block" />
 
       {/* min-w-0: the search box shrinks (its placeholder truncates) instead
@@ -66,7 +66,7 @@ export async function Topbar() {
             <Link
               href="/profile"
               aria-label={tProfile("title")}
-              className="rounded-full outline-none transition-opacity hover:opacity-80 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+              className="rounded-full outline-hidden transition-opacity hover:opacity-80 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
             >
               <Avatar>
                 {session.user.image ? <AvatarImage src={session.user.image} alt={name} /> : null}

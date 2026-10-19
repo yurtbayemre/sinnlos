@@ -34,7 +34,7 @@ describe("AppShell bottom room (#71)", () => {
     const html = await render();
     const main = /<main [^>]*class="([^"]+)"/.exec(html)?.[1] ?? "";
     expect(main.split(" ")).toEqual(
-      expect.arrayContaining(["pb-[calc(5rem_+_env(safe-area-inset-bottom))]", "md:pb-8"]),
+      expect.arrayContaining(["pb-[calc(5rem+env(safe-area-inset-bottom))]", "md:pb-8"]),
     );
   });
 });

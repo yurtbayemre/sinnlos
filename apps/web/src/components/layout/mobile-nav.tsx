@@ -13,12 +13,12 @@ import { LinkPendingIndicator } from "./nav-link";
 
 /** min-h-11: Apple's 44 pt touch target at the least (issue #71; the tabs measure 56 px). */
 const TAB_CLASS = cn(
-  "flex min-h-11 min-w-0 flex-1 flex-col items-center gap-1 py-2 text-[11px] outline-none transition-colors",
+  "flex min-h-11 min-w-0 flex-1 flex-col items-center gap-1 py-2 text-[11px] outline-hidden transition-colors",
   "focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
 );
 
-/** Tailwind `md` (not overridden in tailwind.config.ts): the bar and its sheet hide, the sidebar shows. */
-export const DESKTOP_QUERY = "(min-width: 768px)";
+/** Tailwind `md` (48rem, not overridden in globals.css): the bar and its sheet hide, the sidebar shows. */
+export const DESKTOP_QUERY = "(min-width: 48rem)";
 
 /** useSyncExternalStore subscription: calls onChange when the viewport crosses DESKTOP_QUERY. */
 export function subscribeDesktop(onChange: () => void): () => void {
@@ -85,7 +85,7 @@ export function MobileNav({ items }: { items: readonly NavItem[] }) {
   return (
     <nav
       aria-label={tCommon("bottomNav")}
-      className="fixed inset-x-0 bottom-0 z-40 border-t bg-background/90 backdrop-blur md:hidden"
+      className="fixed inset-x-0 bottom-0 z-40 border-t bg-background/90 backdrop-blur-sm md:hidden"
       style={{
         paddingBottom: "env(safe-area-inset-bottom)",
         paddingLeft: "env(safe-area-inset-left)",
@@ -139,12 +139,12 @@ export function MobileNav({ items }: { items: readonly NavItem[] }) {
               <span className="max-w-full truncate px-0.5">{t("more")}</span>
             </Dialog.Trigger>
             <Dialog.Portal>
-              <Dialog.Overlay className="fixed inset-0 z-50 animate-fade-in bg-background/60 backdrop-blur-sm md:hidden" />
+              <Dialog.Overlay className="fixed inset-0 z-50 animate-fade-in bg-background/60 backdrop-blur-xs md:hidden" />
               <Dialog.Content
                 // No description: the title and the entries say it all
                 // (Radix warns unless aria-describedby is set explicitly).
                 aria-describedby={undefined}
-                className="fixed inset-x-0 bottom-0 z-50 max-h-[80vh] overflow-y-auto rounded-t-2xl border-t bg-background p-4 shadow-2xl outline-none animate-in slide-in-from-bottom duration-200 motion-reduce:animate-none md:hidden"
+                className="fixed inset-x-0 bottom-0 z-50 max-h-[80vh] overflow-y-auto rounded-t-2xl border-t bg-background p-4 shadow-2xl outline-hidden animate-in slide-in-from-bottom duration-200 motion-reduce:animate-none md:hidden"
                 style={{ paddingBottom: "calc(env(safe-area-inset-bottom) + 1rem)" }}
               >
                 <div className="mb-3 flex items-center justify-between">
@@ -153,7 +153,7 @@ export function MobileNav({ items }: { items: readonly NavItem[] }) {
                   </Dialog.Title>
                   <Dialog.Close
                     aria-label={tCommon("close")}
-                    className="rounded-lg p-1 outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
+                    className="rounded-lg p-1 outline-hidden transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
                   >
                     <X className="h-4 w-4" aria-hidden="true" />
                   </Dialog.Close>
@@ -201,7 +201,7 @@ export function MoreSheetLinks({
               aria-current={active ? "page" : undefined}
               onClick={() => onChoose(item.href)}
               className={cn(
-                "flex h-full flex-col items-center gap-1.5 rounded-xl border px-2 py-3 text-center text-xs outline-none transition-colors",
+                "flex h-full flex-col items-center gap-1.5 rounded-xl border px-2 py-3 text-center text-xs outline-hidden transition-colors",
                 "focus-visible:ring-2 focus-visible:ring-ring",
                 active
                   ? "border-primary/40 bg-primary/10 font-medium text-primary"
@@ -212,7 +212,7 @@ export function MoreSheetLinks({
                 <Icon aria-hidden="true" className="h-5 w-5" />
                 <LinkPendingIndicator className="absolute -right-1.5 -top-0.5" />
               </span>
-              <span className="max-w-full break-words">{t(item.labelKey)}</span>
+              <span className="max-w-full wrap-break-word">{t(item.labelKey)}</span>
             </Link>
           </li>
         );

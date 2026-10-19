@@ -1,13 +1,221 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
+@plugin "tailwindcss-animate";
+@plugin "@tailwindcss/typography";
+
+@custom-variant dark (&:is(.dark *));
+
+@utility container {
+  margin-inline: auto;
+  padding-inline: 1.5rem;
+  @media (width >= --theme(--breakpoint-sm)) {
+    max-width: none;
+  }
+  @media (width >= 1400px) {
+    max-width: 1400px;
+  }
+}
+
+@theme {
+  --color-border: hsl(var(--border));
+  --color-input: hsl(var(--input));
+  --color-ring: hsl(var(--ring));
+  --color-background: hsl(var(--background));
+  --color-foreground: hsl(var(--foreground));
+
+  --color-primary: hsl(var(--primary));
+  --color-primary-foreground: hsl(var(--primary-foreground));
+
+  --color-secondary: hsl(var(--secondary));
+  --color-secondary-foreground: hsl(var(--secondary-foreground));
+
+  --color-muted: hsl(var(--muted));
+  --color-muted-foreground: hsl(var(--muted-foreground));
+
+  --color-accent: hsl(var(--accent));
+  --color-accent-foreground: hsl(var(--accent-foreground));
+
+  --color-destructive: hsl(var(--destructive));
+  --color-destructive-foreground: hsl(var(--destructive-foreground));
+
+  --color-card: hsl(var(--card));
+  --color-card-foreground: hsl(var(--card-foreground));
+
+  --text-color-primary: hsl(var(--primary-text));
+
+  --text-color-destructive: hsl(var(--destructive-text));
+
+  --radius-lg: var(--radius);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-sm: calc(var(--radius) - 4px);
+
+  --font-sans: var(--font-inter), system-ui, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  --animate-accordion-down: accordion-down 0.2s ease-out;
+  --animate-accordion-up: accordion-up 0.2s ease-out;
+  --animate-shimmer: shimmer 1.8s ease-in-out infinite;
+  --animate-fade-in-up: fade-in-up 0.3s ease-out backwards;
+  --animate-fade-in: fade-in 0.2s ease-out both;
+  --animate-scale-in: scale-in 0.15s ease-out both;
+  --animate-indeterminate: indeterminate 1.2s ease-in-out infinite;
+
+  @keyframes accordion-down {
+    from {
+      height: 0;
+    }
+    to {
+      height: var(--radix-accordion-content-height);
+    }
+  }
+  @keyframes accordion-up {
+    from {
+      height: var(--radix-accordion-content-height);
+    }
+    to {
+      height: 0;
+    }
+  }
+  @keyframes shimmer {
+    0% {
+      transform: translateX(-100%);
+    }
+    100% {
+      transform: translateX(100%);
+    }
+  }
+  @keyframes fade-in-up {
+    0% {
+      opacity: 0;
+      transform: translateY(4px);
+    }
+    100% {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+  @keyframes fade-in {
+    0% {
+      opacity: 0;
+    }
+    100% {
+      opacity: 1;
+    }
+  }
+  @keyframes scale-in {
+    0% {
+      opacity: 0;
+      transform: scale(0.97) translateY(-4px);
+    }
+    100% {
+      opacity: 1;
+      transform: scale(1) translateY(0);
+    }
+  }
+  @keyframes indeterminate {
+    0% {
+      left: -40%;
+      width: 40%;
+    }
+    50% {
+      left: 20%;
+      width: 60%;
+    }
+    100% {
+      left: 100%;
+      width: 30%;
+    }
+  }
+}
+
+/*
+  The default border color has changed to `currentcolor` in Tailwind CSS v4,
+  so we've added these compatibility styles to make sure everything still
+  looks the same as it did with Tailwind CSS v3.
+
+  If we ever want to remove these styles, we need to add an explicit border
+  color utility to any element that depends on these defaults.
+*/
+@layer base {
+  *,
+  ::after,
+  ::before,
+  ::backdrop,
+  ::file-selector-button {
+    border-color: var(--color-gray-200, currentcolor);
+  }
+
+  /* Tailwind 3's preflight defaults that v4 dropped (upgrade guide):
+     the gray-400 placeholder and the pointer cursor on buttons. */
+  input::placeholder,
+  textarea::placeholder {
+    color: var(--color-gray-400);
+  }
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+}
+
+@utility stagger {
+  /* Staggered entrance for grid/list children. Apply to the container.
+     `backwards` (UI01, see --animate-fade-in-up in the @theme above):
+     hidden during the delay, and no transform left on the children after
+     the animation, which would make each card the containing block of any
+     `fixed` descendant. */
+  & > * {
+    animation: fade-in-up 0.35s ease-out backwards;
+  }
+  & > *:nth-child(1) {
+    animation-delay: 0ms;
+  }
+  & > *:nth-child(2) {
+    animation-delay: 40ms;
+  }
+  & > *:nth-child(3) {
+    animation-delay: 80ms;
+  }
+  & > *:nth-child(4) {
+    animation-delay: 120ms;
+  }
+  & > *:nth-child(5) {
+    animation-delay: 160ms;
+  }
+  & > *:nth-child(6) {
+    animation-delay: 200ms;
+  }
+  & > *:nth-child(7) {
+    animation-delay: 240ms;
+  }
+  & > *:nth-child(8) {
+    animation-delay: 280ms;
+  }
+  & > *:nth-child(n + 9) {
+    animation-delay: 320ms;
+  }
+}
+
+@utility card-lift {
+  /* Interactive card affordance: lift on hover, ring on keyboard focus. */
+  @apply transition-all duration-200 ease-out;
+  &:hover {
+    @apply -translate-y-0.5 border-primary/30 shadow-md;
+  }
+  &:active {
+    @apply translate-y-0 shadow-xs;
+  }
+}
+
+@utility focus-card {
+  /* Focus ring for block-level links wrapping cards. */
+  @apply rounded-lg outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background;
+}
 
 @layer base {
   /* Colour tokens are bare HSL triplets (`H S% L%`), used as
-     hsl(var(--x) / <alpha>) by tailwind.config.ts.
+     hsl(var(--x)) by the @theme above (opacity modifiers via color-mix).
 
      Text tokens (FX31): `text-primary` and `text-destructive` read
-     --primary-text / --destructive-text (tailwind.config.ts textColor),
+     --primary-text / --destructive-text (--text-color-* in the @theme),
      while bg-, border- and ring- utilities keep the fill tokens. A fill
      carries light text and wants a darker colour; text on the page
      background wants a lighter one in dark mode. One token could not do
@@ -133,60 +341,6 @@
   }
   ::-webkit-scrollbar-thumb:hover {
     @apply bg-muted-foreground/35;
-  }
-}
-
-@layer utilities {
-  /* Staggered entrance for grid/list children. Apply to the container.
-     `backwards` (UI01, see the fade-in-up animation in tailwind.config.ts):
-     hidden during the delay, and no transform left on the children after
-     the animation, which would make each card the containing block of any
-     `fixed` descendant. */
-  .stagger > * {
-    animation: fade-in-up 0.35s ease-out backwards;
-  }
-  .stagger > *:nth-child(1) {
-    animation-delay: 0ms;
-  }
-  .stagger > *:nth-child(2) {
-    animation-delay: 40ms;
-  }
-  .stagger > *:nth-child(3) {
-    animation-delay: 80ms;
-  }
-  .stagger > *:nth-child(4) {
-    animation-delay: 120ms;
-  }
-  .stagger > *:nth-child(5) {
-    animation-delay: 160ms;
-  }
-  .stagger > *:nth-child(6) {
-    animation-delay: 200ms;
-  }
-  .stagger > *:nth-child(7) {
-    animation-delay: 240ms;
-  }
-  .stagger > *:nth-child(8) {
-    animation-delay: 280ms;
-  }
-  .stagger > *:nth-child(n + 9) {
-    animation-delay: 320ms;
-  }
-
-  /* Interactive card affordance: lift on hover, ring on keyboard focus. */
-  .card-lift {
-    @apply transition-all duration-200 ease-out;
-  }
-  .card-lift:hover {
-    @apply -translate-y-0.5 border-primary/30 shadow-md;
-  }
-  .card-lift:active {
-    @apply translate-y-0 shadow-sm;
-  }
-
-  /* Focus ring for block-level links wrapping cards. */
-  .focus-card {
-    @apply rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background;
   }
 }
 

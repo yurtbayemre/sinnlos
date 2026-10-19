@@ -147,9 +147,9 @@ export function DocumentPreview({ editable }: { editable: DocumentEditable }) {
           <File className="h-5 w-5" aria-hidden="true" />
         </div>
         <div className="min-w-0 flex-1">
-          <div className="break-words font-medium">{editable.title}</div>
+          <div className="wrap-break-word font-medium">{editable.title}</div>
           {editable.description && (
-            <div className="mt-0.5 break-words text-sm text-muted-foreground">
+            <div className="mt-0.5 wrap-break-word text-sm text-muted-foreground">
               {editable.description}
             </div>
           )}
@@ -170,7 +170,7 @@ export function DocumentPreview({ editable }: { editable: DocumentEditable }) {
           <a
             href={href}
             download
-            className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+            className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border outline-hidden transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
             title={tCommon("download")}
             aria-label={tCommon("download")}
           >

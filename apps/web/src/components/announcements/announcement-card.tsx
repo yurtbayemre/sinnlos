@@ -52,7 +52,7 @@ export function AnnouncementCard(props: AnnouncementCardProps) {
 
   if (props.variant === "full") {
     return (
-      <Card className={props.highlighted ? "border-primary/30 bg-primary/[0.02]" : undefined}>
+      <Card className={props.highlighted ? "border-primary/30 bg-primary/2" : undefined}>
         <CardHeader>
           <div className="flex items-start justify-between gap-4">
             <div className="space-y-1">
@@ -101,7 +101,7 @@ export function AnnouncementCard(props: AnnouncementCardProps) {
       <Link href="/announcements" className="focus-card block lg:col-span-3">
         <Card
           interactive
-          className="group h-full overflow-hidden border-primary/20 bg-gradient-to-br from-primary/[0.06] via-background to-background transition hover:border-primary/40 hover:shadow-md"
+          className="group h-full overflow-hidden border-primary/20 bg-linear-to-br from-primary/6 via-background to-background transition hover:border-primary/40 hover:shadow-md"
         >
           <CardContent className="flex flex-col gap-4 p-6">
             <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-primary">
@@ -131,7 +131,7 @@ export function AnnouncementCard(props: AnnouncementCardProps) {
 
   return (
     <Link href="/announcements" className="focus-card block">
-      <Card interactive className="group transition hover:border-primary/30 hover:shadow-sm">
+      <Card interactive className="group transition hover:border-primary/30 hover:shadow-xs">
         <CardContent className="flex items-start gap-3 p-4">
           {item.pinned && (
             <div className="mt-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">

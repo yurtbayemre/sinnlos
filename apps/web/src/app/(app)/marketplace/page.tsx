@@ -103,7 +103,7 @@ export default async function MarketplacePage({
   const newAdButton = (
     <Link
       href="/marketplace/new"
-      className="inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-2 text-sm font-medium text-primary-foreground outline-none transition-colors hover:bg-primary/90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+      className="inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-2 text-sm font-medium text-primary-foreground outline-hidden transition-colors hover:bg-primary/90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
     >
       <Plus className="h-4 w-4" aria-hidden="true" />
       {t("newAd")}
@@ -174,7 +174,7 @@ export default async function MarketplacePage({
                       {expired && <RenewButton id={ad.id} />}
                       <Link
                         href={`/marketplace/${ad.id}/edit`}
-                        className="rounded-lg border px-3 py-1.5 text-xs font-medium outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                        className="rounded-lg border px-3 py-1.5 text-xs font-medium outline-hidden transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
                       >
                         {t("editAd")}
                       </Link>
@@ -198,7 +198,7 @@ export default async function MarketplacePage({
             return (
               <Link key={ad.id} href={`/marketplace/${ad.id}`} className="focus-card group">
                 <Card interactive className="card-lift h-full overflow-hidden">
-                  <div className="flex aspect-[4/3] items-center justify-center bg-muted/60">
+                  <div className="flex aspect-4/3 items-center justify-center bg-muted/60">
                     {thumb ? (
                       // eslint-disable-next-line @next/next/no-img-element
                       <img
@@ -251,7 +251,7 @@ function CategoryTab({ href, active, label }: { href: Route; active: boolean; la
       href={href}
       aria-current={active ? "page" : undefined}
       className={cn(
-        "rounded-full border px-3 py-1.5 text-xs font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
+        "rounded-full border px-3 py-1.5 text-xs font-medium outline-hidden transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
         active
           ? "border-primary/40 bg-primary/10 text-primary"
           : "text-muted-foreground hover:bg-muted hover:text-foreground",

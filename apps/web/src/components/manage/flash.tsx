@@ -64,7 +64,7 @@ function liveRegion(): HTMLElement {
   region.setAttribute("role", "status");
   region.setAttribute("aria-live", "polite");
   region.className =
-    "pointer-events-none fixed inset-x-4 bottom-[calc(6rem_+_env(safe-area-inset-bottom))] z-50 flex justify-center md:inset-x-auto md:bottom-6 md:right-6";
+    "pointer-events-none fixed inset-x-4 bottom-[calc(6rem+env(safe-area-inset-bottom))] z-50 flex justify-center md:inset-x-auto md:bottom-6 md:right-6";
   document.body.appendChild(region);
   return region;
 }
@@ -96,7 +96,7 @@ export function ManageFlashProvider({ children }: { children: ReactNode }) {
                 type="button"
                 onClick={() => setMessage(null)}
                 aria-label={t("dismiss")}
-                className="rounded-lg p-1 outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
+                className="rounded-lg p-1 outline-hidden transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
               >
                 <X className="h-4 w-4" aria-hidden="true" />
               </button>

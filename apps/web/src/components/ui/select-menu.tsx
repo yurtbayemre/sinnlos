@@ -121,7 +121,7 @@ export function SelectMenu({
           aria-describedby={ariaDescribedBy || undefined}
           aria-busy={busy || undefined}
           className={cn(
-            "group flex h-10 items-center justify-between gap-2 rounded-xl border bg-muted/40 px-3 text-sm outline-none transition-colors hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:opacity-50 aria-busy:opacity-50",
+            "group flex h-10 items-center justify-between gap-2 rounded-xl border bg-muted/40 px-3 text-sm outline-hidden transition-colors hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:opacity-50 aria-busy:opacity-50",
             buttonClassName,
           )}
         >
@@ -141,7 +141,7 @@ export function SelectMenu({
           sideOffset={8}
           collisionPadding={12}
           className={cn(
-            "z-50 max-h-[var(--radix-dropdown-menu-content-available-height)] w-max min-w-[var(--radix-dropdown-menu-trigger-width)] animate-scale-in overflow-y-auto rounded-xl border bg-background p-1 shadow-lg",
+            "z-50 max-h-(--radix-dropdown-menu-content-available-height) w-max min-w-(--radix-dropdown-menu-trigger-width) animate-scale-in overflow-y-auto rounded-xl border bg-background p-1 shadow-lg",
             panelClassName,
           )}
         >
@@ -151,7 +151,7 @@ export function SelectMenu({
                 key={o.value}
                 value={o.value}
                 textValue={o.label}
-                className="flex w-full cursor-default select-none items-center gap-2 rounded-md px-2.5 py-2 text-sm outline-none transition-colors data-[highlighted]:bg-accent data-[highlighted]:text-accent-foreground"
+                className="flex w-full cursor-default select-none items-center gap-2 rounded-md px-2.5 py-2 text-sm outline-hidden transition-colors data-highlighted:bg-accent data-highlighted:text-accent-foreground"
               >
                 <span className="flex-1 truncate text-left">{o.label}</span>
                 <DropdownMenu.ItemIndicator>
