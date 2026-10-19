@@ -18,7 +18,13 @@ import { pollByRef } from "./polls";
 import { cmsError, isRecord } from "./query";
 
 const now = () => new Date().toISOString();
-const nextId = (rows: readonly { id: number }[]) => Math.max(0, ...rows.map((row) => row.id)) + 1;
+/** The last id issued per collection: ids never come back after a delete (a stale tab cannot hit a newer row). */
+const issued = new WeakMap<object, number>();
+function nextId(rows: readonly { id: number }[]): number {
+  const id = Math.max(issued.get(rows) ?? 0, ...rows.map((row) => row.id)) + 1;
+  issued.set(rows, id);
+  return id;
+}
 const text = (value: unknown) =>
   typeof value === "string" && value.trim() !== "" ? value.trim() : null;
 
@@ -307,11 +313,10 @@ export const createAd: DemoHandler = ({ data, body }) => {
   return { data: row };
 };
 
-/** The demo user is a member: only their own ads. */
+/** The demo user is a member: only their own ads. Like the cms's ownership policy, a missing ad is refused too. */
 function ownAd(data: DemoData, id: string | undefined): Classified {
   const ad = data.classifieds.find((row) => String(row.id) === id);
-  if (!ad) throw cmsError(404, "Not Found");
-  if (ad.author?.id !== DEMO_USER_ID) throw cmsError(403, "Forbidden");
+  if (ad?.author?.id !== DEMO_USER_ID) throw cmsError(403, "Policy Failed");
   return ad;
 }
 

@@ -236,6 +236,14 @@ describe("DEMO_MODE writes change what the reads show", () => {
     expect((await api.classifieds.one(String(ad!.id))).data[0]?.title).toBe("Desk lamp (LED)");
     await expect(deleteClassified(ad!.id)).rejects.toMatchObject(redirectTo("/marketplace"));
     expect((await api.classifieds.mine(1)).data.some((row) => row.id === ad!.id)).toBe(false);
+    // A stale tab: the deleted ad is refused like the cms's ownership policy does, and its id is not reused.
+    expect(await deleteClassified(ad!.id)).toMatchObject({ ok: false, code: "forbidden" });
+    await expect(createClassified({}, form(fields))).rejects.toMatchObject(
+      redirectTo("/marketplace"),
+    );
+    const again = (await api.classifieds.mine(1)).data.find((row) => row.title === "Desk lamp");
+    expect(again!.id).toBeGreaterThan(ad!.id);
+    await expect(deleteClassified(again!.id)).rejects.toMatchObject(redirectTo("/marketplace"));
     expect(await deleteClassified(1)).toMatchObject({ ok: false, code: "forbidden" });
   });
 
