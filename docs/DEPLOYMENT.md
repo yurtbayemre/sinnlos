@@ -1388,7 +1388,19 @@ systemctl start docker
 >   or presses a button of the old build. Harmless: nothing was written,
 >   and the tab works again after a reload. They come in a burst right
 >   after the deploy and fade as people reload; the runbooks' error
->   filters print them, so count them as expected there.
+>   filters print them, so count them as expected there;
+> - now and then the cms prints a three-line `(node:N)
+>   TimeoutNegativeWarning: -6 is a negative number.` / `Timeout duration
+>   was set to 1.` / ``(Use `node --trace-warnings ...` …)``. Strapi's
+>   cron library (croner 10.0.1) computes the delay to the next run and
+>   gets a few milliseconds below zero when the event loop runs late;
+>   Node 24 then waits 1 ms instead and the task runs on time. Harmless;
+>   first seen in the v0.17.0 watch (2026-10-19), possible on every
+>   release with Node 24;
+> - the web may log `The Server Reference ID did not match the expected
+>   format`: a scanner posted to a page with a made-up Server Action id,
+>   and Next refused it before any code ran. Harmless; first seen
+>   2026-10-17 on Next 16.4.2.
 
 > **Deploying batch 16.1 (fixes from the batch 16 walkthrough)?** One
 > deploy of cms and web with `infra/deploy.sh`, **once batch 16 runs**
