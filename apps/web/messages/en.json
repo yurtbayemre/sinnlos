@@ -105,9 +105,11 @@
     "openAcksCount": "{count, plural, one {# mandatory announcement is waiting for your read confirmation.} other {# mandatory announcements are waiting for your read confirmation.}}",
     "openAcksAction": "Confirm now",
     "friendFallback": "colleague",
-    "trainingOpen": "{count, plural, one {# open mandatory course} other {# open mandatory courses}}",
+    "trainingOpen": "{count, plural, one {# open or expired mandatory course} other {# open or expired mandatory courses}}",
     "trainingOpenHint": "Please complete your mandatory training.",
-    "trainingOpenCta": "Go to training"
+    "trainingOpenCta": "Go to training",
+    "trainingDueSoon": "{count, plural, one {# mandatory course expires soon} other {# mandatory courses expire soon}}",
+    "trainingDueSoonHint": "You can renew them now."
   },
   "quickLinks": {
     "eyebrow": "Essential links",
@@ -566,7 +568,16 @@
     "quizSomeWrong": "{count, plural, one {# answer is not right yet} other {# answers are not right yet}} — adjust and check again.",
     "completeLocked": "Completion unlocks after passing the comprehension check.",
     "quizContentInvalid": "This quiz contains invalid content. Please contact the course author.",
-    "quizNotPassed": "Not all answers are correct (the questions may have changed). Answer them again."
+    "quizNotPassed": "Not all answers are correct (the questions may have changed). Answer them again.",
+    "statusDueSoon": "Expires on {date}",
+    "statusExpired": "Expired on {date}, please repeat it",
+    "statusExpiredNoDate": "Expired, please repeat it",
+    "nextRenewal": "Next renewal on {date}",
+    "repeatEvery": "{count, plural, one {Repeat every month} other {Repeat every # months}}",
+    "renewCourse": "Renew now",
+    "lessonRenew": "renew",
+    "renewSoon": "Your completion expires on {date}. You can complete this lesson again now.",
+    "renewOverdue": "Your completion expired on {date}. Please complete this lesson again."
   },
   "trainingReport": {
     "title": "Training report",

@@ -1,12 +1,13 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, ArrowRight, CheckCircle2, Circle } from "lucide-react";
-import { getTranslations } from "next-intl/server";
+import { ArrowLeft, ArrowRight, CheckCircle2, Circle, RotateCcw } from "lucide-react";
+import { getLocale, getTranslations } from "next-intl/server";
 
 import { Markdown } from "@/components/markdown";
 import { mediaUrl } from "@/lib/config";
 import { SectionUnavailablePage } from "@/components/section-unavailable";
 import { Card, CardContent } from "@/components/ui/card";
+import { CourseStatus } from "@/components/training/course-status";
 import { isReadDenied } from "@/lib/roles";
 import { tryFetch } from "@/lib/safe-fetch";
 import { loadCourse } from "@/lib/loaders/training";
@@ -43,9 +44,10 @@ export default async function CoursePage({ params }: Params) {
     return <SectionUnavailablePage title={t("title")} />;
   }
 
-  const page = await loadCourse(slug);
+  const [page, locale] = await Promise.all([loadCourse(slug), getLocale()]);
   if (!page) notFound();
-  const { course, lessons, total, completed: doneCount, done, statusUnknown, firstOpen } = page;
+  const { course, lessons, total, completed, status, dueKey, statusUnknown, firstOpen } = page;
+  const renewing = status === "dueSoon" || status === "expired";
 
   const coverImage = mediaUrl(course.coverImage?.url);
 
@@ -77,25 +79,27 @@ export default async function CoursePage({ params }: Params) {
             {course.description}
           </Markdown>
         )}
+        {course.validityMonths ? (
+          <p className="mt-2 text-sm text-muted-foreground">
+            {t("repeatEvery", { count: course.validityMonths })}
+          </p>
+        ) : null}
         <div className="mt-3 flex flex-wrap items-center gap-4 text-sm">
-          {statusUnknown ? (
-            <span className="text-muted-foreground">–</span>
-          ) : done ? (
-            <span className="inline-flex items-center gap-1.5 font-medium text-emerald-700 dark:text-emerald-400">
-              <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
-              {t("statusDone")}
-            </span>
-          ) : (
-            <span className="text-muted-foreground">
-              {t("statusProgress", { done: doneCount, total })}
-            </span>
-          )}
+          <CourseStatus
+            t={t}
+            locale={locale}
+            status={status}
+            dueKey={dueKey}
+            completed={completed}
+            total={total}
+            unknown={statusUnknown}
+          />
           {firstOpen?.documentId && (
             <Link
               href={`/training/${course.slug}/${firstOpen.documentId}`}
               className="inline-flex items-center gap-1.5 rounded-xl bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground outline-hidden transition-colors hover:bg-primary/90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
             >
-              {doneCount > 0 ? t("continueCourse") : t("startCourse")}
+              {renewing ? t("renewCourse") : completed > 0 ? t("continueCourse") : t("startCourse")}
               <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
             </Link>
           )}
@@ -107,14 +111,19 @@ export default async function CoursePage({ params }: Params) {
           {lessons.length === 0 && (
             <div className="px-4 py-6 text-sm text-muted-foreground">{t("noLessons")}</div>
           )}
-          {lessons.map(({ lesson, done: isDone }, index) => {
+          {lessons.map(({ lesson, done: isDone, renew }, index) => {
             return (
               <Link
                 key={lesson.id}
                 href={`/training/${course.slug}/${lesson.documentId}`}
                 className="flex items-center gap-3 px-4 py-3 transition-colors hover:bg-muted/50"
               >
-                {isDone ? (
+                {renew ? (
+                  <RotateCcw
+                    className="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400"
+                    aria-hidden="true"
+                  />
+                ) : isDone ? (
                   <CheckCircle2
                     className="h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400"
                     aria-hidden="true"
@@ -125,6 +134,11 @@ export default async function CoursePage({ params }: Params) {
                 <span className="text-sm">
                   <span className="mr-2 text-muted-foreground">{index + 1}.</span>
                   {lesson.title}
+                  {renew && (
+                    <span className="ml-2 text-xs text-amber-700 dark:text-amber-400">
+                      {t("lessonRenew")}
+                    </span>
+                  )}
                 </span>
               </Link>
             );

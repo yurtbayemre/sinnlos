@@ -113,6 +113,9 @@ const course: CourseEditable = {
   description: null,
   mandatory: false,
   completionMode: "exam",
+  validityMonths: null,
+  departments: [],
+  needsRetarget: false,
   coverImage: null,
   publishAt: null,
   scheduleError: null,
@@ -140,7 +143,14 @@ function render(kind: "lesson" | "course", fresh: LessonEditable = lesson) {
           access: { ...access, area: "lessons" },
           timeZone: "Europe/Berlin",
         })
-      : TrainingCourseEditor({ editable: course, access, timeZone: "Europe/Berlin" });
+      : TrainingCourseEditor({
+          editable: course,
+          access,
+          timeZone: "Europe/Berlin",
+          departments: [],
+          optionsFailed: false,
+          optionsTruncated: false,
+        });
   const all = [...elements(tree)];
   return {
     quiz: all.find((n) => n.type === QuizBuilder)?.props as unknown as Parameters<

@@ -1,11 +1,15 @@
 import type { CourseEditable, EditableMedia, LessonEditable, QuizQuestion } from "@sinnlos/domain";
-import { coerceDocumentValues } from "./values";
+import { coerceDocumentValues, idList } from "./values";
 
 export interface CourseValues {
   title: string;
   description: string;
   mandatory: boolean;
   completionMode: string;
+  /** Months as typed; empty = once is enough. */
+  validityMonths: string;
+  /** Department documentIds; empty = every staff member. */
+  departments: string[];
   coverImage: EditableMedia | null;
 }
 export interface LessonValues {
@@ -21,6 +25,8 @@ export const emptyCourseValues = (): CourseValues => ({
   description: "",
   mandatory: false,
   completionMode: "confirm",
+  validityMonths: "",
+  departments: [],
   coverImage: null,
 });
 export const emptyLessonValues = (course: string): LessonValues => ({
@@ -36,6 +42,8 @@ export const courseValuesFromEditable = (item: CourseEditable): CourseValues => 
   description: item.description ?? "",
   mandatory: item.mandatory,
   completionMode: item.completionMode,
+  validityMonths: item.validityMonths === null ? "" : String(item.validityMonths),
+  departments: [...item.departments],
   coverImage: item.coverImage,
 });
 export const lessonValuesFromEditable = (item: LessonEditable): LessonValues => ({
@@ -59,6 +67,8 @@ export function coerceCourseValues(raw: unknown): CourseValues {
     description: str(r.description),
     mandatory: r.mandatory === true,
     completionMode: str(r.completionMode),
+    validityMonths: str(r.validityMonths).slice(0, 10),
+    departments: idList(r.departments),
     coverImage: coerceDocumentValues({ file: r.coverImage }).file,
   };
 }

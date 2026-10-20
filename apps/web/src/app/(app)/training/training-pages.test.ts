@@ -11,7 +11,10 @@ vi.mock("@/lib/viewer", () => ({
   getViewer: async () => ({ id: 1, role: "member", department: null }),
 }));
 vi.mock("@/lib/training", () => ({ fetchCourseBySlug: vi.fn() }));
-vi.mock("next-intl/server", () => ({ getTranslations: async () => (key: string) => key }));
+vi.mock("next-intl/server", () => ({
+  getTranslations: async () => (key: string) => key,
+  getLocale: async () => "de",
+}));
 const { default: CoursePageComponent } = await import("./[slug]/page");
 const { default: OverviewPage } = await import("./page");
 const course: CoursePage["course"] = {
@@ -32,13 +35,16 @@ const detail: CoursePage = {
   total: 0,
   completed: 0,
   done: false,
+  status: "open",
+  dueKey: null,
   statusUnknown: false,
   firstOpen: null,
 };
 const overview: TrainingOverview = {
-  courses: [{ course, total: 0, completed: 0, done: false }],
+  courses: [{ course, total: 0, completed: 0, done: false, status: "open", dueKey: null }],
   statusUnknown: false,
   openMandatory: 0,
+  dueSoonMandatory: 0,
   empty: false,
   failed: false,
   truncated: false,
@@ -46,6 +52,60 @@ const overview: TrainingOverview = {
 beforeEach(() => {
   courseLoad.mockReset().mockResolvedValue(detail);
   overviewLoad.mockReset().mockResolvedValue(overview);
+});
+
+describe("recurring course status (v0.20)", () => {
+  it("shows expired, due soon and the next renewal with the due day", async () => {
+    overviewLoad.mockResolvedValue({
+      ...overview,
+      courses: [
+        { course, total: 1, completed: 0, done: false, status: "expired", dueKey: "2026-10-01" },
+        {
+          course: { ...course, id: 2 },
+          total: 1,
+          completed: 1,
+          done: true,
+          status: "dueSoon",
+          dueKey: "2026-11-01",
+        },
+        {
+          course: { ...course, id: 3 },
+          total: 1,
+          completed: 1,
+          done: true,
+          status: "done",
+          dueKey: "2027-10-01",
+        },
+      ],
+    });
+    const html = render(await OverviewPage());
+    for (const key of ["statusExpired", "statusDueSoon", "nextRenewal", "statusDone"]) {
+      expect(html).toContain(key);
+    }
+  });
+  it("offers renewal on the course page and marks the lessons to renew", async () => {
+    courseLoad.mockResolvedValue({
+      ...detail,
+      course: { ...course, validityMonths: 12 },
+      lessons: [
+        {
+          lesson: { id: 5, documentId: "l".repeat(24), title: "L1", order: 0 },
+          done: true,
+          renew: true,
+        },
+      ],
+      total: 1,
+      completed: 1,
+      done: true,
+      status: "dueSoon",
+      dueKey: "2026-11-01",
+      firstOpen: { id: 5, documentId: "l".repeat(24), title: "L1", order: 0 },
+    });
+    const html = render(await CoursePageComponent({ params: Promise.resolve({ slug: "course" }) }));
+    expect(html).toContain("repeatEvery");
+    expect(html).toContain("renewCourse");
+    expect(html).toContain("lessonRenew");
+  });
 });
 
 describe("published training presentation", () => {

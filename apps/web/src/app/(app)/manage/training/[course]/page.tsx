@@ -8,6 +8,7 @@ import { ManagePageHeader } from "@/components/manage/page-parts";
 import { areaGate } from "@/lib/manage/page-gate";
 import { lessonListPath } from "@/lib/manage/training-paths";
 import { loadCourseEditable } from "@/lib/loaders/manage/training";
+import { loadTargetingOptions } from "@/lib/loaders/manage/options";
 import { appTimeZone } from "@/lib/app-time-zone";
 
 export async function generateMetadata() {
@@ -18,7 +19,10 @@ export default async function EditCoursePage({ params }: { params: Promise<{ cou
   const { access } = await areaGate("courses", "edit");
   const { course } = await params;
   const t = await getTranslations("manage.training");
-  const load = await loadCourseEditable(course);
+  const [load, options] = await Promise.all([
+    loadCourseEditable(course),
+    loadTargetingOptions({ departments: true, teams: false }),
+  ]);
   if (load.state === "notFound") notFound();
   const header = (
     <ManagePageHeader
@@ -45,6 +49,9 @@ export default async function EditCoursePage({ params }: { params: Promise<{ cou
         editable={load.editable}
         access={access}
         timeZone={appTimeZone()}
+        departments={options.departments}
+        optionsFailed={options.failed}
+        optionsTruncated={options.truncated}
       />
       <PreviewSection>
         <CoursePreview editable={load.editable} />

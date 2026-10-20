@@ -356,7 +356,7 @@ const strList = (value: unknown): string[] =>
     : [];
 
 /** A list of ids: trimmed, non-empty, unique, in the order given. */
-const idList = (value: unknown): string[] => [
+export const idList = (value: unknown): string[] => [
   ...new Set(
     strList(value)
       .map((entry) => entry.trim())

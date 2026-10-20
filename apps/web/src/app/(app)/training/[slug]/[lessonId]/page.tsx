@@ -2,14 +2,16 @@ import Link from "next/link";
 import type { Route } from "next";
 import { notFound } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
-import { getFormatter, getTranslations } from "next-intl/server";
+import { getFormatter, getLocale, getTranslations } from "next-intl/server";
+import { lessonReceiptState, zonedDateKey } from "@sinnlos/domain";
 
 import { Markdown } from "@/components/markdown";
 import { LessonCompletion } from "@/components/training/lesson-completion";
 import { LessonVideo } from "@/components/training/lesson-video";
 import { FetchErrorBanner } from "@/components/fetch-error";
 import { SectionUnavailablePage } from "@/components/section-unavailable";
-import { formatInstant, LONG_DAY } from "@/lib/date-format";
+import { appTimeZone } from "@/lib/app-time-zone";
+import { formatDateOnly, formatInstant, LONG_DAY } from "@/lib/date-format";
 import { isReadDenied } from "@/lib/roles";
 import { tryFetch } from "@/lib/safe-fetch";
 import { fetchCourseBySlug, fetchLessonByDocumentId, fetchMyProgress } from "@/lib/training";
@@ -66,9 +68,21 @@ export default async function LessonPage({
   const lessons = sortLessons(course.lessons ?? []);
   const index = lessons.findIndex((l) => l.documentId === lesson.documentId);
   const next = index >= 0 ? lessons[index + 1] : undefined;
-  const completedAtIso = progressResult.data?.completed.get(lessonId) ?? null;
+  const completed = progressResult.data?.completed;
+  const completedAtIso = completed?.get(lessonId) ?? null;
+  const timeZone = appTimeZone();
+  const receipt = lessonReceiptState(
+    completedAtIso,
+    completed?.has(lessonId) ?? false,
+    course.validityMonths,
+    zonedDateKey(new Date(), timeZone),
+    timeZone,
+  );
+  // Due within the renewal window or overdue (v0.20): complete it again.
+  const renew = (completed?.has(lessonId) ?? false) && receipt.mayComplete;
   // An instant, shown as its day in APP_TIME_ZONE (next-intl's formatter).
-  const completedAtLabel = formatInstant(format, completedAtIso, LONG_DAY);
+  const completedAtLabel = renew ? null : formatInstant(format, completedAtIso, LONG_DAY);
+  const dueLabel = formatDateOnly(await getLocale(), receipt.dueKey, LONG_DAY);
 
   return (
     <article className="mx-auto max-w-3xl space-y-6">
@@ -92,9 +106,22 @@ export default async function LessonPage({
 
       {lesson.body && <Markdown headingAnchors>{lesson.body}</Markdown>}
 
+      {renew && dueLabel && (
+        <p className="rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm">
+          {receipt.counts
+            ? t("renewSoon", { date: dueLabel })
+            : t("renewOverdue", { date: dueLabel })}
+        </p>
+      )}
+
       {/* A refreshed question set or mode must clear feedback from the previous render. */}
       <LessonCompletion
-        key={JSON.stringify([lesson.documentId, lesson.quiz, lesson.course.completionMode])}
+        key={JSON.stringify([
+          lesson.documentId,
+          lesson.quiz,
+          lesson.course.completionMode,
+          completedAtIso,
+        ])}
         quiz={lesson.quiz}
         completionMode={lesson.course.completionMode}
         lessonDocumentId={lessonId}

@@ -49,7 +49,7 @@ describe("fetchCourseProgress", () => {
 });
 
 describe("fetchMyProgress", () => {
-  it("reads the caller's receipts sorted by id and keeps the oldest per lesson", async () => {
+  it("reads the caller's receipts sorted by id and keeps the newest per lesson", async () => {
     strapiMock.mockResolvedValueOnce(
       page(
         [
@@ -63,8 +63,9 @@ describe("fetchMyProgress", () => {
     );
     const { completed, truncated } = await fetchMyProgress();
     expect(truncated).toBe(false);
+    // A renewed lesson (v0.20) has several receipts: the newest counts.
     expect([...completed]).toEqual([
-      ["a", "2026-09-01T10:00:00.000Z"],
+      ["a", "2026-09-02T10:00:00.000Z"],
       ["b", null],
     ]);
     expect(strapiMock.mock.calls[0]).toEqual([

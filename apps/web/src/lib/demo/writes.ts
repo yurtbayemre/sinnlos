@@ -8,9 +8,13 @@ import {
   isCommentTargetType,
   isPollClosed,
   isQuizSelectionList,
+  lessonReceiptState,
+  newestReceipts,
   quizAnswersPass,
+  zonedDateKey,
   type QuizCheckResponse,
 } from "@sinnlos/domain";
+import { appTimeZone } from "@/lib/app-time-zone";
 import type { Classified, EmojiType, KudosValue, RsvpStatus } from "@/lib/types";
 import type { DemoData, DemoHandler } from "./data";
 import { DEMO_USER_ID } from "./people";
@@ -236,7 +240,7 @@ export const updateMe: DemoHandler = ({ data, body }) => {
   return { data: data.me };
 };
 
-/** The cms's order (lesson-progress.ts): target, quiz grade, one receipt per lesson. */
+/** The cms's order (lesson-progress.ts): target, quiz grade, one receipt per lesson while it counts. */
 export const completeLesson: DemoHandler = ({ data, body }) => {
   const { targetDocumentId, answers } = payload(body);
   const lesson = data.lessonRows.find((row) => row.documentId === targetDocumentId);
@@ -244,8 +248,18 @@ export const completeLesson: DemoHandler = ({ data, body }) => {
   if (!quizAnswersPass(data.quizzes[lesson.documentId] ?? [], answers)) {
     throw cmsError(400, "Quiz not passed");
   }
-  if (data.lessonProgress.some((row) => row.targetDocumentId === lesson.documentId)) {
-    throw cmsError(400, "Already completed");
+  const own = data.lessonProgress.filter((row) => row.targetDocumentId === lesson.documentId);
+  if (own.length > 0) {
+    const course = data.courses.find((c) => c.documentId === lesson.course?.documentId);
+    const zone = appTimeZone();
+    const state = lessonReceiptState(
+      newestReceipts(own).get(lesson.documentId),
+      true,
+      course?.validityMonths,
+      zonedDateKey(new Date(), zone),
+      zone,
+    );
+    if (!state.mayComplete) throw cmsError(400, "Already completed");
   }
   const row = {
     id: nextId(data.lessonProgress),

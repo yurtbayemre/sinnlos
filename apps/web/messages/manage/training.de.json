@@ -48,6 +48,14 @@
     "videoUrl": {
       "label": "YouTube-Video",
       "hint": "Optionaler HTTPS-Link zu einem YouTube-Video."
+    },
+    "validityMonths": {
+      "label": "Gültigkeit in Monaten",
+      "hint": "Nach so vielen Monaten muss der Kurs wiederholt werden, z. B. 12 für eine jährliche Unterweisung. Leer: einmal reicht."
+    },
+    "departments": {
+      "label": "Abteilungen",
+      "hint": "Nur diese Abteilungen sehen den Kurs und müssen ihn machen. Keine Auswahl: alle Mitarbeiter."
     }
   },
   "modes": {
@@ -79,5 +87,8 @@
     "optionRemoved": "Antwort entfernt.",
     "empty": "Ohne Quizfragen markieren Leser die Lektion manuell als abgeschlossen.",
     "correct": "richtig"
+  },
+  "sections": {
+    "audience": "Zielgruppe"
   }
 }

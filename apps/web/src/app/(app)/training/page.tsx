@@ -1,10 +1,11 @@
 import Link from "next/link";
-import { CheckCircle2, GraduationCap } from "lucide-react";
-import { getTranslations } from "next-intl/server";
+import { GraduationCap } from "lucide-react";
+import { getLocale, getTranslations } from "next-intl/server";
 
 import { EmptyState } from "@/components/empty-state";
 import { FetchErrorBanner } from "@/components/fetch-error";
 import { PageHeader } from "@/components/page-header";
+import { CourseStatus } from "@/components/training/course-status";
 import { SectionUnavailablePage } from "@/components/section-unavailable";
 import { Card, CardContent } from "@/components/ui/card";
 import { mediaUrl } from "@/lib/config";
@@ -38,7 +39,7 @@ export default async function TrainingPage() {
       />
     );
   }
-  const overview = await loadTrainingOverview();
+  const [overview, locale] = await Promise.all([loadTrainingOverview(), getLocale()]);
 
   return (
     <div className="space-y-8">
@@ -50,7 +51,7 @@ export default async function TrainingPage() {
         <EmptyState icon={GraduationCap} title={t("emptyTitle")} hint={t("emptyHint")} />
       ) : (
         <div className="stagger grid gap-4 md:grid-cols-2">
-          {overview.courses.map(({ course, total, completed: doneCount, done }) => {
+          {overview.courses.map(({ course, total, completed, status, dueKey }) => {
             const coverImage = mediaUrl(
               course.coverImage?.formats?.small?.url ?? course.coverImage?.url,
             );
@@ -84,18 +85,15 @@ export default async function TrainingPage() {
                       <span className="text-muted-foreground">
                         {t("lessonCount", { count: total })}
                       </span>
-                      {overview.statusUnknown ? (
-                        <span className="text-muted-foreground">–</span>
-                      ) : done ? (
-                        <span className="inline-flex items-center gap-1.5 font-medium text-emerald-700 dark:text-emerald-400">
-                          <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
-                          {t("statusDone")}
-                        </span>
-                      ) : (
-                        <span className="text-muted-foreground">
-                          {t("statusProgress", { done: doneCount, total })}
-                        </span>
-                      )}
+                      <CourseStatus
+                        t={t}
+                        locale={locale}
+                        status={status}
+                        dueKey={dueKey}
+                        completed={completed}
+                        total={total}
+                        unknown={overview.statusUnknown}
+                      />
                     </div>
                   </CardContent>
                 </Card>

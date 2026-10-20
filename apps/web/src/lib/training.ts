@@ -1,3 +1,5 @@
+import { newestReceipts } from "@sinnlos/domain";
+
 import {
   courseBySlug,
   courseProgressPage,
@@ -64,10 +66,10 @@ export function fetchCourseProgress(
 /**
  * The caller's own completion receipts (the lesson-progress-visibility
  * policy scopes the list server-side). Returns a documentId →
- * completedAt map — the Map dedupes accidental duplicate rows (accepted
- * check-then-insert race, the oldest row wins: the walk is sorted by id,
- * which also keeps the pages stable on Postgres) and every consumer
- * derives its Set from the keys.
+ * completedAt map of the NEWEST receipt per lesson: a renewed lesson
+ * (v0.20) has several receipts, and accidental duplicates (accepted
+ * check-then-insert race) collapse too. The walk is sorted by id, which
+ * keeps the pages stable on Postgres.
  */
 export async function fetchMyProgress(): Promise<{
   completed: Map<string, string | null>;
@@ -77,11 +79,5 @@ export async function fetchMyProgress(): Promise<{
     maxPages: 20,
     label: "lesson-progress",
   });
-  const completed = new Map<string, string | null>();
-  for (const row of result.data) {
-    if (typeof row.targetDocumentId === "string" && !completed.has(row.targetDocumentId)) {
-      completed.set(row.targetDocumentId, row.completedAt ?? null);
-    }
-  }
-  return { completed, truncated: result.truncated };
+  return { completed: newestReceipts(result.data), truncated: result.truncated };
 }

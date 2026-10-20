@@ -105,9 +105,11 @@
     "openAcksCount": "{count, plural, one {# Pflichtmeldung wartet auf deine Lesebestätigung.} other {# Pflichtmeldungen warten auf deine Lesebestätigung.}}",
     "openAcksAction": "Jetzt bestätigen",
     "friendFallback": "Kolleg:in",
-    "trainingOpen": "{count, plural, one {# offene Pflichtschulung} other {# offene Pflichtschulungen}}",
+    "trainingOpen": "{count, plural, one {# offene oder abgelaufene Pflichtschulung} other {# offene oder abgelaufene Pflichtschulungen}}",
     "trainingOpenHint": "Bitte schließe deine Pflichtschulungen ab.",
-    "trainingOpenCta": "Zu den Schulungen"
+    "trainingOpenCta": "Zu den Schulungen",
+    "trainingDueSoon": "{count, plural, one {# Pflichtschulung läuft bald ab} other {# Pflichtschulungen laufen bald ab}}",
+    "trainingDueSoonHint": "Du kannst sie schon jetzt erneuern."
   },
   "quickLinks": {
     "eyebrow": "Wichtige Links",
@@ -566,7 +568,16 @@
     "quizSomeWrong": "{count, plural, one {# Antwort stimmt noch nicht} other {# Antworten stimmen noch nicht}} — korrigiere und prüfe erneut.",
     "completeLocked": "Der Abschluss wird nach bestandenen Verständnisfragen freigeschaltet.",
     "quizContentInvalid": "Der Inhalt dieses Quiz ist fehlerhaft. Bitte informieren Sie die Kursverantwortlichen.",
-    "quizNotPassed": "Nicht alle Antworten sind richtig (vielleicht haben sich die Fragen geändert). Beantworte sie erneut."
+    "quizNotPassed": "Nicht alle Antworten sind richtig (vielleicht haben sich die Fragen geändert). Beantworte sie erneut.",
+    "statusDueSoon": "Läuft am {date} ab",
+    "statusExpired": "Abgelaufen am {date}, bitte wiederholen",
+    "statusExpiredNoDate": "Abgelaufen, bitte wiederholen",
+    "nextRenewal": "Nächste Wiederholung am {date}",
+    "repeatEvery": "{count, plural, one {Jeden Monat zu wiederholen} other {Alle # Monate zu wiederholen}}",
+    "renewCourse": "Jetzt erneuern",
+    "lessonRenew": "erneuern",
+    "renewSoon": "Dein Abschluss läuft am {date} ab. Du kannst die Lektion jetzt erneut abschließen.",
+    "renewOverdue": "Dein Abschluss ist am {date} abgelaufen. Bitte schließe die Lektion erneut ab."
   },
   "trainingReport": {
     "title": "Schulungs-Report",

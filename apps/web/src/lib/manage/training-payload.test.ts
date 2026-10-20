@@ -25,6 +25,8 @@ describe("training payloads", () => {
         description: null,
         mandatory: false,
         completionMode: "confirm",
+        validityMonths: null,
+        departments: [],
         coverImage: null,
       },
     });
@@ -53,6 +55,53 @@ describe("training payloads", () => {
     expect(
       buildCoursePayload({ ...initial, coverImage: null }, initial, { ...ctx, mode: "update" }),
     ).toEqual({ ok: true, data: { coverImage: null } });
+  });
+  it("sends the validity in whole months 1–120, empty as once", () => {
+    const initial = { ...emptyCourseValues(), title: "Course" };
+    const update = { ...ctx, mode: "update" as const };
+    expect(buildCoursePayload({ ...initial, validityMonths: " 12 " }, initial, update)).toEqual({
+      ok: true,
+      data: { validityMonths: 12 },
+    });
+    expect(
+      buildCoursePayload(
+        { ...initial, validityMonths: "" },
+        { ...initial, validityMonths: "6" },
+        update,
+      ),
+    ).toEqual({ ok: true, data: { validityMonths: null } });
+    for (const typed of ["0", "121", "1.5", "-3", "zwölf"]) {
+      expect(
+        buildCoursePayload({ ...initial, validityMonths: typed }, initial, update),
+        typed,
+      ).toEqual({ ok: false, fields: { validityMonths: "invalid" } });
+    }
+  });
+  it("sends departments only when changed, and never widens a course that needs re-targeting", () => {
+    const office = "o".repeat(24);
+    const initial = { ...emptyCourseValues(), title: "Course", departments: [office] };
+    const update = { ...ctx, mode: "update" as const };
+    expect(buildCoursePayload({ ...initial, title: "New" }, initial, update)).toEqual({
+      ok: true,
+      data: { title: "New" },
+    });
+    expect(buildCoursePayload({ ...initial, departments: [] }, initial, update)).toEqual({
+      ok: true,
+      data: { departments: [] },
+    });
+    expect(
+      buildCoursePayload({ ...initial, departments: [] }, initial, {
+        ...update,
+        needsRetarget: true,
+      }),
+    ).toEqual({ ok: false, fields: { departments: "confirmAudience" } });
+    expect(
+      buildCoursePayload({ ...initial, departments: [] }, initial, {
+        ...update,
+        needsRetarget: true,
+        retarget: true,
+      }),
+    ).toEqual({ ok: true, data: { departments: [] } });
   });
   it("creates a lesson in its selected course, with no reparent payload on update", () => {
     expect(buildLessonPayload(lesson, null, ctx)).toMatchObject({
