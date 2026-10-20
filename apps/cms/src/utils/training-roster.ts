@@ -41,11 +41,45 @@ export interface RosterUser {
   departmentName: string | null;
 }
 
-const isRecord = (value: unknown): value is Record<string, any> =>
+/** The row shapes the queries below select (db.query rows, read defensively). */
+interface CourseRow {
+  id: number;
+  documentId: string;
+  title?: string | null;
+  slug?: string | null;
+  mandatory?: boolean | null;
+  validityMonths?: number | null;
+  audience?: string | null;
+  departments?: { id: number; name?: string | null }[] | null;
+  lessons?:
+    | {
+        id: number;
+        documentId?: string | null;
+        title?: string | null;
+        order?: number | null;
+        publishedAt?: unknown;
+      }[]
+    | null;
+}
+interface UserRow {
+  id: number;
+  username?: string | null;
+  displayName?: string | null;
+  email?: string | null;
+  role?: { type?: string | null } | null;
+  department?: { id?: number; name?: string | null } | null;
+}
+interface ProgressRow {
+  targetDocumentId: string;
+  completedAt?: unknown;
+  user?: { id?: number } | null;
+}
+
+const isRecord = (value: unknown): value is object =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
-const rows = (value: unknown): Record<string, any>[] =>
-  Array.isArray(value) ? value.filter(isRecord) : [];
+const rows = <T>(value: unknown): T[] =>
+  Array.isArray(value) ? (value.filter(isRecord) as T[]) : [];
 
 /** Instants come back as Date or ISO string depending on the engine. */
 export const toIso = (value: unknown): string | null =>
@@ -68,22 +102,27 @@ export async function loadRosterCourses(
     },
     orderBy: [{ title: "asc" }, { id: "asc" }],
   });
-  return rows(found).map((course) => ({
+  return rows<CourseRow>(found).map((course) => ({
     id: course.id,
     documentId: course.documentId,
     title: course.title ?? "",
     slug: course.slug ?? "",
     mandatory: course.mandatory !== false,
     validityMonths:
-      Number.isInteger(course.validityMonths) && course.validityMonths > 0
+      typeof course.validityMonths === "number" &&
+      Number.isInteger(course.validityMonths) &&
+      course.validityMonths > 0
         ? course.validityMonths
         : null,
     audience: course.audience ?? null,
-    departments: rows(course.departments).map((d) => ({ id: d.id, name: d.name ?? "" })),
-    lessons: rows(course.lessons)
+    departments: rows<{ id: number; name?: string | null }>(course.departments).map((d) => ({
+      id: d.id,
+      name: d.name ?? "",
+    })),
+    lessons: rows<NonNullable<CourseRow["lessons"]>[number]>(course.lessons)
       .filter((lesson) => lesson.publishedAt != null && typeof lesson.documentId === "string")
       .sort((a, b) => (a.order ?? 0) - (b.order ?? 0) || a.id - b.id)
-      .map((lesson) => ({ documentId: lesson.documentId, title: lesson.title ?? "" })),
+      .map((lesson) => ({ documentId: lesson.documentId as string, title: lesson.title ?? "" })),
   }));
 }
 
@@ -98,8 +137,8 @@ export async function loadLearners(strapi: DbStrapi, departmentId?: number): Pro
     orderBy: [{ displayName: "asc" }, { id: "asc" }],
   });
   const learner = new Set<string>(TRAINING_LEARNER_ROLES);
-  return rows(found)
-    .filter((user) => learner.has(user.role?.type))
+  return rows<UserRow>(found)
+    .filter((user) => learner.has(user.role?.type ?? ""))
     .map((user) => ({
       id: user.id,
       name: user.displayName || user.username || `#${user.id}`,
@@ -136,7 +175,7 @@ export async function loadReceipts(
         populate: { user: { select: ["id"] } },
         orderBy: [{ id: "asc" }],
       });
-      for (const row of rows(found)) {
+      for (const row of rows<ProgressRow>(found)) {
         if (typeof row.user?.id !== "number") continue;
         out.push({
           userId: row.user.id,

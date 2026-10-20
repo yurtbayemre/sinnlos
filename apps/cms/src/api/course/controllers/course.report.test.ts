@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { TrainingReportCourseResponse, TrainingReportSummaryResponse } from "@sinnlos/domain";
 
 import controller from "./course";
 import * as roster from "../../../utils/training-roster";
@@ -90,10 +91,10 @@ beforeEach(() => {
 describe("course report: who reads what", () => {
   it("gives admin_role every course with every learner it is for", async () => {
     const { actions, ctx } = await setup("admin_role");
-    const body = (await actions.report(ctx)) as any;
+    const body = (await actions.report(ctx)) as TrainingReportSummaryResponse;
     expect(ctx.set).toHaveBeenCalledWith("Cache-Control", "private, no-store");
     expect(body.data.scope).toBe("all");
-    expect(body.data.courses.map((c: any) => [c.title, c.counts.total])).toEqual([
+    expect(body.data.courses.map((c) => [c.title, c.counts.total])).toEqual([
       ["Brandschutz", 2],
       ["Stapler", 1],
     ]);
@@ -103,17 +104,17 @@ describe("course report: who reads what", () => {
   it("gives a head or lead their department's learners and the courses meant for it", async () => {
     for (const role of ["department_head", "team_lead"]) {
       const office = await setup(role, { id: BUERO, name: "Büro" });
-      const body = (await office.actions.report(office.ctx)) as any;
+      const body = (await office.actions.report(office.ctx)) as TrainingReportSummaryResponse;
       expect(body.data).toMatchObject({ scope: "department", department: "Büro" });
-      expect(body.data.courses.map((c: any) => [c.title, c.counts.total])).toEqual([
-        ["Brandschutz", 1],
-      ]);
+      expect(body.data.courses.map((c) => [c.title, c.counts.total])).toEqual([["Brandschutz", 1]]);
       expect(roster.loadLearners).toHaveBeenLastCalledWith(expect.anything(), BUERO);
 
       const warehouse = await setup(role, { id: LAGER, name: "Lager" });
       warehouse.ctx.params.id = LAGER_COURSE.documentId;
-      const course = (await warehouse.actions.reportCourse(warehouse.ctx)) as any;
-      expect(course.data.people.map((p: any) => p.name)).toEqual(["Ana"]);
+      const course = (await warehouse.actions.reportCourse(
+        warehouse.ctx,
+      )) as TrainingReportCourseResponse;
+      expect(course.data.people.map((p) => p.name)).toEqual(["Ana"]);
       expect(course.data.lessons).toEqual(LAGER_COURSE.lessons);
     }
   });
