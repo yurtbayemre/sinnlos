@@ -24,11 +24,7 @@
  * Changing a list changes who is locked, scheduled or audited: the pins in
  * authoring-uids.test.ts name every entry on purpose.
  */
-import {
-  DEPARTMENT_AUTHOR_ROLES,
-  DUTY_PLAN_AUTHOR_ROLES,
-  type RoleType,
-} from "../bootstrap/roles";
+import { DEPARTMENT_AUTHOR_ROLES, DUTY_PLAN_AUTHOR_ROLES, type RoleType } from "../bootstrap/roles";
 
 export const ANNOUNCEMENT_UID = "api::announcement.announcement";
 export const EVENT_UID = "api::event.event";
