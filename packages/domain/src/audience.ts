@@ -167,6 +167,23 @@ export function scopedNeedsRetarget(row: ScopedRetargetFields): boolean {
 }
 
 /**
+ * "Flag OR links" for one department-scoped row (document, quick link,
+ * poll, course), the single-row form of the cms read policies'
+ * departmentScopedIds: company-wide (no departments, flag not
+ * "departments") reaches everyone; otherwise only a user of a linked
+ * department. Flagged without departments reaches nobody. Moderators'
+ * read bypass is the caller's business, as everywhere in this module.
+ */
+export function isInScopedAudience(
+  row: { audience?: string | null; departments?: readonly { id?: number | null }[] | null },
+  departmentId: number | null | undefined,
+): boolean {
+  const departments = row.departments ?? [];
+  if (departments.length === 0) return row.audience !== AUDIENCE_DEPARTMENTS;
+  return departmentId != null && departments.some((department) => department?.id === departmentId);
+}
+
+/**
  * True when an event notifies a restricted audience ("departments") without
  * a department left: it notifies nobody until re-targeted. The event itself
  * stays readable calendar-wide.

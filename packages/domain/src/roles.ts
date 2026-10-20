@@ -97,6 +97,21 @@ export const STAFF_ROLES: readonly RoleType[] = ROLE_PRIVILEGE_ORDER.filter(
   (role) => role !== GUEST,
 );
 
+/**
+ * The training learners: every employee role plus the `authenticated`
+ * fallback (the roles holding the course, lesson and progress grants;
+ * guest has none). The training report and the expiry reminders count
+ * these.
+ */
+export const TRAINING_LEARNER_ROLES: readonly MatrixRoleType[] = [...STAFF_ROLES, AUTHENTICATED];
+
+/**
+ * Who reads the named training report (owner decision 2026-10-20):
+ * admin_role everyone, department heads and team leads the people of their
+ * own department.
+ */
+export const TRAINING_REPORT_ROLES: readonly RoleType[] = [ADMIN, "department_head", "team_lead"];
+
 /** True when `value` is one of the seeded role types. */
 export function isRoleType(value: unknown): value is RoleType {
   return (ROLE_PRIVILEGE_ORDER as readonly unknown[]).includes(value);
