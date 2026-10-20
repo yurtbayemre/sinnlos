@@ -1,6 +1,7 @@
 import type { QuizQuestion } from "@sinnlos/domain";
 import type { Course, Lesson, LessonProgress } from "@/lib/types";
 import type { DemoClock } from "./clock";
+import { DEMO_USER_ID } from "./people";
 
 export function demoTraining(clock: DemoClock) {
   // With the answer key, like the cms stores it: the player leaves it out,
@@ -53,6 +54,7 @@ export function demoTraining(clock: DemoClock) {
       completionMode: "quizGate",
       description: "Mandatory annual security training: phishing, passwords, incident reporting.",
       mandatory: true,
+      validityMonths: 12,
       lessons: lessons,
       updatedAt: clock.iso(-4),
     },
@@ -90,9 +92,13 @@ export function demoTraining(clock: DemoClock) {
     })),
   );
 
-  const lessonProgress: LessonProgress[] = [
-    { id: 1, targetDocumentId: "demolesson00000000000001", completedAt: clock.iso(-2) },
-  ];
+  // Done last year: the annual course is due again within 30 days (renewal, v0.20).
+  const lessonProgress: LessonProgress[] = lessons.map((lesson, i) => ({
+    id: i + 1,
+    targetDocumentId: lesson.documentId,
+    completedAt: clock.iso(-350),
+    user: { id: DEMO_USER_ID, username: "ada" },
+  }));
 
   return { quizzes, courses, lessonRows, lessonProgress };
 }

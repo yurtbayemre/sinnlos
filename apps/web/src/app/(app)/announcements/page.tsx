@@ -54,7 +54,7 @@ export default async function AnnouncementsPage() {
   const renderAck = ({ item, ackRequired, acknowledgedAt }: AnnouncementEntry) =>
     ackRequired && item.documentId ? (
       <AckButton
-        announcementDocumentId={item.documentId}
+        targetDocumentId={item.documentId}
         acknowledgedAtLabel={formatDay(acknowledgedAt)}
         deadlineLabel={formatDateOnly(locale, item.ackDeadline, LONG_DAY)}
       />

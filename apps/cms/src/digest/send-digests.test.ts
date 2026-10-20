@@ -326,10 +326,70 @@ describe("sendDigests orchestrator", () => {
     expect(count(`findMany ${PERMISSION_UID}`)).toBe(1);
     // The window, then its flags again after the relations (batch 15).
     expect(count(`findMany ${ANNOUNCEMENT_UID}`)).toBe(2);
-    expect(count(`findMany ${NOTIFICATION_UID}`)).toBe(1);
+    // The announcement anchors, then the training reminders of every due user.
+    expect(count(`findMany ${NOTIFICATION_UID}`)).toBe(2);
     expect(count(`update ${USER_UID}`)).toBe(5);
     // Nothing per user but the lastDigestAt update (no mentions/kudos opted in).
-    expect(reads).toHaveLength(7 + 5);
+    expect(reads).toHaveLength(8 + 5);
+  });
+
+  it("lists every recipient's own training reminders of their window, whatever the flags", async () => {
+    const reminder = (id: number, recipient: number, type: string, createdAt: string): Row => ({
+      id,
+      type,
+      title: "stored",
+      titleParams: { subject: "Stapler" },
+      createdAt,
+      recipient: { id: recipient },
+    });
+    const { strapi, mails } = digestStub({
+      users: {
+        [USER.alice]: optIn({ locale: "de" }),
+        [USER.carol]: optIn({ digestAnnouncements: false, digestKudos: true }),
+      },
+      notifications: [
+        reminder(1, USER.alice, "trainingDue", minutesAfter(MONDAY_RUN, 75)),
+        // Before alice's window: told in an earlier digest.
+        reminder(2, USER.alice, "trainingExpired", minutesAfter(MONDAY_RUN, -5)),
+        reminder(3, USER.carol, "trainingExpired", minutesAfter(MONDAY_RUN, 80)),
+        reminder(4, USER.dave, "trainingExpired", minutesAfter(MONDAY_RUN, 80)),
+      ],
+    });
+    await sendDigests(strapi, NOW);
+
+    const alice = mailTo(mails(), "alice")?.text ?? "";
+    expect(alice).toContain("Unterweisungen");
+    expect(alice).toContain("• Unterweisung „Stapler“ läuft bald ab");
+    expect(alice).not.toContain("abgelaufen");
+    const carol = mailTo(mails(), "carol")?.text ?? "";
+    expect(carol).toContain('• Training "Stapler" has expired, please repeat it');
+    expect(mails()).toHaveLength(2);
+  });
+
+  it("sends nobody a digest when the training reminders cannot be read", async () => {
+    const { strapi, mails } = digestStub({
+      users: { [USER.alice]: optIn() },
+      announcements: [news("All hands", minutesAfter(MONDAY_RUN, 5))],
+    });
+    const query = strapi.db.query.bind(strapi.db);
+    vi.spyOn(strapi.db, "query").mockImplementation((uid: string) => {
+      const real = query(uid);
+      if (uid !== NOTIFICATION_UID) return real;
+      return {
+        ...real,
+        findMany: async (params: Record<string, unknown>) => {
+          const where = params.where as Record<string, unknown>;
+          if (where.type) throw new Error("db down");
+          return real.findMany(params as never);
+        },
+      };
+    });
+    await sendDigests(strapi, NOW);
+    expect(mails()).toEqual([]);
+    expect(lastDigestAt(strapi, USER.alice)).toBe(MONDAY_RUN);
+    expect(strapi.log.error).toHaveBeenCalledWith(
+      "[digest] could not load the training reminders: db down",
+    );
   });
 
   it("guest, blocked, member, admin: only active readers, strictly their audience", async () => {

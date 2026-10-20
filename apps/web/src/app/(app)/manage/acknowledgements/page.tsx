@@ -2,7 +2,11 @@ import { redirect } from "next/navigation";
 import { AlertTriangle, CheckCircle2, ClipboardCheck, Clock, UserX } from "lucide-react";
 import { getLocale, getTranslations } from "next-intl/server";
 import { formatDateOnly, LONG_DAY } from "@/lib/date-format";
-import { loadAckReport, type AckReportAudience } from "@/lib/loaders/ack-report";
+import {
+  loadAckReport,
+  type AckReportAudience,
+  type AckReportRowView,
+} from "@/lib/loaders/ack-report";
 import { capabilitiesFor } from "@/lib/roles";
 import { getViewer } from "@/lib/viewer";
 import { AdminPageHeader } from "@/components/admin-page-header";
@@ -52,6 +56,94 @@ export default async function AcknowledgementReportPage() {
     return parts.length > 0 ? parts : [t("audienceAll")];
   };
 
+  /** One report card: the rate, the audience chips and who is still open. */
+  const renderRow = (row: AckReportRowView) => {
+    const deadline = deadlineLabel(row.ackDeadline);
+    return (
+      <Card key={row.id}>
+        <CardHeader>
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+            <div className="space-y-1">
+              <CardTitle as="h3" className="text-base">
+                {row.title}
+              </CardTitle>
+              <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+                {audienceLabels(row.audience).map((label) => (
+                  <span key={label}>{label}</span>
+                ))}
+                {deadline && (
+                  <span className="inline-flex items-center gap-1">
+                    <Clock className="h-3 w-3" aria-hidden="true" />
+                    {t("deadline", { date: deadline })}
+                  </span>
+                )}
+              </div>
+            </div>
+            <div className="shrink-0 text-right">
+              {/* No percentage without a known denominator — an
+                    indeterminable audience must not read as 0 of 0. */}
+              <div className="text-2xl font-semibold tracking-tight">
+                {row.targetUnknown ? "–" : `${row.pct}%`}
+              </div>
+              <div className="text-xs text-muted-foreground">
+                {row.targetUnknown
+                  ? t("audienceUnknown")
+                  : t("ackedOf", { acked: row.ackedCount, total: row.targetTotal })}
+              </div>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {!row.targetUnknown && (
+            <div className="h-2 overflow-hidden rounded-full bg-muted">
+              <div
+                className="h-full rounded-full bg-primary transition-all"
+                style={{ width: `${row.pct}%` }}
+              />
+            </div>
+          )}
+          {row.targetUnknown ? (
+            <div className="flex items-start gap-1.5 text-sm text-amber-700 dark:text-amber-400">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+              {/* The headline already sits in the card header; this
+                    line explains WHY there is no rate. */}
+              <span>{t("audienceUnknownHint")}</span>
+            </div>
+          ) : row.openUsers.length === 0 ? (
+            <div className="inline-flex items-center gap-1.5 text-sm text-emerald-700 dark:text-emerald-400">
+              <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
+              {t("allAcked")}
+            </div>
+          ) : (
+            <div className="space-y-1.5">
+              <div className="inline-flex items-center gap-1.5 text-sm font-medium">
+                <UserX className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
+                {t("openUsers", { count: row.openUsers.length })}
+              </div>
+              <ul className="flex flex-wrap gap-1.5">
+                {row.openUsers.map((u) => (
+                  <li
+                    key={u.id}
+                    className="rounded-full border bg-muted/40 px-2.5 py-0.5 text-xs text-muted-foreground"
+                  >
+                    {u.name}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    );
+  };
+  const section = (heading: string, rows: AckReportRowView[]) =>
+    rows.length > 0 && (
+      <section className="space-y-4">
+        <h2 className="text-sm font-medium text-muted-foreground">{heading}</h2>
+        {rows.map(renderRow)}
+      </section>
+    );
+
   return (
     <div className="space-y-8">
       <AdminPageHeader title={t("title")} description={t("description")} />
@@ -76,86 +168,9 @@ export default async function AcknowledgementReportPage() {
       {view.empty ? (
         <EmptyState icon={ClipboardCheck} title={t("emptyTitle")} hint={t("emptyHint")} />
       ) : (
-        <div className="space-y-4">
-          {view.rows.map((row) => {
-            const deadline = deadlineLabel(row.ackDeadline);
-            return (
-              <Card key={row.id}>
-                <CardHeader>
-                  <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-                    <div className="space-y-1">
-                      <CardTitle as="h2" className="text-base">
-                        {row.title}
-                      </CardTitle>
-                      <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
-                        {audienceLabels(row.audience).map((label) => (
-                          <span key={label}>{label}</span>
-                        ))}
-                        {deadline && (
-                          <span className="inline-flex items-center gap-1">
-                            <Clock className="h-3 w-3" aria-hidden="true" />
-                            {t("deadline", { date: deadline })}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                    <div className="shrink-0 text-right">
-                      {/* No percentage without a known denominator — an
-                          indeterminable audience must not read as 0 of 0. */}
-                      <div className="text-2xl font-semibold tracking-tight">
-                        {row.targetUnknown ? "–" : `${row.pct}%`}
-                      </div>
-                      <div className="text-xs text-muted-foreground">
-                        {row.targetUnknown
-                          ? t("audienceUnknown")
-                          : t("ackedOf", { acked: row.ackedCount, total: row.targetTotal })}
-                      </div>
-                    </div>
-                  </div>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  {!row.targetUnknown && (
-                    <div className="h-2 overflow-hidden rounded-full bg-muted">
-                      <div
-                        className="h-full rounded-full bg-primary transition-all"
-                        style={{ width: `${row.pct}%` }}
-                      />
-                    </div>
-                  )}
-                  {row.targetUnknown ? (
-                    <div className="flex items-start gap-1.5 text-sm text-amber-700 dark:text-amber-400">
-                      <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
-                      {/* The headline already sits in the card header; this
-                          line explains WHY there is no rate. */}
-                      <span>{t("audienceUnknownHint")}</span>
-                    </div>
-                  ) : row.openUsers.length === 0 ? (
-                    <div className="inline-flex items-center gap-1.5 text-sm text-emerald-700 dark:text-emerald-400">
-                      <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
-                      {t("allAcked")}
-                    </div>
-                  ) : (
-                    <div className="space-y-1.5">
-                      <div className="inline-flex items-center gap-1.5 text-sm font-medium">
-                        <UserX className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
-                        {t("openUsers", { count: row.openUsers.length })}
-                      </div>
-                      <ul className="flex flex-wrap gap-1.5">
-                        {row.openUsers.map((u) => (
-                          <li
-                            key={u.id}
-                            className="rounded-full border bg-muted/40 px-2.5 py-0.5 text-xs text-muted-foreground"
-                          >
-                            {u.name}
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-            );
-          })}
+        <div className="space-y-8">
+          {section(t("sectionAnnouncements"), view.rows)}
+          {section(t("sectionDocuments"), view.documentRows)}
         </div>
       )}
     </div>

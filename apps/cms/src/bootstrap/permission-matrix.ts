@@ -25,6 +25,7 @@ import {
   DUTY_PLAN_AUTHOR_ROLES,
   MODERATORS,
   STAFF_ROLES,
+  TRAINING_REPORT_ROLES,
   type MatrixRoleType,
 } from "./roles";
 
@@ -435,6 +436,10 @@ export const CUSTOM_ACTION_GRANTS: Record<string, readonly MatrixRoleType[] | "*
   // Same readers as lessons; these actions enforce published lesson and parent.
   "api::lesson.lesson.player": [...STAFF_ROLES, AUTHENTICATED],
   "api::lesson.lesson.check": [...STAFF_ROLES, AUTHENTICATED],
+  // The named training report (v0.20): admin_role everyone, heads and leads
+  // their own department; the controller re-checks role and department.
+  "api::course.course.report": TRAINING_REPORT_ROLES,
+  "api::course.course.reportCourse": TRAINING_REPORT_ROLES,
   "api::event.event.ics": "*",
   // The RSVP summary for the events list (FX21): exactly the roles that
   // hold event-rsvp find in the matrix above. Never guest: guests read the

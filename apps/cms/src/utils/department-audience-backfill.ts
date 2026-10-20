@@ -86,7 +86,7 @@ export async function backfillDepartmentAudience(
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     throw new Error(
-      `${DEPARTMENT_AUDIENCE_LOG} could not backfill the audience of documents and quick links (${reason}); ` +
+      `${DEPARTMENT_AUDIENCE_LOG} could not backfill the audience of documents, quick links and courses (${reason}); ` +
         "nothing was changed (the transaction rolled back), and the cms does not start, because a row " +
         "that links a department without the flag can turn company-wide when the department is deleted. " +
         "Fix the cause and start the cms again (every start retries), or roll back (docs/DEPLOYMENT.md)",

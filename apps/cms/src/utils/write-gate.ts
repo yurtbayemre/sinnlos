@@ -162,7 +162,10 @@ const DEPARTMENT_REF = { select: ["id", "documentId", "name"] };
 
 /** The relations each type's gate, list and form read (never a client populate). */
 export const AUTHORING_POPULATE: Readonly<Record<string, Record<string, unknown>>> = {
-  [COURSE_UID]: { coverImage: { select: ["id", "name", "mime", "size", "url"] } },
+  [COURSE_UID]: {
+    coverImage: { select: ["id", "name", "mime", "size", "url"] },
+    departments: DEPARTMENT_REF,
+  },
   [LESSON_UID]: { course: { select: ["id", "documentId", "title", "slug"] } },
   [ANNOUNCEMENT_UID]: {
     department: DEPARTMENT_REF,

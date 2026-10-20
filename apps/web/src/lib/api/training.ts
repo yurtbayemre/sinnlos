@@ -2,10 +2,15 @@
  * Training reads (issue #29, WD01): one function per Strapi request; the
  * page walks and their caps live in lib/training.ts. Every response is
  * per-user: courses and lessons are status-gated per role (admin/editor see
- * drafts) and progress is strictly the caller's own (admin_role: all rows).
+ * drafts), progress is strictly the caller's own (admin_role: all rows), and
+ * the named report is scoped by the cms to the caller's role and department.
  * Uncached (D-DC01).
  */
-import type { LessonPlayerResponse } from "@sinnlos/domain";
+import type {
+  LessonPlayerResponse,
+  TrainingReportCourseResponse,
+  TrainingReportSummaryResponse,
+} from "@sinnlos/domain";
 import { strapi, type StrapiListResponse } from "@/lib/strapi/client";
 import { strapiQuery, withQuery, type StrapiQuery } from "@/lib/strapi/query";
 import type { Course, Lesson, LessonProgress } from "@/lib/types";
@@ -17,11 +22,6 @@ export type CourseView = Omit<Course, "lessons"> & {
 
 /** The fixed, answerless learner response, independent of authoring reads. */
 export type LessonView = LessonPlayerResponse["data"];
-
-/** A progress row as the report reads it: the lesson and the user's id. */
-export type ProgressReportRow = Pick<LessonProgress, "id" | "targetDocumentId"> & {
-  user?: { id: number } | null;
-};
 
 /** A progress row as the caller's own list reads it: the lesson and when. */
 export type MyProgressRow = Pick<LessonProgress, "id" | "targetDocumentId" | "completedAt">;
@@ -52,35 +52,33 @@ export function lessonByDocumentId(documentId: string): Promise<LessonPlayerResp
   return strapi<LessonPlayerResponse>(`/api/lessons/${encodeURIComponent(documentId)}/player`);
 }
 
-/**
- * One page of the progress rows of the given lessons across all users
- * (admin_role, the /manage/training/report report), sorted by id: without an
- * ORDER BY, Postgres may return rows in a different order per page, and the
- * page walk would skip or repeat rows (WD02).
- */
-export function courseProgressPage(
-  lessonIds: readonly string[],
-  page: number,
-): Promise<StrapiListResponse<ProgressReportRow>> {
-  return strapi<StrapiListResponse<ProgressReportRow>>(
-    withQuery(
-      "/api/lesson-progresses",
-      strapiQuery()
-        .filterIn("targetDocumentId", lessonIds)
-        .fields(["targetDocumentId"])
-        .populateFields("user", ["id"])
-        .sort(["id:asc"])
-        .page(page, 100),
-    ),
+/** The named training report (v0.20): the mandatory courses in the caller's scope. */
+export function trainingReport(): Promise<TrainingReportSummaryResponse> {
+  return strapi<TrainingReportSummaryResponse>("/api/courses/report");
+}
+
+/** One course's people and receipts in the caller's scope; 404 outside it. */
+export function courseTrainingReport(documentId: string): Promise<TrainingReportCourseResponse> {
+  return strapi<TrainingReportCourseResponse>(
+    `/api/courses/${encodeURIComponent(documentId)}/report`,
   );
 }
 
 /** One page of the caller's own completion receipts, sorted by id. */
-export function myProgressPage(page: number): Promise<StrapiListResponse<MyProgressRow>> {
+export function myProgressPage(
+  userId: number,
+  page: number,
+): Promise<StrapiListResponse<MyProgressRow>> {
   return strapi<StrapiListResponse<MyProgressRow>>(
     withQuery(
       "/api/lesson-progresses",
-      strapiQuery().fields(["targetDocumentId", "completedAt"]).sort(["id:asc"]).page(page, 100),
+      strapiQuery()
+        // lesson-progress-visibility lets admin_role read everyone's
+        // receipts: they must not count as the admin's own.
+        .filter(["user", "id"], "$eq", userId)
+        .fields(["targetDocumentId", "completedAt"])
+        .sort(["id:asc"])
+        .page(page, 100),
     ),
   );
 }

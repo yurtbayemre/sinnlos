@@ -28,6 +28,8 @@ export {
   ROLE_PRIVILEGE_ORDER,
   SCHEDULER_ROLES,
   STAFF_ROLES,
+  TRAINING_LEARNER_ROLES,
+  TRAINING_REPORT_ROLES,
   hasRole,
   isRoleType,
   type MatrixRoleType,

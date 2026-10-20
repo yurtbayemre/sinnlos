@@ -269,7 +269,7 @@ describe("targeting guard: scope and transaction", () => {
       context(ANNOUNCEMENT, "findMany"),
       context(EVENT, "findOne", { documentId: "e1" }),
       context(ANNOUNCEMENT, "delete", { documentId: "a1" }),
-      context("api::course.course", "publish", { documentId: "c1" }),
+      context("api::lesson.lesson", "publish", { documentId: "l1" }),
     ]) {
       const next = vi.fn(async () => "result");
       await expect(guard(ctx, next), `${ctx.uid} ${ctx.action}`).resolves.toBe("result");

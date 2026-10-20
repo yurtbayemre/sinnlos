@@ -1,4 +1,5 @@
 import {
+  MAX_VALIDITY_MONTHS,
   TRAINING_FIELDS,
   checkRequiredString,
   checkMarkdown,
@@ -13,6 +14,7 @@ import {
   collectFields,
   done,
   textOrNull,
+  widensToEveryone,
   type BuiltPayload,
   type FieldRule,
   type PayloadContext,
@@ -32,6 +34,19 @@ const COURSE_RULES: readonly FieldRule<CourseValues>[] = [
     inputs: ["completionMode"],
     convert: (v) => checked(v.completionMode, checkEnum(["confirm", "quizGate", "exam"])),
   },
+  {
+    key: "validityMonths",
+    inputs: ["validityMonths"],
+    convert: (v) => {
+      const typed = v.validityMonths.trim();
+      if (typed === "") return { value: null };
+      const months = Number(typed);
+      return /^\d{1,3}$/.test(typed) && months >= 1 && months <= MAX_VALIDITY_MONTHS
+        ? { value: months }
+        : { code: "invalid" };
+    },
+  },
+  { key: "departments", inputs: ["departments"], convert: (v) => ({ value: [...v.departments] }) },
   {
     key: "coverImage",
     inputs: ["coverImage"],
@@ -83,12 +98,16 @@ export function buildCoursePayload(
 ): BuiltPayload {
   const { data, fields } = collectFields(
     new Set(TRAINING_FIELDS.course.moderator),
-    new Set<string>(),
+    new Set(["departments"]),
     COURSE_RULES,
     values,
     initial,
     ctx,
   );
+  // Never widen a course that needs re-targeting by accident (save.ts asks the cms).
+  if (ctx.needsRetarget === true && ctx.retarget !== true && widensToEveryone("course", data)) {
+    fields.departments = "confirmAudience";
+  }
   return done(data, fields);
 }
 export function buildLessonPayload(

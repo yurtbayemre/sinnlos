@@ -8,9 +8,13 @@ import {
   isCommentTargetType,
   isPollClosed,
   isQuizSelectionList,
+  lessonReceiptState,
+  newestReceipts,
   quizAnswersPass,
+  zonedDateKey,
   type QuizCheckResponse,
 } from "@sinnlos/domain";
+import { appTimeZone } from "@/lib/app-time-zone";
 import type { Classified, EmojiType, KudosValue, RsvpStatus } from "@/lib/types";
 import type { DemoData, DemoHandler } from "./data";
 import { DEMO_USER_ID } from "./people";
@@ -170,22 +174,28 @@ export const vote: DemoHandler = ({ data, body, match }) => {
   return { data: { id: tally.total, optionIndex } };
 };
 
-/** The cms's checks in its order (acknowledgement.ts); one receipt per announcement. */
+/** The cms's checks in its order (acknowledgement.ts); one receipt per announcement or document. */
 export const acknowledge: DemoHandler = ({ data, body }) => {
   const { targetType, targetDocumentId } = payload(body);
-  if (targetType !== "announcement") throw cmsError(400, "Invalid targetType");
+  if (targetType !== "announcement" && targetType !== "document") {
+    throw cmsError(400, "Invalid targetType");
+  }
   if (!text(targetDocumentId)) throw cmsError(400, "targetDocumentId required");
-  const announcement = data.announcements.find(
-    (a) => a.documentId === targetDocumentId && a.requiresAck,
-  );
-  if (!announcement) throw cmsError(400, "Target not available for acknowledgement");
-  if (data.acknowledgements.some((row) => row.targetDocumentId === announcement.documentId)) {
+  const targets: { documentId?: string; requiresAck?: boolean }[] =
+    targetType === "announcement" ? data.announcements : data.documents;
+  const target = targets.find((t) => t.documentId === targetDocumentId && t.requiresAck);
+  if (!target?.documentId) throw cmsError(400, "Target not available for acknowledgement");
+  if (
+    data.acknowledgements.some(
+      (row) => row.targetType === targetType && row.targetDocumentId === target.documentId,
+    )
+  ) {
     throw cmsError(400, "Already acknowledged");
   }
   const row = {
     id: nextId(data.acknowledgements),
-    targetType: "announcement" as const,
-    targetDocumentId: announcement.documentId,
+    targetType: targetType as "announcement" | "document",
+    targetDocumentId: target.documentId,
     acknowledgedAt: now(),
     user: data.users.ada,
   };
@@ -236,7 +246,7 @@ export const updateMe: DemoHandler = ({ data, body }) => {
   return { data: data.me };
 };
 
-/** The cms's order (lesson-progress.ts): target, quiz grade, one receipt per lesson. */
+/** The cms's order (lesson-progress.ts): target, quiz grade, one receipt per lesson while it counts. */
 export const completeLesson: DemoHandler = ({ data, body }) => {
   const { targetDocumentId, answers } = payload(body);
   const lesson = data.lessonRows.find((row) => row.documentId === targetDocumentId);
@@ -244,8 +254,18 @@ export const completeLesson: DemoHandler = ({ data, body }) => {
   if (!quizAnswersPass(data.quizzes[lesson.documentId] ?? [], answers)) {
     throw cmsError(400, "Quiz not passed");
   }
-  if (data.lessonProgress.some((row) => row.targetDocumentId === lesson.documentId)) {
-    throw cmsError(400, "Already completed");
+  const own = data.lessonProgress.filter((row) => row.targetDocumentId === lesson.documentId);
+  if (own.length > 0) {
+    const course = data.courses.find((c) => c.documentId === lesson.course?.documentId);
+    const zone = appTimeZone();
+    const state = lessonReceiptState(
+      newestReceipts(own).get(lesson.documentId),
+      true,
+      course?.validityMonths,
+      zonedDateKey(new Date(), zone),
+      zone,
+    );
+    if (!state.mayComplete) throw cmsError(400, "Already completed");
   }
   const row = {
     id: nextId(data.lessonProgress),

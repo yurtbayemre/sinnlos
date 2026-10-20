@@ -9,6 +9,7 @@ import {
   type CommonCode,
 } from "@/lib/action-result";
 import { strapi } from "@/lib/strapi";
+import type { Acknowledgement } from "@/lib/types";
 
 /**
  * The cms's one refusal for an announcement the caller cannot acknowledge:
@@ -34,8 +35,20 @@ const targetGone = (cms: CmsErrorInfo): CommonCode | undefined =>
 export async function acknowledgeAnnouncement(
   announcementDocumentId: string,
 ): Promise<ActionResult> {
+  return acknowledge("announcement", announcementDocumentId);
+}
+
+/** Confirms the caller read a document that requires it (v0.20); same answers. */
+export async function acknowledgeDocument(documentDocumentId: string): Promise<ActionResult> {
+  return acknowledge("document", documentDocumentId);
+}
+
+async function acknowledge(
+  targetType: Acknowledgement["targetType"],
+  targetDocumentId: string,
+): Promise<ActionResult> {
   // A Server Action's argument comes from the client.
-  if (typeof announcementDocumentId !== "string" || announcementDocumentId === "") {
+  if (typeof targetDocumentId !== "string" || targetDocumentId === "") {
     return actionFailure("invalid");
   }
   // The CMS controller takes the acknowledging user from the JWT
@@ -45,16 +58,14 @@ export async function acknowledgeAnnouncement(
     () =>
       strapi("/api/acknowledgements", {
         method: "POST",
-        body: JSON.stringify({
-          data: { targetType: "announcement", targetDocumentId: announcementDocumentId },
-        }),
+        body: JSON.stringify({ data: { targetType, targetDocumentId } }),
       }),
     {
-      label: "[announcements] acknowledge",
+      label: `[${targetType}s] acknowledge`,
       mapError: targetGone,
       // Acknowledgement state is read uncached (D-DC01) — refresh so the
-      // announcements page and the dashboard banner reflect the new ack
-      // without a manual reload.
+      // page and the dashboard banner reflect the new ack without a manual
+      // reload.
       after: () => refresh(),
     },
   );

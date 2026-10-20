@@ -4,6 +4,7 @@ import type {
   EditableBase,
   EditableMedia,
 } from "./authoring/dto.js";
+import { addMonthsToKey, daysBetweenKeys, instantEpochMs, zonedDateKey } from "./plain-date.js";
 
 /**
  * Training content rules (issue #29): the YouTube parser and the lesson quiz
@@ -282,6 +283,11 @@ export interface CourseEditable extends EditableBase {
   description: string | null;
   mandatory: boolean;
   completionMode: TrainingCompletionMode;
+  /** Months a completion stays valid; null = once is enough. */
+  validityMonths: number | null;
+  /** Department documentIds; empty = every staff member. */
+  departments: string[];
+  needsRetarget: boolean;
   coverImage: EditableMedia | null;
   publishAt: string | null;
   scheduleError: string | null;
@@ -309,4 +315,196 @@ export interface LessonAuthoringListRow extends AuthoringListRow {
 export interface LessonAuthoringListResponse {
   data: LessonAuthoringListRow[];
   meta: { pagination: AuthoringPagination };
+}
+
+// ---------------------------------------------------------------------------
+// Recurring training (v0.20, plan-training-recurrence.md). A receipt is due
+// again `validityMonths` calendar months after its completion day in the app
+// zone; a lesson counts while today is before the due day of its NEWEST
+// receipt. Stateless: old receipts stay as the proof history.
+
+/** Longest validity a course may set (ten years). */
+export const MAX_VALIDITY_MONTHS = 120;
+
+/** Days before the due day from which a lesson may be renewed and the reminder goes out. */
+export const RENEWAL_WINDOW_DAYS = 30;
+
+/** The day a receipt is due again; null when the course never expires. */
+export function receiptDueKey(
+  completedAt: string,
+  validityMonths: number | null | undefined,
+  timeZone: string,
+): string | null {
+  if (!validityMonths) return null;
+  return addMonthsToKey(zonedDateKey(completedAt, timeZone), validityMonths);
+}
+
+export interface LessonReceiptState {
+  /** The lesson counts toward the course today. */
+  counts: boolean;
+  /** The caller may (re)complete it: never done, or due within the renewal window. */
+  mayComplete: boolean;
+  /** Due day of the newest receipt; null without a receipt or validity. */
+  dueKey: string | null;
+}
+
+/**
+ * One lesson from its newest receipt. A receipt without a readable instant
+ * counts only for a course that never expires (fail closed on a due date
+ * that cannot be told).
+ */
+export function lessonReceiptState(
+  completedAt: string | null | undefined,
+  hasReceipt: boolean,
+  validityMonths: number | null | undefined,
+  todayKey: string,
+  timeZone: string,
+): LessonReceiptState {
+  if (!hasReceipt) return { counts: false, mayComplete: true, dueKey: null };
+  if (!validityMonths) return { counts: true, mayComplete: false, dueKey: null };
+  if (!completedAt || instantEpochMs(completedAt) === null) {
+    return { counts: false, mayComplete: true, dueKey: null };
+  }
+  const dueKey = receiptDueKey(completedAt, validityMonths, timeZone)!;
+  return {
+    counts: todayKey < dueKey,
+    mayComplete: daysBetweenKeys(todayKey, dueKey) <= RENEWAL_WINDOW_DAYS,
+    dueKey,
+  };
+}
+
+export type CourseValidityStatus = "done" | "dueSoon" | "expired" | "open";
+
+export interface CourseValidity {
+  total: number;
+  /** Lessons that count today. */
+  completed: number;
+  status: CourseValidityStatus;
+  /** Earliest due day over the lessons; set for done, dueSoon and expired with validity. */
+  dueKey: string | null;
+  /** Newest receipt instant when the course counts (done or dueSoon). */
+  completedAt: string | null;
+}
+
+/**
+ * A course for one user. `newest` maps lesson documentId to the newest
+ * receipt's completedAt (null when unreadable); a missing key = never done.
+ * expired = every current lesson has a receipt but not all count any more
+ * (a lesson added later makes the course open again, as before v0.20).
+ */
+export function courseValidity(
+  lessonIds: readonly string[],
+  newest: ReadonlyMap<string, string | null>,
+  validityMonths: number | null | undefined,
+  todayKey: string,
+  timeZone: string,
+): CourseValidity {
+  let completed = 0;
+  let allHaveReceipts = lessonIds.length > 0;
+  let dueKey: string | null = null;
+  let completedAt: string | null = null;
+  for (const id of lessonIds) {
+    const has = newest.has(id);
+    const at = newest.get(id) ?? null;
+    const state = lessonReceiptState(at, has, validityMonths, todayKey, timeZone);
+    if (!has) allHaveReceipts = false;
+    if (state.counts) completed++;
+    if (state.dueKey && (dueKey === null || state.dueKey < dueKey)) dueKey = state.dueKey;
+    if (
+      at &&
+      (completedAt === null || (instantEpochMs(at) ?? 0) > (instantEpochMs(completedAt) ?? 0))
+    )
+      completedAt = at;
+  }
+  const total = lessonIds.length;
+  if (total > 0 && completed === total) {
+    const soon = dueKey !== null && daysBetweenKeys(todayKey, dueKey) <= RENEWAL_WINDOW_DAYS;
+    return { total, completed, status: soon ? "dueSoon" : "done", dueKey, completedAt };
+  }
+  if (allHaveReceipts && validityMonths) {
+    return { total, completed, status: "expired", dueKey, completedAt: null };
+  }
+  return { total, completed, status: "open", dueKey: null, completedAt: null };
+}
+
+/** Newest receipt per lesson from receipt rows in any order (duplicates are harmless). */
+export function newestReceipts(
+  rows: readonly { targetDocumentId?: string | null; completedAt?: string | null }[],
+): Map<string, string | null> {
+  const newest = new Map<string, string | null>();
+  for (const row of rows) {
+    const id = row.targetDocumentId;
+    if (typeof id !== "string" || id === "") continue;
+    const at = row.completedAt ?? null;
+    if (!newest.has(id)) {
+      newest.set(id, at);
+      continue;
+    }
+    const kept = newest.get(id) ?? null;
+    if (at !== null && (kept === null || (instantEpochMs(at) ?? 0) > (instantEpochMs(kept) ?? 0)))
+      newest.set(id, at);
+  }
+  return newest;
+}
+
+// ---------------------------------------------------------------------------
+// The named training report (v0.20): GET /api/courses/report (summary per
+// mandatory course) and GET /api/courses/:id/report (people + receipts).
+// admin_role reads everyone, department heads and team leads the people of
+// their own department (TRAINING_REPORT_ROLES).
+
+export interface TrainingReportCounts {
+  done: number;
+  dueSoon: number;
+  expired: number;
+  open: number;
+  /** People the course is for, in the caller's scope. */
+  total: number;
+}
+
+export interface TrainingReportCourse {
+  documentId: string;
+  title: string;
+  slug: string;
+  validityMonths: number | null;
+  lessonCount: number;
+  /** Department names; empty = every staff member. */
+  departments: string[];
+  counts: TrainingReportCounts;
+}
+
+export interface TrainingReportScope {
+  /** "all" for admin_role; "department" for a head or lead. */
+  scope: "all" | "department";
+  /** The caller's department name for scope "department". */
+  department: string | null;
+}
+
+export interface TrainingReportSummaryResponse {
+  data: TrainingReportScope & { courses: TrainingReportCourse[] };
+}
+
+export interface TrainingReportPerson {
+  userId: number;
+  name: string;
+  email: string | null;
+  department: string | null;
+  status: CourseValidityStatus;
+  /** Lessons that count today, of `total`. */
+  completed: number;
+  total: number;
+  /** When the course counts: the newest receipt. */
+  completedAt: string | null;
+  /** Earliest due day (YYYY-MM-DD) when the course expires. */
+  dueKey: string | null;
+  /** Every receipt for the current lessons, oldest first: the proof history. */
+  receipts: { lessonDocumentId: string; completedAt: string | null }[];
+}
+
+export interface TrainingReportCourseResponse {
+  data: TrainingReportScope & {
+    course: TrainingReportCourse;
+    lessons: { documentId: string; title: string }[];
+    people: TrainingReportPerson[];
+  };
 }

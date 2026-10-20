@@ -36,7 +36,12 @@ const { api, strapi, StrapiError } = await import("./strapi");
 const { demo } = await import("./demo");
 const { fetchAllTeams } = await import("./teams");
 const { fetchAllUsers } = await import("./users");
-const { fetchAnnouncementAckIndex, fetchMyAnnouncementAcks } = await import("./acknowledgements");
+const {
+  fetchAnnouncementAckIndex,
+  fetchDocumentAckIndex,
+  fetchMyAnnouncementAcks,
+  fetchMyDocumentAcks,
+} = await import("./acknowledgements");
 const training = await import("./training");
 const analytics = await import("./api/analytics");
 const { DEMO_VIEWER, toViewer } = await import("./viewer");
@@ -80,6 +85,7 @@ const API_READS: Record<string, () => Promise<unknown>> = {
   "polls.results": () => api.polls.results("demopoll0000000000000001"),
   "polls.resultsMany": () => api.polls.resultsMany([1, "demopoll0000000000000002"]),
   "documents.list": () => api.documents.list(),
+  "documents.requiringAck": () => api.documents.requiringAck(),
   "kudos.list": () => api.kudos.list(),
   "classifieds.list": () => api.classifieds.list(zonedDateKey(NOW, ZONE)),
   "classifieds.mine": () => api.classifieds.mine(1),
@@ -98,10 +104,11 @@ const DIRECT_READS: Record<string, () => Promise<unknown>> = {
   "fetchAllUsers(kudos)": () => fetchAllUsers(kudosRecipientQuery(1)),
   fetchMyAnnouncementAcks: () => fetchMyAnnouncementAcks(),
   fetchAnnouncementAckIndex: () => fetchAnnouncementAckIndex(["demoann00000000000000001"]),
+  fetchMyDocumentAcks: () => fetchMyDocumentAcks(),
+  fetchDocumentAckIndex: () => fetchDocumentAckIndex(["demodoc00000000000000001"]),
   fetchCourses: () => training.fetchCourses(),
   fetchCourseBySlug: () => training.fetchCourseBySlug("security-awareness-basics"),
   fetchLessonByDocumentId: () => training.fetchLessonByDocumentId("demolesson00000000000001"),
-  fetchCourseProgress: () => training.fetchCourseProgress(["demolesson00000000000001"], "demo"),
   fetchMyProgress: () => training.fetchMyProgress(),
   getNotifications: () => getNotifications(),
   "analytics countPage": () => analytics.countPage("wiki-spaces"),

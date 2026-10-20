@@ -103,11 +103,14 @@
     "featured": "Hervorgehoben",
     "openAcksTitle": "Offene Bestätigungen",
     "openAcksCount": "{count, plural, one {# Pflichtmeldung wartet auf deine Lesebestätigung.} other {# Pflichtmeldungen warten auf deine Lesebestätigung.}}",
+    "openAcksDocuments": "{count, plural, one {# Pflichtdokument wartet auf deine Lesebestätigung.} other {# Pflichtdokumente warten auf deine Lesebestätigung.}}",
     "openAcksAction": "Jetzt bestätigen",
     "friendFallback": "Kolleg:in",
-    "trainingOpen": "{count, plural, one {# offene Pflichtschulung} other {# offene Pflichtschulungen}}",
+    "trainingOpen": "{count, plural, one {# offene oder abgelaufene Pflichtschulung} other {# offene oder abgelaufene Pflichtschulungen}}",
     "trainingOpenHint": "Bitte schließe deine Pflichtschulungen ab.",
-    "trainingOpenCta": "Zu den Schulungen"
+    "trainingOpenCta": "Zu den Schulungen",
+    "trainingDueSoon": "{count, plural, one {# Pflichtschulung läuft bald ab} other {# Pflichtschulungen laufen bald ab}}",
+    "trainingDueSoonHint": "Du kannst sie schon jetzt erneuern."
   },
   "quickLinks": {
     "eyebrow": "Wichtige Links",
@@ -354,7 +357,8 @@
     "other": "Sonstiges",
     "emptyTitle": "Noch keine Dokumente",
     "emptyHint": "Redaktion, Admins und Abteilungsleitungen fügen Dokumente unter „Verwaltung“ hinzu.",
-    "noFile": "Keine Datei hinterlegt"
+    "noFile": "Keine Datei hinterlegt",
+    "ackRequired": "Lesebestätigung erforderlich"
   },
   "profile": {
     "title": "Mein Profil",
@@ -402,7 +406,7 @@
     "analyticsDashboard": "Analyse-Dashboard",
     "analyticsDesc": "Inhaltsstatistiken, Engagement-Metriken und aktuelle Aktivitäten.",
     "ackReportLink": "Lesebestätigungen",
-    "ackReportLinkDesc": "Bestätigungsquote und offene Nutzer je Pflichtmeldung.",
+    "ackReportLinkDesc": "Bestätigungsquote und offene Nutzer je Pflichtmeldung und Pflichtdokument.",
     "rolesSection": "Rollen",
     "rolesDesc": "Sinnlos enthält sechs Rollen. Admins vergeben sie im Strapi-Adminbereich; mit Microsoft-Anmeldung vergeben die Entra-App-Rollen Intranet.Admin, Intranet.Editor, Intranet.DepartmentHead, Intranet.TeamLead, Intranet.Member und Intranet.Guest sie bei jeder Anmeldung.",
     "roleChangeHint": "Möchten Sie ändern, wer welche Rolle hat?",
@@ -423,7 +427,7 @@
     "roleMember": "Lesezugriff je nach Rolle/Abteilung/Team. Eigenes Profil bearbeiten.",
     "roleGuest": "Nur Lesezugriff auf öffentliche Wiki-Bereiche.",
     "trainingReportLink": "Schulungs-Report",
-    "trainingReportLinkDesc": "Wer hat welche Pflichtschulung abgeschlossen"
+    "trainingReportLinkDesc": "Wer ist unterwiesen, wer ist fällig"
   },
   "analytics": {
     "title": "Analyse",
@@ -450,9 +454,11 @@
   },
   "ackReport": {
     "title": "Lesebestätigungen",
-    "description": "Bestätigungsstatus aller Pflichtmeldungen: Quote je Meldung und wer noch nicht bestätigt hat.",
-    "emptyTitle": "Keine Pflichtmeldungen",
-    "emptyHint": "Neuigkeiten mit Bestätigungspflicht (requiresAck) erscheinen hier mit ihrer Bestätigungsquote.",
+    "description": "Bestätigungsstatus aller Pflichtmeldungen und Pflichtdokumente: Quote je Eintrag und wer noch nicht bestätigt hat.",
+    "emptyTitle": "Keine Pflichtmeldungen oder Pflichtdokumente",
+    "emptyHint": "Neuigkeiten und Dokumente mit Bestätigungspflicht erscheinen hier mit ihrer Bestätigungsquote.",
+    "sectionAnnouncements": "Pflichtmeldungen",
+    "sectionDocuments": "Pflichtdokumente",
     "audienceAll": "Alle Mitarbeitenden",
     "audienceDepartment": "Abteilung: {name}",
     "audienceTeam": "Team: {name}",
@@ -566,16 +572,45 @@
     "quizSomeWrong": "{count, plural, one {# Antwort stimmt noch nicht} other {# Antworten stimmen noch nicht}} — korrigiere und prüfe erneut.",
     "completeLocked": "Der Abschluss wird nach bestandenen Verständnisfragen freigeschaltet.",
     "quizContentInvalid": "Der Inhalt dieses Quiz ist fehlerhaft. Bitte informieren Sie die Kursverantwortlichen.",
-    "quizNotPassed": "Nicht alle Antworten sind richtig (vielleicht haben sich die Fragen geändert). Beantworte sie erneut."
+    "quizNotPassed": "Nicht alle Antworten sind richtig (vielleicht haben sich die Fragen geändert). Beantworte sie erneut.",
+    "statusDueSoon": "Läuft am {date} ab",
+    "statusExpired": "Abgelaufen am {date}, bitte wiederholen",
+    "statusExpiredNoDate": "Abgelaufen, bitte wiederholen",
+    "nextRenewal": "Nächste Wiederholung am {date}",
+    "repeatEvery": "{count, plural, one {Jeden Monat zu wiederholen} other {Alle # Monate zu wiederholen}}",
+    "renewCourse": "Jetzt erneuern",
+    "lessonRenew": "erneuern",
+    "renewSoon": "Dein Abschluss läuft am {date} ab. Du kannst die Lektion jetzt erneut abschließen.",
+    "renewOverdue": "Dein Abschluss ist am {date} abgelaufen. Bitte schließe die Lektion erneut ab."
   },
   "trainingReport": {
     "title": "Schulungs-Report",
-    "description": "Abschlussstand der Pflichtschulungen über {count} Mitarbeitende.",
-    "truncatedWarning": "Einzelne Datenquellen sind unvollständig — Zahlen werden unterdrückt statt falsch angezeigt.",
+    "scopeAll": "Pflichtschulungen aller Mitarbeitenden: wer unterwiesen ist, wer fällig ist.",
+    "scopeDepartment": "Pflichtschulungen der Abteilung {department}: wer unterwiesen ist, wer fällig ist.",
     "emptyTitle": "Keine Pflichtkurse",
-    "emptyHint": "Veröffentlichte Kurse mit Pflicht-Flag erscheinen hier mit ihrer Abschlussquote.",
-    "completedOf": "{done} von {total} abgeschlossen",
-    "updatedAt": "Stand {date}"
+    "emptyHint": "Veröffentlichte Kurse mit Pflicht-Flag erscheinen hier mit allen, die sie abgeschlossen haben.",
+    "validOf": "{valid} von {total} gültig",
+    "validityEvery": "{count, plural, one {jeden Monat wiederholen} other {alle # Monate wiederholen}}",
+    "validityOnce": "einmalig",
+    "allEmployees": "alle Mitarbeitenden",
+    "showPeople": "Personen anzeigen",
+    "backToCourses": "Alle Kurse",
+    "statusDone": "Gültig",
+    "statusDueSoon": "Läuft bald ab",
+    "statusExpired": "Abgelaufen",
+    "statusOpen": "Offen",
+    "filterLabel": "Nach Status filtern",
+    "filterAll": "Alle",
+    "columnName": "Name",
+    "columnDepartment": "Abteilung",
+    "columnStatus": "Status",
+    "columnLessons": "Lektionen",
+    "columnCompletedAt": "Erledigt am",
+    "columnDueOn": "Fällig am",
+    "lessonsOf": "{done}/{total}",
+    "noPeople": "Niemand in dieser Auswahl.",
+    "downloadStatus": "Status (CSV)",
+    "downloadReceipts": "Nachweis (CSV)"
   },
   "duties": {
     "title": "Zuständigkeiten",

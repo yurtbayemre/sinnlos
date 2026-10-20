@@ -35,8 +35,8 @@ const { rsvpToEvent } = await import("./event-actions");
 const { addComment, deleteComment, getCommentSection, toggleReaction } =
   await import("./comment-actions");
 const { votePoll } = await import("./poll-actions");
-const { acknowledgeAnnouncement } = await import("./acknowledgement-actions");
-const { fetchMyAnnouncementAcks } = await import("./acknowledgements");
+const { acknowledgeAnnouncement, acknowledgeDocument } = await import("./acknowledgement-actions");
+const { fetchMyAnnouncementAcks, fetchMyDocumentAcks } = await import("./acknowledgements");
 const { getNotifications, markAllNotificationsRead, markNotificationsRead } =
   await import("./notification-actions");
 const { updateProfile } = await import("./profile-actions");
@@ -163,6 +163,28 @@ describe("DEMO_MODE writes change what the reads show", () => {
     }
   });
 
+  it("document acknowledgement (v0.20): recorded once, apart from the announcement receipts", async () => {
+    const acked = async () =>
+      (await fetchMyDocumentAcks()).acks.filter(
+        (a) => a.targetDocumentId === "demodoc00000000000000001",
+      );
+    if ((await acked()).length === 0) {
+      expect(await acknowledgeDocument("demodoc00000000000000001")).toEqual({ ok: true });
+    }
+    expect(await acked()).toHaveLength(1);
+    expect((await fetchMyAnnouncementAcks()).acks.map((a) => a.targetType)).not.toContain(
+      "document",
+    );
+    expect(await acknowledgeDocument("demodoc00000000000000001")).toMatchObject({
+      ok: false,
+      code: "invalid",
+    });
+    // A document without requiresAck, and an announcement's id, are gone for the caller.
+    for (const id of ["demodoc00000000000000002", "demoann00000000000000001"]) {
+      expect(await acknowledgeDocument(id)).toMatchObject({ ok: false, code: "notFound" });
+    }
+  });
+
   it("a read is a copy: a later write does not change what a caller holds", async () => {
     const before = await getNotifications();
     const unreadBefore = before.items.filter((n) => !n.readAt).length;
@@ -215,6 +237,8 @@ describe("DEMO_MODE writes change what the reads show", () => {
     });
     expect(await completeLesson("demolesson00000000000002", null)).toEqual({ ok: true });
     expect((await fetchMyProgress()).completed.has("demolesson00000000000002")).toBe(true);
+    // The fixture's receipts of last year are Ada's own (the user filter of fetchMyProgress).
+    expect((await fetchMyProgress()).completed.has("demolesson00000000000003")).toBe(true);
     expect(await completeLesson("demolesson00000000000002", null)).toMatchObject({ ok: false });
   });
 

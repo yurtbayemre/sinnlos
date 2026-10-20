@@ -130,9 +130,22 @@ describe("saves", () => {
         category: "policy",
         departments: [],
         file: 42,
+        requiresAck: false,
       },
     });
     expect(refreshMock).not.toHaveBeenCalled();
+  });
+
+  it("a moderator's update sends a changed read confirmation alone (v0.20)", async () => {
+    const initial = values();
+    await documents.saveDocument({
+      documentId: DOC,
+      version: "5",
+      status: "draft",
+      values: { ...initial, requiresAck: true },
+      initial,
+    });
+    expect(call().body).toEqual({ data: { requiresAck: true } });
   });
 
   it("a create without a file sends file: null", async () => {
@@ -258,10 +271,12 @@ describe("a department author (amendment 1, §N2)", () => {
   it("creates with their department pinned, whatever the form held, and never a moderator-only key", async () => {
     await documents.saveDocument({
       status: "published",
-      values: values({ departments: [SALES], file: UPLOADED }),
+      values: values({ departments: [SALES], file: UPLOADED, requiresAck: true }),
     });
     const data = call().body?.data ?? {};
     expect(data.departments).toEqual([ENG.documentId]);
+    // The read confirmation is a moderator field (v0.20).
+    expect(data).not.toHaveProperty("requiresAck");
     expect(
       Object.keys(data).filter((key) => !DOCUMENT_DEPARTMENT_AUTHOR_FIELDS.includes(key as never)),
     ).toEqual([]);

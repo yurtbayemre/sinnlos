@@ -32,3 +32,33 @@ export function listDocuments(): Promise<WalkResult<Document>> {
     { maxPages: 10, label: "documents" },
   );
 }
+
+/** A document that requires acknowledgement, with what its audience depends on. */
+export type AckDocument = Pick<
+  Document,
+  "id" | "documentId" | "title" | "requiresAck" | "audience" | "departments"
+>;
+
+/**
+ * The documents that require acknowledgement (v0.20): the dashboard banner
+ * and, as admin_role (which bypasses document-visibility), the ack report.
+ * requiresAck is a plain boolean attribute, so the filter validates for
+ * every reading role. Full walk with the library's cap.
+ */
+export function listDocumentsRequiringAck(): Promise<WalkResult<AckDocument>> {
+  return walkAllPages<AckDocument>(
+    (page) =>
+      strapi<StrapiListResponse<AckDocument>>(
+        withQuery(
+          "/api/documents",
+          strapiQuery()
+            .filter("requiresAck", "$eq", true)
+            .fields(["title", "requiresAck", "audience"])
+            .populateFields("departments", ["name"])
+            .sort(["id:asc"])
+            .page(page, 100),
+        ),
+      ),
+    { maxPages: 10, label: "mandatory documents" },
+  );
+}

@@ -1,4 +1,8 @@
-import { computeOpenAcks, fetchMyAnnouncementAcks } from "@/lib/acknowledgements";
+import {
+  computeOpenAcks,
+  fetchMyAnnouncementAcks,
+  fetchMyDocumentAcks,
+} from "@/lib/acknowledgements";
 import type { AnnouncementListItem } from "@/lib/api/announcements";
 import { isReadDenied } from "@/lib/roles";
 import { SKIPPED_READ, tryFetch } from "@/lib/safe-fetch";
@@ -103,29 +107,43 @@ export async function loadAnnouncements(role: Role): Promise<AnnouncementsView> 
   };
 }
 
-/** The dashboard banner's number (AckBanner). */
+/** The dashboard banner's numbers (AckBanner). */
 export interface OpenAckCount {
   /** Mandatory announcements the caller has not confirmed; null: a read failed. */
   count: number | null;
-  /** A walk stopped at its cap: the count may be off. */
+  /** Documents requiring acknowledgement the caller has not confirmed (v0.20); null: a read failed. */
+  documents: number | null;
+  /** A walk stopped at its cap: a count may be off. */
   truncated: boolean;
 }
 
 /**
- * How many mandatory announcements the caller has not confirmed: the same
- * rule as the open section on /announcements (computeOpenAcks). A failed
- * read gives null and the banner stays away (the dashboard shows its own
+ * How many mandatory announcements and documents the caller has not
+ * confirmed: the same rule as the open section on /announcements and the
+ * buttons on /documents (computeOpenAcks). A failed read gives null for its
+ * kind and that line of the banner stays away (the dashboard shows its own
  * CMS-down banner).
  */
 export async function loadOpenAckCount(): Promise<OpenAckCount> {
-  const [mandatory, receipts] = await Promise.all([
+  const [mandatory, receipts, documents, documentReceipts] = await Promise.all([
     tryFetch(() => api.announcements.requiringAck(), "ack-banner"),
     tryFetch(() => fetchMyAnnouncementAcks(), "ack-banner"),
+    tryFetch(() => api.documents.requiringAck(), "ack-banner"),
+    tryFetch(() => fetchMyDocumentAcks(), "ack-banner"),
   ]);
-  if (mandatory.failed || receipts.failed) return { count: null, truncated: false };
+  const open = (
+    targets: { data: { data: { requiresAck?: boolean; documentId?: string }[] } | null },
+    acks: typeof receipts,
+  ): number | null =>
+    !targets.data || acks.failed
+      ? null
+      : computeOpenAcks(targets.data.data, acks.data?.acks ?? []).length;
   return {
-    count: computeOpenAcks(mandatory.data?.data ?? [], receipts.data?.acks ?? []).length,
-    truncated: !!mandatory.data?.truncated || !!receipts.data?.truncated,
+    count: open(mandatory, receipts),
+    documents: open(documents, documentReceipts),
+    truncated: [mandatory, receipts, documents, documentReceipts].some(
+      (read) => !read.failed && !!read.data?.truncated,
+    ),
   };
 }
 

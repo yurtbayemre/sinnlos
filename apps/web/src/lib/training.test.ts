@@ -16,8 +16,10 @@ vi.mock("@/lib/strapi/client", () => ({
   strapi: (...args: unknown[]) => strapiMock(...args),
 }));
 
-const { fetchCourseProgress, fetchMyProgress, fetchLessonByDocumentId } =
-  await import("./training");
+const viewer = { id: 5 as number | null };
+vi.mock("@/lib/viewer", () => ({ getViewer: async () => viewer }));
+
+const { fetchMyProgress, fetchLessonByDocumentId } = await import("./training");
 
 const page = (data: unknown[], pageNo: number, pageCount: number) => ({
   data,
@@ -28,28 +30,8 @@ beforeEach(() => {
   strapiMock.mockReset();
 });
 
-describe("fetchCourseProgress", () => {
-  it("walks every page of the course's lessons, sorted by id, user ids only", async () => {
-    strapiMock
-      .mockResolvedValueOnce(page([{ id: 1, targetDocumentId: "a", user: { id: 5 } }], 1, 2))
-      .mockResolvedValueOnce(page([{ id: 2, targetDocumentId: "b", user: { id: 5 } }], 2, 2));
-    const result = await fetchCourseProgress(["a", "b c"], "training-report:x");
-    expect(result).toEqual({
-      data: [
-        { id: 1, targetDocumentId: "a", user: { id: 5 } },
-        { id: 2, targetDocumentId: "b", user: { id: 5 } },
-      ],
-      truncated: false,
-    });
-    expect(strapiMock.mock.calls.map(([path]) => path)).toEqual([
-      "/api/lesson-progresses?filters[targetDocumentId][$in][0]=a&filters[targetDocumentId][$in][1]=b%20c&fields[0]=targetDocumentId&populate[user][fields][0]=id&sort[0]=id:asc&pagination[page]=1&pagination[pageSize]=100",
-      "/api/lesson-progresses?filters[targetDocumentId][$in][0]=a&filters[targetDocumentId][$in][1]=b%20c&fields[0]=targetDocumentId&populate[user][fields][0]=id&sort[0]=id:asc&pagination[page]=2&pagination[pageSize]=100",
-    ]);
-  });
-});
-
 describe("fetchMyProgress", () => {
-  it("reads the caller's receipts sorted by id and keeps the oldest per lesson", async () => {
+  it("reads the caller's receipts sorted by id and keeps the newest per lesson", async () => {
     strapiMock.mockResolvedValueOnce(
       page(
         [
@@ -63,13 +45,23 @@ describe("fetchMyProgress", () => {
     );
     const { completed, truncated } = await fetchMyProgress();
     expect(truncated).toBe(false);
+    // A renewed lesson (v0.20) has several receipts: the newest counts.
     expect([...completed]).toEqual([
-      ["a", "2026-09-01T10:00:00.000Z"],
+      ["a", "2026-09-02T10:00:00.000Z"],
       ["b", null],
     ]);
     expect(strapiMock.mock.calls[0]).toEqual([
-      "/api/lesson-progresses?fields[0]=targetDocumentId&fields[1]=completedAt&sort[0]=id:asc&pagination[page]=1&pagination[pageSize]=100",
+      "/api/lesson-progresses?filters[user][id][$eq]=5&fields[0]=targetDocumentId&fields[1]=completedAt&sort[0]=id:asc&pagination[page]=1&pagination[pageSize]=100",
     ]);
+  });
+});
+
+describe("fetchMyProgress without an identity", () => {
+  it("fails closed instead of reading everyone's receipts (admin_role may)", async () => {
+    viewer.id = null;
+    await expect(fetchMyProgress()).rejects.toThrow("no viewer id");
+    expect(strapiMock).not.toHaveBeenCalled();
+    viewer.id = 5;
   });
 });
 

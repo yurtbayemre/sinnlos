@@ -153,7 +153,7 @@ describe("the landing", () => {
     expect(hrefs(tree).some((href) => href.includes("/admin/content-manager"))).toBe(true);
   });
 
-  it("a department head: announcements, events, documents, duty plans and KPIs only (§L1), never the wiki", async () => {
+  it("a department head: announcements, events, documents, duty plans and KPIs only (§L1), never the wiki; the training report (v0.20)", async () => {
     viewerRef.current = viewer("department_head", ENG);
     const tree = elements(await ManagePage());
     expect(tileHrefs(tree).sort()).toEqual([
@@ -162,6 +162,7 @@ describe("the landing", () => {
       "/manage/duty-plans",
       "/manage/events",
       "/manage/kpis",
+      "/manage/training/report",
     ]);
     // Their counts come from their own lists; the wiki's page list is never asked.
     const paths = strapiMock.mock.calls.map(([path]) => String(path));

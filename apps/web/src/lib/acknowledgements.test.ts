@@ -12,6 +12,8 @@ const strapiMock = vi.fn();
 vi.mock("@/lib/strapi/client", () => ({
   strapi: (...args: unknown[]) => strapiMock(...args),
 }));
+const viewer = { id: 7 as number | null };
+vi.mock("@/lib/viewer", () => ({ getViewer: async () => viewer }));
 
 const {
   REPORT_ACK_CHUNK,
@@ -23,6 +25,7 @@ const {
 
 beforeEach(() => {
   strapiMock.mockReset();
+  viewer.id = 7;
 });
 
 describe("computeOpenAcks", () => {
@@ -180,7 +183,13 @@ describe("fetchMyAnnouncementAcks", () => {
     expect(result.truncated).toBe(true);
     expect(result.acks).toHaveLength(20);
     expect(strapiMock.mock.calls[0]).toEqual([
-      "/api/acknowledgements?filters[targetType][$eq]=announcement&sort=id:asc&pagination[page]=1&pagination[pageSize]=100",
+      "/api/acknowledgements?filters[targetType][$eq]=announcement&filters[user][id][$eq]=7&sort=id:asc&pagination[page]=1&pagination[pageSize]=100",
     ]);
+  });
+
+  it("reads only the caller's rows (admin_role may read everyone's) and fails closed without an id", async () => {
+    viewer.id = null;
+    await expect(fetchMyAnnouncementAcks()).rejects.toThrow("no viewer id");
+    expect(strapiMock).not.toHaveBeenCalled();
   });
 });

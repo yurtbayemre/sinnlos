@@ -1,16 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { courseCompletion, quizGatesCompletion, sortLessons } from "./training-shared";
-
-describe("courseCompletion", () => {
-  it("fails closed on zero lessons and derives done from the current list", () => {
-    expect(courseCompletion([], new Set(["x"])).done).toBe(false);
-    expect(courseCompletion([{ documentId: "a" }], new Set(["a"])).done).toBe(true);
-    expect(courseCompletion([{ documentId: "a" }, { documentId: "b" }], new Set(["a"])).done).toBe(
-      false,
-    );
-  });
-});
+import { quizGatesCompletion, sortLessons } from "./training-shared";
 
 describe("sortLessons", () => {
   it("sorts by order then id", () => {

@@ -1,24 +1,18 @@
 import Link from "next/link";
+import type { Route } from "next";
 import { redirect } from "next/navigation";
-import { AlertTriangle, CheckCircle2, GraduationCap } from "lucide-react";
-import { getFormatter, getTranslations } from "next-intl/server";
-import { formatInstant, SHORT_DAY } from "@/lib/date-format";
-import { capabilitiesFor, TRAINING_ROLES } from "@/lib/roles";
-import { getViewer } from "@/lib/viewer";
-import { fetchCourseProgress, fetchCourses } from "@/lib/training";
-import {
-  courseLessons,
-  trainingReport,
-  trainingStaff,
-  type CourseProgress,
-  type TrainingReportUser,
-} from "@/lib/training-report";
-import { fetchAllUsers } from "@/lib/users";
+import { GraduationCap } from "lucide-react";
+import { getTranslations } from "next-intl/server";
+import type { TrainingReportCourse } from "@sinnlos/domain";
+import { trainingReport } from "@/lib/api/training";
+import { capabilitiesFor, isAdmin } from "@/lib/roles";
 import { tryFetch } from "@/lib/safe-fetch";
-import type { UserLite } from "@/lib/types";
+import { getViewer } from "@/lib/viewer";
 import { EmptyState } from "@/components/empty-state";
 import { AdminPageHeader } from "@/components/admin-page-header";
 import { FetchErrorBanner } from "@/components/fetch-error";
+import { NoDepartmentExplanation } from "@/components/manage/page-parts";
+import { ReportCounts } from "@/components/manage/training-report";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 export async function generateMetadata() {
@@ -26,45 +20,32 @@ export async function generateMetadata() {
   return { title: t("title") };
 }
 
-type ReportUser = UserLite & TrainingReportUser;
-
 /**
- * Completion report per mandatory course (issue #29; clone of
- * /manage/acknowledgements). admin_role bypasses both training policies,
- * so courses include drafts — filtered out here — and progress rows span
- * ALL users. Progress is walked PER COURSE (lib/training.ts
- * fetchCourseProgress) so the walk cap scales with course size, not with
- * the global row count. Fail-closed: any truncated/failed input suppresses
- * the numbers ("–"), never false-green (lib/training-report.ts). The
- * denominator counts the training roles (lib/roles.ts TRAINING_ROLES, the
- * role types holding the course, lesson and progress reads; pinned to the
- * CMS matrix by roles-matrix-parity.test.ts): `guest` has NO training
- * grants (issue #29).
+ * The named training report (v0.20; owner decision 2026-10-20): one card per
+ * mandatory course with who is valid, due soon, expired or open. The cms
+ * scopes the answer (GET /api/courses/report): admin_role sees everyone,
+ * department heads and team leads the people of their own department. A head
+ * or lead without a department gets the explanation instead of a 403 banner.
  */
 export default async function TrainingReportPage() {
-  if (!capabilitiesFor((await getViewer()).role).reports.training) {
-    redirect("/");
-  }
+  const viewer = await getViewer();
+  if (!capabilitiesFor(viewer.role).reports.training) redirect("/");
 
-  // `format` renders instants in APP_TIME_ZONE (i18n/request.ts).
-  const [t, tTraining, format] = await Promise.all([
+  const [t, tTraining] = await Promise.all([
     getTranslations("trainingReport"),
     getTranslations("training"),
-    getFormatter(),
   ]);
+  if (!isAdmin(viewer.role) && !viewer.department) {
+    return (
+      <div className="space-y-8">
+        <AdminPageHeader title={t("title")} />
+        <NoDepartmentExplanation />
+      </div>
+    );
+  }
 
-  const [coursesResult, usersResult] = await Promise.all([
-    tryFetch(() => fetchCourses(), "training-report"),
-    tryFetch(
-      () =>
-        fetchAllUsers(
-          "populate[role]=true&fields[0]=displayName&fields[1]=email&fields[2]=blocked",
-        ),
-      "training-report",
-    ),
-  ]);
-
-  if (coursesResult.failed || usersResult.failed) {
+  const result = await tryFetch(() => trainingReport(), "training-report");
+  if (result.failed) {
     return (
       <div className="space-y-8">
         <AdminPageHeader title={t("title")} />
@@ -72,101 +53,72 @@ export default async function TrainingReportPage() {
       </div>
     );
   }
-
-  // REST default status=published (drafts stay the authors' workbench);
-  // the report covers mandatory courses only.
-  const courses = coursesResult.data!.courses.filter((c) => c.mandatory);
-  const coursesTruncated = coursesResult.data!.truncated;
-
-  const staff = trainingStaff(usersResult.data!.users as ReportUser[], TRAINING_ROLES);
-  const usersTruncated = usersResult.data!.truncated;
-
-  // Per-course progress walk, keyed by the course's lesson documentIds
-  // (only for courses that have lessons).
-  const progress = new Map<number, CourseProgress>(
-    await Promise.all(
-      courses
-        .map((course) => ({ course, lessonIds: courseLessons(course).lessonIds }))
-        .filter(({ lessonIds }) => lessonIds.length > 0)
-        .map(async ({ course, lessonIds }): Promise<[number, CourseProgress]> => {
-          const result = await tryFetch(
-            () => fetchCourseProgress(lessonIds, `training-report:${course.slug}`),
-            "training-report",
-          );
-          return [
-            course.id,
-            result.failed ? null : { rows: result.data!.data, truncated: result.data!.truncated },
-          ];
-        }),
-    ),
-  );
-
-  const { rows, anyTruncated, denominator } = trainingReport({
-    courses,
-    coursesTruncated,
-    staff,
-    usersTruncated,
-    progressOf: (course) => progress.get(course.id) ?? null,
-  });
+  const { scope, department, courses } = result.data!.data;
 
   return (
     <div className="space-y-8">
-      <AdminPageHeader title={t("title")} description={t("description", { count: denominator })} />
-
-      {anyTruncated && (
-        <div className="flex items-start gap-3 rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm">
-          <AlertTriangle
-            className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400"
-            aria-hidden="true"
-          />
-          <span>{t("truncatedWarning")}</span>
-        </div>
-      )}
-
+      <AdminPageHeader
+        title={t("title")}
+        description={
+          scope === "all" ? t("scopeAll") : t("scopeDepartment", { department: department ?? "" })
+        }
+      />
       {courses.length === 0 ? (
         <EmptyState icon={GraduationCap} title={t("emptyTitle")} hint={t("emptyHint")} />
       ) : (
         <div className="space-y-4">
-          {rows.map(({ course, lessonCount, completedUsers, unknown, pct }) => {
-            const updated = formatInstant(format, course.updatedAt, SHORT_DAY);
-            return (
-              <Card key={course.id}>
-                <CardHeader className="pb-2">
-                  <CardTitle
-                    as="h2"
-                    className="flex flex-wrap items-center justify-between gap-3 text-base"
-                  >
-                    <Link href={`/training/${course.slug}`} className="hover:underline">
-                      {course.title}
-                    </Link>
-                    <span className="text-sm font-normal text-muted-foreground">
-                      {tTraining("lessonCount", { count: lessonCount })}
-                    </span>
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="flex flex-wrap items-center gap-4 text-sm">
-                  {unknown ? (
-                    <span className="text-muted-foreground">–</span>
-                  ) : (
-                    <>
-                      <span className="inline-flex items-center gap-1.5 font-medium text-emerald-700 dark:text-emerald-400">
-                        <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
-                        {t("completedOf", { done: completedUsers as number, total: denominator })}
-                      </span>
-                      <span className="text-muted-foreground">({pct}%)</span>
-                      {updated && (
-                        <span className="text-xs text-muted-foreground">
-                          {t("updatedAt", { date: updated })}
-                        </span>
-                      )}
-                    </>
-                  )}
-                </CardContent>
-              </Card>
-            );
-          })}
+          {courses.map((course) => (
+            <CourseCard
+              key={course.documentId}
+              course={course}
+              lessonCount={tTraining("lessonCount", { count: course.lessonCount })}
+              validity={
+                course.validityMonths
+                  ? t("validityEvery", { count: course.validityMonths })
+                  : t("validityOnce")
+              }
+              audience={course.departments.join(", ") || t("allEmployees")}
+              showPeople={t("showPeople")}
+            />
+          ))}
         </div>
       )}
     </div>
+  );
+}
+
+function CourseCard({
+  course,
+  lessonCount,
+  validity,
+  audience,
+  showPeople,
+}: {
+  course: TrainingReportCourse;
+  lessonCount: string;
+  validity: string;
+  audience: string;
+  showPeople: string;
+}) {
+  const href = `/manage/training/report/${course.documentId}` as Route;
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <CardTitle as="h2" className="flex flex-wrap items-center justify-between gap-3 text-base">
+          <Link href={href} className="hover:underline">
+            {course.title}
+          </Link>
+          <span className="text-sm font-normal text-muted-foreground">
+            {lessonCount} · {validity} · {audience}
+          </span>
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="flex flex-wrap items-center justify-between gap-4 text-sm">
+        <ReportCounts counts={course.counts} />
+        <Link href={href} className="text-sm font-medium text-primary hover:underline">
+          {showPeople}
+        </Link>
+      </CardContent>
+    </Card>
   );
 }

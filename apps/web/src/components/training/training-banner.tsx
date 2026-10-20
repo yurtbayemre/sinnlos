@@ -13,8 +13,9 @@ import { loadTrainingOverview } from "@/lib/loaders/training";
  * banner rather than a wrong count.
  */
 export async function TrainingBanner() {
-  const { openMandatory: openCount } = await loadTrainingOverview("training-banner");
-  if (!openCount) return null;
+  const { openMandatory: openCount, dueSoonMandatory: dueSoonCount } =
+    await loadTrainingOverview("training-banner");
+  if (!openCount && !dueSoonCount) return null;
 
   const t = await getTranslations("dashboard");
 
@@ -29,8 +30,14 @@ export async function TrainingBanner() {
           aria-hidden="true"
         />
         <div>
-          <div className="text-sm font-medium">{t("trainingOpen", { count: openCount })}</div>
-          <div className="text-xs text-muted-foreground">{t("trainingOpenHint")}</div>
+          <div className="text-sm font-medium">
+            {openCount
+              ? t("trainingOpen", { count: openCount })
+              : t("trainingDueSoon", { count: dueSoonCount ?? 0 })}
+          </div>
+          <div className="text-xs text-muted-foreground">
+            {openCount ? t("trainingOpenHint") : t("trainingDueSoonHint")}
+          </div>
         </div>
       </div>
       <span className="text-xs text-muted-foreground">{t("trainingOpenCta")}</span>

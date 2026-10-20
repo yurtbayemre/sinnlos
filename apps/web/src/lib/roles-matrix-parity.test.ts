@@ -234,6 +234,9 @@ describe("web predicates = the cms grants", () => {
   it("the report denominators: announcement.find and the training reads", () => {
     expect(sorted(roles.ANNOUNCEMENT_READER_ROLES)).toEqual(holders(`${A.announcement}.find`));
     expect(sorted(roles.TRAINING_ROLES)).toEqual(holders(`${A.course}.find`));
+    expect(sorted(roles.TRAINING_REPORT_READER_ROLES)).toEqual(
+      holders(`${A.course}.report`, `${A.course}.reportCourse`),
+    );
   });
 
   it("KNOWN_ROLES are the matrix roles, and guest is one of them", () => {
@@ -421,7 +424,6 @@ describe("capabilitiesFor = the cms grants (decision 06 §L2)", () => {
 
   it.each(MATRIX_ROLES)("%s: manage and the reports follow the page gates (§L1)", (role) => {
     const caps = capabilitiesFor(role);
-    const admin = roles.isAdmin(role);
     // The /manage shell opens exactly to the roles that author an area,
     // MODERATORS and DEPARTMENT_AUTHOR_ROLES (batch 15, §L1, §N7): a
     // capability is what the cms grants, so no role gets an empty shell.
@@ -433,7 +435,9 @@ describe("capabilitiesFor = the cms grants (decision 06 §L2)", () => {
     );
     expect(caps.reports.analytics).toBe(holds(role, "api::search-log.search-log.summary"));
     expect(caps.reports.acknowledgements).toBe(holds(role, "plugin::users-permissions.role.find"));
-    expect(caps.reports.training).toBe(admin);
+    expect(caps.reports.training).toBe(
+      holds(role, "api::course.course.report", "api::course.course.reportCourse"),
+    );
     expect(caps.reports.activity).toBe(holds(role, "api::audit-event.audit-event.list"));
   });
 

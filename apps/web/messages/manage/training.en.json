@@ -48,6 +48,14 @@
     "videoUrl": {
       "label": "YouTube video",
       "hint": "Optional HTTPS link to a YouTube video."
+    },
+    "validityMonths": {
+      "label": "Validity in months",
+      "hint": "After this many months the course must be repeated, e.g. 12 for yearly safety training. Empty: once is enough."
+    },
+    "departments": {
+      "label": "Departments",
+      "hint": "Only these departments see the course and must take it. None selected: every employee."
     }
   },
   "modes": {
@@ -79,5 +87,8 @@
     "optionRemoved": "Answer removed.",
     "empty": "Without quiz questions, readers mark the lesson complete manually.",
     "correct": "correct"
+  },
+  "sections": {
+    "audience": "Audience"
   }
 }

@@ -5,7 +5,7 @@
     "singularName": "course",
     "pluralName": "courses",
     "displayName": "Course",
-    "description": "Training course: ordered lessons, mandatory completion tracking and draft/publish visibility. completionMode waehlt nur das Feedback des Quiz: confirm = Rueckmeldung pro Antwort; quizGate = eine Pruefung per 'Antworten pruefen'; exam = nur Gesamtergebnis, auch bei abgeschlossenen Lektionen. In allen Modi schliesst eine Lektion mit Quiz erst ab, wenn alle Antworten richtig sind; eine Lektion ohne Quiz per Klick. Der Server prueft die Antworten und liefert keine Loesungsschluessel aus. Unbegrenzte Versuche, kein Timer; bestehende Abschluesse bleiben nach Quiz-Aenderungen gueltig."
+    "description": "Training course: ordered lessons, mandatory completion tracking and draft/publish visibility. completionMode waehlt nur das Feedback des Quiz: confirm = Rueckmeldung pro Antwort; quizGate = eine Pruefung per 'Antworten pruefen'; exam = nur Gesamtergebnis, auch bei abgeschlossenen Lektionen. In allen Modi schliesst eine Lektion mit Quiz erst ab, wenn alle Antworten richtig sind; eine Lektion ohne Quiz per Klick. Der Server prueft die Antworten und liefert keine Loesungsschluessel aus. Unbegrenzte Versuche, kein Timer; bestehende Abschluesse bleiben nach Quiz-Aenderungen gueltig. validityMonths: ein Abschluss gilt so viele Monate (leer = einmalig); departments: leer = alle Mitarbeiter, sonst nur diese Abteilungen."
   },
   "options": {
     "draftAndPublish": true
@@ -31,6 +31,21 @@
       "type": "enumeration",
       "enum": ["confirm", "quizGate", "exam"],
       "default": "confirm"
+    },
+    "validityMonths": {
+      "type": "integer",
+      "min": 1,
+      "max": 120
+    },
+    "departments": {
+      "type": "relation",
+      "relation": "manyToMany",
+      "target": "api::department.department"
+    },
+    "audience": {
+      "type": "enumeration",
+      "enum": ["all", "departments"],
+      "default": "all"
     },
     "coverImage": {
       "type": "media",

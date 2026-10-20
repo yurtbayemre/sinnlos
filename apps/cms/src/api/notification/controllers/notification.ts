@@ -62,15 +62,23 @@ export default factories.createCoreController("api::notification.notification", 
    * answers 404 (utils/entry-id.ts). That 404 is reachable only for the
    * bypass role: for everyone else the policy looks the row up first and
    * answers 403.
+   *
+   * A training reminder (sourceType "course", v0.20) is the daily
+   * training-reminders cron's ledger: deleting it would send it again the
+   * next morning, so the API refuses (400); the web offers no delete, and a
+   * correction goes through the admin panel.
    */
   async delete(ctx) {
     const where = parseEntryRef(ctx.params.id);
     if (!where) return ctx.notFound();
     const entity = await strapi.db.query("api::notification.notification").findOne({
       where,
-      select: ["id", "documentId"],
+      select: ["id", "documentId", "sourceType"],
     });
     if (!entity) return ctx.notFound();
+    if (entity.sourceType === "course") {
+      return ctx.badRequest("Training reminders cannot be deleted");
+    }
     ctx.params.id = entity.documentId;
     return super.delete(ctx);
   },

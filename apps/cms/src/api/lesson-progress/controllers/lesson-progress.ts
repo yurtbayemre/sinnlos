@@ -3,10 +3,14 @@ import {
   QUIZ_CONTENT_INVALID,
   QUIZ_MAX_OPTIONS,
   QUIZ_MAX_QUESTIONS,
+  lessonReceiptState,
+  newestReceipts,
   quizAnswersPass,
 } from "@sinnlos/domain";
 
+import { appTimeZone, todayIn } from "../../../utils/time";
 import { loadPublishedLesson } from "../../../utils/training-access";
+import { toIso } from "../../../utils/training-roster";
 import { validateStoredQuiz } from "../../../utils/training-validation";
 
 /**
@@ -26,6 +30,11 @@ import { validateStoredQuiz } from "../../../utils/training-validation";
  * `answers`, one option index per question, every one correct
  * (quizAnswersPass, whatever the course's completionMode). The web gates
  * its button on server feedback; completion independently regrades.
+ *
+ * Renewal (v0.20): a course with `validityMonths` takes a NEW receipt once
+ * the newest one is due within RENEWAL_WINDOW_DAYS or overdue
+ * (lessonReceiptState); receipts are never edited, the old ones stay as the
+ * proof history.
  */
 const PROGRESS_UID = "api::lesson-progress.lesson-progress";
 
@@ -45,7 +54,7 @@ export default factories.createCoreController(PROGRESS_UID, ({ strapi }) => ({
     // Deliberately ONE identical error for all failure modes — "no such
     // lesson", "draft only" and "course unpublished" — so the endpoint
     // is no existence oracle for draft documentIds (§5.17).
-    const lesson = await loadPublishedLesson(strapi, targetDocumentId);
+    const lesson = await loadPublishedLesson(strapi, targetDocumentId, user);
     if (!lesson) return ctx.badRequest("Target not available for completion");
     const validated = validateStoredQuiz(lesson.quiz);
     if ("error" in validated) {
@@ -66,14 +75,30 @@ export default factories.createCoreController(PROGRESS_UID, ({ strapi }) => ({
       return ctx.badRequest("Quiz not passed");
     }
 
-    // One receipt per user + lesson. Accepted check-then-insert race
-    // (#16 class, same as acknowledgement): a photo-finish duplicate is
-    // cosmetic — every consumer dedupes by Set over targetDocumentId,
-    // and course completion is a set comparison (inherently idempotent).
-    const existing = await strapi.db
+    // One receipt per user + lesson while it counts (renewal: see the
+    // header). Accepted check-then-insert race (#16 class, same as
+    // acknowledgement): a photo-finish duplicate is cosmetic — every
+    // consumer keeps the newest receipt per lesson (newestReceipts).
+    const previous = await strapi.db
       .query(PROGRESS_UID)
-      .findOne({ where: { user: user.id, targetDocumentId } });
-    if (existing) return ctx.badRequest("Already completed");
+      .findMany({ where: { user: user.id, targetDocumentId }, select: ["id", "completedAt"] });
+    if (Array.isArray(previous) && previous.length > 0) {
+      const newest = newestReceipts(
+        previous.map((row: { completedAt?: unknown }) => ({
+          targetDocumentId,
+          completedAt: toIso(row.completedAt),
+        })),
+      ).get(targetDocumentId);
+      const zone = appTimeZone();
+      const state = lessonReceiptState(
+        newest,
+        true,
+        lesson.course.validityMonths,
+        todayIn(zone).toString(),
+        zone,
+      );
+      if (!state.mayComplete) return ctx.badRequest("Already completed");
+    }
 
     // Single-row db.query create — attaches the user relation correctly
     // (createMany would NOT link relations).

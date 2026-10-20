@@ -34,11 +34,13 @@ interface ContentRow {
 const DOCUMENT = "api::document.document";
 const QUICK_LINK = "api::quick-link.quick-link";
 const POLL = "api::poll.poll";
+const COURSE = "api::course.course";
 
 const LINKS: Record<string, { table: string; column: string }> = {
   [DOCUMENT]: { table: "documents_departments_lnk", column: "document_id" },
   [QUICK_LINK]: { table: "quick_links_departments_lnk", column: "quick_link_id" },
   [POLL]: { table: "polls_departments_lnk", column: "poll_id" },
+  [COURSE]: { table: "courses_departments_lnk", column: "course_id" },
 };
 
 const metadataOf = (uid: string) => ({
@@ -89,7 +91,7 @@ function host(options: {
   dialect?: string;
 }) {
   const tables: Record<string, ContentRow[]> = {};
-  for (const uid of [DOCUMENT, QUICK_LINK, POLL]) {
+  for (const uid of [DOCUMENT, QUICK_LINK, POLL, COURSE]) {
     tables[uid] = (options.rows[uid] ?? []).map((row) => ({
       ...row,
       departments: [...row.departments],
@@ -230,20 +232,20 @@ describe("departmentLinkTable", () => {
 });
 
 describe("restrictRowsOfDeletedDepartments (FX29 residual)", () => {
-  it("flags the draft and published rows linking the deleted department, in both types", async () => {
+  it("flags the draft and published rows linking the deleted department, in every type", async () => {
     const { strapi, flagged } = host({
       departments: [1, 2],
       rows: { [DOCUMENT]: ROWS, [QUICK_LINK]: ROWS },
     });
     const changed = await restrictRowsOfDeletedDepartments(strapi, { id: 1 });
     // 6 was flagged already, 4 and 5 do not link Engineering.
-    expect(changed).toEqual({ [DOCUMENT]: 3, [QUICK_LINK]: 3 });
+    expect(changed).toEqual({ [DOCUMENT]: 3, [QUICK_LINK]: 3, [COURSE]: 0 });
     expect(flagged(DOCUMENT)).toEqual([1, 2, 3, 6]);
     expect(flagged(QUICK_LINK)).toEqual([1, 2, 3, 6]);
   });
 
   it("covers the types DEPARTMENT_SCOPED_TYPES names, and nothing else", async () => {
-    expect(DEPARTMENT_SCOPED_TYPES.map((type) => type.uid)).toEqual([DOCUMENT, QUICK_LINK]);
+    expect(DEPARTMENT_SCOPED_TYPES.map((type) => type.uid)).toEqual([DOCUMENT, QUICK_LINK, COURSE]);
     const { strapi, flagged } = host({
       departments: [1],
       rows: { [POLL]: [{ id: 1, audience: "all", departments: [1] }] },
@@ -330,9 +332,11 @@ describe("restrictRowsOfDeletedDepartments (FX29 residual)", () => {
       `lock 1..${last}`,
       `read documents_departments_lnk 1..${last}`,
       `read quick_links_departments_lnk 1..${last}`,
+      `read courses_departments_lnk 1..${last}`,
       `lock ${last + 1}..${last + 2}`,
       `read documents_departments_lnk ${last + 1}..${last + 2}`,
       `read quick_links_departments_lnk ${last + 1}..${last + 2}`,
+      `read courses_departments_lnk ${last + 1}..${last + 2}`,
     ]);
     expect(flagged(DOCUMENT)).toEqual([1, 2, 3, 4, 6]);
   });
@@ -353,6 +357,7 @@ describe("restrictRowsOfDeletedDepartments (FX29 residual)", () => {
     expect(sqlite.events).toEqual([
       "read documents_departments_lnk 2..2",
       "read quick_links_departments_lnk 2..2",
+      "read courses_departments_lnk 2..2",
     ]);
     expect(sqlite.flagged(DOCUMENT)).toEqual(postgres.flagged(DOCUMENT));
   });

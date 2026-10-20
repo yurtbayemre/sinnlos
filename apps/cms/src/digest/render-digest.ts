@@ -20,6 +20,8 @@ export interface DigestContent {
   /** The stored title, and the type and values it is rendered from in the reader's language (AC04). */
   mentions: { title: string; type?: unknown; titleParams?: unknown }[];
   kudos: { message: string; from?: string | null; value?: string | null }[];
+  /** Training expiry reminders (cron/training-reminders.ts), rendered like mentions. */
+  training?: { title: string; type?: unknown; titleParams?: unknown }[];
 }
 
 export interface RenderedDigest {
@@ -76,6 +78,7 @@ const STR = {
     mentions: "Erwähnungen & Antworten",
     kudos: "Kudos für dich",
     kudosFrom: (from: string) => `von ${from}`,
+    training: "Unterweisungen",
     footer: (base: string) =>
       `Du erhältst diese Mail, weil du Digests aktiviert hast. Abbestellen: ${base}/profile`,
   },
@@ -88,6 +91,7 @@ const STR = {
     mentions: "Mentions & replies",
     kudos: "Kudos for you",
     kudosFrom: (from: string) => `from ${from}`,
+    training: "Training",
     footer: (base: string) =>
       `You receive this mail because digests are enabled in your profile. Unsubscribe: ${base}/profile`,
   },
@@ -112,7 +116,8 @@ export function totalItems(content: DigestContent): number {
     content.announcements.length +
     moreAnnouncements(content) +
     content.mentions.length +
-    content.kudos.length
+    content.kudos.length +
+    (content.training?.length ?? 0)
   );
 }
 
@@ -140,6 +145,14 @@ export function renderDigest(
         ...content.announcements.map((a) => `• ${a.title}${a.author ? ` — ${a.author}` : ""}`),
         ...(more > 0 ? [`• ${t.more(more)}`] : []),
       ],
+    });
+  }
+  if (content.training?.length) {
+    sections.push({
+      heading: t.training,
+      lines: content.training.map(
+        (r) => `• ${notificationTitle(r.type, r.titleParams, locale) ?? r.title}`,
+      ),
     });
   }
   if (content.mentions.length > 0) {

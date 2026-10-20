@@ -205,11 +205,12 @@ describe("acknowledgement create: targets and duplicates", () => {
     expect(ctx.send).toHaveBeenCalled();
   });
 
-  it("answers missing, draft-only, requiresAck=false and document targets with the SAME 400", async () => {
+  it("answers missing, draft-only, requiresAck=false and wrong-type targets with the SAME 400", async () => {
     for (const [targetType, targetDocumentId] of [
       ["announcement", "zzzzzzzzzzzzzzzzzzzzzzzz"],
       ["announcement", DRAFT_DOC],
       ["announcement", NO_ACK_DOC],
+      // An announcement's documentId under the document type: no such document.
       ["document", ANN_DOC],
     ]) {
       const { ctx, calls } = await create({ data: { targetType, targetDocumentId } });
@@ -465,5 +466,104 @@ describe("acknowledgement create: expiry (DA02)", () => {
     const tables = withTargeting({ department: { id: DEPT_OPS }, expiresAt: PAST });
     const { ctx } = await create(body, tables);
     expect(ctx.badRequest.mock.calls).toEqual([[NOT_AVAILABLE]]);
+  });
+});
+
+describe("acknowledgement create: documents (v0.20)", () => {
+  const DOC = "f0f1f2f3f4f5f6f7f8f9g0g1";
+  const body = { data: { targetType: "document", targetDocumentId: DOC } };
+  const missing = {
+    data: { targetType: "document", targetDocumentId: "zzzzzzzzzzzzzzzzzzzzzzzz" },
+  };
+  const created = (calls: { op: string }[]) => calls.some((c) => c.op === "create");
+  /** One published document (with its draft twin) carrying the given fields. */
+  const withDocument = (fields: Row) => {
+    const tables = baseTables();
+    tables["api::document.document"] = [
+      { id: 60, documentId: DOC, requiresAck: true, publishedAt: null, departments: [] },
+      {
+        id: 61,
+        documentId: DOC,
+        requiresAck: true,
+        publishedAt: "2026-09-01T00:00:00.000Z",
+        audience: "all",
+        departments: [],
+        ...fields,
+      },
+    ];
+    return tables;
+  };
+
+  it("acknowledges a published company-wide document that requires it, for the caller", async () => {
+    const { ctx, calls } = await create(body, withDocument({}));
+    expect(ctx.badRequest).not.toHaveBeenCalled();
+    expect(calls[0]).toMatchObject({
+      uid: "api::document.document",
+      params: {
+        where: { documentId: DOC, publishedAt: { $notNull: true } },
+        populate: { departments: { select: ["id"] } },
+      },
+    });
+    expect(calls.find((c) => c.op === "create")?.params.data).toEqual({
+      user: MEMBER.id,
+      targetType: "document",
+      targetDocumentId: DOC,
+      acknowledgedAt: expect.any(String),
+    });
+  });
+
+  it("lets only members of a linked department acknowledge (flag OR links)", async () => {
+    const own = await create(body, withDocument({ departments: [{ id: DEPT_SALES }] }));
+    expect(own.ctx.badRequest).not.toHaveBeenCalled();
+    // A link restricts whatever the flag says.
+    const other = await create(
+      body,
+      withDocument({ audience: "all", departments: [{ id: DEPT_OPS }] }),
+    );
+    expect(other.ctx.badRequest.mock.calls).toEqual([[NOT_AVAILABLE]]);
+    expect(other.calls.some((c) => c.uid === "api::acknowledgement.acknowledgement")).toBe(false);
+  });
+
+  it("answers requiresAck=false, draft-only, outside-audience and flagged-without-departments with the SAME 400", async () => {
+    const gone = await create(missing);
+    const draftOnly = baseTables();
+    draftOnly["api::document.document"] = [
+      { id: 60, documentId: DOC, requiresAck: true, publishedAt: null, departments: [] },
+    ];
+    for (const tables of [
+      withDocument({ requiresAck: false }),
+      draftOnly,
+      withDocument({ departments: [{ id: DEPT_OPS }] }),
+      withDocument({ audience: "departments", departments: [] }),
+    ]) {
+      const { ctx, calls } = await create(body, tables);
+      expect(ctx.badRequest.mock.calls).toEqual(gone.ctx.badRequest.mock.calls);
+      expect(created(calls)).toBe(false);
+    }
+  });
+
+  it("lets admin_role and editor acknowledge any document they read, without a scope lookup", async () => {
+    for (const fields of [
+      { departments: [{ id: 99 }] },
+      { audience: "departments", departments: [] },
+    ]) {
+      for (const user of [EDITOR, ADMIN]) {
+        const { ctx, calls } = await create(body, withDocument(fields), user);
+        expect(ctx.badRequest, user.role.type).not.toHaveBeenCalled();
+        expect(calls.some((c) => c.uid === "plugin::users-permissions.user")).toBe(false);
+      }
+    }
+  });
+
+  it("answers 'Already acknowledged' for a second document acknowledgement", async () => {
+    const tables = withDocument({});
+    tables["api::acknowledgement.acknowledgement"].push({
+      id: 51,
+      user: MEMBER.id,
+      targetType: "document",
+      targetDocumentId: DOC,
+    });
+    const { ctx } = await create(body, tables);
+    expect(ctx.badRequest).toHaveBeenCalledWith("Already acknowledged");
   });
 });

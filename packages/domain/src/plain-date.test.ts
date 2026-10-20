@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   addDaysToKey,
+  addMonthsToKey,
   canonicalTimeZone,
   daysBetweenKeys,
   formatPlainDate,
@@ -84,6 +85,16 @@ describe("plain-date", () => {
     expect(addDaysToKey("2027-03-01", -1)).toBe("2027-02-28");
     expect(() => addDaysToKey("2026-02-31", 1)).toThrow();
     expect(() => addDaysToKey("2026-09-30", 0.5)).toThrow();
+  });
+
+  it("addMonthsToKey clamps to the month end and crosses years", () => {
+    expect(addMonthsToKey("2026-03-15", 12)).toBe("2027-03-15");
+    expect(addMonthsToKey("2026-01-31", 1)).toBe("2026-02-28");
+    expect(addMonthsToKey("2027-01-31", 13)).toBe("2028-02-29");
+    expect(addMonthsToKey("2026-11-30", 3)).toBe("2027-02-28");
+    expect(addMonthsToKey("2026-05-31", -1)).toBe("2026-04-30");
+    expect(() => addMonthsToKey("2026-02-31", 1)).toThrow();
+    expect(() => addMonthsToKey("2026-09-30", 1.5)).toThrow();
   });
 
   it("formatPlainDate never moves the day", () => {

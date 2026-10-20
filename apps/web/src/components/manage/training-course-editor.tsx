@@ -20,9 +20,10 @@ import {
 import { uploadImageFile } from "@/lib/manage/upload";
 import { checkUploadFile } from "@/lib/manage/upload-check";
 import { scheduleValuesFromEditable, type ScheduleValues } from "@/lib/manage/values";
-import { Field, CheckboxField, inputClass } from "./form-controls";
+import type { DepartmentOption } from "@/lib/loaders/manage/options";
+import { CheckboxField, CheckboxList, Field, inputClass } from "./form-controls";
 import { ConflictDialog, EditorStatus, FormAlert, useFieldError } from "./editor-chrome";
-import { BackToList, Section } from "./editor-parts";
+import { BackToList, OptionsNotice, RetargetNotice, Section } from "./editor-parts";
 import { FileField } from "./file-field";
 import { MarkdownEditor } from "./markdown-editor";
 import { SinglePicker } from "./pickers";
@@ -37,7 +38,9 @@ const FIELD_ORDER = [
   "description",
   "mandatory",
   "completionMode",
+  "validityMonths",
   "coverImage",
+  "departments",
   "publishAt",
 ] as const;
 const ACTIONS: ItemActions = {
@@ -51,10 +54,16 @@ export function TrainingCourseEditor({
   editable,
   access,
   timeZone,
+  departments,
+  optionsFailed,
+  optionsTruncated,
 }: {
   editable: CourseEditable | null;
   access: AreaAccess;
   timeZone: string;
+  departments: DepartmentOption[];
+  optionsFailed: boolean;
+  optionsTruncated: boolean;
 }) {
   const t = useTranslations("manage.training");
   const tc = useTranslations("manage.common");
@@ -186,6 +195,26 @@ export function TrainingCourseEditor({
           />
           <p className="text-sm text-muted-foreground">{t("modeHint")}</p>
           <p className="rounded-xl border bg-muted/30 p-3 text-sm">{t("receiptsNotice")}</p>
+          <Field
+            id={id("validityMonths")}
+            label={t("fields.validityMonths.label")}
+            hint={t("fields.validityMonths.hint")}
+            error={error("validityMonths")}
+          >
+            {(a11y) => (
+              <input
+                {...a11y}
+                type="number"
+                inputMode="numeric"
+                min={1}
+                max={120}
+                value={values.validityMonths}
+                disabled={pending}
+                onChange={(e) => setValue("validityMonths", e.target.value)}
+                className={inputClass}
+              />
+            )}
+          </Field>
           <FileField
             id={id("coverImage")}
             label={t("fields.coverImage.label")}
@@ -209,6 +238,27 @@ export function TrainingCourseEditor({
               dropPick();
               setValue("coverImage", null);
             }}
+          />
+        </Section>
+        <Section title={t("sections.audience")}>
+          {editable?.needsRetarget && (
+            <RetargetNotice
+              checked={item.retarget}
+              disabled={pending || optionsFailed}
+              onChange={item.setRetarget}
+            />
+          )}
+          <OptionsNotice failed={optionsFailed} truncated={optionsTruncated} />
+          <CheckboxList
+            id={id("departments")}
+            legend={t("fields.departments.label")}
+            hint={t("fields.departments.hint")}
+            error={error("departments")}
+            options={departments.map((d) => ({ value: d.documentId, label: d.name }))}
+            selected={values.departments}
+            disabled={pending || optionsFailed}
+            emptyText={tc("targeting.noneAvailable")}
+            onChange={(selected) => setValue("departments", selected)}
           />
         </Section>
         <FormAlert area="courses" failure={editor.failure} alertRef={editor.alertRef} />

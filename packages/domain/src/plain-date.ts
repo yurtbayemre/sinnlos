@@ -200,6 +200,21 @@ export function addDaysToKey(key: string, days: number): string {
   return `${pad(shifted.getUTCFullYear(), 4)}-${pad(shifted.getUTCMonth() + 1)}-${pad(shifted.getUTCDate())}`;
 }
 
+/**
+ * Calendar-month arithmetic on 'YYYY-MM-DD' keys, clamped to the target
+ * month's last day: 2026-01-31 + 1 month = 2026-02-28.
+ */
+export function addMonthsToKey(key: string, months: number): string {
+  if (!isPlainDate(key)) throw new RangeError(`Not a calendar date (YYYY-MM-DD): ${key}`);
+  if (!Number.isInteger(months)) throw new RangeError(`Not a whole number of months: ${months}`);
+  const [year, month, day] = key.split("-").map(Number);
+  const target = new Date(Date.UTC(year, month - 1 + months, 1));
+  const lastDay = new Date(
+    Date.UTC(target.getUTCFullYear(), target.getUTCMonth() + 1, 0),
+  ).getUTCDate();
+  return `${pad(target.getUTCFullYear(), 4)}-${pad(target.getUTCMonth() + 1)}-${pad(Math.min(day, lastDay))}`;
+}
+
 /** Epoch ms of UTC midnight of a calendar date: a day number, never an instant. */
 function keyToUtcMs(key: string): number {
   if (!isPlainDate(key)) throw new RangeError(`Not a calendar date (YYYY-MM-DD): ${key}`);

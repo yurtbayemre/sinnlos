@@ -287,7 +287,7 @@ describe("capabilitiesFor", () => {
     }
   });
 
-  it("opens /manage to moderators, department heads and team leads, the reports to admin_role only (§L1)", () => {
+  it("opens /manage to moderators, department heads and team leads, the reports to admin_role (training: heads and leads too) (§L1)", () => {
     for (const role of ALL_ROLES) {
       const caps = capabilitiesFor(role);
       const admin = role === "admin_role";
@@ -297,7 +297,8 @@ describe("capabilitiesFor", () => {
       expect(caps.reports, role).toEqual({
         analytics: admin,
         acknowledgements: admin,
-        training: admin,
+        // v0.20: the named training report, scoped to the own department.
+        training: ["admin_role", "department_head", "team_lead"].includes(role),
         activity: admin,
       });
     }

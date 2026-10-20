@@ -1,23 +1,25 @@
+import { newestReceipts } from "@sinnlos/domain";
+
 import {
   courseBySlug,
-  courseProgressPage,
   coursesPage,
   lessonByDocumentId,
   myProgressPage,
   type CourseView,
   type LessonView,
   type MyProgressRow,
-  type ProgressReportRow,
 } from "@/lib/api/training";
 import { StrapiError } from "@/lib/strapi-error";
 import { walkAllPages, type WalkResult } from "@/lib/paginate";
+import { getViewer } from "@/lib/viewer";
 
 /**
  * Training data helpers (issue #29): the page walks, their caps and the
  * result shaping; each request is one function of lib/api/training.ts
- * (WD01). Every response is per-user: courses and lessons are status-gated
- * per role (admin/editor see drafts) and progress is strictly the caller's
- * own. Uncached like every strapi() read (D-DC01).
+ * (WD01). Every response is per-user: courses and lessons are status- and
+ * audience-gated per role (admin/editor see drafts) and progress is
+ * strictly the caller's own; the named report is the cms's
+ * /api/courses/report (v0.20). Uncached like every strapi() read (D-DC01).
  */
 
 export async function fetchCourses(): Promise<{ courses: CourseView[]; truncated: boolean }> {
@@ -43,45 +45,23 @@ export async function fetchLessonByDocumentId(documentId: string): Promise<Lesso
 }
 
 /**
- * Every progress row for the given lessons, across ALL users — only useful
- * for admin_role (the lesson-progress-visibility policy scopes everyone
- * else to their own rows). The /manage/training/report report walks it PER COURSE
- * (`targetDocumentId $in <lesson ids>`), so the walk cap scales with the
- * course size, not with the global row count. Sorted by id: without an
- * ORDER BY, Postgres may return rows in a different order per page, and
- * the page walk would skip or repeat rows (WD02).
- */
-export function fetchCourseProgress(
-  lessonIds: string[],
-  label: string,
-): Promise<WalkResult<ProgressReportRow>> {
-  return walkAllPages<ProgressReportRow>((page) => courseProgressPage(lessonIds, page), {
-    maxPages: 20,
-    label,
-  });
-}
-
-/**
  * The caller's own completion receipts (the lesson-progress-visibility
  * policy scopes the list server-side). Returns a documentId →
- * completedAt map — the Map dedupes accidental duplicate rows (accepted
- * check-then-insert race, the oldest row wins: the walk is sorted by id,
- * which also keeps the pages stable on Postgres) and every consumer
- * derives its Set from the keys.
+ * completedAt map of the NEWEST receipt per lesson: a renewed lesson
+ * (v0.20) has several receipts, and accidental duplicates (accepted
+ * check-then-insert race) collapse too. The walk is sorted by id, which
+ * keeps the pages stable on Postgres.
  */
 export async function fetchMyProgress(): Promise<{
   completed: Map<string, string | null>;
   truncated: boolean;
 }> {
-  const result: WalkResult<MyProgressRow> = await walkAllPages<MyProgressRow>(myProgressPage, {
-    maxPages: 20,
-    label: "lesson-progress",
-  });
-  const completed = new Map<string, string | null>();
-  for (const row of result.data) {
-    if (typeof row.targetDocumentId === "string" && !completed.has(row.targetDocumentId)) {
-      completed.set(row.targetDocumentId, row.completedAt ?? null);
-    }
-  }
-  return { completed, truncated: result.truncated };
+  const { id } = await getViewer();
+  // Without an identity nothing is known: fail closed (the callers' tryFetch).
+  if (id === null) throw new Error("lesson-progress: no viewer id");
+  const result: WalkResult<MyProgressRow> = await walkAllPages<MyProgressRow>(
+    (page) => myProgressPage(id, page),
+    { maxPages: 20, label: "lesson-progress" },
+  );
+  return { completed: newestReceipts(result.data), truncated: result.truncated };
 }

@@ -36,6 +36,7 @@ export const TEAM = "api::team.team";
 export const WIKI_PAGE = "api::wiki-page.wiki-page";
 export const DUTY_PLAN = "api::duty-plan.duty-plan";
 export const KPI = "api::kpi.kpi";
+export const COURSE = "api::course.course";
 
 interface LinkSpec {
   table: string;
@@ -121,6 +122,13 @@ export const LINK_TABLES: Record<string, Record<string, LinkSpec>> = {
     departments: {
       table: "polls_departments_lnk",
       rowColumn: "poll_id",
+      targetColumn: "department_id",
+    },
+  },
+  [COURSE]: {
+    departments: {
+      table: "courses_departments_lnk",
+      rowColumn: "course_id",
       targetColumn: "department_id",
     },
   },

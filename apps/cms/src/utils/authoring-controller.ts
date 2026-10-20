@@ -154,7 +154,7 @@ export const AUTHORING_SPECS: Readonly<Record<string, AuthoringSpec>> = {
     authorField: null,
     scheduled: true,
     unpublishScheduled: false,
-    flagColumns: [],
+    flagColumns: ["audience"],
   },
   [LESSON_UID]: {
     uid: LESSON_UID,
@@ -582,8 +582,9 @@ export function spaceNeedsRetarget(row: Record<string, unknown> | null): boolean
 export function rowNeedsRetarget(uid: string, row: Record<string, unknown> | null): boolean {
   if (!row) return false;
   if (uid === WIKI_SPACE_UID) return spaceNeedsRetarget(row);
-  // A wiki page has no targeting: its space decides who reads it.
-  if (uid === WIKI_PAGE_UID || isTrainingUid(uid)) return false;
+  // A wiki page has no targeting: its space decides who reads it; a lesson
+  // follows its course.
+  if (uid === WIKI_PAGE_UID || uid === LESSON_UID) return false;
   if (uid === ANNOUNCEMENT_UID) {
     return announcementNeedsRetarget({
       audience: row.audience as string | null,
@@ -629,6 +630,9 @@ export async function editableFields(
         description: text(draft.description),
         mandatory: draft.mandatory !== false,
         completionMode: text(draft.completionMode) ?? "confirm",
+        validityMonths: typeof draft.validityMonths === "number" ? draft.validityMonths : null,
+        departments: documentIdsOf(draft.departments),
+        needsRetarget: retarget,
         coverImage: editableMediaOf(draft.coverImage),
         publishAt: iso(draft.publishAt),
         scheduleError: text(draft.scheduleError),
@@ -706,6 +710,7 @@ export async function editableFields(
         needsRetarget: retarget,
         ...(moderator
           ? {
+              requiresAck: draft.requiresAck === true,
               publishAt: iso(draft.publishAt),
               unpublishAt: iso(draft.unpublishAt),
               scheduleError: text(draft.scheduleError),

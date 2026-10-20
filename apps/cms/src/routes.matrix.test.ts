@@ -419,6 +419,9 @@ const GOLDEN: Record<string, PolicySpec[]> = {
   // Fixed learner actions enforce published targets inside the controller.
   "api::lesson.lesson.player": [],
   "api::lesson.lesson.check": [],
+  // The named training report (v0.20): the controller checks role and department.
+  "api::course.course.report": [],
+  "api::course.course.reportCourse": [],
 
   "api::lesson-progress.lesson-progress.find": ["global::lesson-progress-visibility"],
   "api::lesson-progress.lesson-progress.findOne": ["global::lesson-progress-visibility"],
@@ -1405,7 +1408,12 @@ describe("route → policy matrix (S01)", async () => {
           (action) =>
             action.startsWith(`${uid}.`) &&
             !["find", "findOne"].includes(splitAction(action)[1]) &&
-            !["api::lesson.lesson.player", "api::lesson.lesson.check"].includes(action),
+            ![
+              "api::lesson.lesson.player",
+              "api::lesson.lesson.check",
+              "api::course.course.report",
+              "api::course.course.reportCourse",
+            ].includes(action),
         );
         expect(authoring, uid).toEqual([]);
       }

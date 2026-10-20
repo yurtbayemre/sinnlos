@@ -29,7 +29,7 @@ import {
 } from "@/lib/manage/values";
 import { cn } from "@/lib/utils";
 import type { DepartmentOption } from "@/lib/loaders/manage/options";
-import { CheckboxList, Field, inputClass, textareaClass } from "./form-controls";
+import { CheckboxField, CheckboxList, Field, inputClass, textareaClass } from "./form-controls";
 import { ConflictDialog, EditorStatus, FormAlert, useFieldError } from "./editor-chrome";
 import {
   BackToList,
@@ -54,6 +54,7 @@ const FIELD_ORDER = [
   "category",
   "file",
   "departments",
+  "requiresAck",
   "publishAt",
   "unpublishAt",
 ] as const;
@@ -321,6 +322,20 @@ export function DocumentEditor({
             </>
           )}
         </Section>
+
+        {!departmentAuthor && (
+          <Section title={t("sections.confirmation")}>
+            <CheckboxField
+              id={id("requiresAck")}
+              label={t("fields.requiresAck.label")}
+              hint={t("fields.requiresAck.hint")}
+              error={error("requiresAck")}
+              checked={values.requiresAck}
+              disabled={pending}
+              onChange={(requiresAck) => setValue("requiresAck", requiresAck)}
+            />
+          </Section>
+        )}
 
         <FormAlert area="documents" failure={editor.failure} alertRef={editor.alertRef} />
         <PublishBar

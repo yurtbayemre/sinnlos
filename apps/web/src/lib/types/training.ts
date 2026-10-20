@@ -11,6 +11,8 @@ export interface Course {
   description?: string | null;
   mandatory?: boolean;
   completionMode?: TrainingCompletionMode;
+  /** Months a completion stays valid; null/absent = once is enough (v0.20). */
+  validityMonths?: number | null;
   coverImage?: { url?: string; formats?: { small?: { url?: string } } | null } | null;
   lessons?: Lesson[];
   createdAt?: string;

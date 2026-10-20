@@ -135,6 +135,52 @@ describe("loadTrainingOverview (banner and list)", () => {
   });
 });
 
+describe("recurring courses (v0.20)", () => {
+  const YEARLY = { ...SECURITY, slug: "yearly", validityMonths: 12 };
+  const daysAgo = (days: number) => new Date(Date.now() - days * 86400000).toISOString();
+  const receipts = (age: number) => ({
+    completed: new Map(YEARLY.lessons.map((l) => [l.documentId, daysAgo(age)])),
+    truncated: false,
+  });
+
+  it("counts an expired mandatory course as open and one due soon separately", async () => {
+    reads.courses.mockResolvedValue({ courses: [YEARLY], truncated: false });
+    reads.progress.mockResolvedValue(receipts(400));
+    const expired = await loadTrainingOverview();
+    expect(expired.courses[0]).toMatchObject({ status: "expired", done: false, completed: 0 });
+    expect(expired).toMatchObject({ openMandatory: 1, dueSoonMandatory: 0 });
+
+    reads.progress.mockResolvedValue(receipts(350));
+    const soon = await loadTrainingOverview();
+    expect(soon.courses[0]).toMatchObject({ status: "dueSoon", done: true, completed: 3 });
+    expect(soon).toMatchObject({ openMandatory: 0, dueSoonMandatory: 1 });
+
+    reads.progress.mockResolvedValue(receipts(10));
+    const valid = await loadTrainingOverview();
+    expect(valid.courses[0]).toMatchObject({ status: "done", done: true });
+    expect(valid.courses[0].dueKey).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(valid).toMatchObject({ openMandatory: 0, dueSoonMandatory: 0 });
+  });
+
+  it("marks lessons due for renewal and points the CTA at the first of them", async () => {
+    reads.course.mockResolvedValue(YEARLY);
+    reads.progress.mockResolvedValue(receipts(350));
+    const page = await loadCourse("yearly");
+    expect(page?.lessons.map((l) => [l.lesson.id, l.done, l.renew])).toEqual([
+      [11, true, true],
+      [12, true, true],
+      [13, true, true],
+    ]);
+    expect(page).toMatchObject({ status: "dueSoon", done: true });
+    expect(page?.firstOpen?.id).toBe(11);
+
+    reads.progress.mockResolvedValue(receipts(10));
+    const valid = await loadCourse("yearly");
+    expect(valid?.lessons.every((l) => l.done && !l.renew)).toBe(true);
+    expect(valid?.firstOpen).toBeNull();
+  });
+});
+
 describe("loadCourse (the course page)", () => {
   it("success: lessons in course order with completion, the first open one", async () => {
     const page = await loadCourse("security");

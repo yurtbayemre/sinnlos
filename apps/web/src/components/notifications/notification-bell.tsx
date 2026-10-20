@@ -4,7 +4,7 @@ import { useId, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import type { Route } from "next";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
-import { Bell, Megaphone, MessageCircle, Calendar, Award } from "lucide-react";
+import { Bell, Megaphone, MessageCircle, Calendar, Award, GraduationCap } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   isSharedErrorCode,
@@ -28,6 +28,8 @@ const typeIcon: Record<string, typeof Bell> = {
   comment: MessageCircle,
   event: Calendar,
   kudos: Award,
+  trainingDue: GraduationCap,
+  trainingExpired: GraduationCap,
 };
 
 /** The badge text: the count, capped at "99+". */

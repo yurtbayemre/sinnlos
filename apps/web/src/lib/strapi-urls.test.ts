@@ -77,8 +77,8 @@ const OVERFLOW_DOC = "overflow-doc";
 
 /**
  * The canned body per path: enough for every caller to go on to its next
- * read (the ack report to its ack chunks, the training report to a course's
- * progress walk) and for getViewer() to see an admin.
+ * read (the ack report to its ack chunks, the training report pages to their
+ * render) and for getViewer() to see an admin.
  */
 function respond(url: string): Response {
   const path = url.slice(STRAPI.length);
@@ -137,6 +137,28 @@ function respond(url: string): Response {
       meta: { pagination: { page: 1, pageSize: 500, pageCount: 2, total: 501 } },
     });
   }
+  if (path === "/api/courses/report") {
+    return json({ data: { scope: "all", department: null, courses: [] } });
+  }
+  if (/^\/api\/courses\/[^/?]+\/report$/.test(path)) {
+    return json({
+      data: {
+        scope: "all",
+        department: null,
+        course: {
+          documentId: "course-doc-1",
+          title: "Security",
+          slug: "security",
+          validityMonths: null,
+          lessonCount: 0,
+          departments: [],
+          counts: { done: 0, dueSoon: 0, expired: 0, open: 0, total: 0 },
+        },
+        lessons: [],
+        people: [],
+      },
+    });
+  }
   if (path.startsWith("/api/courses?")) {
     return json(
       onePage([
@@ -175,7 +197,12 @@ function describeCall([url, init]: Call): string {
 const { api } = await import("./strapi");
 const { fetchAllTeams } = await import("./teams");
 const { fetchAllUsers } = await import("./users");
-const { fetchAnnouncementAckIndex, fetchMyAnnouncementAcks } = await import("./acknowledgements");
+const {
+  fetchAnnouncementAckIndex,
+  fetchDocumentAckIndex,
+  fetchMyAnnouncementAcks,
+  fetchMyDocumentAcks,
+} = await import("./acknowledgements");
 const training = await import("./training");
 const { getViewer } = await import("./viewer");
 const { getNotifications } = await import("./notification-actions");
@@ -184,6 +211,9 @@ const { getCommentSection, getCommentSections } = await import("./comment-action
 const { default: AckReportPage } = await import("@/app/(app)/manage/acknowledgements/page");
 const { default: AnalyticsPage } = await import("@/app/(app)/manage/analytics/page");
 const { default: TrainingReportPage } = await import("@/app/(app)/manage/training/report/page");
+const { default: CourseReportPage } =
+  await import("@/app/(app)/manage/training/report/[course]/page");
+const trainingApi = await import("./api/training");
 const { default: PersonPage } = await import("@/app/(app)/people/[id]/page");
 const { default: ProfilePage } = await import("@/app/(app)/profile/page");
 
@@ -219,6 +249,7 @@ const API_READS: Record<string, () => Promise<unknown>> = {
       7,
     ]),
   "documents.list": () => api.documents.list(),
+  "documents.requiringAck": () => api.documents.requiringAck(),
   "kudos.list": () => api.kudos.list(),
   "classifieds.list": async () => {
     await api.classifieds.list("2026-09-28");
@@ -239,15 +270,17 @@ const DIRECT_READS: Record<string, () => Promise<unknown>> = {
   "users.fetchAllUsers(fields[0]=id)": () => fetchAllUsers("fields[0]=id"),
   "users.fetchAllUsers(sorted)": () => fetchAllUsers("fields[0]=displayName&sort=displayName:asc"),
   "acknowledgements.fetchMyAnnouncementAcks": () => fetchMyAnnouncementAcks(),
+  "acknowledgements.fetchMyDocumentAcks": () => fetchMyDocumentAcks(),
   "acknowledgements.fetchAnnouncementAckIndex": () =>
     fetchAnnouncementAckIndex(
       Array.from({ length: 21 }, (_, i) => `ann doc ${i}`).concat(["ann doc 0", ""]),
     ),
+  "acknowledgements.fetchDocumentAckIndex": () => fetchDocumentAckIndex(["doc doc 0"]),
   "training.fetchCourses": () => training.fetchCourses(),
   "training.fetchCourseBySlug": () => training.fetchCourseBySlug("security & safety"),
   "training.fetchLessonByDocumentId": () => training.fetchLessonByDocumentId("lesson/doc 1"),
-  "training.fetchCourseProgress": () =>
-    training.fetchCourseProgress(["lesson-doc-1", "lesson doc 2"], "label"),
+  "training.trainingReport": () => trainingApi.trainingReport(),
+  "training.courseTrainingReport": () => trainingApi.courseTrainingReport("course doc/1"),
   "training.fetchMyProgress": () => training.fetchMyProgress(),
   "viewer.getViewer": () => getViewer(),
   "topbar.getNotifications": () => getNotifications(),
@@ -276,6 +309,11 @@ const DIRECT_READS: Record<string, () => Promise<unknown>> = {
   "page.manage/acknowledgements": () => AckReportPage(),
   "page.manage/analytics": () => AnalyticsPage(),
   "page.manage/training/report": () => TrainingReportPage(),
+  "page.manage/training/report/[course]": () =>
+    CourseReportPage({
+      params: Promise.resolve({ course: "k3v9q2m8x7c4b1n6p5z0r2t8" }),
+      searchParams: Promise.resolve({}),
+    }),
   "page.people/[id]": () => PersonPage({ params: Promise.resolve({ id: "7" }) }),
   "page.profile": () => ProfilePage(),
 };

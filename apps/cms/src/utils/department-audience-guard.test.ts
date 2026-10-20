@@ -298,7 +298,7 @@ describe("department audience guard: stays in its lane", () => {
     const guard = createDepartmentAudienceGuard(strapi);
     const cases: DocumentMiddlewareContext[] = [
       context("api::poll.poll", "publish", { documentId: "p1" }),
-      context("api::course.course", "update", { documentId: "c1" }),
+      context("api::lesson.lesson", "update", { documentId: "l1" }),
       context("api::announcement.announcement", "findOne", { documentId: "a1" }),
       context("api::event.event", "delete", { documentId: "e1" }),
       context("api::document.document", "findMany"),

@@ -452,8 +452,9 @@ const CONTRACTS: Record<string, PolicyContract> = {
     kind: "read-filter",
     anonymous: "filter",
     cases: [
-      { bypass: ADMIN_EDITOR, injectsFilter: false, pinsStatus: true },
-      { config: { level: "course" }, bypass: ADMIN_EDITOR, injectsFilter: false, pinsStatus: true },
+      // Course audience (v0.20): the course level filters by department too.
+      read(ADMIN_EDITOR, true),
+      read(ADMIN_EDITOR, true, { level: "course" }),
       read(ADMIN_EDITOR, true, { level: "lesson" }),
     ],
   },
