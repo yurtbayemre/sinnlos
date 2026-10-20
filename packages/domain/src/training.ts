@@ -446,3 +446,65 @@ export function newestReceipts(
   }
   return newest;
 }
+
+// ---------------------------------------------------------------------------
+// The named training report (v0.20): GET /api/courses/report (summary per
+// mandatory course) and GET /api/courses/:id/report (people + receipts).
+// admin_role reads everyone, department heads and team leads the people of
+// their own department (TRAINING_REPORT_ROLES).
+
+export interface TrainingReportCounts {
+  done: number;
+  dueSoon: number;
+  expired: number;
+  open: number;
+  /** People the course is for, in the caller's scope. */
+  total: number;
+}
+
+export interface TrainingReportCourse {
+  documentId: string;
+  title: string;
+  slug: string;
+  validityMonths: number | null;
+  lessonCount: number;
+  /** Department names; empty = every staff member. */
+  departments: string[];
+  counts: TrainingReportCounts;
+}
+
+export interface TrainingReportScope {
+  /** "all" for admin_role; "department" for a head or lead. */
+  scope: "all" | "department";
+  /** The caller's department name for scope "department". */
+  department: string | null;
+}
+
+export interface TrainingReportSummaryResponse {
+  data: TrainingReportScope & { courses: TrainingReportCourse[] };
+}
+
+export interface TrainingReportPerson {
+  userId: number;
+  name: string;
+  email: string | null;
+  department: string | null;
+  status: CourseValidityStatus;
+  /** Lessons that count today, of `total`. */
+  completed: number;
+  total: number;
+  /** When the course counts: the newest receipt. */
+  completedAt: string | null;
+  /** Earliest due day (YYYY-MM-DD) when the course expires. */
+  dueKey: string | null;
+  /** Every receipt for the current lessons, oldest first: the proof history. */
+  receipts: { lessonDocumentId: string; completedAt: string | null }[];
+}
+
+export interface TrainingReportCourseResponse {
+  data: TrainingReportScope & {
+    course: TrainingReportCourse;
+    lessons: { documentId: string; title: string }[];
+    people: TrainingReportPerson[];
+  };
+}

@@ -31,6 +31,8 @@ admin_role|api::course.course.editable
 admin_role|api::course.course.find
 admin_role|api::course.course.findOne
 admin_role|api::course.course.publish
+admin_role|api::course.course.report
+admin_role|api::course.course.reportCourse
 admin_role|api::course.course.unpublish
 admin_role|api::course.course.update
 admin_role|api::department.department.editable
@@ -258,6 +260,8 @@ department_head|api::comment.comment.find
 department_head|api::comment.comment.findOne
 department_head|api::course.course.find
 department_head|api::course.course.findOne
+department_head|api::course.course.report
+department_head|api::course.course.reportCourse
 department_head|api::department.department.editable
 department_head|api::department.department.find
 department_head|api::department.department.findOne
@@ -650,6 +654,8 @@ team_lead|api::comment.comment.find
 team_lead|api::comment.comment.findOne
 team_lead|api::course.course.find
 team_lead|api::course.course.findOne
+team_lead|api::course.course.report
+team_lead|api::course.course.reportCourse
 team_lead|api::department.department.find
 team_lead|api::department.department.findOne
 team_lead|api::document.document.find
