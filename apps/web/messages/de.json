@@ -423,7 +423,7 @@
     "roleMember": "Lesezugriff je nach Rolle/Abteilung/Team. Eigenes Profil bearbeiten.",
     "roleGuest": "Nur Lesezugriff auf öffentliche Wiki-Bereiche.",
     "trainingReportLink": "Schulungs-Report",
-    "trainingReportLinkDesc": "Wer hat welche Pflichtschulung abgeschlossen"
+    "trainingReportLinkDesc": "Wer ist unterwiesen, wer ist fällig"
   },
   "analytics": {
     "title": "Analyse",
@@ -570,12 +570,32 @@
   },
   "trainingReport": {
     "title": "Schulungs-Report",
-    "description": "Abschlussstand der Pflichtschulungen über {count} Mitarbeitende.",
-    "truncatedWarning": "Einzelne Datenquellen sind unvollständig — Zahlen werden unterdrückt statt falsch angezeigt.",
+    "scopeAll": "Pflichtschulungen aller Mitarbeitenden: wer unterwiesen ist, wer fällig ist.",
+    "scopeDepartment": "Pflichtschulungen der Abteilung {department}: wer unterwiesen ist, wer fällig ist.",
     "emptyTitle": "Keine Pflichtkurse",
-    "emptyHint": "Veröffentlichte Kurse mit Pflicht-Flag erscheinen hier mit ihrer Abschlussquote.",
-    "completedOf": "{done} von {total} abgeschlossen",
-    "updatedAt": "Stand {date}"
+    "emptyHint": "Veröffentlichte Kurse mit Pflicht-Flag erscheinen hier mit allen, die sie abgeschlossen haben.",
+    "validOf": "{valid} von {total} gültig",
+    "validityEvery": "{count, plural, one {jeden Monat wiederholen} other {alle # Monate wiederholen}}",
+    "validityOnce": "einmalig",
+    "allEmployees": "alle Mitarbeitenden",
+    "showPeople": "Personen anzeigen",
+    "backToCourses": "Alle Kurse",
+    "statusDone": "Gültig",
+    "statusDueSoon": "Läuft bald ab",
+    "statusExpired": "Abgelaufen",
+    "statusOpen": "Offen",
+    "filterLabel": "Nach Status filtern",
+    "filterAll": "Alle",
+    "columnName": "Name",
+    "columnDepartment": "Abteilung",
+    "columnStatus": "Status",
+    "columnLessons": "Lektionen",
+    "columnCompletedAt": "Erledigt am",
+    "columnDueOn": "Fällig am",
+    "lessonsOf": "{done}/{total}",
+    "noPeople": "Niemand in dieser Auswahl.",
+    "downloadStatus": "Status (CSV)",
+    "downloadReceipts": "Nachweis (CSV)"
   },
   "duties": {
     "title": "Zuständigkeiten",

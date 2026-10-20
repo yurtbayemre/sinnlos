@@ -105,8 +105,11 @@ GET http://cms.test/api/courses?filters[slug][$eq]=security%20%26%20safety&popul
 ## training.fetchLessonByDocumentId
 GET http://cms.test/api/lessons/lesson%2Fdoc%201/player cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
 
-## training.fetchCourseProgress
-GET http://cms.test/api/lesson-progresses?filters[targetDocumentId][$in][0]=lesson-doc-1&filters[targetDocumentId][$in][1]=lesson%20doc%202&fields[0]=targetDocumentId&populate[user][fields][0]=id&sort[0]=id:asc&pagination[page]=1&pagination[pageSize]=100 cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
+## training.trainingReport
+GET http://cms.test/api/courses/report cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
+
+## training.courseTrainingReport
+GET http://cms.test/api/courses/course%20doc%2F1/report cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
 
 ## training.fetchMyProgress
 GET http://cms.test/api/lesson-progresses?fields[0]=targetDocumentId&fields[1]=completedAt&sort[0]=id:asc&pagination[page]=1&pagination[pageSize]=100 cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
@@ -248,10 +251,12 @@ GET http://cms.test/api/wiki-pages?&pagination[pageSize]=1 cache=no-store header
 GET http://cms.test/api/wiki-spaces?&pagination[pageSize]=1 cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
 
 ## page.manage/training/report
-GET http://cms.test/api/courses?populate[lessons][fields][0]=documentId&populate[lessons][fields][1]=title&populate[lessons][fields][2]=order&populate[coverImage]=true&sort[0]=title:asc&sort[1]=id:asc&pagination[page]=1&pagination[pageSize]=100 cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
-GET http://cms.test/api/lesson-progresses?filters[targetDocumentId][$in][0]=lesson-doc-1&fields[0]=targetDocumentId&populate[user][fields][0]=id&sort[0]=id:asc&pagination[page]=1&pagination[pageSize]=100 cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
+GET http://cms.test/api/courses/report cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
 GET http://cms.test/api/me cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
-GET http://cms.test/api/users?populate[role]=true&fields[0]=displayName&fields[1]=email&fields[2]=blocked&sort=id:asc&start=0&limit=100 cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
+
+## page.manage/training/report/[course]
+GET http://cms.test/api/courses/k3v9q2m8x7c4b1n6p5z0r2t8/report cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
+GET http://cms.test/api/me cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
 
 ## page.people/[id]
 GET http://cms.test/api/users/7?populate[department]=true&populate[avatar]=true&populate[manager][populate][avatar]=true&populate[directReports][populate][avatar]=true&populate[teams][populate][department]=true&populate[role]=true cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
