@@ -13,15 +13,19 @@ import type { Acknowledgement } from "@/lib/types";
 const feedMock = vi.fn<() => Promise<unknown>>();
 const mandatoryMock = vi.fn<() => Promise<unknown>>();
 const receiptsMock = vi.fn<() => Promise<unknown>>();
+const documentsMock = vi.fn<() => Promise<unknown>>();
+const documentReceiptsMock = vi.fn<() => Promise<unknown>>();
 
 vi.mock("@/lib/strapi", () => ({
   api: {
     announcements: { list: () => feedMock(), requiringAck: () => mandatoryMock() },
+    documents: { requiringAck: () => documentsMock() },
   },
 }));
 vi.mock("@/lib/acknowledgements", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/acknowledgements")>()),
   fetchMyAnnouncementAcks: () => receiptsMock(),
+  fetchMyDocumentAcks: () => documentReceiptsMock(),
 }));
 
 const { loadAnnouncements, loadOpenAckCount, pickLatestNews } = await import("./announcements");
@@ -76,6 +80,8 @@ beforeEach(() => {
   feedMock.mockReset().mockResolvedValue(FEED);
   mandatoryMock.mockReset().mockResolvedValue(MANDATORY);
   receiptsMock.mockReset().mockResolvedValue(RECEIPTS);
+  documentsMock.mockReset().mockResolvedValue({ data: [], truncated: false });
+  documentReceiptsMock.mockReset().mockResolvedValue({ acks: [], truncated: false });
   vi.spyOn(console, "error").mockImplementation(() => {});
 });
 
@@ -157,20 +163,58 @@ describe("loadAnnouncements", () => {
 
 describe("loadOpenAckCount (the dashboard banner)", () => {
   it("counts the mandatory posts the caller has not confirmed", async () => {
-    await expect(loadOpenAckCount()).resolves.toEqual({ count: 2, truncated: false });
+    await expect(loadOpenAckCount()).resolves.toEqual({
+      count: 2,
+      documents: 0,
+      truncated: false,
+    });
   });
 
-  it("is unknown (null) when a read fails, never 0 or every post", async () => {
+  it("counts the documents requiring acknowledgement the caller has not confirmed (v0.20)", async () => {
+    documentsMock.mockResolvedValue({
+      data: [
+        { id: 1, documentId: "doc-1", requiresAck: true },
+        { id: 2, documentId: "doc-2", requiresAck: true },
+        // DEMO_MODE answers unfiltered: requiresAck is checked again.
+        { id: 3, documentId: "doc-3", requiresAck: false },
+      ],
+      truncated: false,
+    });
+    documentReceiptsMock.mockResolvedValue({
+      acks: [{ ...receipt("doc-2", null), targetType: "document" }],
+      truncated: false,
+    });
+    await expect(loadOpenAckCount()).resolves.toEqual({
+      count: 2,
+      documents: 1,
+      truncated: false,
+    });
+  });
+
+  it("is unknown (null) per kind when its read fails, never 0 or every post", async () => {
     receiptsMock.mockRejectedValue(outage());
-    await expect(loadOpenAckCount()).resolves.toEqual({ count: null, truncated: false });
+    await expect(loadOpenAckCount()).resolves.toEqual({
+      count: null,
+      documents: 0,
+      truncated: false,
+    });
     receiptsMock.mockResolvedValue(RECEIPTS);
     mandatoryMock.mockRejectedValue(outage());
-    await expect(loadOpenAckCount()).resolves.toEqual({ count: null, truncated: false });
+    documentReceiptsMock.mockRejectedValue(outage());
+    await expect(loadOpenAckCount()).resolves.toEqual({
+      count: null,
+      documents: null,
+      truncated: false,
+    });
   });
 
   it("flags a walk cut at its cap", async () => {
     receiptsMock.mockResolvedValue({ ...RECEIPTS, truncated: true });
-    await expect(loadOpenAckCount()).resolves.toEqual({ count: 2, truncated: true });
+    await expect(loadOpenAckCount()).resolves.toEqual({
+      count: 2,
+      documents: 0,
+      truncated: true,
+    });
   });
 });
 

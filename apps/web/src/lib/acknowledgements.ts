@@ -1,5 +1,5 @@
 import { indexAcks, type AckIndex } from "@/lib/ack-report";
-import { announcementAcksPage, myAnnouncementAcksPage } from "@/lib/api/announcements";
+import { acksPage, myAcksPage } from "@/lib/api/announcements";
 import { walkAllPages } from "@/lib/paginate";
 import type { Acknowledgement } from "@/lib/types";
 
@@ -46,9 +46,18 @@ export interface AnnouncementAcksResult {
 
 /** The caller's own announcement acknowledgements (policy-scoped to self). */
 export function fetchMyAnnouncementAcks(): Promise<AnnouncementAcksResult> {
-  return walkAllPages<Acknowledgement>((page) => myAnnouncementAcksPage(page, PAGE_SIZE), {
+  return fetchMyAcks("announcement");
+}
+
+/** The caller's own document acknowledgements (v0.20; policy-scoped to self). */
+export function fetchMyDocumentAcks(): Promise<AnnouncementAcksResult> {
+  return fetchMyAcks("document");
+}
+
+function fetchMyAcks(targetType: Acknowledgement["targetType"]): Promise<AnnouncementAcksResult> {
+  return walkAllPages<Acknowledgement>((page) => myAcksPage(targetType, page, PAGE_SIZE), {
     maxPages: MY_ACKS_MAX_PAGES,
-    label: "announcement acknowledgements",
+    label: `${targetType} acknowledgements`,
   }).then(({ data, truncated }) => ({ acks: data, truncated }));
 }
 
@@ -72,7 +81,19 @@ export interface AnnouncementAckIndexResult {
  * into its CMS-down banner); a cut-short chunk sets `truncated`, which the
  * report treats as incomplete (reportCompleteness).
  */
-export async function fetchAnnouncementAckIndex(
+export function fetchAnnouncementAckIndex(
+  documentIds: string[],
+): Promise<AnnouncementAckIndexResult> {
+  return fetchAckIndex("announcement", documentIds);
+}
+
+/** The same index for the listed documents that require acknowledgement (v0.20). */
+export function fetchDocumentAckIndex(documentIds: string[]): Promise<AnnouncementAckIndexResult> {
+  return fetchAckIndex("document", documentIds);
+}
+
+async function fetchAckIndex(
+  targetType: Acknowledgement["targetType"],
   documentIds: string[],
 ): Promise<AnnouncementAckIndexResult> {
   const ids = [...new Set(documentIds.filter((id) => typeof id === "string" && id !== ""))];
@@ -80,9 +101,9 @@ export async function fetchAnnouncementAckIndex(
   let truncated = false;
   for (let start = 0; start < ids.length; start += REPORT_ACK_CHUNK) {
     const chunk = ids.slice(start, start + REPORT_ACK_CHUNK);
-    const walk = await walkAllPages((page) => announcementAcksPage(chunk, page, PAGE_SIZE), {
+    const walk = await walkAllPages((page) => acksPage(targetType, chunk, page, PAGE_SIZE), {
       maxPages: REPORT_ACK_MAX_PAGES,
-      label: `ack-report acknowledgements ${start / REPORT_ACK_CHUNK + 1}`,
+      label: `ack-report ${targetType} acknowledgements ${start / REPORT_ACK_CHUNK + 1}`,
     });
     indexAcks(walk.data, index);
     truncated ||= walk.truncated;

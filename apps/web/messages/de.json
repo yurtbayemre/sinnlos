@@ -103,6 +103,7 @@
     "featured": "Hervorgehoben",
     "openAcksTitle": "Offene Bestätigungen",
     "openAcksCount": "{count, plural, one {# Pflichtmeldung wartet auf deine Lesebestätigung.} other {# Pflichtmeldungen warten auf deine Lesebestätigung.}}",
+    "openAcksDocuments": "{count, plural, one {# Pflichtdokument wartet auf deine Lesebestätigung.} other {# Pflichtdokumente warten auf deine Lesebestätigung.}}",
     "openAcksAction": "Jetzt bestätigen",
     "friendFallback": "Kolleg:in",
     "trainingOpen": "{count, plural, one {# offene oder abgelaufene Pflichtschulung} other {# offene oder abgelaufene Pflichtschulungen}}",
@@ -356,7 +357,8 @@
     "other": "Sonstiges",
     "emptyTitle": "Noch keine Dokumente",
     "emptyHint": "Redaktion, Admins und Abteilungsleitungen fügen Dokumente unter „Verwaltung“ hinzu.",
-    "noFile": "Keine Datei hinterlegt"
+    "noFile": "Keine Datei hinterlegt",
+    "ackRequired": "Lesebestätigung erforderlich"
   },
   "profile": {
     "title": "Mein Profil",
@@ -404,7 +406,7 @@
     "analyticsDashboard": "Analyse-Dashboard",
     "analyticsDesc": "Inhaltsstatistiken, Engagement-Metriken und aktuelle Aktivitäten.",
     "ackReportLink": "Lesebestätigungen",
-    "ackReportLinkDesc": "Bestätigungsquote und offene Nutzer je Pflichtmeldung.",
+    "ackReportLinkDesc": "Bestätigungsquote und offene Nutzer je Pflichtmeldung und Pflichtdokument.",
     "rolesSection": "Rollen",
     "rolesDesc": "Sinnlos enthält sechs Rollen. Admins vergeben sie im Strapi-Adminbereich; mit Microsoft-Anmeldung vergeben die Entra-App-Rollen Intranet.Admin, Intranet.Editor, Intranet.DepartmentHead, Intranet.TeamLead, Intranet.Member und Intranet.Guest sie bei jeder Anmeldung.",
     "roleChangeHint": "Möchten Sie ändern, wer welche Rolle hat?",
@@ -452,9 +454,11 @@
   },
   "ackReport": {
     "title": "Lesebestätigungen",
-    "description": "Bestätigungsstatus aller Pflichtmeldungen: Quote je Meldung und wer noch nicht bestätigt hat.",
-    "emptyTitle": "Keine Pflichtmeldungen",
-    "emptyHint": "Neuigkeiten mit Bestätigungspflicht (requiresAck) erscheinen hier mit ihrer Bestätigungsquote.",
+    "description": "Bestätigungsstatus aller Pflichtmeldungen und Pflichtdokumente: Quote je Eintrag und wer noch nicht bestätigt hat.",
+    "emptyTitle": "Keine Pflichtmeldungen oder Pflichtdokumente",
+    "emptyHint": "Neuigkeiten und Dokumente mit Bestätigungspflicht erscheinen hier mit ihrer Bestätigungsquote.",
+    "sectionAnnouncements": "Pflichtmeldungen",
+    "sectionDocuments": "Pflichtdokumente",
     "audienceAll": "Alle Mitarbeitenden",
     "audienceDepartment": "Abteilung: {name}",
     "audienceTeam": "Team: {name}",

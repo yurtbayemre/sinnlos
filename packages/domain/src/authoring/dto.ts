@@ -226,6 +226,7 @@ export interface DocumentEditable extends EditableBase {
   ownerDepartment: OwnerDepartment | null;
   needsRetarget: boolean;
   /** Moderators only. */
+  requiresAck?: boolean;
   publishAt?: string | null;
   unpublishAt?: string | null;
   scheduleError?: string | null;

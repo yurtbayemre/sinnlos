@@ -10,6 +10,7 @@ export function demoDocuments(users: DemoUsers, clock: DemoClock) {
       title: "Travel & expense policy",
       description: "Per-diems, booking rules and how to file expenses.",
       category: "policy",
+      requiresAck: true,
       file: {
         url: "/uploads/demo-travel-policy.pdf",
         name: "travel-policy.pdf",

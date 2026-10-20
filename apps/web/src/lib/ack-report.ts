@@ -14,6 +14,7 @@
  * the page's Next.js / Strapi runtime.
  */
 
+import { isInScopedAudience } from "@sinnlos/domain";
 import { isAnnouncementVisibleTo, type AnnouncementAudience } from "@/lib/audience";
 
 export interface ReportInputs {
@@ -94,6 +95,20 @@ export interface ReportAnnouncement extends AnnouncementAudience {
   department?: { id: number; name?: string } | null;
   team?: { id: number; name?: string } | null;
   audienceRoles?: { id: number; type?: string; name?: string }[] | null;
+}
+
+/**
+ * A document that requires acknowledgement (v0.20) plus what its audience
+ * depends on: the department links and the `audience` flag (flag OR
+ * links, as the cms document-visibility policy reads it).
+ */
+export interface ReportDocument {
+  id: number;
+  documentId?: string;
+  title?: string;
+  requiresAck?: boolean;
+  audience?: string | null;
+  departments?: { id: number; name?: string }[] | null;
 }
 
 /** One acknowledgement as the report needs it: whose, and for which document. */
@@ -181,9 +196,47 @@ export function buildAckReportRows<U extends ReportUser, A extends ReportAnnounc
       }),
     );
     const ackedUserIds = (a.documentId ? acks.get(a.documentId) : undefined) ?? none;
-    const openUsers = targetUsers.filter((u) => !ackedUserIds.has(u.id));
-    const ackedCount = targetUsers.length - openUsers.length;
-    const pct = targetUsers.length > 0 ? Math.round((ackedCount / targetUsers.length) * 100) : 0;
-    return { announcement: a, targetUsers, openUsers, ackedCount, pct, targetUnknown };
+    return { announcement: a, ...ackCounts(targetUsers, ackedUserIds), targetUnknown };
   });
+}
+
+export interface DocumentAckReportRow<U extends ReportUser, D extends ReportDocument> {
+  document: D;
+  targetUsers: U[];
+  openUsers: U[];
+  ackedCount: number;
+  pct: number;
+  /** The directory could not be read completely: "–", never a rate. */
+  targetUnknown: boolean;
+}
+
+/**
+ * One row per document that requires acknowledgement (v0.20). The audience
+ * is the document-visibility rule for one row (isInScopedAudience: no
+ * departments and no flag → everyone; linked departments → their members;
+ * flagged without departments → nobody), without the admin/editor read
+ * bypass, as for announcements: the report asks who the document is FOR.
+ * The page passes users narrowed with eligibleReportUsers over
+ * ACKNOWLEDGER_ROLES (guest reads documents but never acknowledges).
+ */
+export function buildDocumentAckRows<U extends ReportUser, D extends ReportDocument>(input: {
+  documents: D[];
+  acks: AckIndex;
+  eligibleUsers: U[];
+  usersUnknown: boolean;
+}): DocumentAckReportRow<U, D>[] {
+  const { documents, acks, eligibleUsers, usersUnknown } = input;
+  return documents.map((d) => {
+    const targetUsers = eligibleUsers.filter((u) => isInScopedAudience(d, u.department?.id));
+    const ackedUserIds = (d.documentId ? acks.get(d.documentId) : undefined) ?? new Set<number>();
+    return { document: d, ...ackCounts(targetUsers, ackedUserIds), targetUnknown: usersUnknown };
+  });
+}
+
+/** Who of the targeted users has not confirmed, and the rate (0 for an empty audience). */
+function ackCounts<U extends ReportUser>(targetUsers: U[], ackedUserIds: ReadonlySet<number>) {
+  const openUsers = targetUsers.filter((u) => !ackedUserIds.has(u.id));
+  const ackedCount = targetUsers.length - openUsers.length;
+  const pct = targetUsers.length > 0 ? Math.round((ackedCount / targetUsers.length) * 100) : 0;
+  return { targetUsers, openUsers, ackedCount, pct };
 }

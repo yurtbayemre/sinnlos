@@ -9,7 +9,8 @@
   "sections": {
     "document": "Dokument",
     "file": "Datei",
-    "audience": "Zielgruppe"
+    "audience": "Zielgruppe",
+    "confirmation": "Lesebestätigung"
   },
   "fields": {
     "title": {
@@ -21,6 +22,10 @@
     },
     "category": {
       "label": "Kategorie"
+    },
+    "requiresAck": {
+      "label": "Lesebestätigung erforderlich",
+      "hint": "Die Leserinnen und Leser bestätigen in der Bibliothek, dass sie das Dokument gelesen haben; der Bericht „Lesebestätigungen“ zeigt, wer noch fehlt."
     },
     "departments": {
       "label": "Für Abteilungen anzeigen",

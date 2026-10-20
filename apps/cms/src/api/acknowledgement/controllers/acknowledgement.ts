@@ -1,4 +1,5 @@
 import { factories } from "@strapi/strapi";
+import { isInScopedAudience } from "@sinnlos/domain";
 
 import { MODERATORS, hasRole } from "../../../bootstrap/roles";
 import {
@@ -39,6 +40,9 @@ const ANNOUNCEMENT_TARGETING = {
   audienceRoles: { select: ["id"] },
 };
 
+/** The document relation its department rule reads (isInScopedAudience). */
+const DOCUMENT_TARGETING = { departments: { select: ["id"] } };
+
 interface AckCaller {
   id: number;
   role?: { type?: string } | null;
@@ -54,9 +58,11 @@ interface AckCaller {
  * invisible like one outside the audience, by the shared rule
  * (utils/announcement-expiry.ts) and in the order isTargetVisible checks a
  * comment or reaction target: the bypass first (admin_role and editor keep
- * expired announcements), then expiry, then the audience. Any other target
- * type fails closed: documents have no requiresAck yet, and would need
- * their own visibility rules here once they do.
+ * expired announcements), then expiry, then the audience. A document (v0.20)
+ * only the readers of the document-visibility policy may acknowledge: the
+ * same admin_role/editor bypass, else "flag OR links" for the caller's
+ * department (isInScopedAudience, the departmentScopedIds rule). Any
+ * other target type fails closed.
  *
  * An announcement that targets nobody (batch 15: D-PT01, or the
  * `retargetRequired` marker after a department or team delete) is outside
@@ -67,11 +73,15 @@ interface AckCaller {
 async function isVisibleToCaller(
   strapi: ScopeStrapi,
   targetType: string,
-  target: AnnouncementTargeting & ExpiringRow & { id?: unknown },
+  target: AnnouncementTargeting &
+    ExpiringRow & { id?: unknown; departments?: { id?: number | null }[] | null },
   user: AckCaller,
 ): Promise<boolean> {
-  if (targetType !== "announcement") return false;
+  if (targetType !== "announcement" && targetType !== "document") return false;
   if (hasRole(user, MODERATORS)) return true;
+  if (targetType === "document") {
+    return isInScopedAudience(target, (await loadUserScope(strapi, user.id)).departmentId);
+  }
   if (isAnnouncementExpired(target, new Date())) return false;
   // The flag and the marker read again after the relations, so a department
   // or team delete between the statements cannot pair an old marker with the
@@ -105,12 +115,10 @@ export default factories.createCoreController(
       }
 
       // The target must exist as a PUBLISHED entry and actually require
-      // acknowledgement. Documents currently have no requiresAck field, so
-      // document acks are rejected here until the schema grows one — the
-      // enum value is only prepared.
+      // acknowledgement (the announcement or document `requiresAck`).
       const target = await strapi.db.query(targetUid).findOne({
         where: { documentId: targetDocumentId, publishedAt: { $notNull: true } },
-        ...(targetType === "announcement" ? { populate: ANNOUNCEMENT_TARGETING } : {}),
+        populate: targetType === "announcement" ? ANNOUNCEMENT_TARGETING : DOCUMENT_TARGETING,
       });
       // Deliberately ONE identical error (message + status) for all five
       // failure modes — "does not exist", "draft only", "requiresAck=false",

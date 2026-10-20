@@ -1,11 +1,15 @@
-import { FileText, Download, File } from "lucide-react";
+import { FileText, Download, File, ClipboardCheck } from "lucide-react";
 import { getFormatter, getTranslations } from "next-intl/server";
-import { formatInstant, SHORT_DAY } from "@/lib/date-format";
+import { fetchMyDocumentAcks } from "@/lib/acknowledgements";
+import { formatInstant, LONG_DAY, SHORT_DAY } from "@/lib/date-format";
+import { isReadDenied } from "@/lib/roles";
 import { api } from "@/lib/strapi";
-import { tryFetch } from "@/lib/safe-fetch";
+import { SKIPPED_READ, tryFetch } from "@/lib/safe-fetch";
+import { getViewer } from "@/lib/viewer";
 import { mediaUrl } from "@/lib/config";
 import { formatKilobytes } from "@/lib/manage/upload-check";
 import type { Document } from "@/lib/types";
+import { AckButton } from "@/components/announcements/ack-button";
 import { EmptyState } from "@/components/empty-state";
 import { FetchErrorBanner } from "@/components/fetch-error";
 import { PageHeader } from "@/components/page-header";
@@ -32,14 +36,31 @@ function isDocumentCategory(value: string): value is (typeof DOCUMENT_CATEGORIES
 
 export default async function DocumentsPage() {
   // `format` renders instants in APP_TIME_ZONE (i18n/request.ts).
-  const [t, tCommon, format] = await Promise.all([
+  const [t, tCommon, format, viewer] = await Promise.all([
     getTranslations("documents"),
     getTranslations("common"),
     getFormatter(),
+    getViewer(),
   ]);
   const updatedLabel = (iso: string | undefined) => formatInstant(format, iso, SHORT_DAY);
-  const { data, failed } = await tryFetch(() => api.documents.list(), "documents");
+  const { data, failed: docsFailed } = await tryFetch(() => api.documents.list(), "documents");
   const docs = (data?.data ?? []) as Document[];
+
+  // Read confirmation (v0.20): only a role holding the acknowledgement
+  // grants confirms (guest reads documents, never acknowledges). Without
+  // receipts every mandatory document shows its button, with the banner.
+  const canAck = !isReadDenied(viewer.role, "acknowledgements");
+  const receipts =
+    canAck && docs.some((d) => d.requiresAck)
+      ? await tryFetch(() => fetchMyDocumentAcks(), "documents")
+      : SKIPPED_READ;
+  const acknowledgedAt = new Map<string, string | null>();
+  for (const ack of receipts.data?.acks ?? []) {
+    if (!acknowledgedAt.has(ack.targetDocumentId)) {
+      acknowledgedAt.set(ack.targetDocumentId, ack.acknowledgedAt ?? null);
+    }
+  }
+  const failed = docsFailed || receipts.failed;
 
   const grouped = new Map<string, Document[]>();
   for (const d of docs) {
@@ -83,6 +104,12 @@ export default async function DocumentsPage() {
                           </div>
                         )}
                         <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                          {canAck && doc.requiresAck && (
+                            <span className="inline-flex items-center gap-1 font-medium text-amber-700 dark:text-amber-400">
+                              <ClipboardCheck className="h-3.5 w-3.5" aria-hidden="true" />
+                              {t("ackRequired")}
+                            </span>
+                          )}
                           {doc.file?.name && <span>{doc.file.name}</span>}
                           {doc.file?.size ? <span>{formatKilobytes(doc.file.size)}</span> : null}
                           {updatedLabel(doc.updatedAt) && (
@@ -91,6 +118,24 @@ export default async function DocumentsPage() {
                             </span>
                           )}
                         </div>
+                        {canAck && doc.requiresAck && doc.documentId && (
+                          <div className="mt-3">
+                            <AckButton
+                              targetType="document"
+                              targetDocumentId={doc.documentId}
+                              acknowledgedAtLabel={
+                                acknowledgedAt.has(doc.documentId)
+                                  ? (formatInstant(
+                                      format,
+                                      acknowledgedAt.get(doc.documentId),
+                                      LONG_DAY,
+                                    ) ?? "")
+                                  : null
+                              }
+                              deadlineLabel={null}
+                            />
+                          </div>
+                        )}
                       </div>
                       {fileUrl && (
                         <a

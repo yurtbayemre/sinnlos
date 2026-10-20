@@ -76,6 +76,7 @@ const READS: Record<string, () => Promise<unknown>> = {
   "polls.results": () => api.polls.results(1),
   "polls.resultsMany": () => api.polls.resultsMany(["k3m9x0000000000000000001", 7]),
   "documents.list": () => api.documents.list(),
+  "documents.requiringAck": () => api.documents.requiringAck(),
   "kudos.list": () => api.kudos.list(),
   "classifieds.list": () => api.classifieds.list(iso),
   "classifieds.mine": () => api.classifieds.mine(1),

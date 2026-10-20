@@ -836,6 +836,7 @@ const DOCUMENT_MODERATOR: WriteRule = {
     ...DOCUMENT_COMMON,
     departments: toMany("departments"),
     file: media("ownUpload"),
+    requiresAck: value(checkBoolean),
     publishAt: value(checkNullableInstant),
     unpublishAt: value(checkNullableInstant),
   },

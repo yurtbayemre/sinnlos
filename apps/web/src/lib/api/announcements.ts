@@ -108,28 +108,27 @@ export function listAckReportAnnouncements(): Promise<WalkResult<ReportAnnouncem
   );
 }
 
-/** One page of the caller's own announcement acknowledgements, by id. */
-export function myAnnouncementAcksPage(
+/** One page of the caller's own acknowledgements of one target type, by id. */
+export function myAcksPage(
+  targetType: Acknowledgement["targetType"],
   page: number,
   pageSize: number,
 ): Promise<StrapiListResponse<Acknowledgement>> {
   return strapi<StrapiListResponse<Acknowledgement>>(
     withQuery(
       "/api/acknowledgements",
-      strapiQuery()
-        .filter("targetType", "$eq", "announcement")
-        .sortBy("id:asc")
-        .page(page, pageSize),
+      strapiQuery().filter("targetType", "$eq", targetType).sortBy("id:asc").page(page, pageSize),
     ),
   );
 }
 
 /**
- * One page of the acknowledgements of the given announcements across all
- * users (admin_role, the ack report, FX32): only the target and the user's
- * id, sorted by id so the pages of a walk stay stable.
+ * One page of the acknowledgements of the given announcements or documents
+ * across all users (admin_role, the ack report, FX32): only the target and
+ * the user's id, sorted by id so the pages of a walk stay stable.
  */
-export function announcementAcksPage(
+export function acksPage(
+  targetType: Acknowledgement["targetType"],
   documentIds: readonly string[],
   page: number,
   pageSize: number,
@@ -138,7 +137,7 @@ export function announcementAcksPage(
     withQuery(
       "/api/acknowledgements",
       strapiQuery()
-        .filter("targetType", "$eq", "announcement")
+        .filter("targetType", "$eq", targetType)
         .filterIn("targetDocumentId", documentIds)
         .fields(["targetDocumentId"])
         .populateFields("user", ["id"])

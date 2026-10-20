@@ -120,6 +120,7 @@ export const DOCUMENT_MODERATOR_FIELDS = [
   "category",
   "departments",
   "file",
+  "requiresAck",
   "publishAt",
   "unpublishAt",
 ] as const;
