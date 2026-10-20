@@ -26,7 +26,6 @@
  * file passes unchecked (keeping is not attaching), and `null` clears it.
  * The wiki types have their own lists (wiki.ts).
  */
-import { DEPARTMENT_AUTHOR_ROLES, DUTY_PLAN_AUTHOR_ROLES, type RoleType } from "../roles.js";
 
 /** The phase-1 authored types, by their web area name. */
 export const AUTHORING_TYPES = [
@@ -52,20 +51,6 @@ export const DEPARTMENT_AUTHORED_TYPES: readonly AuthoringType[] = [
   "document",
   "dutyPlan",
 ];
-
-/**
- * The role types that author each department-authored type for their own
- * department: department heads, and for duty plans team leads too (owner
- * decision 2026-10-20). Empty for the moderator-only types.
- */
-export const DEPARTMENT_AUTHOR_ROLES_OF: Readonly<Record<AuthoringType, readonly RoleType[]>> = {
-  announcement: DEPARTMENT_AUTHOR_ROLES,
-  event: DEPARTMENT_AUTHOR_ROLES,
-  document: DEPARTMENT_AUTHOR_ROLES,
-  dutyPlan: DUTY_PLAN_AUTHOR_ROLES,
-  quickLink: [],
-  poll: [],
-};
 
 export const ANNOUNCEMENT_MODERATOR_FIELDS = [
   "title",

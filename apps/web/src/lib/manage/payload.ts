@@ -46,6 +46,7 @@ import {
   checkPositiveIntOrNull,
   checkQuickLinkUrl,
   checkRequiredString,
+  MAX_DUTY_SHIFTS,
   dutyShiftsCode,
   dutyTemplatesCode,
   eventSpanCode,
@@ -483,6 +484,8 @@ const DUTY_PLAN_RULES: readonly FieldRule<DutyPlanValues>[] = [
       Array.isArray(a) &&
       pruneDutyShifts(a as DutyShift[], new Date()).length === a.length,
     convert: (v, ctx) => {
+      // An overlong list is refused before the prune could shorten it unseen.
+      if (v.shifts.length > MAX_DUTY_SHIFTS) return { code: "invalid" };
       const kept = pruneDutyShifts(v.shifts, new Date(ctx.now));
       const result = validateDutyShifts(kept);
       return "error" in result

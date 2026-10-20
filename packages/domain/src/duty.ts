@@ -199,7 +199,11 @@ export function moveDutyShift(shift: DutyShift, days: number, timeZone: string):
   return { userId: shift.userId, startsAt: move(shift.startsAt), endsAt: move(shift.endsAt) };
 }
 
-/** Copies of the shifts starting in the week from `weekStart` (seven calendar days), one week later. */
+/**
+ * Copies of the shifts starting in the week from `weekStart` (seven
+ * calendar days), one week later. A shift still being typed (an endpoint
+ * that is no instant) is not copied.
+ */
 export function copyDutyWeek(
   shifts: readonly DutyShift[],
   weekStart: string,
@@ -207,6 +211,7 @@ export function copyDutyWeek(
 ): DutyShift[] {
   const weekEnd = addDaysToKey(weekStart, 7);
   return shifts
+    .filter((s) => instantEpochMs(s.startsAt) !== null && instantEpochMs(s.endsAt) !== null)
     .filter((s) => {
       const day = zonedDateKey(s.startsAt, timeZone);
       return day >= weekStart && day < weekEnd;

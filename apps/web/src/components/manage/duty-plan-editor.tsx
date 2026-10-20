@@ -32,6 +32,7 @@ import {
   addDaysToKey,
   daysBetweenKeys,
   instantEpochMs,
+  isPlainDate,
   isoWeekdayOfKey,
   zonedDateKey,
   zonedTimeOfDay,
@@ -385,8 +386,10 @@ export function DutyPlanEditor({
             {values.shifts.map((shift, index) => {
               const parts = partsOf(shift, timeZone);
               const rowId = `${id("shifts")}-${index}`;
+              // A start day still being typed matches no template (and must not throw).
               const matching = values.shiftTemplates.find(
                 (template) =>
+                  isPlainDate(parts.startDay) &&
                   template.start === parts.start &&
                   template.end === parts.end &&
                   parts.endDay === templateParts(template, parts.startDay).endDay,
@@ -430,7 +433,13 @@ export function DutyPlanEditor({
                         const template = values.shiftTemplates.find(
                           (entry) => entry.label === label,
                         );
-                        if (template) setParts(templateParts(template, parts.startDay || today));
+                        if (template)
+                          setParts(
+                            templateParts(
+                              template,
+                              isPlainDate(parts.startDay) ? parts.startDay : today,
+                            ),
+                          );
                       }}
                     />
                   </div>

@@ -121,6 +121,23 @@ describe("buildDutyPlanPayload", () => {
     });
   });
 
+  it("refuses an overlong list even when the prune would shorten it", () => {
+    const shift = plan().shifts[0]!;
+    const old = {
+      userId: 7,
+      startsAt: "2026-09-01T04:00:00.000Z",
+      endsAt: "2026-09-01T12:00:00.000Z",
+    };
+    const values = coerceDutyPlanValues({
+      name: "X",
+      shifts: [old, old, ...Array(400).fill(shift)],
+    });
+    expect(buildDutyPlanPayload(values, null, ctx({ mode: "create" }))).toMatchObject({
+      ok: false,
+      fields: { shifts: "invalid" },
+    });
+  });
+
   it("reads client values defensively", () => {
     expect(
       coerceDutyPlanValues({

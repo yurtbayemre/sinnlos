@@ -140,6 +140,10 @@ describe("templates, copying and pruning in APP_TIME_ZONE", () => {
       shift(1, "2026-10-26T05:00:00.000Z", "2026-10-26T13:00:00.000Z"),
       shift(2, "2026-11-01T05:00:00.000Z", "2026-11-01T13:00:00.000Z"),
     ]);
+    // A shift still being typed is not copied.
+    expect(
+      copyDutyWeek([...week, shift(4, "T22:00", "2026-10-20T04:00:00.000Z")], "2026-10-19", BERLIN),
+    ).toHaveLength(2);
     expect(moveDutyShift(week[0], -7, BERLIN)).toEqual(
       shift(1, "2026-10-12T04:00:00.000Z", "2026-10-12T12:00:00.000Z"),
     );
