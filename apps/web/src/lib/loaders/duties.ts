@@ -28,6 +28,9 @@ export interface DutiesView {
   truncated: boolean;
 }
 
+/** Most ids one /api/users lookup names. */
+export const DUTY_PEOPLE_CHUNK = 100;
+
 /** The /api/users query of the people a set of shifts names. */
 export function dutyPeopleQuery(ids: readonly number[]): string {
   return [
@@ -57,11 +60,16 @@ export async function loadDuties(): Promise<DutiesView> {
   });
   const ids = [...new Set(plans.flatMap((plan) => plan.shifts.map((shift) => shift.userId)))];
   const people: Record<number, DutyPersonView> = {};
-  if (ids.length > 0) {
-    const users = await tryFetch(
-      () => fetchAllUsers<UserLite>(dutyPeopleQuery(ids)),
-      "duty people",
-    );
+  // Strapi parses at most 100 entries of one `$in` list (qs arrayLimit).
+  const chunks = Array.from({ length: Math.ceil(ids.length / DUTY_PEOPLE_CHUNK) }, (_, i) =>
+    ids.slice(i * DUTY_PEOPLE_CHUNK, (i + 1) * DUTY_PEOPLE_CHUNK),
+  );
+  const answers = await Promise.all(
+    chunks.map((chunk) =>
+      tryFetch(() => fetchAllUsers<UserLite>(dutyPeopleQuery(chunk)), "duty people"),
+    ),
+  );
+  for (const users of answers) {
     for (const user of users.data?.users ?? []) {
       people[user.id] = {
         name: user.displayName || user.username || null,
