@@ -1,61 +1,38 @@
 "use client";
 
 import { Play } from "lucide-react";
-import { useEffect, useId, useRef, useState, type Ref } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 
 /**
- * The lesson video frame. Its attributes are the security layer of issue #29
- * and FX09: a sandbox, and the origin as Referer (YouTube's player refuses
- * to play without it, "Error 153"; the former `no-referrer` broke playback).
- */
-export function LessonVideoFrame({
-  src,
-  title,
-  ref,
-}: {
-  src: string;
-  title: string;
-  ref?: Ref<HTMLIFrameElement>;
-}) {
-  return (
-    <iframe
-      ref={ref}
-      src={src}
-      title={title}
-      className="h-full w-full"
-      sandbox="allow-scripts allow-same-origin allow-presentation allow-popups"
-      referrerPolicy="strict-origin-when-cross-origin"
-      allow="autoplay; encrypted-media; picture-in-picture; fullscreen"
-    />
-  );
-}
-
-/**
- * Click to load (issue #37): until the viewer asks for the video, nothing is
- * requested from YouTube (no player scripts, no thumbnail), so opening a
- * lesson neither loads the player nor connects to Google. The click renders
- * the frame with autoplay and moves the focus into it.
+ * Click to load (issue #37): until the viewer asks for the video, `children`
+ * (the frame, built on the server by LessonVideo) is not rendered, so
+ * nothing is requested from YouTube (no player scripts, no thumbnail, no
+ * connection to Google). The click renders it and moves the focus into it.
  */
 export function VideoFacade({
-  src,
-  title,
   playLabel,
   notice,
+  children,
 }: {
-  src: string;
-  title: string;
   playLabel: string;
   notice: string;
+  children: ReactNode;
 }) {
   const [playing, setPlaying] = useState(false);
-  const frame = useRef<HTMLIFrameElement>(null);
+  const box = useRef<HTMLDivElement>(null);
   const noticeId = useId();
 
   useEffect(() => {
-    if (playing) frame.current?.focus();
+    if (playing) box.current?.querySelector("iframe")?.focus();
   }, [playing]);
 
-  if (playing) return <LessonVideoFrame ref={frame} src={src} title={title} />;
+  if (playing) {
+    return (
+      <div ref={box} className="h-full w-full">
+        {children}
+      </div>
+    );
+  }
   return (
     <button
       type="button"

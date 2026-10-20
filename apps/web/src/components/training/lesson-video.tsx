@@ -17,9 +17,11 @@ export function lessonVideoSrc(videoUrl: string | null | undefined): string | nu
 }
 
 /**
- * The lesson video behind a click (issue #37, VideoFacade): the frame with
- * its security attributes (LessonVideoFrame) loads only when the viewer
- * plays the video. Server Component; the facade is the only client part.
+ * The lesson video behind a click (issue #37): the frame is built here, on
+ * the server, and VideoFacade renders it only when the viewer plays the
+ * video. The frame's attributes are the security layer (issue #29, FX09):
+ * a sandbox, and the origin as Referer (YouTube's player refuses to play
+ * without it, "Error 153"; the former `no-referrer` broke playback).
  */
 export async function LessonVideo({ videoUrl }: { videoUrl?: string | null }) {
   const src = lessonVideoSrc(videoUrl);
@@ -28,12 +30,16 @@ export async function LessonVideo({ videoUrl }: { videoUrl?: string | null }) {
 
   return (
     <div className="aspect-video w-full overflow-hidden rounded-xl border bg-black">
-      <VideoFacade
-        src={src}
-        title={t("videoTitle")}
-        playLabel={t("videoPlay")}
-        notice={t("videoNotice")}
-      />
+      <VideoFacade playLabel={t("videoPlay")} notice={t("videoNotice")}>
+        <iframe
+          src={src}
+          title={t("videoTitle")}
+          className="h-full w-full"
+          sandbox="allow-scripts allow-same-origin allow-presentation allow-popups"
+          referrerPolicy="strict-origin-when-cross-origin"
+          allow="autoplay; encrypted-media; picture-in-picture; fullscreen"
+        />
+      </VideoFacade>
     </div>
   );
 }
