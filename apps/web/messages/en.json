@@ -427,7 +427,7 @@
     "roleMember": "Read everything their role/department/team permits. Edits their profile.",
     "roleGuest": "Read-only access to public wiki spaces.",
     "trainingReportLink": "Training report",
-    "trainingReportLinkDesc": "Who completed which mandatory course"
+    "trainingReportLinkDesc": "Who is trained, who is due"
   },
   "analytics": {
     "title": "Analytics",
@@ -585,12 +585,32 @@
   },
   "trainingReport": {
     "title": "Training report",
-    "description": "Completion state of mandatory courses across {count} staff members.",
-    "truncatedWarning": "Some data sources are incomplete — numbers are suppressed rather than shown wrong.",
+    "scopeAll": "Mandatory training of all employees: who is trained, who is due.",
+    "scopeDepartment": "Mandatory training of the {department} department: who is trained, who is due.",
     "emptyTitle": "No mandatory courses",
-    "emptyHint": "Published courses flagged as mandatory will appear here with their completion rate.",
-    "completedOf": "{done} of {total} completed",
-    "updatedAt": "As of {date}"
+    "emptyHint": "Published courses flagged as mandatory will appear here with who completed them.",
+    "validOf": "{valid} of {total} valid",
+    "validityEvery": "{count, plural, one {repeat every month} other {repeat every # months}}",
+    "validityOnce": "once",
+    "allEmployees": "all employees",
+    "showPeople": "Show people",
+    "backToCourses": "All courses",
+    "statusDone": "Valid",
+    "statusDueSoon": "Due soon",
+    "statusExpired": "Expired",
+    "statusOpen": "Open",
+    "filterLabel": "Filter by status",
+    "filterAll": "All",
+    "columnName": "Name",
+    "columnDepartment": "Department",
+    "columnStatus": "Status",
+    "columnLessons": "Lessons",
+    "columnCompletedAt": "Completed on",
+    "columnDueOn": "Due on",
+    "lessonsOf": "{done}/{total}",
+    "noPeople": "Nobody in this selection.",
+    "downloadStatus": "Status (CSV)",
+    "downloadReceipts": "Proof (CSV)"
   },
   "duties": {
     "title": "Responsibilities",

@@ -32,6 +32,7 @@ import {
   MODERATORS,
   ROLE_PRIVILEGE_ORDER,
   SCHEDULER_ROLES,
+  TRAINING_REPORT_ROLES,
   type MatrixRoleType,
 } from "@sinnlos/domain";
 
@@ -119,11 +120,17 @@ export const DIGEST_ROLES: ReadonlySet<string> = ANNOUNCEMENT_READER_ROLES;
 export const ACKNOWLEDGER_ROLES: ReadonlySet<string> = roleSet(...STAFF_AND_FALLBACK);
 
 /**
- * Training: course and lesson reads plus the own lesson-progress rows. The
- * training report counts these roles; `guest` has no training grant
- * (issue #29).
+ * Training: course and lesson reads plus the own lesson-progress rows;
+ * `guest` has no training grant (issue #29).
  */
 export const TRAINING_ROLES: ReadonlySet<string> = roleSet(...STAFF_AND_FALLBACK);
+
+/**
+ * course.report / reportCourse (v0.20): the named training report. admin_role
+ * reads everyone, department heads and team leads their own department (the
+ * cms scopes the answer).
+ */
+export const TRAINING_REPORT_READER_ROLES: ReadonlySet<string> = roleSet(...TRAINING_REPORT_ROLES);
 
 /** department.find and team.find: the org pages. */
 export const ORG_READER_ROLES: ReadonlySet<string> = roleSet(...STAFF_AND_FALLBACK);
@@ -465,7 +472,7 @@ export function capabilitiesFor(role: Role): Capabilities {
     reports: {
       analytics: admin,
       acknowledgements: admin,
-      training: admin,
+      training: hasRole(TRAINING_REPORT_READER_ROLES, role),
       // The fixed activity read is admin-only.
       activity: admin,
     },

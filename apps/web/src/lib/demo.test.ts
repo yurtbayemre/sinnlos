@@ -109,7 +109,6 @@ const DIRECT_READS: Record<string, () => Promise<unknown>> = {
   fetchCourses: () => training.fetchCourses(),
   fetchCourseBySlug: () => training.fetchCourseBySlug("security-awareness-basics"),
   fetchLessonByDocumentId: () => training.fetchLessonByDocumentId("demolesson00000000000001"),
-  fetchCourseProgress: () => training.fetchCourseProgress(["demolesson00000000000001"], "demo"),
   fetchMyProgress: () => training.fetchMyProgress(),
   getNotifications: () => getNotifications(),
   "analytics countPage": () => analytics.countPage("wiki-spaces"),

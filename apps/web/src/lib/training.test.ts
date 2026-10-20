@@ -16,8 +16,7 @@ vi.mock("@/lib/strapi/client", () => ({
   strapi: (...args: unknown[]) => strapiMock(...args),
 }));
 
-const { fetchCourseProgress, fetchMyProgress, fetchLessonByDocumentId } =
-  await import("./training");
+const { fetchMyProgress, fetchLessonByDocumentId } = await import("./training");
 
 const page = (data: unknown[], pageNo: number, pageCount: number) => ({
   data,
@@ -26,26 +25,6 @@ const page = (data: unknown[], pageNo: number, pageCount: number) => ({
 
 beforeEach(() => {
   strapiMock.mockReset();
-});
-
-describe("fetchCourseProgress", () => {
-  it("walks every page of the course's lessons, sorted by id, user ids only", async () => {
-    strapiMock
-      .mockResolvedValueOnce(page([{ id: 1, targetDocumentId: "a", user: { id: 5 } }], 1, 2))
-      .mockResolvedValueOnce(page([{ id: 2, targetDocumentId: "b", user: { id: 5 } }], 2, 2));
-    const result = await fetchCourseProgress(["a", "b c"], "training-report:x");
-    expect(result).toEqual({
-      data: [
-        { id: 1, targetDocumentId: "a", user: { id: 5 } },
-        { id: 2, targetDocumentId: "b", user: { id: 5 } },
-      ],
-      truncated: false,
-    });
-    expect(strapiMock.mock.calls.map(([path]) => path)).toEqual([
-      "/api/lesson-progresses?filters[targetDocumentId][$in][0]=a&filters[targetDocumentId][$in][1]=b%20c&fields[0]=targetDocumentId&populate[user][fields][0]=id&sort[0]=id:asc&pagination[page]=1&pagination[pageSize]=100",
-      "/api/lesson-progresses?filters[targetDocumentId][$in][0]=a&filters[targetDocumentId][$in][1]=b%20c&fields[0]=targetDocumentId&populate[user][fields][0]=id&sort[0]=id:asc&pagination[page]=2&pagination[pageSize]=100",
-    ]);
-  });
 });
 
 describe("fetchMyProgress", () => {
