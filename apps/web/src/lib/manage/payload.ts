@@ -47,6 +47,10 @@ import {
   checkQuickLinkUrl,
   checkRequiredString,
   MAX_DUTY_SHIFTS,
+  KPI_AGGREGATIONS,
+  KPI_PERIODS,
+  kpiValuesCode,
+  type KpiValues as KpiNumbers,
   dutyShiftsCode,
   dutyTemplatesCode,
   eventSpanCode,
@@ -62,6 +66,7 @@ import {
   type TrainingAuthoringType,
   type FieldCheck,
 } from "@sinnlos/domain";
+import { parseKpiNumber } from "@/lib/kpi-format";
 import { pollClosesAtForDay } from "@/lib/poll-close";
 import {
   dayStartInstant,
@@ -75,6 +80,7 @@ import type {
   AnnouncementValues,
   DocumentValues,
   DutyPlanValues,
+  KpiValues,
   EventValues,
   PollValues,
   QuickLinkValues,
@@ -501,6 +507,68 @@ export function buildDutyPlanPayload(
   ctx: PayloadContext,
 ): BuiltPayload {
   const { data, fields } = buildFields("dutyPlan", DUTY_PLAN_RULES, values, initial, ctx);
+  return done(data, fields);
+}
+
+/** The typed values as numbers by period start, sorted; null when one is unreadable. */
+export function kpiNumbers(values: Readonly<Record<string, string>>): KpiNumbers | null {
+  const out: KpiNumbers = {};
+  for (const key of Object.keys(values).sort()) {
+    const value = parseKpiNumber(values[key]!);
+    if (value === null) return null;
+    if (value !== undefined) out[key] = value;
+  }
+  return out;
+}
+
+/**
+ * A KPI (v0.19). A department author's department is their own (the form
+ * shows it fixed), so it travels on create only. The values travel as
+ * numbers; the cms also checks every key against the KPI's rhythm.
+ */
+const KPI_RULES: readonly FieldRule<KpiValues>[] = [
+  { key: "name", inputs: ["name"], convert: (v) => checked(v.name.trim(), checkRequiredString) },
+  {
+    key: "unit",
+    inputs: ["unit"],
+    convert: (v) => checked(textOrNull(v.unit), checkNullableString),
+  },
+  {
+    key: "description",
+    inputs: ["description"],
+    convert: (v) => checked(textOrNull(v.description), checkNullableString),
+  },
+  { key: "department", inputs: ["department"], convert: (v) => ({ value: v.department || null }) },
+  { key: "period", inputs: ["period"], convert: (v) => checked(v.period, checkEnum(KPI_PERIODS)) },
+  {
+    key: "aggregation",
+    inputs: ["aggregation"],
+    convert: (v) => checked(v.aggregation, checkEnum(KPI_AGGREGATIONS)),
+  },
+  {
+    key: "values",
+    inputs: ["values"],
+    // "5" and "5,0" or a blank entry and none say the same.
+    same: (a, b) =>
+      sameJson(
+        kpiNumbers(a as Record<string, string>) ?? a,
+        kpiNumbers(b as Record<string, string>) ?? b,
+      ),
+    convert: (v) => {
+      const numbers = kpiNumbers(v.values);
+      if (numbers === null) return { code: "invalid" };
+      const code = kpiValuesCode(numbers, v.period);
+      return code ? { code } : { value: numbers };
+    },
+  },
+];
+
+export function buildKpiPayload(
+  values: KpiValues,
+  initial: KpiValues | null,
+  ctx: PayloadContext,
+): BuiltPayload {
+  const { data, fields } = buildFields("kpi", KPI_RULES, values, initial, ctx);
   return done(data, fields);
 }
 

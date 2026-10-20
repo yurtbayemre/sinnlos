@@ -65,6 +65,7 @@ export const AUTHORING_PATHS: Readonly<Record<AuthoringType, string>> = {
   document: "documents",
   poll: "polls",
   dutyPlan: "duty-plans",
+  kpi: "kpis",
 };
 
 /** How a type's create and update treat `?status=` (§B3 step 3). */
@@ -77,6 +78,7 @@ export const AUTHORING_STATUS_MODES: Readonly<Record<AuthoringType, AuthoringSta
   document: "explicit",
   poll: "alwaysPublished",
   dutyPlan: "explicit",
+  kpi: "explicit",
 };
 
 /** The authoring intents of the table above. */
@@ -110,6 +112,7 @@ export const AUTHORING_INTENTS: Readonly<Record<AuthoringType, readonly Authorin
   document: EVERY_INTENT,
   poll: ["create", "update", "delete", "authoringList", "editable"],
   dutyPlan: EVERY_INTENT,
+  kpi: EVERY_INTENT,
 };
 
 /** One route of the table: method and path below `/api` (`:documentId` as written). */

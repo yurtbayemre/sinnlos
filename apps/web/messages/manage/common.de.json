@@ -1,7 +1,7 @@
 {
   "title": "Verwaltung",
   "description": "Neuigkeiten, Termine, Umfragen, Schnellzugriffe, Dokumente und das Wiki schreiben, planen und veröffentlichen.",
-  "descriptionDepartmentAuthor": "Neuigkeiten, Termine und Dokumente für {department} schreiben und veröffentlichen.",
+  "descriptionDepartmentAuthor": "Inhalte für {department} pflegen und veröffentlichen.",
   "back": "Verwaltung",
   "landing": {
     "contentSection": "Inhalte",
@@ -40,6 +40,10 @@
     "dutyPlans": {
       "title": "Zuständigkeiten",
       "description": "Dienstpläne: wer wann zuständig ist, zum Beispiel Schlüsseldienst oder Schichtleitung."
+    },
+    "kpis": {
+      "title": "Kennzahlen",
+      "description": "Kennzahlen der Abteilungen erfassen, zum Beispiel verladene Kubikmeter oder abgeschlossene Aufträge."
     }
   },
   "counts": {

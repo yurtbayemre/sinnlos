@@ -1,7 +1,7 @@
 {
   "title": "Manage",
   "description": "Write, schedule and publish announcements, events, polls, quick links, documents and the wiki.",
-  "descriptionDepartmentAuthor": "Write and publish announcements, events and documents for {department}.",
+  "descriptionDepartmentAuthor": "Maintain and publish content for {department}.",
   "back": "Manage",
   "landing": {
     "contentSection": "Content",
@@ -40,6 +40,10 @@
     "dutyPlans": {
       "title": "Responsibilities",
       "description": "Duty plans: who is responsible when, for example key service or shift lead."
+    },
+    "kpis": {
+      "title": "KPIs",
+      "description": "Record department figures, for example cubic metres loaded or orders completed."
     }
   },
   "counts": {

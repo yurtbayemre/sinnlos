@@ -94,6 +94,7 @@ describe("navItemsFor", () => {
   const EVERYONE = ["/", "/people", "/events", "/wiki", "/polls", "/documents"];
   const READ_GATED = [
     "/duties",
+    "/kpis",
     "/training",
     "/departments",
     "/teams",

@@ -44,6 +44,7 @@
     "marketplace": "Marketplace",
     "training": "Training",
     "duties": "Responsibilities",
+    "kpis": "KPIs",
     "more": "More",
     "moreSections": "More sections"
   },
@@ -590,5 +591,19 @@
     "loadFailed": "The responsibilities could not be loaded right now.",
     "noShifts": "No shifts.",
     "viewAll": "All responsibilities"
+  },
+  "kpis": {
+    "title": "KPIs",
+    "description": "The departments' figures, period by period.",
+    "companyWide": "Whole company",
+    "empty": "No KPIs published yet.",
+    "loadFailed": "The KPIs could not be loaded right now.",
+    "notReported": "No value reported yet.",
+    "previous": "Before ({period}): {value}",
+    "previousMissing": "Before ({period}): not reported",
+    "yearToDate": "Year to date: {value}",
+    "chartLabel": "Values of the last {count} periods",
+    "missing": "not reported",
+    "viewAll": "All KPIs"
   }
 }

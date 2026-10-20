@@ -1,0 +1,44 @@
+{
+  "kind": "collectionType",
+  "collectionName": "kpis",
+  "info": {
+    "singularName": "kpi",
+    "pluralName": "kpis",
+    "displayName": "KPI",
+    "description": "A department figure (Kennzahl) with its values by period, entered by hand"
+  },
+  "options": { "draftAndPublish": true },
+  "attributes": {
+    "name": { "type": "string", "required": true },
+    "unit": { "type": "string" },
+    "description": { "type": "string" },
+    "period": {
+      "type": "enumeration",
+      "enum": ["month", "quarter", "year"],
+      "default": "month",
+      "required": true
+    },
+    "aggregation": {
+      "type": "enumeration",
+      "enum": ["sum", "last"],
+      "default": "sum",
+      "required": true
+    },
+    "values": { "type": "json" },
+    "department": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::department.department"
+    },
+    "author": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "plugin::users-permissions.user"
+    },
+    "ownerDepartment": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::department.department"
+    }
+  }
+}

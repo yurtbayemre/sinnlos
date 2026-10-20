@@ -16,6 +16,12 @@ import {
   MAX_POLL_OPTIONS,
   MAX_DUTY_SHIFTS,
   MAX_DUTY_TEMPLATES,
+  MAX_KPI_VALUES,
+  isKpiAggregation,
+  isKpiPeriod,
+  type KpiAggregation,
+  type KpiEditable,
+  type KpiPeriod,
   type AnnouncementEditable,
   type DocumentEditable,
   type DutyPlanEditable,
@@ -106,6 +112,21 @@ export interface DutyPlanValues {
   shifts: DutyShift[];
 }
 
+/**
+ * A KPI (v0.19): the department (documentId, "" for the whole company) and
+ * the values as typed, by period start; a blank entry is no value. Entries
+ * outside the table's window stay as stored.
+ */
+export interface KpiValues {
+  name: string;
+  unit: string;
+  description: string;
+  department: string;
+  period: KpiPeriod;
+  aggregation: KpiAggregation;
+  values: Record<string, string>;
+}
+
 export interface PollValues {
   question: string;
   options: string[];
@@ -180,6 +201,32 @@ export function dutyPlanValuesFromEditable(editable: DutyPlanEditable): DutyPlan
     department: editable.department ?? "",
     shiftTemplates: (editable.shiftTemplates ?? []).map((template) => ({ ...template })),
     shifts: (editable.shifts ?? []).map((shift) => ({ ...shift })),
+  };
+}
+
+export function emptyKpiValues(department = ""): KpiValues {
+  return {
+    name: "",
+    unit: "",
+    description: "",
+    department,
+    period: "month",
+    aggregation: "sum",
+    values: {},
+  };
+}
+
+export function kpiValuesFromEditable(editable: KpiEditable): KpiValues {
+  return {
+    name: editable.name ?? "",
+    unit: editable.unit ?? "",
+    description: editable.description ?? "",
+    department: editable.department ?? "",
+    period: editable.period,
+    aggregation: editable.aggregation,
+    values: Object.fromEntries(
+      Object.entries(editable.values ?? {}).map(([period, value]) => [period, String(value)]),
+    ),
   };
 }
 
@@ -411,6 +458,28 @@ export function coerceDutyPlanValues(raw: unknown): DutyPlanValues {
       startsAt: str(s.startsAt),
       endsAt: str(s.endsAt),
     })),
+  };
+}
+
+/**
+ * The values as the client sent them: string entries only, capped one
+ * above the limit, so an overlong set is refused by the payload rules.
+ */
+export function coerceKpiValues(raw: unknown): KpiValues {
+  const r = isRecord(raw) ? raw : {};
+  const values = isRecord(r.values) ? r.values : {};
+  return {
+    name: str(r.name),
+    unit: str(r.unit),
+    description: str(r.description),
+    department: str(r.department).trim(),
+    period: isKpiPeriod(r.period) ? r.period : "month",
+    aggregation: isKpiAggregation(r.aggregation) ? r.aggregation : "sum",
+    values: Object.fromEntries(
+      Object.entries(values)
+        .filter((entry): entry is [string, string] => typeof entry[1] === "string")
+        .slice(0, MAX_KPI_VALUES + 1),
+    ),
   };
 }
 

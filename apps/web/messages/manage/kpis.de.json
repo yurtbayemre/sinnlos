@@ -1,0 +1,57 @@
+{
+  "title": "Kennzahlen",
+  "description": "Kennzahlen der Abteilungen: Name, Einheit, Rhythmus und die Werte je Zeitraum.",
+  "new": "Neue Kennzahl",
+  "newDescription": "Wird als Entwurf gespeichert; unter „Kennzahlen“ erscheint sie, sobald sie veröffentlicht ist.",
+  "editTitle": "Kennzahl bearbeiten",
+  "emptyTitle": "Noch keine Kennzahlen",
+  "emptyHint": "Legen Sie die erste an, zum Beispiel „Verladene Kubikmeter“.",
+  "sections": {
+    "kpi": "Kennzahl",
+    "values": "Werte"
+  },
+  "periods": {
+    "month": "Monatlich",
+    "quarter": "Vierteljährlich",
+    "year": "Jährlich"
+  },
+  "aggregations": {
+    "sum": "Summe (zum Beispiel Mengen)",
+    "last": "Letzter Wert (zum Beispiel ein Bestand)"
+  },
+  "fields": {
+    "name": {
+      "label": "Name",
+      "hint": "Zum Beispiel „Verladene Kubikmeter“ oder „Abgeschlossene Werkstattaufträge“."
+    },
+    "unit": {
+      "label": "Einheit",
+      "hint": "Zum Beispiel „m³“, „Artikel“ oder „Aufträge“. Darf leer bleiben."
+    },
+    "description": {
+      "label": "Beschreibung",
+      "hint": "Ein Satz, was gezählt wird. Erscheint unter der Kennzahl."
+    },
+    "department": {
+      "label": "Abteilung",
+      "companyWide": "Ganze Firma",
+      "hint": "Die Abteilungsleitung dieser Abteilung pflegt die Kennzahl mit."
+    },
+    "period": {
+      "label": "Rhythmus",
+      "hint": "Für welchen Zeitraum jeweils ein Wert eingetragen wird.",
+      "locked": "Lässt sich nur ändern, solange keine Werte eingetragen sind.",
+      "invalid": "Der Rhythmus lässt sich nur ändern, solange keine Werte eingetragen sind."
+    },
+    "aggregation": {
+      "label": "Jahreswert",
+      "hint": "Summe: die Werte des Jahres werden addiert. Letzter Wert: es zählt der jüngste Stand."
+    },
+    "values": {
+      "hint": "Leer heißt: noch nicht erfasst. Komma oder Punkt als Dezimaltrennzeichen, ohne Tausenderpunkt.",
+      "earlier": "Ältere Zeiträume anzeigen",
+      "hidden": "{count, plural, one {Ein älterer Wert bleibt erhalten.} other {# ältere Werte bleiben erhalten.}}",
+      "invalid": "Bitte nur Zahlen eintragen, zum Beispiel 1250,5."
+    }
+  }
+}

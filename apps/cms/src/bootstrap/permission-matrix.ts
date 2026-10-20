@@ -43,6 +43,7 @@ export const CONTENT_TYPES = [
   "api::duty-plan.duty-plan",
   "api::event.event",
   "api::event-rsvp.event-rsvp",
+  "api::kpi.kpi",
   "api::kudos.kudos",
   "api::lesson.lesson",
   "api::lesson-progress.lesson-progress",
@@ -117,6 +118,7 @@ export const PERMISSION_MATRIX: Record<
     "api::department.department": [...READ_ACTIONS, "update"],
     "api::document.document": ALL_ACTIONS,
     "api::duty-plan.duty-plan": ALL_ACTIONS,
+    "api::kpi.kpi": ALL_ACTIONS,
     "api::event.event": ALL_ACTIONS,
     // delete deliberately admin-only across ALL roles: removing someone
     // else's RSVP is an admin correction, not a user action.
@@ -148,6 +150,7 @@ export const PERMISSION_MATRIX: Record<
     "api::department.department": READ_ACTIONS,
     "api::document.document": ALL_ACTIONS,
     "api::duty-plan.duty-plan": ALL_ACTIONS,
+    "api::kpi.kpi": ALL_ACTIONS,
     "api::event.event": ALL_ACTIONS,
     // No delete (admin-only); update is ownership-gated by
     // is-event-rsvp-owner — editors change only their OWN answer.
@@ -182,6 +185,8 @@ export const PERMISSION_MATRIX: Record<
     "api::document.document": DEPARTMENT_AUTHOR_WRITES,
     // Duty plans (v0.18): their own department's, like the documents above.
     "api::duty-plan.duty-plan": DEPARTMENT_AUTHOR_WRITES,
+    // KPIs (v0.19): their own department's figures.
+    "api::kpi.kpi": DEPARTMENT_AUTHOR_WRITES,
     "api::event.event": DEPARTMENT_AUTHOR_WRITES,
     "api::event-rsvp.event-rsvp": [...READ_ACTIONS, "create", "update"],
     "api::kudos.kudos": ["find", "findOne", "create"],
@@ -208,6 +213,7 @@ export const PERMISSION_MATRIX: Record<
     // own department's plans (DUTY_PLAN_AUTHOR_ROLES); global::can-author
     // scopes them like department heads. No other department-authored type.
     "api::duty-plan.duty-plan": DEPARTMENT_AUTHOR_WRITES,
+    "api::kpi.kpi": READ_ACTIONS,
     "api::event.event": READ_ACTIONS,
     "api::event-rsvp.event-rsvp": [...READ_ACTIONS, "create", "update"],
     "api::kudos.kudos": ["find", "findOne", "create"],
@@ -233,6 +239,7 @@ export const PERMISSION_MATRIX: Record<
     "api::department.department": READ_ACTIONS,
     "api::document.document": READ_ACTIONS,
     "api::duty-plan.duty-plan": READ_ACTIONS,
+    "api::kpi.kpi": READ_ACTIONS,
     "api::event.event": READ_ACTIONS,
     "api::event-rsvp.event-rsvp": [...READ_ACTIONS, "create", "update"],
     "api::kudos.kudos": ["find", "findOne", "create"],
@@ -325,6 +332,7 @@ export const PERMISSION_MATRIX: Record<
     "api::department.department": READ_ACTIONS,
     "api::document.document": READ_ACTIONS,
     "api::duty-plan.duty-plan": READ_ACTIONS,
+    "api::kpi.kpi": READ_ACTIONS,
     "api::event.event": READ_ACTIONS,
     "api::event-rsvp.event-rsvp": [...READ_ACTIONS, "create", "update"],
     "api::kudos.kudos": ["find", "findOne", "create"],
@@ -412,6 +420,7 @@ export const AUTHORING_ACTION_GRANTS: Readonly<Record<string, readonly MatrixRol
   ...authoringGrants("api::event.event", AUTHORING_ACTIONS, DEPARTMENT_AUTHORS),
   ...authoringGrants("api::document.document", AUTHORING_ACTIONS, DEPARTMENT_AUTHORS),
   ...authoringGrants("api::duty-plan.duty-plan", AUTHORING_ACTIONS, DUTY_PLAN_AUTHORS),
+  ...authoringGrants("api::kpi.kpi", AUTHORING_ACTIONS, DEPARTMENT_AUTHORS),
   ...authoringGrants("api::quick-link.quick-link", AUTHORING_ACTIONS, MODERATORS),
   ...authoringGrants("api::poll.poll", POLL_AUTHORING_ACTIONS, MODERATORS),
   ...authoringGrants("api::wiki-space.wiki-space", WIKI_SPACE_ACTIONS, MODERATORS),

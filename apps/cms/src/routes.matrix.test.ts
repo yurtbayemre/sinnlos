@@ -286,6 +286,7 @@ const EVENT = "api::event.event";
 const QUICK_LINK = "api::quick-link.quick-link";
 const DOCUMENT = "api::document.document";
 const DUTY_PLAN = "api::duty-plan.duty-plan";
+const KPI = "api::kpi.kpi";
 const POLL = "api::poll.poll";
 const WIKI_SPACE = "api::wiki-space.wiki-space";
 const WIKI_PAGE = "api::wiki-page.wiki-page";
@@ -381,6 +382,13 @@ const GOLDEN: Record<string, PolicySpec[]> = {
   "api::duty-plan.duty-plan.update": canAuthor(DUTY_PLAN),
   "api::duty-plan.duty-plan.delete": ADMIN_OR_EDITOR,
   ...authoringRoutes(DUTY_PLAN, DP_INTENTS),
+
+  "api::kpi.kpi.find": ["global::published-only"],
+  "api::kpi.kpi.findOne": ["global::published-only"],
+  "api::kpi.kpi.create": canAuthor(KPI),
+  "api::kpi.kpi.update": canAuthor(KPI),
+  "api::kpi.kpi.delete": ADMIN_OR_EDITOR,
+  ...authoringRoutes(KPI, DP_INTENTS),
 
   "api::event.event.find": ["global::published-only"],
   "api::event.event.findOne": ["global::published-only"],
@@ -664,6 +672,14 @@ const WRITE_ALLOWLIST_ENFORCERS: Record<string, { policy: string; classes: reado
     policy: "global::can-author",
     classes: ["departmentAuthor", "moderator"],
   },
+  "api::kpi.kpi.create": {
+    policy: "global::can-author",
+    classes: ["departmentAuthor", "moderator"],
+  },
+  "api::kpi.kpi.update": {
+    policy: "global::can-author",
+    classes: ["departmentAuthor", "moderator"],
+  },
   "api::quick-link.quick-link.create": { policy: "global::can-author", classes: ["moderator"] },
   "api::quick-link.quick-link.update": { policy: "global::can-author", classes: ["moderator"] },
   "api::poll.poll.create": { policy: "global::can-author", classes: ["moderator"] },
@@ -852,6 +868,7 @@ describe("route → policy matrix (S01)", async () => {
           "/quick-links/authoring",
           "/documents/authoring",
           "/duty-plans/authoring",
+          "/kpis/authoring",
           "/polls/authoring",
           "/wiki-spaces/authoring",
           "/wiki-pages/authoring",
@@ -1430,14 +1447,16 @@ describe("route → policy matrix (S01)", async () => {
           "update",
         ].sort(),
       );
-      for (const uid of [ANNOUNCEMENT, EVENT, DOCUMENT, QUICK_LINK, POLL]) {
+      for (const uid of [ANNOUNCEMENT, EVENT, DOCUMENT, QUICK_LINK, POLL, KPI]) {
         expect(authoring(uid), uid).toEqual([]);
       }
     });
 
-    it("every staff role and authenticated read published plans; guests do not", () => {
+    it("every staff role and authenticated read published plans and KPIs; guests do not", () => {
       for (const role of matrixRoles) {
-        expect(effectiveGrants(role).has(`${DUTY_PLAN}.find`), role).toBe(role !== "guest");
+        for (const uid of [DUTY_PLAN, KPI]) {
+          expect(effectiveGrants(role).has(`${uid}.find`), `${role} ${uid}`).toBe(role !== "guest");
+        }
       }
     });
   });

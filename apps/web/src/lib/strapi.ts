@@ -24,6 +24,7 @@ import { listCelebrations, listKudos } from "@/lib/api/kudos";
 import { classifiedById, listClassifieds, myClassifieds } from "@/lib/api/marketplace";
 import { listQuickLinks } from "@/lib/api/quick-links";
 import { listDutyPlans } from "@/lib/api/duties";
+import { listKpis } from "@/lib/api/kpis";
 
 export {
   strapi,
@@ -58,5 +59,6 @@ export const api = {
   classifieds: { list: listClassifieds, mine: myClassifieds, one: classifiedById },
   quickLinks: { list: listQuickLinks },
   dutyPlans: { list: listDutyPlans },
+  kpis: { list: listKpis },
   celebrations: listCelebrations,
 };

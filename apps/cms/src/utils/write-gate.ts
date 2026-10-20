@@ -10,6 +10,7 @@ import {
   DOCUMENT_UID,
   DUTY_PLAN_UID,
   EVENT_UID,
+  KPI_UID,
   QUICK_LINK_UID,
   WIKI_PAGE_UID,
   WIKI_SPACE_UID,
@@ -47,7 +48,7 @@ import {
  *      of AUTHORED_UIDS or an unknown intent: no class;
  *   2. the role class (§B2, §N1): admin_role and editor are `moderator` on
  *      every authored type; a `department_head` (DEPARTMENT_AUTHOR_ROLES) is
- *      `departmentAuthor` on announcement, event, document and duty plan, a
+ *      `departmentAuthor` on announcement, event, document, duty plan and KPI, a
  *      `team_lead` on duty plans only (departmentAuthorRolesOf), and
  *      only with a `user.department`, read per request with one query (the
  *      loader of can-edit-department.ts). Everyone else has none;
@@ -191,6 +192,11 @@ export const AUTHORING_POPULATE: Readonly<Record<string, Record<string, unknown>
     ownerDepartment: DEPARTMENT_REF,
     author: { select: ["id", "displayName", "username"] },
   },
+  [KPI_UID]: {
+    department: DEPARTMENT_REF,
+    ownerDepartment: DEPARTMENT_REF,
+    author: { select: ["id", "displayName", "username"] },
+  },
   [WIKI_SPACE_UID]: {
     allowedRoles: { select: ["id", "documentId", "type"] },
     department: DEPARTMENT_REF,
@@ -280,7 +286,7 @@ const relationIds = (value: unknown): number[] =>
  *   - announcement: `department` is it; `team` null or a team of it;
  *     audience roles only staff role types (they only narrow);
  *   - event and document: `departments` exactly that one department;
- *   - duty plan: `department` is it.
+ *   - duty plan and KPI: `department` is it.
  */
 export function rowInDepartmentScope(
   uid: string,
@@ -306,7 +312,7 @@ export function rowInDepartmentScope(
     const ids = relationIds(row.departments);
     return ids.length === 1 && ids[0] === department.id;
   }
-  if (uid === DUTY_PLAN_UID) return relationId(row.department) === department.id;
+  if (uid === DUTY_PLAN_UID || uid === KPI_UID) return relationId(row.department) === department.id;
   return false;
 }
 

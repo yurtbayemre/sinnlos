@@ -12,6 +12,7 @@ import {
   GraduationCap,
   Link2,
   Lock,
+  TrendingUp,
   Megaphone,
   Shield,
   Users,
@@ -50,6 +51,7 @@ const AREA_ICONS: Readonly<Record<Exclude<ManageArea, "lessons">, LucideIcon>> =
   wiki: BookOpen,
   courses: GraduationCap,
   dutyPlans: CalendarClock,
+  kpis: TrendingUp,
 };
 
 const ROLE_COLORS = [

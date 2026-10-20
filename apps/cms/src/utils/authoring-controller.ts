@@ -9,6 +9,9 @@ import {
   parseQuiz,
   validateDutyShifts,
   validateDutyTemplates,
+  isKpiAggregation,
+  isKpiPeriod,
+  validateKpiValues,
   scopedNeedsRetarget,
   type AuthoringDocumentStatus,
   type AuthoringListRow,
@@ -31,6 +34,7 @@ import {
   EVENT_UID,
   QUICK_LINK_UID,
   DUTY_PLAN_UID,
+  KPI_UID,
   WIKI_PAGE_UID,
   WIKI_SPACE_UID,
 } from "./authoring-uids";
@@ -207,6 +211,16 @@ export const AUTHORING_SPECS: Readonly<Record<string, AuthoringSpec>> = {
     uid: DUTY_PLAN_UID,
     type: "dutyPlan",
     statusMode: AUTHORING_STATUS_MODES.dutyPlan,
+    labelField: "name",
+    authorField: "author",
+    scheduled: false,
+    unpublishScheduled: false,
+    flagColumns: [],
+  },
+  [KPI_UID]: {
+    uid: KPI_UID,
+    type: "kpi",
+    statusMode: AUTHORING_STATUS_MODES.kpi,
     labelField: "name",
     authorField: "author",
     scheduled: false,
@@ -760,6 +774,20 @@ export async function editableFields(
         department: documentIdOf(draft.department),
         shiftTemplates: "error" in templates ? [] : templates.templates,
         shifts: "error" in shifts ? [] : shifts.shifts,
+        ownerDepartment: ownerOf(draft),
+      };
+    }
+    case KPI_UID: {
+      // The stored values passed the lifecycle; anything else reads as none.
+      const values = validateKpiValues(draft.values);
+      return {
+        name: text(draft.name) ?? "",
+        unit: text(draft.unit),
+        description: text(draft.description),
+        department: documentIdOf(draft.department),
+        period: isKpiPeriod(draft.period) ? draft.period : "month",
+        aggregation: isKpiAggregation(draft.aggregation) ? draft.aggregation : "sum",
+        values: "error" in values ? {} : values.values,
         ownerDepartment: ownerOf(draft),
       };
     }

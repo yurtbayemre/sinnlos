@@ -131,6 +131,9 @@ export const ORG_READER_ROLES: ReadonlySet<string> = roleSet(...STAFF_AND_FALLBA
 /** duty-plan.find (v0.18): every staff role and `authenticated`; guests none. */
 export const DUTY_READER_ROLES: ReadonlySet<string> = roleSet(...STAFF_AND_FALLBACK);
 
+/** kpi.find (v0.19): every staff role and `authenticated`; guests none. */
+export const KPI_READER_ROLES: ReadonlySet<string> = roleSet(...STAFF_AND_FALLBACK);
+
 /** kudos.find: the kudos wall. */
 export const KUDOS_READER_ROLES: ReadonlySet<string> = roleSet(...STAFF_AND_FALLBACK);
 
@@ -224,7 +227,8 @@ export type ReadSection =
   | "celebrations"
   | "marketplace"
   | "training"
-  | "duties";
+  | "duties"
+  | "kpis";
 
 export const READ_SECTIONS: Readonly<Record<ReadSection, ReadonlySet<string>>> = Object.freeze({
   announcements: ANNOUNCEMENT_READER_ROLES,
@@ -236,6 +240,7 @@ export const READ_SECTIONS: Readonly<Record<ReadSection, ReadonlySet<string>>> =
   marketplace: AD_READER_ROLES,
   training: TRAINING_ROLES,
   duties: DUTY_READER_ROLES,
+  kpis: KPI_READER_ROLES,
 });
 
 /** Fail-closed like every gate: only a listed role reads the section. */
@@ -269,7 +274,8 @@ export type AuthoringArea =
   | "wikiSpaces"
   | "courses"
   | "lessons"
-  | "dutyPlans";
+  | "dutyPlans"
+  | "kpis";
 
 export type AuthoringVerb =
   "create" | "edit" | "publish" | "unpublish" | "schedule" | "discard" | "delete";
@@ -287,6 +293,7 @@ export const AUTHORING_AREAS: readonly AuthoringArea[] = [
   "courses",
   "lessons",
   "dutyPlans",
+  "kpis",
 ];
 
 export interface Capabilities {
@@ -346,6 +353,8 @@ const MODERATOR_AUTHORING: Readonly<Record<AuthoringArea, readonly AuthoringVerb
   lessons: ["create", "edit", "publish", "unpublish", "schedule", "discard"],
   // Duty plans (v0.18) have no schedule: a shift list is live data.
   dutyPlans: ["create", "edit", "publish", "unpublish", "discard", "delete"],
+  // KPIs (v0.19): figures entered by hand, no schedule.
+  kpis: ["create", "edit", "publish", "unpublish", "discard", "delete"],
 };
 
 /**
@@ -364,6 +373,7 @@ const DEPARTMENT_AUTHOR_AUTHORING: Readonly<
   events: ["create", "edit", "publish", "unpublish", "discard"],
   documents: ["create", "edit", "publish", "unpublish", "discard"],
   dutyPlans: ["create", "edit", "publish", "unpublish", "discard"],
+  kpis: ["create", "edit", "publish", "unpublish", "discard"],
 };
 
 /** wiki-page create: moderators, department heads and team leads. */
@@ -397,6 +407,7 @@ const DEPARTMENT_AUTHOR_ROLES_BY_AREA: Readonly<
   events: DEPARTMENT_AUTHOR_ROLE_SET,
   documents: DEPARTMENT_AUTHOR_ROLE_SET,
   dutyPlans: roleSet(...DUTY_PLAN_AUTHOR_ROLES),
+  kpis: DEPARTMENT_AUTHOR_ROLE_SET,
 };
 
 /** The roles that may schedule (`publishAt`, `unpublishAt`; §D rule 1, §L2). */
