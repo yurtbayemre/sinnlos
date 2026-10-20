@@ -40,8 +40,12 @@ export interface ItemActions {
   remove?: (documentId: string, version: string) => Promise<AuthoringActionResult>;
 }
 
-/** Lists whose order means something (a poll's answers: votes point at an index). */
-const ORDERED_LISTS = new Set(["options", "quiz"]);
+/**
+ * Lists compared as written: order means something (a poll's answers: votes
+ * point at an index) or the entries are objects (a quiz, a duty plan's
+ * templates and shifts), which the set comparison would read as equal.
+ */
+const ORDERED_LISTS = new Set(["options", "quiz", "shiftTemplates", "shifts"]);
 
 /**
  * Whether two values objects say the same (strings, booleans, lists). A

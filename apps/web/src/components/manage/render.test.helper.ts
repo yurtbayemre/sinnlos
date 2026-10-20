@@ -23,6 +23,8 @@ import orgDe from "../../../messages/manage/org.de.json";
 import orgEn from "../../../messages/manage/org.en.json";
 import activityDe from "../../../messages/manage/activity.de.json";
 import activityEn from "../../../messages/manage/activity.en.json";
+import dutyPlansDe from "../../../messages/manage/dutyPlans.de.json";
+import dutyPlansEn from "../../../messages/manage/dutyPlans.en.json";
 import { withManageMessages } from "@/i18n/messages";
 
 /**
@@ -43,6 +45,7 @@ export const MESSAGES = {
     training: trainingEn,
     org: orgEn,
     activity: activityEn,
+    dutyPlans: dutyPlansEn,
   }),
   de: withManageMessages(de, {
     common: commonDe,
@@ -55,6 +58,7 @@ export const MESSAGES = {
     training: trainingDe,
     org: orgDe,
     activity: activityDe,
+    dutyPlans: dutyPlansDe,
   }),
 };
 

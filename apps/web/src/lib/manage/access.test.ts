@@ -23,7 +23,16 @@ import { k8Capabilities } from "./k8-capabilities.test.helper";
  * follow whatever lib/roles.ts says.
  */
 
-const AREAS = ["announcements", "events", "polls", "quickLinks", "documents", "wiki", "courses"];
+const AREAS = [
+  "announcements",
+  "events",
+  "polls",
+  "quickLinks",
+  "documents",
+  "wiki",
+  "courses",
+  "dutyPlans",
+];
 
 const ENG = { documentId: "deptengineering000000000" };
 
@@ -50,10 +59,10 @@ describe("areaAccess with batch 15's capabilities (K8)", () => {
     }
   });
 
-  it("department heads: announcements, events and documents of their department, no schedule or delete", () => {
+  it("department heads: announcements, events, documents and duty plans of their department, no schedule or delete", () => {
     const caps = k8Capabilities(roles, "department_head");
-    expect(manageAreasFor(caps)).toEqual(["announcements", "events", "documents"]);
-    for (const area of ["announcements", "events", "documents"] as const) {
+    expect(manageAreasFor(caps)).toEqual(["announcements", "events", "documents", "dutyPlans"]);
+    for (const area of ["announcements", "events", "documents", "dutyPlans"] as const) {
       expect(areaAccess(caps, area)).toEqual({
         area,
         verbs: ["create", "edit", "publish", "unpublish", "discard"],
@@ -69,12 +78,21 @@ describe("areaAccess with batch 15's capabilities (K8)", () => {
     expect(canDo(access, "delete")).toBe(false);
   });
 
-  it.each(["team_lead", "member", "guest", "authenticated", null, "Editor"])(
-    "%s authors nothing",
-    (role) => {
-      expect(manageAreasFor(k8Capabilities(roles, role))).toEqual([]);
-    },
-  );
+  it("team leads: the duty plans of their department only (v0.18)", () => {
+    const caps = k8Capabilities(roles, "team_lead");
+    expect(manageAreasFor(caps)).toEqual(["dutyPlans"]);
+    expect(areaAccess(caps, "dutyPlans")).toEqual({
+      area: "dutyPlans",
+      verbs: ["create", "edit", "publish", "unpublish", "discard"],
+      scope: "ownDepartment",
+      roleClass: "departmentAuthor",
+    });
+    expect(areaAccess(caps, "announcements")).toBeNull();
+  });
+
+  it.each(["member", "guest", "authenticated", null, "Editor"])("%s authors nothing", (role) => {
+    expect(manageAreasFor(k8Capabilities(roles, role))).toEqual([]);
+  });
 
   it("a department author without a department authors nothing (§N1); moderators need none", () => {
     const head = areaAccess(k8Capabilities(roles, "department_head"), "events");
@@ -111,8 +129,9 @@ describe("areaAccess with lib/roles.ts's own values", () => {
       "announcements",
       "events",
       "documents",
+      "dutyPlans",
     ]);
-    expect(manageAreasFor(roles.capabilitiesFor("team_lead"))).toEqual([]);
+    expect(manageAreasFor(roles.capabilitiesFor("team_lead"))).toEqual(["dutyPlans"]);
     expect(areaAccess(editor, "announcements")?.verbs).toEqual(
       ["create", "edit", "publish", "unpublish", "schedule", "discard", "delete"].filter((verb) =>
         editor.author.announcements.has(verb as roles.AuthoringVerb),
@@ -132,6 +151,7 @@ describe("the areas", () => {
       "quickLink",
       "document",
       "course",
+      "dutyPlan",
     ]);
     expect(MANAGE_AREAS.map((area) => AREA_CAPABILITY[area])).toEqual([
       "announcements",
@@ -141,6 +161,7 @@ describe("the areas", () => {
       "documents",
       "wikiSpaces",
       "courses",
+      "dutyPlans",
     ]);
     for (const area of MANAGE_AREAS) {
       expect(roles.AUTHORING_AREAS).toContain(AREA_CAPABILITY[area]);

@@ -14,8 +14,13 @@
 import {
   MAX_TARGET_DEPARTMENTS,
   MAX_POLL_OPTIONS,
+  MAX_DUTY_SHIFTS,
+  MAX_DUTY_TEMPLATES,
   type AnnouncementEditable,
   type DocumentEditable,
+  type DutyPlanEditable,
+  type DutyShift,
+  type DutyShiftTemplate,
   type EditableMedia,
   type EventEditable,
   type PollEditable,
@@ -88,6 +93,19 @@ export interface DocumentValues {
   file: EditableMedia | null;
 }
 
+/**
+ * A duty plan (v0.18): the department (documentId, "" for the whole
+ * company), the shift templates and the shifts as the cms stores them;
+ * the form edits a shift's day and times and writes the instants back.
+ */
+export interface DutyPlanValues {
+  name: string;
+  note: string;
+  department: string;
+  shiftTemplates: DutyShiftTemplate[];
+  shifts: DutyShift[];
+}
+
 export interface PollValues {
   question: string;
   options: string[];
@@ -149,6 +167,20 @@ export function emptyQuickLinkValues(): QuickLinkValues {
 
 export function emptyDocumentValues(departments: string[] = []): DocumentValues {
   return { title: "", description: "", category: "other", departments, file: null };
+}
+
+export function emptyDutyPlanValues(department = ""): DutyPlanValues {
+  return { name: "", note: "", department, shiftTemplates: [], shifts: [] };
+}
+
+export function dutyPlanValuesFromEditable(editable: DutyPlanEditable): DutyPlanValues {
+  return {
+    name: editable.name ?? "",
+    note: editable.note ?? "",
+    department: editable.department ?? "",
+    shiftTemplates: (editable.shiftTemplates ?? []).map((template) => ({ ...template })),
+    shifts: (editable.shifts ?? []).map((shift) => ({ ...shift })),
+  };
 }
 
 export function emptyPollValues(): PollValues {
@@ -353,6 +385,28 @@ export function coerceDocumentValues(raw: unknown): DocumentValues {
     category: str(r.category).trim(),
     departments: idList(r.departments),
     file: fileValue(r.file),
+  };
+}
+
+/** Templates and shifts as the client sent them: entries of the right shape, capped; the payload rules check the rest. */
+export function coerceDutyPlanValues(raw: unknown): DutyPlanValues {
+  const r = isRecord(raw) ? raw : {};
+  const list = (value: unknown, max: number) =>
+    (Array.isArray(value) ? value : []).filter(isRecord).slice(0, max);
+  return {
+    name: str(r.name),
+    note: str(r.note),
+    department: str(r.department).trim(),
+    shiftTemplates: list(r.shiftTemplates, MAX_DUTY_TEMPLATES).map((t) => ({
+      label: str(t.label),
+      start: str(t.start),
+      end: str(t.end),
+    })),
+    shifts: list(r.shifts, MAX_DUTY_SHIFTS).map((s) => ({
+      userId: typeof s.userId === "number" ? s.userId : 0,
+      startsAt: str(s.startsAt),
+      endsAt: str(s.endsAt),
+    })),
   };
 }
 

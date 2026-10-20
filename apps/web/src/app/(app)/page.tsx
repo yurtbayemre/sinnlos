@@ -13,6 +13,7 @@ import { AckBanner } from "@/components/dashboard/ack-banner";
 import { TrainingBanner } from "@/components/training/training-banner";
 import { LatestNews } from "@/components/dashboard/latest-news";
 import { QuickLinks } from "@/components/dashboard/quick-links";
+import { DutiesNowSection } from "@/components/duties/duty-lists";
 
 /**
  * The dashboard. Its data comes from lib/loaders/dashboard.ts (WD03): the
@@ -100,6 +101,11 @@ export default async function DashboardPage() {
           <StatTile icon={Award} label={tNav("kudos")} value={t("give")} href="/kudos" />
         )}
       </section>
+
+      {/* Who is on duty (v0.18): its own reads, streamed like the banners. */}
+      <Suspense fallback={null}>
+        <DutiesNowSection />
+      </Suspense>
 
       <QuickLinks items={view.quickLinks} />
 

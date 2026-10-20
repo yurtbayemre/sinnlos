@@ -21,6 +21,7 @@ export const ACTIVITY_TARGETS = {
   "api::wiki-page.wiki-page": "wikiPage",
   "api::course.course": "course",
   "api::lesson.lesson": "lesson",
+  "api::duty-plan.duty-plan": "dutyPlan",
   "api::department.department": "department",
   "api::team.team": "team",
   "api::classified.classified": "classified",

@@ -1,0 +1,61 @@
+{
+  "title": "Zuständigkeiten",
+  "description": "Dienstpläne: wer wann zuständig ist, mit Schichtvorlagen und Schichten.",
+  "new": "Neuer Dienstplan",
+  "newDescription": "Wird als Entwurf gespeichert; unter „Zuständigkeiten“ erscheint er, sobald er veröffentlicht ist.",
+  "editTitle": "Dienstplan bearbeiten",
+  "emptyTitle": "Noch keine Dienstpläne",
+  "emptyHint": "Legen Sie den ersten an, zum Beispiel „Schlüsseldienst“.",
+  "sections": {
+    "plan": "Dienst",
+    "templates": "Schichtvorlagen",
+    "shifts": "Schichten"
+  },
+  "fields": {
+    "name": {
+      "label": "Name des Dienstes",
+      "hint": "Zum Beispiel „Schlüsseldienst“ oder „Schichtleitung Frühschicht Halle 2“."
+    },
+    "note": {
+      "label": "Hinweis",
+      "hint": "Erscheint bei der Zuständigkeit, zum Beispiel „Schlüssel im Fach 3“."
+    },
+    "department": {
+      "label": "Abteilung",
+      "companyWide": "Ganze Firma",
+      "hint": "Abteilungsleiter und Teamleiter dieser Abteilung pflegen den Plan mit."
+    },
+    "shiftTemplates": {
+      "hint": "Feste Schichtzeiten. Liegt das Ende vor dem Beginn, endet die Schicht am Folgetag.",
+      "add": "Vorlage hinzufügen",
+      "remove": "Vorlage entfernen",
+      "templateLabel": "Bezeichnung",
+      "start": "Beginn",
+      "end": "Ende",
+      "invalid": "Jede Vorlage braucht eine eindeutige Bezeichnung und zwei verschiedene Uhrzeiten.",
+      "tooLong": "Eine Bezeichnung darf höchstens 60 Zeichen lang sein."
+    },
+    "shifts": {
+      "hint": "Schichten, die vor mehr als vier Wochen endeten, werden beim Speichern entfernt.",
+      "add": "Schicht hinzufügen",
+      "copyWeek": "Woche kopieren",
+      "copyWeekHint": "Übernimmt die Schichten der Woche ab dem gewählten Montag in die Woche danach.",
+      "weekStart": "Woche ab",
+      "copied": "{count, plural, =0 {In dieser Woche gibt es keine Schichten.} one {Eine Schicht übernommen.} other {# Schichten übernommen.}}",
+      "remove": "Schicht entfernen",
+      "person": "Person",
+      "choosePerson": "Person wählen",
+      "day": "Tag",
+      "template": "Vorlage",
+      "custom": "Eigene Zeiten",
+      "start": "Beginn",
+      "end": "Ende",
+      "nextDay": "Folgetag",
+      "empty": "Noch keine Schichten.",
+      "peopleFailed": "Das Personenverzeichnis konnte nicht geladen werden. Vorhandene Schichten bleiben erhalten.",
+      "overlap": "Überschneidung: {first} und {second} sind gleichzeitig eingeteilt. Das ist erlaubt, prüfen Sie es aber bitte.",
+      "invalid": "Jede Schicht braucht eine Person, einen Tag und gültige Uhrzeiten.",
+      "endBeforeStart": "Eine Schicht endet vor ihrem Beginn oder dauert länger als 14 Tage."
+    }
+  }
+}

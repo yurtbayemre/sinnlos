@@ -1,0 +1,61 @@
+{
+  "title": "Responsibilities",
+  "description": "Duty plans: who is responsible when, with shift templates and shifts.",
+  "new": "New duty plan",
+  "newDescription": "Saved as a draft; it shows under “Responsibilities” once it is published.",
+  "editTitle": "Edit duty plan",
+  "emptyTitle": "No duty plans yet",
+  "emptyHint": "Create the first one, for example “Key service”.",
+  "sections": {
+    "plan": "Duty",
+    "templates": "Shift templates",
+    "shifts": "Shifts"
+  },
+  "fields": {
+    "name": {
+      "label": "Name of the duty",
+      "hint": "For example “Key service” or “Shift lead, early shift, hall 2”."
+    },
+    "note": {
+      "label": "Note",
+      "hint": "Shown with the responsibility, for example “Keys in box 3”."
+    },
+    "department": {
+      "label": "Department",
+      "companyWide": "Whole company",
+      "hint": "Department heads and team leads of this department maintain the plan too."
+    },
+    "shiftTemplates": {
+      "hint": "Fixed shift times. An end before the start ends on the next day.",
+      "add": "Add template",
+      "remove": "Remove template",
+      "templateLabel": "Label",
+      "start": "Start",
+      "end": "End",
+      "invalid": "Every template needs a unique label and two different times.",
+      "tooLong": "A label may have at most 60 characters."
+    },
+    "shifts": {
+      "hint": "Shifts that ended more than four weeks ago are removed when you save.",
+      "add": "Add shift",
+      "copyWeek": "Copy week",
+      "copyWeekHint": "Copies the shifts of the week from the chosen Monday into the week after.",
+      "weekStart": "Week from",
+      "copied": "{count, plural, =0 {There are no shifts in this week.} one {One shift copied.} other {# shifts copied.}}",
+      "remove": "Remove shift",
+      "person": "Person",
+      "choosePerson": "Choose a person",
+      "day": "Day",
+      "template": "Template",
+      "custom": "Own times",
+      "start": "Start",
+      "end": "End",
+      "nextDay": "next day",
+      "empty": "No shifts yet.",
+      "peopleFailed": "The directory could not be loaded. Existing shifts are kept.",
+      "overlap": "Overlap: {first} and {second} are on duty at the same time. That is allowed, but please check it.",
+      "invalid": "Every shift needs a person, a day and valid times.",
+      "endBeforeStart": "A shift ends before it starts or lasts longer than 14 days."
+    }
+  }
+}

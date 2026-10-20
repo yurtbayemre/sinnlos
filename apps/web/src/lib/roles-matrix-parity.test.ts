@@ -44,13 +44,13 @@ const { PERMISSION_MATRIX, CUSTOM_ACTION_GRANTS } = (await import(
   CUSTOM_ACTION_GRANTS: Record<string, readonly string[] | "*" | undefined>;
 };
 
-const { MODERATORS, DEPARTMENT_AUTHOR_ROLES, SCHEDULER_ROLES } = (await import(
-  join(CMS_SRC, "bootstrap", "roles.ts")
-)) as {
-  MODERATORS: readonly string[];
-  DEPARTMENT_AUTHOR_ROLES: readonly string[];
-  SCHEDULER_ROLES: readonly string[];
-};
+const { MODERATORS, DEPARTMENT_AUTHOR_ROLES, DUTY_PLAN_AUTHOR_ROLES, SCHEDULER_ROLES } =
+  (await import(join(CMS_SRC, "bootstrap", "roles.ts"))) as {
+    MODERATORS: readonly string[];
+    DEPARTMENT_AUTHOR_ROLES: readonly string[];
+    DUTY_PLAN_AUTHOR_ROLES: readonly string[];
+    SCHEDULER_ROLES: readonly string[];
+  };
 
 const { DIGEST_EXCLUDED_ROLE_TYPES } = (await import(
   join(CMS_SRC, "digest", "send-digests.ts")
@@ -111,6 +111,7 @@ const A = {
   comment: "api::comment.comment",
   course: "api::course.course",
   department: "api::department.department",
+  dutyPlan: "api::duty-plan.duty-plan",
   eventRsvp: "api::event-rsvp.event-rsvp",
   kudos: "api::kudos.kudos",
   lesson: "api::lesson.lesson",
@@ -249,6 +250,7 @@ const SECTION_READS: Record<ReadSection, string[]> = {
   kudos: [`${A.kudos}.find`],
   celebrations: ["api::kudos.kudos.celebrations"],
   marketplace: [`${A.classified}.find`, `${A.classified}.findOne`],
+  duties: [`${A.dutyPlan}.find`, `${A.dutyPlan}.findOne`],
   training: [
     `${A.course}.find`,
     `${A.lesson}.find`,
@@ -312,6 +314,15 @@ const AUTHORING_GRANTS: Record<AuthoringArea, Partial<Record<AuthoringVerb, stri
     // Training deletes stay in the admin panel (§I).
     courses: draftAndPublish(A.course, false),
     lessons: draftAndPublish(A.lesson, false),
+    // Duty plans (v0.18): no schedule, a shift plan is live data.
+    dutyPlans: {
+      create: `${A.dutyPlan}.create`,
+      edit: `${A.dutyPlan}.update`,
+      publish: `${A.dutyPlan}.publish`,
+      unpublish: `${A.dutyPlan}.unpublish`,
+      discard: `${A.dutyPlan}.discardDraft`,
+      delete: `${A.dutyPlan}.delete`,
+    },
   };
 })();
 
@@ -354,8 +365,9 @@ describe("capabilitiesFor = the cms grants (decision 06 §L2)", () => {
       } else if (MODERATORS.includes(role)) {
         expect(caps.authorScope[area], area).toBe("any");
       } else {
-        // Batch 15: "ownDepartment" exactly for the department authors.
-        expect(DEPARTMENT_AUTHOR_ROLES, `${role} authors ${area}`).toContain(role);
+        // Batch 15: "ownDepartment" exactly for the department authors (team leads on duty plans).
+        const authors = area === "dutyPlans" ? DUTY_PLAN_AUTHOR_ROLES : DEPARTMENT_AUTHOR_ROLES;
+        expect(authors, `${role} authors ${area}`).toContain(role);
         expect(caps.authorScope[area], area).toBe("ownDepartment");
       }
     }
@@ -363,11 +375,11 @@ describe("capabilitiesFor = the cms grants (decision 06 §L2)", () => {
 
   it("schedule is a SCHEDULER_ROLES verb: department authors hold update but never schedule", () => {
     expect([...SCHEDULER_ROLES]).toEqual([...MODERATORS]);
-    for (const role of DEPARTMENT_AUTHOR_ROLES) {
+    for (const role of new Set([...DEPARTMENT_AUTHOR_ROLES, ...DUTY_PLAN_AUTHOR_ROLES])) {
       const caps = capabilitiesFor(role);
       for (const area of AUTHORING_AREAS)
         expect(caps.author[area].has("schedule"), area).toBe(false);
-      expect(holds(role, `${A.announcement}.update`)).toBe(true);
+      expect(holds(role, `${A.dutyPlan}.update`)).toBe(true);
     }
   });
 
@@ -403,7 +415,11 @@ describe("capabilitiesFor = the cms grants (decision 06 §L2)", () => {
     // MODERATORS and DEPARTMENT_AUTHOR_ROLES (batch 15, §L1, §N7): a
     // capability is what the cms grants, so no role gets an empty shell.
     expect(caps.manage).toBe(AUTHORING_AREAS.some((area) => caps.author[area].size > 0));
-    expect(caps.manage).toBe(MODERATORS.includes(role) || DEPARTMENT_AUTHOR_ROLES.includes(role));
+    expect(caps.manage).toBe(
+      MODERATORS.includes(role) ||
+        DEPARTMENT_AUTHOR_ROLES.includes(role) ||
+        DUTY_PLAN_AUTHOR_ROLES.includes(role),
+    );
     expect(caps.reports.analytics).toBe(holds(role, "api::search-log.search-log.summary"));
     expect(caps.reports.acknowledgements).toBe(holds(role, "plugin::users-permissions.role.find"));
     expect(caps.reports.training).toBe(admin);

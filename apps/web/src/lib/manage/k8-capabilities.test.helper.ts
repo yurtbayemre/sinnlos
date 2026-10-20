@@ -1,4 +1,9 @@
-import { DEPARTMENT_AUTHOR_ROLES, MODERATORS, SCHEDULER_ROLES } from "@sinnlos/domain";
+import {
+  DEPARTMENT_AUTHOR_ROLES,
+  DUTY_PLAN_AUTHOR_ROLES,
+  MODERATORS,
+  SCHEDULER_ROLES,
+} from "@sinnlos/domain";
 import type * as RolesModule from "@/lib/roles";
 import type { AuthoringArea, AuthoringScope, AuthoringVerb, Capabilities } from "@/lib/roles";
 
@@ -40,6 +45,8 @@ export function k8Capabilities(
   const base = roles.capabilitiesFor(role);
   const moderator = holds(MODERATORS, role);
   const departmentAuthor = holds(DEPARTMENT_AUTHOR_ROLES, role);
+  // Duty plans (v0.18): team leads author them too, for their own department.
+  const dutyAuthor = holds(DUTY_PLAN_AUTHOR_ROLES, role);
   const scheduler = holds(SCHEDULER_ROLES, role);
   const author = {} as Record<AuthoringArea, ReadonlySet<AuthoringVerb>>;
   const authorScope = {} as Record<AuthoringArea, AuthoringScope | null>;
@@ -56,7 +63,13 @@ export function k8Capabilities(
     if (!scheduler) verbs.delete("schedule");
     author[area] = verbs;
     authorScope[area] =
-      verbs.size === 0 ? null : moderator ? "any" : departmentAuthor ? "ownDepartment" : null;
+      verbs.size === 0
+        ? null
+        : moderator
+          ? "any"
+          : departmentAuthor || (dutyAuthor && area === "dutyPlans")
+            ? "ownDepartment"
+            : null;
   }
-  return { ...base, manage: moderator || departmentAuthor, author, authorScope };
+  return { ...base, manage: moderator || departmentAuthor || dutyAuthor, author, authorScope };
 }

@@ -46,7 +46,12 @@ import {
   checkPositiveIntOrNull,
   checkQuickLinkUrl,
   checkRequiredString,
+  dutyShiftsCode,
+  dutyTemplatesCode,
   eventSpanCode,
+  pruneDutyShifts,
+  validateDutyShifts,
+  validateDutyTemplates,
   pollOptionsCode,
   samePollOptions,
   scheduleCodes,
@@ -67,6 +72,7 @@ import type { ManageErrorCode } from "./errors";
 import type {
   AnnouncementValues,
   DocumentValues,
+  DutyPlanValues,
   EventValues,
   PollValues,
   QuickLinkValues,
@@ -440,6 +446,56 @@ const DOCUMENT_RULES: readonly FieldRule<DocumentValues>[] = [
  * newly attached file is the caller's own fresh upload (§E2, the media
  * claims of §E3). A create without a file sends `file: null`.
  */
+/** JSON lists of objects: compared as written (sameValue would read every object as "[object Object]"). */
+const sameJson = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+
+/**
+ * A duty plan (v0.18). A department author's department is their own (the
+ * form shows it fixed), so it travels on create only. Shifts that ended
+ * more than DUTY_HISTORY_DAYS ago leave the plan on every save.
+ */
+const DUTY_PLAN_RULES: readonly FieldRule<DutyPlanValues>[] = [
+  { key: "name", inputs: ["name"], convert: (v) => checked(v.name.trim(), checkRequiredString) },
+  {
+    key: "note",
+    inputs: ["note"],
+    convert: (v) => checked(textOrNull(v.note), checkNullableString),
+  },
+  { key: "department", inputs: ["department"], convert: (v) => ({ value: v.department || null }) },
+  {
+    key: "shiftTemplates",
+    inputs: ["shiftTemplates"],
+    same: sameJson,
+    convert: (v) => {
+      const result = validateDutyTemplates(v.shiftTemplates);
+      return "error" in result
+        ? { code: dutyTemplatesCode(v.shiftTemplates) ?? "invalid" }
+        : { value: result.templates };
+    },
+  },
+  {
+    key: "shifts",
+    inputs: ["shifts"],
+    same: sameJson,
+    convert: (v, ctx) => {
+      const kept = pruneDutyShifts(v.shifts, new Date(ctx.now));
+      const result = validateDutyShifts(kept);
+      return "error" in result
+        ? { code: dutyShiftsCode(kept) ?? "invalid" }
+        : { value: result.shifts };
+    },
+  },
+];
+
+export function buildDutyPlanPayload(
+  values: DutyPlanValues,
+  initial: DutyPlanValues | null,
+  ctx: PayloadContext,
+): BuiltPayload {
+  const { data, fields } = buildFields("dutyPlan", DUTY_PLAN_RULES, values, initial, ctx);
+  return done(data, fields);
+}
+
 export function buildDocumentPayload(
   values: DocumentValues,
   initial: DocumentValues | null,

@@ -43,6 +43,7 @@ export interface NavItem {
 export const NAV_ITEMS: readonly NavItem[] = [
   { href: "/", labelKey: "dashboard", mobileLabelKey: "home", icon: "Home", mobilePrimary: true },
   { href: "/people", labelKey: "people", icon: "Contact" },
+  { href: "/duties", labelKey: "duties", icon: "CalendarClock", capability: "duties" },
   { href: "/events", labelKey: "events", icon: "Calendar", mobilePrimary: true },
   { href: "/wiki", labelKey: "wiki", icon: "BookOpen", mobilePrimary: true },
   { href: "/training", labelKey: "training", icon: "GraduationCap", capability: "training" },
