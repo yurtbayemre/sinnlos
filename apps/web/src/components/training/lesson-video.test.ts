@@ -1,15 +1,17 @@
+import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import de from "../../../messages/de.json";
 import en from "../../../messages/en.json";
 
 /**
- * The lesson video render gate (issue #29, FX09). YouTube's player refuses
- * to play without the embedding origin in the Referer ("Error 153"), so the
- * frame must send `strict-origin-when-cross-origin`, never `no-referrer`.
- * The embed URL stays rebuilt from the validated video id only, and the
- * frame title comes from the catalogs. `next-intl/server` is mocked with
- * the real catalogs (the component is an async Server Component).
+ * The lesson video (issues #29, #37, FX09). Before the click the page holds
+ * only the facade: no frame and no YouTube address in the markup, so nothing
+ * is requested from YouTube. The frame it renders on the click keeps the
+ * security layer: the embed URL rebuilt from the validated video id only,
+ * a sandbox, and `strict-origin-when-cross-origin` (YouTube's player refuses
+ * to play without the embedding origin in the Referer, "Error 153").
+ * `next-intl/server` is mocked with the real catalogs (async Server Component).
  */
 const state = vi.hoisted(() => ({ locale: "en" as "en" | "de" }));
 
@@ -20,7 +22,8 @@ vi.mock("next-intl/server", () => ({
   },
 }));
 
-const { LessonVideo } = await import("./lesson-video");
+const { LessonVideo, lessonVideoSrc } = await import("./lesson-video");
+const { LessonVideoFrame } = await import("./video-facade");
 
 async function render(videoUrl: string | null | undefined): Promise<string> {
   const element = await LessonVideo({ videoUrl });
@@ -28,29 +31,45 @@ async function render(videoUrl: string | null | undefined): Promise<string> {
 }
 
 describe("LessonVideo", () => {
-  it("sends the origin as Referer so the YouTube player can verify the embed", async () => {
+  it("shows only the play button before the click: no frame, no YouTube request", async () => {
     const html = await render("https://www.youtube.com/watch?v=dQw4w9WgXcQ");
+    expect(html).toContain('<button type="button"');
+    expect(html).toContain(en.training.videoPlay);
+    expect(html).toContain(en.training.videoNotice);
+    expect(html).toMatch(/aria-describedby="([^"]+)"[\s\S]*id="\1"/);
+    expect(html).not.toContain("<iframe");
+    expect(html).not.toContain("youtube");
+    expect(html).not.toContain("ytimg");
+  });
+
+  it("rebuilds the embed URL from the validated id and drops everything else", () => {
+    expect(lessonVideoSrc('https://youtu.be/dQw4w9WgXcQ?t=42&x="><script>alert(1)</script>')).toBe(
+      "https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ?autoplay=1",
+    );
+  });
+
+  it("the frame after the click sends the origin as Referer and stays sandboxed", () => {
+    const html = renderToStaticMarkup(
+      createElement(LessonVideoFrame, {
+        src: lessonVideoSrc("https://youtu.be/dQw4w9WgXcQ")!,
+        title: en.training.videoTitle,
+      }),
+    );
+    expect(html).toContain('src="https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ?autoplay=1"');
     expect(html).toContain('referrerPolicy="strict-origin-when-cross-origin"');
     expect(html).not.toContain("no-referrer");
-  });
-
-  it("rebuilds the embed URL from the validated id and drops everything else", async () => {
-    const html = await render('https://youtu.be/dQw4w9WgXcQ?t=42&x="><script>alert(1)</script>');
-    expect(html).toContain('src="https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ"');
-    expect(html).not.toContain("<script");
-    expect(html).not.toContain("alert");
-    expect(html).not.toContain("t=42");
-  });
-
-  it("names the frame in the UI language", async () => {
-    state.locale = "en";
-    expect(await render("https://youtu.be/dQw4w9WgXcQ")).toContain(
-      `title="${en.training.videoTitle}"`,
+    expect(html).toContain(
+      'sandbox="allow-scripts allow-same-origin allow-presentation allow-popups"',
     );
+    expect(html).toContain('allow="autoplay; encrypted-media; picture-in-picture; fullscreen"');
+    expect(html).toContain(`title="${en.training.videoTitle}"`);
+  });
+
+  it("labels the button in the UI language", async () => {
     state.locale = "de";
-    expect(await render("https://youtu.be/dQw4w9WgXcQ")).toContain(
-      `title="${de.training.videoTitle}"`,
-    );
+    const html = await render("https://youtu.be/dQw4w9WgXcQ");
+    expect(html).toContain(de.training.videoPlay);
+    expect(html).toContain(de.training.videoNotice);
     state.locale = "en";
   });
 
@@ -62,6 +81,7 @@ describe("LessonVideo", () => {
       "http://youtu.be/dQw4w9WgXcQ",
       "https://evil.example/embed/x",
     ]) {
+      expect(lessonVideoSrc(url), String(url)).toBeNull();
       expect(await render(url), String(url)).toBe("");
     }
   });

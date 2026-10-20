@@ -540,6 +540,8 @@
     "noLessons": "Dieser Kurs hat noch keine Lektionen.",
     "lessonPosition": "Lektion {current} von {total}",
     "videoTitle": "Lektionsvideo",
+    "videoPlay": "Video abspielen",
+    "videoNotice": "Beim Abspielen wird eine Verbindung zu YouTube hergestellt.",
     "quizTitle": "Verständnisfragen (Selbstkontrolle)",
     "quizCorrect": "Richtig!",
     "quizWrong": "Nicht ganz — probier es nochmal.",
