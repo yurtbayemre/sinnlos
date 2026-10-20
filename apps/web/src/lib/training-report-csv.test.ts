@@ -87,9 +87,9 @@ it("toCsv starts with a BOM and ends every row with CRLF", () => {
 it("statusCsv lists every person with German labels and dates in the app zone", () => {
   expect(statusCsv(report, TZ).split("\r\n")).toEqual([
     "\uFEFFName;E-Mail;Abteilung;Status;Lektionen;Erledigt am;Fällig am",
-    "'=HYPERLINK(evil);eve@example.com;Lager;Offen;1/2;;",
+    "'=HYPERLINK(evil);eve@example.com;Lager;Offen;1 von 2;;",
     // 22:15 UTC on 31 March is 1 April in Berlin.
-    '"Ana ""Die Fahrerin""";;;Gültig;2/2;01.04.2026;01.04.2027',
+    '"Ana ""Die Fahrerin""";;;Gültig;2 von 2;01.04.2026;01.04.2027',
     "",
   ]);
 });

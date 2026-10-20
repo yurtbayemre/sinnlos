@@ -55,7 +55,8 @@ export function statusCsv(report: Report, timeZone: string): string {
       person.email,
       person.department,
       STATUS_LABELS[person.status],
-      `${person.completed}/${person.total}`,
+      // "1/2" would turn into a date in Excel.
+      `${person.completed} von ${person.total}`,
       germanInstant(person.completedAt, timeZone, false),
       germanDay(person.dueKey),
     ]),

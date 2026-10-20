@@ -69,7 +69,7 @@ it("answers the status CSV as a dated, uncached attachment", async () => {
   // The BOM is the response's first character (no decoding that strips it).
   const body = new TextDecoder("utf-8", { ignoreBOM: true }).decode(await res.arrayBuffer());
   expect(body.startsWith("\uFEFFName;E-Mail;Abteilung;Status")).toBe(true);
-  expect(body).toContain("Ana;;Lager;Offen;0/1;;");
+  expect(body).toContain("Ana;;Lager;Offen;0 von 1;;");
   expect(state.report).toHaveBeenCalledWith(DOC);
 });
 
