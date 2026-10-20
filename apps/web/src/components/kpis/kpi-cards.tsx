@@ -70,7 +70,7 @@ export async function KpiCard({ kpi }: { kpi: KpiView }) {
                 >
                   <div
                     className={cn(
-                      "w-full rounded-sm",
+                      "w-full rounded-t-[3px]",
                       point.value === null
                         ? "h-px bg-border"
                         : point.value < 0

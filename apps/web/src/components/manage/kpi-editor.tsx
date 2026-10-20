@@ -88,6 +88,9 @@ export function KpiEditor({
   const id = (field: string) => fieldInputId(FORM_ID, field);
   const disabled = editor.pending;
   const [count, setCount] = useState(KPI_WINDOW);
+  // The values' error describes the group and every entry (focus lands on either).
+  const valuesError = error("values");
+  const valuesErrorId = `${id("values")}-error`;
 
   const today = zonedDateKey(new Date(), timeZone);
   const periods = recentKpiPeriods(today, values.period, count);
@@ -223,7 +226,14 @@ export function KpiEditor({
         </Section>
 
         <Section title={t("sections.values")} description={t("fields.values.hint")}>
-          <div id={id("values")} role="group" tabIndex={-1} className="space-y-3">
+          <div
+            id={id("values")}
+            role="group"
+            tabIndex={-1}
+            aria-label={t("sections.values")}
+            aria-describedby={valuesError ? valuesErrorId : undefined}
+            className="space-y-3"
+          >
             <div className="grid gap-x-4 gap-y-2 sm:grid-cols-2">
               {periods.map((period) => (
                 <Field
@@ -235,6 +245,8 @@ export function KpiEditor({
                   {(a11y) => (
                     <input
                       {...a11y}
+                      aria-describedby={valuesError ? valuesErrorId : undefined}
+                      aria-invalid={valuesError ? true : undefined}
                       inputMode="decimal"
                       autoComplete="off"
                       value={values.values[period] ?? ""}
@@ -246,7 +258,7 @@ export function KpiEditor({
                 </Field>
               ))}
             </div>
-            <FieldError id={`${id("values")}-error`}>{error("values")}</FieldError>
+            <FieldError id={valuesErrorId}>{valuesError}</FieldError>
             <div className="flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
               <Button
                 type="button"

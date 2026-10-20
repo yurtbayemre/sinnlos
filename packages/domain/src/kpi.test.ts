@@ -67,8 +67,12 @@ describe("kpiSummary", () => {
     expect(summary.previous).toEqual({ period: "2026-08-01", value: 1100 });
     expect(summary.yearToDate).toBe(2280);
     expect(summary.series).toHaveLength(12);
-    expect(summary.series[0]).toEqual({ period: "2025-11-01", value: 900 });
-    expect(summary.series.at(-1)).toEqual({ period: "2026-10-01", value: null });
+    // October is still open and unreported: the bars end with September.
+    expect(summary.series[0]).toEqual({ period: "2025-10-01", value: null });
+    expect(summary.series[1]).toEqual({ period: "2025-11-01", value: 900 });
+    expect(summary.series.at(-1)).toEqual({ period: "2026-09-01", value: 1180 });
+    const reported = kpiSummary({ ...values, "2026-10-01": 50 }, "month", "sum", "2026-10-20");
+    expect(reported.series.at(-1)).toEqual({ period: "2026-10-01", value: 50 });
   });
 
   it("takes the latest level for `last`, and knows nothing without values", () => {

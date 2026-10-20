@@ -32,8 +32,10 @@ describe("parseKpiNumber", () => {
     expect(parseKpiNumber("1250,5")).toBe(1250.5);
     expect(parseKpiNumber(" 1250.5 ")).toBe(1250.5);
     expect(parseKpiNumber("-3")).toBe(-3);
+    // A stored 0.0000001 reopens as String() writes it.
+    expect(parseKpiNumber(String(0.0000001))).toBe(0.0000001);
     expect(parseKpiNumber("  ")).toBeUndefined();
-    for (const bad of ["1.250,5", "1 250", "12a", "1e5", ",5", "5,"]) {
+    for (const bad of ["1.250,5", "1 250", "12a", "e5", ",5", "5,"]) {
       expect(parseKpiNumber(bad), bad).toBeNull();
     }
   });

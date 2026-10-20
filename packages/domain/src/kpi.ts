@@ -102,7 +102,10 @@ export interface KpiSummary {
   previous: { period: string; value: number | null } | null;
   /** Sum (or, for `last`, the latest value) over this year's periods up to today; null without one. */
   yearToDate: number | null;
-  /** The last KPI_WINDOW periods up to today, oldest first; null where nothing was reported. */
+  /**
+   * The last KPI_WINDOW periods, oldest first, ending with today's period once it has a
+   * value (until then the one before: an open period is no gap); null where nothing was reported.
+   */
   series: { period: string; value: number | null }[];
 }
 
@@ -133,7 +136,10 @@ export function kpiSummary(
     previous:
       previousKey === null ? null : { period: previousKey, value: values[previousKey] ?? null },
     yearToDate,
-    series: recentKpiPeriods(today, period)
+    series: recentKpiPeriods(
+      values[current] === undefined ? addKpiPeriods(current, period, -1) : current,
+      period,
+    )
       .reverse()
       .map((key) => ({ period: key, value: values[key] ?? null })),
   };

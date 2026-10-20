@@ -155,6 +155,25 @@ describe.each(testEngines())("authoring KPIs on %s", (engine) => {
       data: { name: "Panel ok", values: '{"2026-02-01":2,"2026-01-01":1}' },
     });
     expect((await rowOf(created.documentId)).values).toEqual({ "2026-01-01": 1, "2026-02-01": 2 });
+
+    // A partial update is checked as it will be stored: a new rhythm alone, values alone.
+    await expect(
+      t.strapi.documents(K).update({ documentId: created.documentId, data: { period: "year" } }),
+    ).rejects.toThrow(/not the first day of a year/);
+    const yearly = await t.strapi.documents(K).create({
+      data: { name: "Panel yearly", period: "year", values: '{"2025-01-01":7}' },
+    });
+    await expect(
+      t.strapi.documents(K).update({
+        documentId: yearly.documentId,
+        data: { values: '{"2026-03-01":1}' },
+      }),
+    ).rejects.toThrow(/not the first day of a year/);
+    await t.strapi.documents(K).update({
+      documentId: yearly.documentId,
+      data: { values: '{"2026-01-01":8,"2025-01-01":7}' },
+    });
+    expect((await rowOf(yearly.documentId)).values).toEqual({ "2025-01-01": 7, "2026-01-01": 8 });
   });
 
   it("lets members only read, and keeps delete with the moderators", async () => {
