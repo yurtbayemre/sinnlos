@@ -35,6 +35,7 @@ export const AUTHORING_TYPES = [
   "document",
   "poll",
   "dutyPlan",
+  "kpi",
 ] as const;
 
 export type AuthoringType = (typeof AUTHORING_TYPES)[number];
@@ -50,6 +51,7 @@ export const DEPARTMENT_AUTHORED_TYPES: readonly AuthoringType[] = [
   "event",
   "document",
   "dutyPlan",
+  "kpi",
 ];
 
 export const ANNOUNCEMENT_MODERATOR_FIELDS = [
@@ -137,6 +139,20 @@ export const DOCUMENT_DEPARTMENT_AUTHOR_FIELDS = [
  */
 export const DUTY_PLAN_FIELDS = ["name", "note", "department", "shiftTemplates", "shifts"] as const;
 
+/**
+ * KPIs (v0.19): both classes write the same keys. A department author's
+ * `department` is pinned to their own department by the server.
+ */
+export const KPI_FIELDS = [
+  "name",
+  "unit",
+  "description",
+  "department",
+  "period",
+  "aggregation",
+  "values",
+] as const;
+
 export const POLL_MODERATOR_FIELDS = [
   "question",
   "options",
@@ -166,6 +182,7 @@ export const AUTHORING_FIELDS: Readonly<
   },
   poll: { moderator: POLL_MODERATOR_FIELDS },
   dutyPlan: { moderator: DUTY_PLAN_FIELDS, departmentAuthor: DUTY_PLAN_FIELDS },
+  kpi: { moderator: KPI_FIELDS, departmentAuthor: KPI_FIELDS },
 };
 
 /**
@@ -183,6 +200,7 @@ export const TARGETING_KEYS: Readonly<Record<AuthoringType, readonly string[]>> 
   document: ["departments"],
   poll: ["departments"],
   dutyPlan: [],
+  kpi: [],
 };
 
 /** The `enumeration` values the forms offer (the schemas' enums, pinned by the cms tests). */

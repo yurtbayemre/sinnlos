@@ -37,6 +37,7 @@ export const LESSON_UID = "api::lesson.lesson";
 export const DEPARTMENT_UID = "api::department.department";
 export const TEAM_UID = "api::team.team";
 export const DUTY_PLAN_UID = "api::duty-plan.duty-plan";
+export const KPI_UID = "api::kpi.kpi";
 const POLL = "api::poll.poll";
 
 /**
@@ -56,6 +57,7 @@ export const AUTHORED_UIDS: readonly string[] = [
   COURSE_UID,
   LESSON_UID,
   DUTY_PLAN_UID,
+  KPI_UID,
 ];
 
 /** Department authors write these for their own department (amendment 1). */
@@ -64,6 +66,7 @@ export const DEPARTMENT_AUTHORED_UIDS: readonly string[] = [
   EVENT_UID,
   DOCUMENT_UID,
   DUTY_PLAN_UID,
+  KPI_UID,
 ];
 
 /**
@@ -98,6 +101,7 @@ export const GUARDED_UIDS: readonly string[] = [
   DEPARTMENT_UID,
   TEAM_UID,
   DUTY_PLAN_UID,
+  KPI_UID,
 ];
 
 /** One audit row per Document Service mutation (§H); the guarded set. */

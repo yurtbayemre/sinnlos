@@ -32,6 +32,7 @@ const AREAS = [
   "wiki",
   "courses",
   "dutyPlans",
+  "kpis",
 ];
 
 const ENG = { documentId: "deptengineering000000000" };
@@ -59,10 +60,16 @@ describe("areaAccess with batch 15's capabilities (K8)", () => {
     }
   });
 
-  it("department heads: announcements, events, documents and duty plans of their department, no schedule or delete", () => {
+  it("department heads: announcements, events, documents, duty plans and KPIs of their department, no schedule or delete", () => {
     const caps = k8Capabilities(roles, "department_head");
-    expect(manageAreasFor(caps)).toEqual(["announcements", "events", "documents", "dutyPlans"]);
-    for (const area of ["announcements", "events", "documents", "dutyPlans"] as const) {
+    expect(manageAreasFor(caps)).toEqual([
+      "announcements",
+      "events",
+      "documents",
+      "dutyPlans",
+      "kpis",
+    ]);
+    for (const area of ["announcements", "events", "documents", "dutyPlans", "kpis"] as const) {
       expect(areaAccess(caps, area)).toEqual({
         area,
         verbs: ["create", "edit", "publish", "unpublish", "discard"],
@@ -130,6 +137,7 @@ describe("areaAccess with lib/roles.ts's own values", () => {
       "events",
       "documents",
       "dutyPlans",
+      "kpis",
     ]);
     expect(manageAreasFor(roles.capabilitiesFor("team_lead"))).toEqual(["dutyPlans"]);
     expect(areaAccess(editor, "announcements")?.verbs).toEqual(
@@ -152,6 +160,7 @@ describe("the areas", () => {
       "document",
       "course",
       "dutyPlan",
+      "kpi",
     ]);
     expect(MANAGE_AREAS.map((area) => AREA_CAPABILITY[area])).toEqual([
       "announcements",
@@ -162,6 +171,7 @@ describe("the areas", () => {
       "wikiSpaces",
       "courses",
       "dutyPlans",
+      "kpis",
     ]);
     for (const area of MANAGE_AREAS) {
       expect(roles.AUTHORING_AREAS).toContain(AREA_CAPABILITY[area]);

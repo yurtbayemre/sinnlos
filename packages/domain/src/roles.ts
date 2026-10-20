@@ -79,6 +79,7 @@ export const DEPARTMENT_AUTHOR_ROLES_OF: Readonly<Record<AuthoringType, readonly
   event: DEPARTMENT_AUTHOR_ROLES,
   document: DEPARTMENT_AUTHOR_ROLES,
   dutyPlan: DUTY_PLAN_AUTHOR_ROLES,
+  kpi: DEPARTMENT_AUTHOR_ROLES,
   quickLink: [],
   poll: [],
 };

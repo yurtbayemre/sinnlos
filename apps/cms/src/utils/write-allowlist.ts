@@ -21,6 +21,10 @@ import {
   checkRequiredString,
   dutyShiftsCode,
   dutyTemplatesCode,
+  KPI_AGGREGATIONS,
+  KPI_PERIODS,
+  isKpiPeriod,
+  kpiValuesCode,
   eventSpanCode,
   pollOptionsCode,
   samePollOptions,
@@ -36,6 +40,7 @@ import {
   DOCUMENT_UID,
   DUTY_PLAN_UID,
   EVENT_UID,
+  KPI_UID,
   QUICK_LINK_UID,
   DEPARTMENT_UID as DEPARTMENT,
   TEAM_UID as TEAM,
@@ -921,6 +926,51 @@ const DUTY_PLAN_RULES = {
   departmentAuthor: withCreate(DUTY_PLAN_DEPARTMENT_AUTHOR, "author", true),
 };
 
+// ---- v0.19: KPIs ------------------------------------------------------------
+//
+// Like the duty plans: a moderator picks any department or none
+// (company-wide) and ownerDepartment follows it; a department head's KPI
+// is their own department's. The values are an object of period starts to
+// numbers (@sinnlos/domain kpi.ts); every key must start a period of the
+// KPI's rhythm as stored ⊕ payload, so a new rhythm is refused while
+// values of the old one are left.
+
+const kpiCrossCheck: CrossCheck = (merged, carried) => {
+  if (!carriesAny(carried, ["period", "values"])) return {};
+  // Absent on a create without one: the schema default.
+  const period = isKpiPeriod(merged.period) ? merged.period : "month";
+  if (kpiValuesCode(merged.values, period) === null) return {};
+  return { [carried.has("values") ? "values" : "period"]: "invalid" satisfies AuthoringFieldCode };
+};
+
+const KPI_COMMON = {
+  name: value(checkRequiredString),
+  unit: value(checkNullableString),
+  description: value(checkNullableString),
+  period: value(checkEnum(KPI_PERIODS)),
+  aggregation: value(checkEnum(KPI_AGGREGATIONS)),
+  values: value(kpiValuesCode),
+};
+
+const KPI_MODERATOR: WriteRule = {
+  fields: { ...KPI_COMMON, department: toOne("department") },
+  derivedFromMerged: { ownerDepartment: DUTY_PLAN_OWNER },
+  crossCheck: kpiCrossCheck,
+};
+
+const KPI_DEPARTMENT_AUTHOR: WriteRule = {
+  fields: {
+    ...KPI_COMMON,
+    department: toOne("callerDepartment", { callerDepartmentOnCreate: true }),
+  },
+  crossCheck: kpiCrossCheck,
+};
+
+const KPI_RULES = {
+  moderator: withCreate(KPI_MODERATOR, "author", false),
+  departmentAuthor: withCreate(KPI_DEPARTMENT_AUTHOR, "author", true),
+};
+
 /*
  * v2 follow-ups, kept OUT of the table on purpose until each has its own
  * batch and check:
@@ -1036,6 +1086,16 @@ export const WRITE_ALLOWLIST = {
       departmentAuthor: DUTY_PLAN_RULES.departmentAuthor.update,
     },
   },
+  [KPI_UID]: {
+    create: {
+      moderator: KPI_RULES.moderator.create,
+      departmentAuthor: KPI_RULES.departmentAuthor.create,
+    },
+    update: {
+      moderator: KPI_RULES.moderator.update,
+      departmentAuthor: KPI_RULES.departmentAuthor.update,
+    },
+  },
 } as const satisfies WriteAllowlist;
 
 /**
@@ -1097,6 +1157,11 @@ export const REFUSED_ATTRIBUTES: Readonly<Record<string, Readonly<Record<string,
     author: "ownership: the caller, set on create (callerFields)",
   },
   [DUTY_PLAN_UID]: {
+    author: "ownership: the caller, set on create (callerFields)",
+    ownerDepartment:
+      "derived ownership: the department author's department on create, a moderator's department",
+  },
+  [KPI_UID]: {
     author: "ownership: the caller, set on create (callerFields)",
     ownerDepartment:
       "derived ownership: the department author's department on create, a moderator's department",

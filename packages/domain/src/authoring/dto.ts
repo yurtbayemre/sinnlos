@@ -199,6 +199,19 @@ export interface DutyPlanEditable extends EditableBase {
   ownerDepartment: OwnerDepartment | null;
 }
 
+/** A KPI (v0.19): its definition and its values by period start (kpi.ts). */
+export interface KpiEditable extends EditableBase {
+  name: string;
+  unit: string | null;
+  description: string | null;
+  /** The department (documentId), or null for a company-wide KPI. */
+  department: string | null;
+  period: "month" | "quarter" | "year";
+  aggregation: "sum" | "last";
+  values: Record<string, number>;
+  ownerDepartment: OwnerDepartment | null;
+}
+
 export interface DocumentEditable extends EditableBase {
   title: string;
   description: string | null;
@@ -450,6 +463,7 @@ export type ActivityTargetUid =
   | "api::document.document"
   | "api::poll.poll"
   | "api::duty-plan.duty-plan"
+  | "api::kpi.kpi"
   | "api::wiki-space.wiki-space"
   | "api::wiki-page.wiki-page"
   | "api::course.course"

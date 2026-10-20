@@ -22,6 +22,7 @@ export * from "./entry-id.js";
 export * from "./live-contract.js";
 export * from "./notification-title.js";
 export * from "./duty.js";
+export * from "./kpi.js";
 export * from "./plain-date.js";
 export * from "./poll-close.js";
 export * from "./roles.js";

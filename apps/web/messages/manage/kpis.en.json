@@ -1,0 +1,57 @@
+{
+  "title": "KPIs",
+  "description": "Department figures: name, unit, rhythm and the value of each period.",
+  "new": "New KPI",
+  "newDescription": "Saved as a draft; it appears under “KPIs” once it is published.",
+  "editTitle": "Edit KPI",
+  "emptyTitle": "No KPIs yet",
+  "emptyHint": "Create the first one, for example “Cubic metres loaded”.",
+  "sections": {
+    "kpi": "KPI",
+    "values": "Values"
+  },
+  "periods": {
+    "month": "Monthly",
+    "quarter": "Quarterly",
+    "year": "Yearly"
+  },
+  "aggregations": {
+    "sum": "Sum (for example quantities)",
+    "last": "Latest value (for example a stock level)"
+  },
+  "fields": {
+    "name": {
+      "label": "Name",
+      "hint": "For example “Cubic metres loaded” or “Workshop orders completed”."
+    },
+    "unit": {
+      "label": "Unit",
+      "hint": "For example “m³”, “items” or “orders”. May stay empty."
+    },
+    "description": {
+      "label": "Description",
+      "hint": "One sentence on what is counted. Shown below the KPI."
+    },
+    "department": {
+      "label": "Department",
+      "companyWide": "Whole company",
+      "hint": "That department's head maintains the KPI too."
+    },
+    "period": {
+      "label": "Rhythm",
+      "hint": "The period each value stands for.",
+      "locked": "Can only change while no values are entered.",
+      "invalid": "The rhythm can only change while no values are entered."
+    },
+    "aggregation": {
+      "label": "Year figure",
+      "hint": "Sum: the year's values add up. Latest value: the most recent level counts."
+    },
+    "values": {
+      "hint": "Empty means not reported yet. Comma or point as the decimal separator, no thousands separators.",
+      "earlier": "Show earlier periods",
+      "hidden": "{count, plural, one {One earlier value is kept.} other {# earlier values are kept.}}",
+      "invalid": "Please enter numbers only, for example 1250.5."
+    }
+  }
+}

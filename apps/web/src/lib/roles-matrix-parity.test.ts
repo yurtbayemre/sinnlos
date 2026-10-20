@@ -112,6 +112,7 @@ const A = {
   course: "api::course.course",
   department: "api::department.department",
   dutyPlan: "api::duty-plan.duty-plan",
+  kpi: "api::kpi.kpi",
   eventRsvp: "api::event-rsvp.event-rsvp",
   kudos: "api::kudos.kudos",
   lesson: "api::lesson.lesson",
@@ -251,6 +252,7 @@ const SECTION_READS: Record<ReadSection, string[]> = {
   celebrations: ["api::kudos.kudos.celebrations"],
   marketplace: [`${A.classified}.find`, `${A.classified}.findOne`],
   duties: [`${A.dutyPlan}.find`, `${A.dutyPlan}.findOne`],
+  kpis: [`${A.kpi}.find`, `${A.kpi}.findOne`],
   training: [
     `${A.course}.find`,
     `${A.lesson}.find`,
@@ -322,6 +324,15 @@ const AUTHORING_GRANTS: Record<AuthoringArea, Partial<Record<AuthoringVerb, stri
       unpublish: `${A.dutyPlan}.unpublish`,
       discard: `${A.dutyPlan}.discardDraft`,
       delete: `${A.dutyPlan}.delete`,
+    },
+    // KPIs (v0.19): no schedule either.
+    kpis: {
+      create: `${A.kpi}.create`,
+      edit: `${A.kpi}.update`,
+      publish: `${A.kpi}.publish`,
+      unpublish: `${A.kpi}.unpublish`,
+      discard: `${A.kpi}.discardDraft`,
+      delete: `${A.kpi}.delete`,
     },
   };
 })();

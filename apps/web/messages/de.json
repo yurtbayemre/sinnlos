@@ -44,6 +44,7 @@
     "marketplace": "Kleinanzeigen",
     "training": "Schulungen",
     "duties": "Zuständigkeiten",
+    "kpis": "Kennzahlen",
     "more": "Mehr",
     "moreSections": "Weitere Bereiche"
   },
@@ -590,5 +591,19 @@
     "loadFailed": "Die Zuständigkeiten konnten gerade nicht geladen werden.",
     "noShifts": "Keine Schichten.",
     "viewAll": "Alle Zuständigkeiten"
+  },
+  "kpis": {
+    "title": "Kennzahlen",
+    "description": "Die Kennzahlen der Abteilungen, Zeitraum für Zeitraum.",
+    "companyWide": "Ganze Firma",
+    "empty": "Noch keine Kennzahlen veröffentlicht.",
+    "loadFailed": "Die Kennzahlen konnten gerade nicht geladen werden.",
+    "notReported": "Noch kein Wert erfasst.",
+    "previous": "Davor ({period}): {value}",
+    "previousMissing": "Davor ({period}): nicht erfasst",
+    "yearToDate": "Seit Jahresbeginn: {value}",
+    "chartLabel": "Werte der letzten {count} Zeiträume",
+    "missing": "nicht erfasst",
+    "viewAll": "Alle Kennzahlen"
   }
 }

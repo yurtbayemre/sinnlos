@@ -72,6 +72,13 @@ function draftAndPublishTypes(deps: Dependencies): DpType[] {
       data: (label) => ({ name: label }),
     },
     {
+      uid: "api::kpi.kpi",
+      plural: "kpis",
+      field: "name",
+      guestReads: false,
+      data: (label) => ({ name: label }),
+    },
+    {
       uid: "api::event.event",
       plural: "events",
       field: "title",

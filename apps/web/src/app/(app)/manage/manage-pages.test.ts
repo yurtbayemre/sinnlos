@@ -120,7 +120,7 @@ describe("the /manage shell", () => {
 });
 
 describe("the landing", () => {
-  it("an editor: the eight area tiles, no reports and no Strapi links", async () => {
+  it("an editor: the nine area tiles, no reports and no Strapi links", async () => {
     const tree = elements(await ManagePage());
     expect(tileHrefs(tree).sort()).toEqual(
       [
@@ -132,6 +132,7 @@ describe("the landing", () => {
         "/manage/wiki",
         "/manage/training",
         "/manage/duty-plans",
+        "/manage/kpis",
       ].sort(),
     );
     expect(hrefs(tree)).not.toContain("/manage/analytics");
@@ -152,7 +153,7 @@ describe("the landing", () => {
     expect(hrefs(tree).some((href) => href.includes("/admin/content-manager"))).toBe(true);
   });
 
-  it("a department head: announcements, events, documents and duty plans only (§L1), never the wiki", async () => {
+  it("a department head: announcements, events, documents, duty plans and KPIs only (§L1), never the wiki", async () => {
     viewerRef.current = viewer("department_head", ENG);
     const tree = elements(await ManagePage());
     expect(tileHrefs(tree).sort()).toEqual([
@@ -160,6 +161,7 @@ describe("the landing", () => {
       "/manage/documents",
       "/manage/duty-plans",
       "/manage/events",
+      "/manage/kpis",
     ]);
     // Their counts come from their own lists; the wiki's page list is never asked.
     const paths = strapiMock.mock.calls.map(([path]) => String(path));
@@ -171,12 +173,14 @@ describe("the landing", () => {
       "/api/documents/authoring?status=published",
       "/api/duty-plans/authoring?status=published",
       "/api/events/authoring?status=published",
+      "/api/kpis/authoring?status=published",
     ]);
     expect(publishedOnly(hrefs(tree))).toEqual([
       "/manage/announcements?status=published",
       "/manage/documents?status=published",
       "/manage/duty-plans?status=published",
       "/manage/events?status=published",
+      "/manage/kpis?status=published",
     ]);
   });
 
@@ -205,12 +209,13 @@ describe("the landing", () => {
         "/api/wiki-pages/authoring?status=published",
         "/api/courses/authoring?status=published",
         "/api/duty-plans/authoring?status=published",
+        "/api/kpis/authoring?status=published",
       ].sort(),
     );
     const publishedCounts = tree.filter(
       (el) => el.type === StatCount && (el.props.count as { value: number }).value === 5,
     );
-    expect(publishedCounts).toHaveLength(8);
+    expect(publishedCounts).toHaveLength(9);
     // Polls have no status tabs and the wiki lists spaces: those counts are no link.
     const countLinks = hrefs(tree).filter((href) => href.includes("?status="));
     expect(publishedOnly(countLinks)).toEqual([
@@ -218,6 +223,7 @@ describe("the landing", () => {
       "/manage/documents?status=published",
       "/manage/duty-plans?status=published",
       "/manage/events?status=published",
+      "/manage/kpis?status=published",
       "/manage/quick-links?status=published",
       "/manage/training?status=published",
     ]);

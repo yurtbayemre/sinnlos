@@ -56,6 +56,7 @@ const DRAFT_AND_PUBLISH: Readonly<Record<string, boolean>> = {
   "api::duty-plan.duty-plan": true,
   "api::event.event": true,
   "api::event-rsvp.event-rsvp": false,
+  "api::kpi.kpi": true,
   "api::kudos.kudos": false,
   "api::lesson.lesson": true,
   "api::lesson-progress.lesson-progress": false,

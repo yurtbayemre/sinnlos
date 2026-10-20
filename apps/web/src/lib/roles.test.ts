@@ -32,6 +32,7 @@ import {
   KUDOS_READER_ROLES,
   ORG_READER_ROLES,
   DUTY_READER_ROLES,
+  KPI_READER_ROLES,
   POLL_CREATOR_ROLES,
   READ_SECTIONS,
   REACTOR_ROLES,
@@ -204,6 +205,7 @@ describe("read sections", () => {
     marketplace: [AD_READER_ROLES, STAFF_AND_FALLBACK],
     training: [TRAINING_ROLES, STAFF_AND_FALLBACK],
     duties: [DUTY_READER_ROLES, STAFF_AND_FALLBACK],
+    kpis: [KPI_READER_ROLES, STAFF_AND_FALLBACK],
   };
 
   it("lists exactly these sections, each with its role set", () => {
@@ -302,7 +304,7 @@ describe("capabilitiesFor", () => {
   });
 
   it("scopes the moderators' areas to 'any' and the department authors' to 'ownDepartment' (batch 15)", () => {
-    const departmentAreas = ["announcements", "events", "documents"];
+    const departmentAreas = ["announcements", "events", "documents", "kpis"];
     for (const role of ALL_ROLES) {
       const caps = capabilitiesFor(role);
       for (const area of AUTHORING_AREAS) {

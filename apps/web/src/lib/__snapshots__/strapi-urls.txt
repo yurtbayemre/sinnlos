@@ -71,6 +71,9 @@ GET http://cms.test/api/quick-links?sort[0]=order:asc&sort[1]=label:asc&sort[2]=
 ## api.dutyPlans.list
 GET http://cms.test/api/duty-plans?fields[0]=name&fields[1]=note&fields[2]=shifts&populate[department][fields][0]=name&populate[department][fields][1]=slug&sort[0]=name:asc&sort[1]=id:asc&pagination[page]=1&pagination[pageSize]=100 cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
 
+## api.kpis.list
+GET http://cms.test/api/kpis?fields[0]=name&fields[1]=unit&fields[2]=description&fields[3]=period&fields[4]=aggregation&fields[5]=values&populate[department][fields][0]=name&populate[department][fields][1]=slug&sort[0]=name:asc&sort[1]=id:asc&pagination[page]=1&pagination[pageSize]=100 cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
+
 ## api.celebrations
 GET http://cms.test/api/celebrations?window=30 cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
 

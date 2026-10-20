@@ -5,6 +5,7 @@ import type {
   LessonEditable,
   DocumentEditable,
   DutyPlanEditable,
+  KpiEditable,
   EventEditable,
   PollEditable,
   QuickLinkEditable,
@@ -57,7 +58,9 @@ export type EditableOf<A extends TypedArea> = A extends "courses"
             ? DocumentEditable
             : A extends "dutyPlans"
               ? DutyPlanEditable
-              : QuickLinkEditable;
+              : A extends "kpis"
+                ? KpiEditable
+                : QuickLinkEditable;
 
 export type EditorLoad<T> =
   { state: "ok"; editable: T } | { state: "notFound" } | { state: "failed" };
