@@ -26,9 +26,17 @@
  * file passes unchecked (keeping is not attaching), and `null` clears it.
  * The wiki types have their own lists (wiki.ts).
  */
+import { DEPARTMENT_AUTHOR_ROLES, DUTY_PLAN_AUTHOR_ROLES, type RoleType } from "../roles.js";
 
 /** The phase-1 authored types, by their web area name. */
-export const AUTHORING_TYPES = ["announcement", "event", "quickLink", "document", "poll"] as const;
+export const AUTHORING_TYPES = [
+  "announcement",
+  "event",
+  "quickLink",
+  "document",
+  "poll",
+  "dutyPlan",
+] as const;
 
 export type AuthoringType = (typeof AUTHORING_TYPES)[number];
 
@@ -42,7 +50,22 @@ export const DEPARTMENT_AUTHORED_TYPES: readonly AuthoringType[] = [
   "announcement",
   "event",
   "document",
+  "dutyPlan",
 ];
+
+/**
+ * The role types that author each department-authored type for their own
+ * department: department heads, and for duty plans team leads too (owner
+ * decision 2026-10-20). Empty for the moderator-only types.
+ */
+export const DEPARTMENT_AUTHOR_ROLES_OF: Readonly<Record<AuthoringType, readonly RoleType[]>> = {
+  announcement: DEPARTMENT_AUTHOR_ROLES,
+  event: DEPARTMENT_AUTHOR_ROLES,
+  document: DEPARTMENT_AUTHOR_ROLES,
+  dutyPlan: DUTY_PLAN_AUTHOR_ROLES,
+  quickLink: [],
+  poll: [],
+};
 
 export const ANNOUNCEMENT_MODERATOR_FIELDS = [
   "title",
@@ -122,6 +145,13 @@ export const DOCUMENT_DEPARTMENT_AUTHOR_FIELDS = [
   "file",
 ] as const;
 
+/**
+ * Duty plans (v0.18): both classes write the same keys. A department
+ * author's `department` is pinned to their own department by the server;
+ * a moderator's may be any department or null (company-wide).
+ */
+export const DUTY_PLAN_FIELDS = ["name", "note", "department", "shiftTemplates", "shifts"] as const;
+
 export const POLL_MODERATOR_FIELDS = [
   "question",
   "options",
@@ -150,6 +180,7 @@ export const AUTHORING_FIELDS: Readonly<
     departmentAuthor: DOCUMENT_DEPARTMENT_AUTHOR_FIELDS,
   },
   poll: { moderator: POLL_MODERATOR_FIELDS },
+  dutyPlan: { moderator: DUTY_PLAN_FIELDS, departmentAuthor: DUTY_PLAN_FIELDS },
 };
 
 /**
@@ -166,6 +197,7 @@ export const TARGETING_KEYS: Readonly<Record<AuthoringType, readonly string[]>> 
   quickLink: ["departments"],
   document: ["departments"],
   poll: ["departments"],
+  dutyPlan: [],
 };
 
 /** The `enumeration` values the forms offer (the schemas' enums, pinned by the cms tests). */

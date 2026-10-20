@@ -24,6 +24,11 @@
  * Changing a list changes who is locked, scheduled or audited: the pins in
  * authoring-uids.test.ts name every entry on purpose.
  */
+import {
+  DEPARTMENT_AUTHOR_ROLES,
+  DUTY_PLAN_AUTHOR_ROLES,
+  type RoleType,
+} from "../bootstrap/roles";
 
 export const ANNOUNCEMENT_UID = "api::announcement.announcement";
 export const EVENT_UID = "api::event.event";
@@ -35,6 +40,7 @@ export const COURSE_UID = "api::course.course";
 export const LESSON_UID = "api::lesson.lesson";
 export const DEPARTMENT_UID = "api::department.department";
 export const TEAM_UID = "api::team.team";
+export const DUTY_PLAN_UID = "api::duty-plan.duty-plan";
 const POLL = "api::poll.poll";
 
 /**
@@ -53,6 +59,7 @@ export const AUTHORED_UIDS: readonly string[] = [
   WIKI_PAGE_UID,
   COURSE_UID,
   LESSON_UID,
+  DUTY_PLAN_UID,
 ];
 
 /** Department authors write these for their own department (amendment 1). */
@@ -60,7 +67,18 @@ export const DEPARTMENT_AUTHORED_UIDS: readonly string[] = [
   ANNOUNCEMENT_UID,
   EVENT_UID,
   DOCUMENT_UID,
+  DUTY_PLAN_UID,
 ];
+
+/**
+ * The role types that department-author `uid` for their own department:
+ * department heads, and on duty plans team leads too (owner decision
+ * 2026-10-20). Empty for every type outside DEPARTMENT_AUTHORED_UIDS.
+ */
+export function departmentAuthorRolesOf(uid: string): readonly RoleType[] {
+  if (!DEPARTMENT_AUTHORED_UIDS.includes(uid)) return [];
+  return uid === DUTY_PLAN_UID ? DUTY_PLAN_AUTHOR_ROLES : DEPARTMENT_AUTHOR_ROLES;
+}
 
 /** `publishAt` + `scheduleError`; the scheduler's types (no poll). */
 export const SCHEDULED_UIDS: readonly string[] = [
@@ -83,6 +101,7 @@ export const GUARDED_UIDS: readonly string[] = [
   WIKI_SPACE_UID,
   DEPARTMENT_UID,
   TEAM_UID,
+  DUTY_PLAN_UID,
 ];
 
 /** One audit row per Document Service mutation (§H); the guarded set. */

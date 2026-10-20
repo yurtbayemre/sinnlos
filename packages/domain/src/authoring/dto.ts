@@ -1,5 +1,6 @@
 import type { AuthoringRoleClass, OrgEditorClass } from "./fields.js";
 import type { WikiEditorClass, WikiSpaceVisibility } from "./wiki.js";
+import type { DutyShift, DutyShiftTemplate } from "../duty.js";
 
 /**
  * The response shapes of v2 authoring (deep-dive decision 06 §B3; batch 15
@@ -182,6 +183,17 @@ export interface QuickLinkEditable extends EditableBase {
   publishAt: string | null;
   unpublishAt: string | null;
   scheduleError: string | null;
+}
+
+/** A duty plan (v0.18): its shift templates and shifts as the cms stores them (../duty.ts). */
+export interface DutyPlanEditable extends EditableBase {
+  name: string;
+  note: string | null;
+  /** The department (documentId), or null for a company-wide plan. */
+  department: string | null;
+  shiftTemplates: DutyShiftTemplate[];
+  shifts: DutyShift[];
+  ownerDepartment: OwnerDepartment | null;
 }
 
 export interface DocumentEditable extends EditableBase {
@@ -434,6 +446,7 @@ export type ActivityTargetUid =
   | "api::quick-link.quick-link"
   | "api::document.document"
   | "api::poll.poll"
+  | "api::duty-plan.duty-plan"
   | "api::wiki-space.wiki-space"
   | "api::wiki-page.wiki-page"
   | "api::course.course"

@@ -7,7 +7,7 @@ import {
   REVOKED_PERMISSIONS,
   computeDesiredGrants,
 } from "./bootstrap/permission-matrix";
-import { ADMIN, DEPARTMENT_AUTHOR_ROLES, MODERATORS } from "./bootstrap/roles";
+import { ADMIN, MODERATORS } from "./bootstrap/roles";
 import { knownActions, unknownActions } from "./bootstrap/sync-permissions";
 import {
   cmsPackageDir,
@@ -19,7 +19,11 @@ import {
   RESTRICTED_RELATION_TARGETS,
   isRestrictedRelation,
 } from "./utils/restricted-relations";
-import { AUTHORED_UIDS, DEPARTMENT_AUTHORED_UIDS } from "./utils/authoring-uids";
+import {
+  AUTHORED_UIDS,
+  DEPARTMENT_AUTHORED_UIDS,
+  departmentAuthorRolesOf,
+} from "./utils/authoring-uids";
 import {
   DEPARTMENT_AUTHOR_CLASS,
   MODERATOR_CLASS,
@@ -281,6 +285,7 @@ const ANNOUNCEMENT = "api::announcement.announcement";
 const EVENT = "api::event.event";
 const QUICK_LINK = "api::quick-link.quick-link";
 const DOCUMENT = "api::document.document";
+const DUTY_PLAN = "api::duty-plan.duty-plan";
 const POLL = "api::poll.poll";
 const WIKI_SPACE = "api::wiki-space.wiki-space";
 const WIKI_PAGE = "api::wiki-page.wiki-page";
@@ -369,6 +374,13 @@ const GOLDEN: Record<string, PolicySpec[]> = {
   "api::document.document.update": canAuthor(DOCUMENT),
   "api::document.document.delete": ADMIN_OR_EDITOR,
   ...authoringRoutes(DOCUMENT, DP_INTENTS),
+
+  "api::duty-plan.duty-plan.find": ["global::published-only"],
+  "api::duty-plan.duty-plan.findOne": ["global::published-only"],
+  "api::duty-plan.duty-plan.create": canAuthor(DUTY_PLAN),
+  "api::duty-plan.duty-plan.update": canAuthor(DUTY_PLAN),
+  "api::duty-plan.duty-plan.delete": ADMIN_OR_EDITOR,
+  ...authoringRoutes(DUTY_PLAN, DP_INTENTS),
 
   "api::event.event.find": ["global::published-only"],
   "api::event.event.findOne": ["global::published-only"],
@@ -644,6 +656,14 @@ const WRITE_ALLOWLIST_ENFORCERS: Record<string, { policy: string; classes: reado
     policy: "global::can-author",
     classes: ["departmentAuthor", "moderator"],
   },
+  "api::duty-plan.duty-plan.create": {
+    policy: "global::can-author",
+    classes: ["departmentAuthor", "moderator"],
+  },
+  "api::duty-plan.duty-plan.update": {
+    policy: "global::can-author",
+    classes: ["departmentAuthor", "moderator"],
+  },
   "api::quick-link.quick-link.create": { policy: "global::can-author", classes: ["moderator"] },
   "api::quick-link.quick-link.update": { policy: "global::can-author", classes: ["moderator"] },
   "api::poll.poll.create": { policy: "global::can-author", classes: ["moderator"] },
@@ -831,6 +851,7 @@ describe("route → policy matrix (S01)", async () => {
           "/events/authoring",
           "/quick-links/authoring",
           "/documents/authoring",
+          "/duty-plans/authoring",
           "/polls/authoring",
           "/wiki-spaces/authoring",
           "/wiki-pages/authoring",
@@ -1193,9 +1214,8 @@ describe("route → policy matrix (S01)", async () => {
       for (const uid of AUTHORED_UIDS) {
         if (uid === WIKI_PAGE) continue; // can-edit-wiki's actions: the next test.
         const intents = intentsOf[uid] ?? DP_INTENTS;
-        const roles = (DEPARTMENT_AUTHORED_UIDS as readonly string[]).includes(uid)
-          ? [...MODERATORS, ...DEPARTMENT_AUTHOR_ROLES]
-          : [...MODERATORS];
+        // Department heads on every department-authored type, team leads on duty plans.
+        const roles = [...MODERATORS, ...departmentAuthorRolesOf(uid)];
         for (const intent of intents) expected[`${uid}.${intent}`] = roles;
       }
       const authoringCustom = [...routes.values()].filter(
@@ -1385,6 +1405,40 @@ describe("route → policy matrix (S01)", async () => {
       expect(withClass).toEqual(
         DEPARTMENT_AUTHORED_UIDS.flatMap((uid) => [`${uid}.create`, `${uid}.update`]).sort(),
       );
+    });
+  });
+
+  describe("duty plans (v0.18, owner decision 2026-10-20)", () => {
+    it("team_lead authors duty plans and no other department-authored type", () => {
+      const grants = new Set(
+        [...effectiveGrants("team_lead")].filter((action) => CUSTOM_ACTION_GRANTS[action] !== "*"),
+      );
+      const authoring = (uid: string) =>
+        [...grants]
+          .filter((action) => action.startsWith(`${uid}.`))
+          .map((action) => splitAction(action)[1])
+          .filter((action) => !["find", "findOne"].includes(action))
+          .sort();
+      expect(authoring(DUTY_PLAN)).toEqual(
+        [
+          "authoringList",
+          "create",
+          "discardDraft",
+          "editable",
+          "publish",
+          "unpublish",
+          "update",
+        ].sort(),
+      );
+      for (const uid of [ANNOUNCEMENT, EVENT, DOCUMENT, QUICK_LINK, POLL]) {
+        expect(authoring(uid), uid).toEqual([]);
+      }
+    });
+
+    it("every staff role and authenticated read published plans; guests do not", () => {
+      for (const role of matrixRoles) {
+        expect(effectiveGrants(role).has(`${DUTY_PLAN}.find`), role).toBe(role !== "guest");
+      }
     });
   });
 

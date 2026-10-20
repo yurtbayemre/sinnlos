@@ -19,6 +19,8 @@ import {
   checkPositiveIntOrNull,
   checkQuickLinkUrl,
   checkRequiredString,
+  dutyShiftsCode,
+  dutyTemplatesCode,
   eventSpanCode,
   pollOptionsCode,
   samePollOptions,
@@ -32,6 +34,7 @@ import {
   COURSE_UID,
   LESSON_UID,
   DOCUMENT_UID,
+  DUTY_PLAN_UID,
   EVENT_UID,
   QUICK_LINK_UID,
   DEPARTMENT_UID as DEPARTMENT,
@@ -877,6 +880,47 @@ const DOCUMENT_RULES = {
 };
 const POLL_RULES = { moderator: withCreate(POLL_MODERATOR, "author", false) };
 
+// ---- v0.18: duty plans -------------------------------------------------------
+//
+// The shift templates and shifts are JSON lists checked by the shared rules
+// (@sinnlos/domain duty.ts); the lifecycle normalises what is stored. A
+// moderator picks any department or none (company-wide); the plan's
+// ownerDepartment follows it, so that department's heads and team leads
+// maintain the plan too. A department author's department is their own.
+// shortcut: user ids in `shifts` are not checked to exist (staff read the
+// directory anyway); an unknown id renders as an unknown person. Add an
+// async check if ids ever come from outside the web form.
+
+const DUTY_PLAN_COMMON = {
+  name: value(checkRequiredString),
+  note: value(checkNullableString),
+  shiftTemplates: value(dutyTemplatesCode),
+  shifts: value(dutyShiftsCode),
+};
+
+const DUTY_PLAN_OWNER: MergedDerivation = {
+  when: ["department"],
+  derive: (merged) =>
+    typeof merged.department === "string" ? { set: [{ documentId: merged.department }] } : null,
+};
+
+const DUTY_PLAN_MODERATOR: WriteRule = {
+  fields: { ...DUTY_PLAN_COMMON, department: toOne("department") },
+  derivedFromMerged: { ownerDepartment: DUTY_PLAN_OWNER },
+};
+
+const DUTY_PLAN_DEPARTMENT_AUTHOR: WriteRule = {
+  fields: {
+    ...DUTY_PLAN_COMMON,
+    department: toOne("callerDepartment", { callerDepartmentOnCreate: true }),
+  },
+};
+
+const DUTY_PLAN_RULES = {
+  moderator: withCreate(DUTY_PLAN_MODERATOR, "author", false),
+  departmentAuthor: withCreate(DUTY_PLAN_DEPARTMENT_AUTHOR, "author", true),
+};
+
 /*
  * v2 follow-ups, kept OUT of the table on purpose until each has its own
  * batch and check:
@@ -982,6 +1026,16 @@ export const WRITE_ALLOWLIST = {
     create: { moderator: POLL_RULES.moderator.create },
     update: { moderator: POLL_RULES.moderator.update },
   },
+  [DUTY_PLAN_UID]: {
+    create: {
+      moderator: DUTY_PLAN_RULES.moderator.create,
+      departmentAuthor: DUTY_PLAN_RULES.departmentAuthor.create,
+    },
+    update: {
+      moderator: DUTY_PLAN_RULES.moderator.update,
+      departmentAuthor: DUTY_PLAN_RULES.departmentAuthor.update,
+    },
+  },
 } as const satisfies WriteAllowlist;
 
 /**
@@ -1041,6 +1095,11 @@ export const REFUSED_ATTRIBUTES: Readonly<Record<string, Readonly<Record<string,
   [POLL_UID]: {
     audience: "derived targeting flag (derivedFromMerged, contract K10)",
     author: "ownership: the caller, set on create (callerFields)",
+  },
+  [DUTY_PLAN_UID]: {
+    author: "ownership: the caller, set on create (callerFields)",
+    ownerDepartment:
+      "derived ownership: the department author's department on create, a moderator's department",
   },
   [WIKI_PAGE_UID]: {
     slug: "derived from the title on create (uniqueSlugFrom); fixed afterwards",

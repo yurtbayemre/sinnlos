@@ -52,6 +52,7 @@ const UID_OF: Record<AuthoringType, string> = {
   quickLink: "api::quick-link.quick-link",
   document: "api::document.document",
   poll: "api::poll.poll",
+  dutyPlan: "api::duty-plan.duty-plan",
 };
 
 const apiName = (uid: string) => uid.split("::")[1].split(".")[0];

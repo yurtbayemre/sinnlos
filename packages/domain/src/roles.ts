@@ -60,6 +60,14 @@ export const MODERATORS: readonly RoleType[] = [ADMIN, "editor"];
 export const DEPARTMENT_AUTHOR_ROLES: readonly RoleType[] = ["department_head"];
 
 /**
+ * The department authors of duty plans (owner decision 2026-10-20): team
+ * leads maintain the shift plans of their department too. Only for this
+ * type: DEPARTMENT_AUTHOR_ROLES stays the set for announcements, events and
+ * documents.
+ */
+export const DUTY_PLAN_AUTHOR_ROLES: readonly RoleType[] = ["department_head", "team_lead"];
+
+/**
  * The roles that may schedule a publish or an unpublish (`publishAt`,
  * `unpublishAt`; decision 06 §D rule 1, §L2): the moderators. Department
  * authors hold `update` but may not schedule (§N2), so the web's

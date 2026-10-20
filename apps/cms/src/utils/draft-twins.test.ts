@@ -118,7 +118,7 @@ describe("planDraftTwinTypes", () => {
     });
   });
 
-  it("plans the app's schemas: nine types, alphabetical, no ordering constraint today", () => {
+  it("plans the app's schemas: ten types, alphabetical, no ordering constraint today", () => {
     const apiDir = join(__dirname, "..", "api");
     const contentTypes: Record<string, DraftTwinModel> = {};
     for (const api of readdirSync(apiDir)) {
@@ -138,6 +138,7 @@ describe("planDraftTwinTypes", () => {
         ANNOUNCEMENT,
         COURSE,
         "api::document.document",
+        "api::duty-plan.duty-plan",
         "api::event.event",
         LESSON,
         "api::poll.poll",

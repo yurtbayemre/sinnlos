@@ -1,0 +1,32 @@
+{
+  "kind": "collectionType",
+  "collectionName": "duty_plans",
+  "info": {
+    "singularName": "duty-plan",
+    "pluralName": "duty-plans",
+    "displayName": "Duty plan",
+    "description": "Who is on duty: the shift templates and shifts of one duty (Zuständigkeiten)"
+  },
+  "options": { "draftAndPublish": true },
+  "attributes": {
+    "name": { "type": "string", "required": true },
+    "note": { "type": "string" },
+    "department": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::department.department"
+    },
+    "shiftTemplates": { "type": "json" },
+    "shifts": { "type": "json" },
+    "author": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "plugin::users-permissions.user"
+    },
+    "ownerDepartment": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::department.department"
+    }
+  }
+}

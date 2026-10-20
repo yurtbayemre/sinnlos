@@ -65,6 +65,13 @@ function draftAndPublishTypes(deps: Dependencies): DpType[] {
       data: (label) => ({ title: label }),
     },
     {
+      uid: "api::duty-plan.duty-plan",
+      plural: "duty-plans",
+      field: "name",
+      guestReads: false,
+      data: (label) => ({ name: label }),
+    },
+    {
       uid: "api::event.event",
       plural: "events",
       field: "title",
