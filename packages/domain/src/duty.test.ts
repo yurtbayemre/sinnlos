@@ -152,9 +152,11 @@ describe("templates, copying and pruning in APP_TIME_ZONE", () => {
         [
           shift(1, "2026-09-01T04:00:00.000Z", "2026-09-01T12:00:00.000Z"),
           shift(2, "2026-10-02T04:00:00.000Z", "2026-10-02T12:00:00.000Z"),
+          // An unreadable end stays for the validation to refuse.
+          shift(3, "2026-09-01T04:00:00.000Z", "2026-09-01T"),
         ],
         now,
       ).map((s) => s.userId),
-    ).toEqual([2]);
+    ).toEqual([2, 3]);
   });
 });

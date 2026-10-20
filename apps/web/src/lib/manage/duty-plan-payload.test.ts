@@ -90,6 +90,37 @@ describe("buildDutyPlanPayload", () => {
     });
   });
 
+  it("refuses a shift with an unreadable end instead of dropping it", () => {
+    const cleared = plan({
+      shifts: [{ userId: 7, startsAt: "2026-10-20T04:00:00.000Z", endsAt: "2026-10-20T" }],
+    });
+    expect(buildDutyPlanPayload(cleared, plan(), ctx())).toEqual({
+      ok: false,
+      fields: { shifts: "invalid" },
+    });
+  });
+
+  it("prunes old shifts also when only the note changed", () => {
+    const old = {
+      userId: 7,
+      startsAt: "2026-09-01T04:00:00.000Z",
+      endsAt: "2026-09-01T12:00:00.000Z",
+    };
+    const initial = plan({ shifts: [old, ...plan().shifts] });
+    const built = buildDutyPlanPayload({ ...initial, note: "Neu" }, initial, ctx());
+    expect(built).toEqual({ ok: true, data: { note: "Neu", shifts: plan().shifts } });
+  });
+
+  it("keeps an overlong list for the rules to refuse", () => {
+    const shift = plan().shifts[0]!;
+    const values = coerceDutyPlanValues({ name: "X", shifts: Array(401).fill(shift) });
+    expect(values.shifts).toHaveLength(401);
+    expect(buildDutyPlanPayload(values, null, ctx({ mode: "create" }))).toMatchObject({
+      ok: false,
+      fields: { shifts: "invalid" },
+    });
+  });
+
   it("reads client values defensively", () => {
     expect(
       coerceDutyPlanValues({

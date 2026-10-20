@@ -388,7 +388,11 @@ export function coerceDocumentValues(raw: unknown): DocumentValues {
   };
 }
 
-/** Templates and shifts as the client sent them: entries of the right shape, capped; the payload rules check the rest. */
+/**
+ * Templates and shifts as the client sent them: entries of the right shape.
+ * The lists are capped one above their limit, so an overlong list reaches
+ * the payload rules and is refused there, never cut down unseen.
+ */
 export function coerceDutyPlanValues(raw: unknown): DutyPlanValues {
   const r = isRecord(raw) ? raw : {};
   const list = (value: unknown, max: number) =>
@@ -397,12 +401,12 @@ export function coerceDutyPlanValues(raw: unknown): DutyPlanValues {
     name: str(r.name),
     note: str(r.note),
     department: str(r.department).trim(),
-    shiftTemplates: list(r.shiftTemplates, MAX_DUTY_TEMPLATES).map((t) => ({
+    shiftTemplates: list(r.shiftTemplates, MAX_DUTY_TEMPLATES + 1).map((t) => ({
       label: str(t.label),
       start: str(t.start),
       end: str(t.end),
     })),
-    shifts: list(r.shifts, MAX_DUTY_SHIFTS).map((s) => ({
+    shifts: list(r.shifts, MAX_DUTY_SHIFTS + 1).map((s) => ({
       userId: typeof s.userId === "number" ? s.userId : 0,
       startsAt: str(s.startsAt),
       endsAt: str(s.endsAt),

@@ -4,6 +4,8 @@ import { useMemo, useState } from "react";
 import { useTranslations } from "next-intl";
 import { Copy, Plus, Trash2 } from "lucide-react";
 import {
+  MAX_DUTY_SHIFTS,
+  MAX_DUTY_TEMPLATES,
   copyDutyWeek,
   dutyShiftOverlaps,
   type DutyPlanEditable,
@@ -70,17 +72,19 @@ interface ShiftParts {
   end: string;
 }
 
+/** The day and time an endpoint shows; an incomplete input (instantOf's "dayTtime") as typed. */
+function endpointParts(value: string, timeZone: string): [day: string, time: string] {
+  if (instantEpochMs(value) === null) {
+    const [day = "", time = ""] = value.split("T");
+    return [day, time];
+  }
+  return [zonedDateKey(value, timeZone), zonedTimeOfDay(value, timeZone)];
+}
+
 function partsOf(shift: DutyShift, timeZone: string): ShiftParts {
-  const day = (instant: string) =>
-    instantEpochMs(instant) === null ? "" : zonedDateKey(instant, timeZone);
-  const time = (instant: string) =>
-    instantEpochMs(instant) === null ? "" : zonedTimeOfDay(instant, timeZone);
-  return {
-    startDay: day(shift.startsAt),
-    start: time(shift.startsAt),
-    endDay: day(shift.endsAt),
-    end: time(shift.endsAt),
-  };
+  const [startDay, start] = endpointParts(shift.startsAt, timeZone);
+  const [endDay, end] = endpointParts(shift.endsAt, timeZone);
+  return { startDay, start, endDay, end };
 }
 
 /** The instant of a day and a time; an incomplete input stays as typed, and the save refuses it. */
@@ -354,7 +358,7 @@ export function DutyPlanEditor({
               type="button"
               variant="outline"
               size="sm"
-              disabled={disabled}
+              disabled={disabled || values.shiftTemplates.length >= MAX_DUTY_TEMPLATES}
               onClick={() =>
                 setTemplates([
                   ...values.shiftTemplates,
@@ -396,6 +400,12 @@ export function DutyPlanEditor({
               ];
               const setParts = (next: ShiftParts) =>
                 updateShift(index, shiftOf(shift.userId, next, timeZone));
+              // One endpoint at a time: the other keeps its instant (a repeated
+              // wall time in the autumn clock change must not move it).
+              const setStart = (day: string, time: string) =>
+                updateShift(index, { ...shift, startsAt: instantOf(day, time, timeZone) });
+              const setEnd = (day: string, time: string) =>
+                updateShift(index, { ...shift, endsAt: instantOf(day, time, timeZone) });
               return (
                 <div key={index} className="space-y-3 rounded-xl border p-3">
                   <div className="grid gap-3 sm:grid-cols-2">
@@ -439,10 +449,16 @@ export function DutyPlanEditor({
                               parts.startDay && parts.endDay && day
                                 ? daysBetweenKeys(parts.startDay, day)
                                 : 0;
-                            setParts({
-                              ...parts,
-                              startDay: day,
-                              endDay: parts.endDay ? addDaysToKey(parts.endDay, shiftBy) : day,
+                            updateShift(index, {
+                              ...shift,
+                              startsAt: instantOf(day, parts.start, timeZone),
+                              endsAt: shiftBy
+                                ? instantOf(
+                                    addDaysToKey(parts.endDay, shiftBy),
+                                    parts.end,
+                                    timeZone,
+                                  )
+                                : shift.endsAt,
                             });
                           }}
                           className={inputClass}
@@ -456,7 +472,7 @@ export function DutyPlanEditor({
                           type="time"
                           value={parts.start}
                           disabled={disabled}
-                          onChange={(event) => setParts({ ...parts, start: event.target.value })}
+                          onChange={(event) => setStart(parts.startDay, event.target.value)}
                           className={inputClass}
                         />
                       )}
@@ -468,7 +484,7 @@ export function DutyPlanEditor({
                           type="date"
                           value={parts.endDay}
                           disabled={disabled}
-                          onChange={(event) => setParts({ ...parts, endDay: event.target.value })}
+                          onChange={(event) => setEnd(event.target.value, parts.end)}
                           className={inputClass}
                         />
                       )}
@@ -480,7 +496,7 @@ export function DutyPlanEditor({
                           type="time"
                           value={parts.end}
                           disabled={disabled}
-                          onChange={(event) => setParts({ ...parts, end: event.target.value })}
+                          onChange={(event) => setEnd(parts.endDay, event.target.value)}
                           className={inputClass}
                         />
                       )}
@@ -518,7 +534,7 @@ export function DutyPlanEditor({
                 type="button"
                 variant="outline"
                 size="sm"
-                disabled={disabled}
+                disabled={disabled || values.shifts.length >= MAX_DUTY_SHIFTS}
                 onClick={addShift}
               >
                 <Plus className="h-4 w-4" aria-hidden="true" />

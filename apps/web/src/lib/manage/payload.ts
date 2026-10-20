@@ -56,6 +56,7 @@ import {
   samePollOptions,
   scheduleCodes,
   type AuthoringRoleClass,
+  type DutyShift,
   type AuthoringType,
   type TrainingAuthoringType,
   type FieldCheck,
@@ -476,7 +477,11 @@ const DUTY_PLAN_RULES: readonly FieldRule<DutyPlanValues>[] = [
   {
     key: "shifts",
     inputs: ["shifts"],
-    same: sameJson,
+    // Unchanged only when the save would drop no old shift: every save prunes.
+    same: (a, b) =>
+      sameJson(a, b) &&
+      Array.isArray(a) &&
+      pruneDutyShifts(a as DutyShift[], new Date()).length === a.length,
     convert: (v, ctx) => {
       const kept = pruneDutyShifts(v.shifts, new Date(ctx.now));
       const result = validateDutyShifts(kept);

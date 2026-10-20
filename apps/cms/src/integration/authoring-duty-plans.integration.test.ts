@@ -31,7 +31,7 @@ describe.each(testEngines())("authoring duty plans on %s", (engine) => {
       where: { documentId, publishedAt: { $null: true } },
       populate: { department: true, ownerDepartment: true, author: true },
     });
-    return row as Record<string, unknown> & {
+    return row as unknown as Record<string, unknown> & {
       department: { id: number } | null;
       ownerDepartment: { id: number } | null;
       author: { id: number } | null;

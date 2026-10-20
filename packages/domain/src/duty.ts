@@ -214,12 +214,19 @@ export function copyDutyWeek(
     .map((s) => moveDutyShift(s, 7, timeZone));
 }
 
-/** The shifts without those that ended more than `keepDays` days before `now`. */
+/**
+ * The shifts without those that ended more than `keepDays` days before
+ * `now`. A shift whose end is no instant stays, so the validation refuses
+ * it instead of the prune dropping it unseen.
+ */
 export function pruneDutyShifts(
   shifts: readonly DutyShift[],
   now: Date,
   keepDays: number = DUTY_HISTORY_DAYS,
 ): DutyShift[] {
   const cutoff = now.getTime() - keepDays * DAY_MS;
-  return shifts.filter((s) => Date.parse(s.endsAt) >= cutoff);
+  return shifts.filter((s) => {
+    const end = instantEpochMs(s.endsAt);
+    return end === null || end >= cutoff;
+  });
 }
