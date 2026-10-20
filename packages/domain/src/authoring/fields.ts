@@ -215,7 +215,16 @@ export const MAX_TARGET_DEPARTMENTS = 50;
 /** Training writers are the existing moderators (admin_role and editor). */
 export const TRAINING_FIELDS = {
   course: {
-    moderator: ["title", "description", "mandatory", "completionMode", "coverImage", "publishAt"],
+    moderator: [
+      "title",
+      "description",
+      "mandatory",
+      "completionMode",
+      "validityMonths",
+      "departments",
+      "coverImage",
+      "publishAt",
+    ],
   },
   lesson: {
     moderator: ["title", "body", "order", "course", "videoUrl", "quiz", "publishAt"],
