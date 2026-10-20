@@ -65,11 +65,20 @@ export function courseTrainingReport(documentId: string): Promise<TrainingReport
 }
 
 /** One page of the caller's own completion receipts, sorted by id. */
-export function myProgressPage(page: number): Promise<StrapiListResponse<MyProgressRow>> {
+export function myProgressPage(
+  userId: number,
+  page: number,
+): Promise<StrapiListResponse<MyProgressRow>> {
   return strapi<StrapiListResponse<MyProgressRow>>(
     withQuery(
       "/api/lesson-progresses",
-      strapiQuery().fields(["targetDocumentId", "completedAt"]).sort(["id:asc"]).page(page, 100),
+      strapiQuery()
+        // lesson-progress-visibility lets admin_role read everyone's
+        // receipts: they must not count as the admin's own.
+        .filter(["user", "id"], "$eq", userId)
+        .fields(["targetDocumentId", "completedAt"])
+        .sort(["id:asc"])
+        .page(page, 100),
     ),
   );
 }

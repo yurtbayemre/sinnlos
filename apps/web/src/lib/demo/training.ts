@@ -1,6 +1,7 @@
 import type { QuizQuestion } from "@sinnlos/domain";
 import type { Course, Lesson, LessonProgress } from "@/lib/types";
 import type { DemoClock } from "./clock";
+import { DEMO_USER_ID } from "./people";
 
 export function demoTraining(clock: DemoClock) {
   // With the answer key, like the cms stores it: the player leaves it out,
@@ -96,6 +97,7 @@ export function demoTraining(clock: DemoClock) {
     id: i + 1,
     targetDocumentId: lesson.documentId,
     completedAt: clock.iso(-350),
+    user: { id: DEMO_USER_ID, username: "ada" },
   }));
 
   return { quizzes, courses, lessonRows, lessonProgress };

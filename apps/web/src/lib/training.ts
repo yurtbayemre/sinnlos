@@ -11,6 +11,7 @@ import {
 } from "@/lib/api/training";
 import { StrapiError } from "@/lib/strapi-error";
 import { walkAllPages, type WalkResult } from "@/lib/paginate";
+import { getViewer } from "@/lib/viewer";
 
 /**
  * Training data helpers (issue #29): the page walks, their caps and the
@@ -55,9 +56,12 @@ export async function fetchMyProgress(): Promise<{
   completed: Map<string, string | null>;
   truncated: boolean;
 }> {
-  const result: WalkResult<MyProgressRow> = await walkAllPages<MyProgressRow>(myProgressPage, {
-    maxPages: 20,
-    label: "lesson-progress",
-  });
+  const { id } = await getViewer();
+  // Without an identity nothing is known: fail closed (the callers' tryFetch).
+  if (id === null) throw new Error("lesson-progress: no viewer id");
+  const result: WalkResult<MyProgressRow> = await walkAllPages<MyProgressRow>(
+    (page) => myProgressPage(id, page),
+    { maxPages: 20, label: "lesson-progress" },
+  );
   return { completed: newestReceipts(result.data), truncated: result.truncated };
 }

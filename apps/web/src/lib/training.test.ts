@@ -16,6 +16,9 @@ vi.mock("@/lib/strapi/client", () => ({
   strapi: (...args: unknown[]) => strapiMock(...args),
 }));
 
+const viewer = { id: 5 as number | null };
+vi.mock("@/lib/viewer", () => ({ getViewer: async () => viewer }));
+
 const { fetchMyProgress, fetchLessonByDocumentId } = await import("./training");
 
 const page = (data: unknown[], pageNo: number, pageCount: number) => ({
@@ -48,8 +51,17 @@ describe("fetchMyProgress", () => {
       ["b", null],
     ]);
     expect(strapiMock.mock.calls[0]).toEqual([
-      "/api/lesson-progresses?fields[0]=targetDocumentId&fields[1]=completedAt&sort[0]=id:asc&pagination[page]=1&pagination[pageSize]=100",
+      "/api/lesson-progresses?filters[user][id][$eq]=5&fields[0]=targetDocumentId&fields[1]=completedAt&sort[0]=id:asc&pagination[page]=1&pagination[pageSize]=100",
     ]);
+  });
+});
+
+describe("fetchMyProgress without an identity", () => {
+  it("fails closed instead of reading everyone's receipts (admin_role may)", async () => {
+    viewer.id = null;
+    await expect(fetchMyProgress()).rejects.toThrow("no viewer id");
+    expect(strapiMock).not.toHaveBeenCalled();
+    viewer.id = 5;
   });
 });
 

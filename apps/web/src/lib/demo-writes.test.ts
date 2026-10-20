@@ -237,6 +237,8 @@ describe("DEMO_MODE writes change what the reads show", () => {
     });
     expect(await completeLesson("demolesson00000000000002", null)).toEqual({ ok: true });
     expect((await fetchMyProgress()).completed.has("demolesson00000000000002")).toBe(true);
+    // The fixture's receipts of last year are Ada's own (the user filter of fetchMyProgress).
+    expect((await fetchMyProgress()).completed.has("demolesson00000000000003")).toBe(true);
     expect(await completeLesson("demolesson00000000000002", null)).toMatchObject({ ok: false });
   });
 
