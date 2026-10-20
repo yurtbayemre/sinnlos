@@ -11,6 +11,19 @@ describe("notificationTitle", () => {
     expect(notificationTitle("kudos", params, "en")).toBe("Ada gave you kudos!");
     expect(notificationTitle("comment", params, "de")).toBe("Ada hat „Sommerfest“ kommentiert");
     expect(notificationTitle("comment", params, "en")).toBe('Ada commented on "Sommerfest"');
+    const course = { subject: "Staplerunterweisung" };
+    expect(notificationTitle("trainingDue", course, "de")).toBe(
+      "Unterweisung „Staplerunterweisung“ läuft bald ab",
+    );
+    expect(notificationTitle("trainingDue", course, "en")).toBe(
+      'Training "Staplerunterweisung" is due soon',
+    );
+    expect(notificationTitle("trainingExpired", course, "de")).toBe(
+      "Unterweisung „Staplerunterweisung“ ist abgelaufen, bitte wiederholen",
+    );
+    expect(notificationTitle("trainingExpired", {}, "en")).toBe(
+      'Training "a course" has expired, please repeat it',
+    );
   });
 
   it("uses the fallback for a blank or missing value, and English for any other locale", () => {

@@ -29,6 +29,12 @@
  * arrived. Mentions and kudos stay per-user queries (they filter by the
  * recipient in SQL).
  *
+ * Training reminders (v0.20): the expiry notifications of the
+ * training-reminders cron go to every recipient, whatever their flags
+ * (mandatory training, no opt-in of its own), read once per run for all due
+ * users. shortcut: a user with every digest flag off is no candidate and
+ * gets them in the bell only; add a candidate rule if the owner wants mail.
+ *
  * Expired announcements (DA02, owner answer 2026-09-29 (b)): the run reads
  * only announcements that are not expired at its `now` (expiresAt unset or
  * later, utils/announcement-expiry.ts), for every recipient, admin_role
@@ -89,6 +95,9 @@ const USER_UID = "plugin::users-permissions.user";
 const ANNOUNCEMENT_UID = "api::announcement.announcement";
 const NOTIFICATION_UID = "api::notification.notification";
 const KUDOS_UID = "api::kudos.kudos";
+
+/** The notification types of the training expiry reminders (cron/training-reminders.ts). */
+const TRAINING_REMINDER_TYPES = ["trainingDue", "trainingExpired"];
 
 /** Announcements per digest; the rest is summarised as "+N more". */
 export const DIGEST_ANNOUNCEMENT_CAP = 25;
@@ -348,6 +357,55 @@ async function loadAnnouncementWindow(
   return { rows, notified: notifiedIndex(notifications) };
 }
 
+interface TrainingReminderRow {
+  title?: string | null;
+  type?: unknown;
+  titleParams?: unknown;
+  createdAt?: string | null;
+  recipient?: { id?: number } | null;
+}
+
+/** The training reminders of every due user in the widest window, newest first, by user. */
+async function loadTrainingReminders(
+  strapi: DigestStrapi,
+  due: readonly Due[],
+  now: Date,
+): Promise<Map<number, TrainingReminderRow[]>> {
+  const byUser = new Map<number, TrainingReminderRow[]>();
+  if (due.length === 0) return byUser;
+  const widest = new Date(Math.min(...due.map((entry) => entry.since.getTime())));
+  const rows = listOf<TrainingReminderRow>(
+    await strapi.db.query(NOTIFICATION_UID).findMany({
+      where: {
+        recipient: { id: { $in: due.map((entry) => entry.user.id) } },
+        type: { $in: TRAINING_REMINDER_TYPES },
+        createdAt: { $gte: widest.toISOString(), $lt: now.toISOString() },
+      },
+      select: ["id", "title", "type", "titleParams", "createdAt"],
+      populate: { recipient: { select: ["id"] } },
+      orderBy: { createdAt: "desc" },
+    }),
+  );
+  for (const row of rows) {
+    const userId = row.recipient?.id;
+    if (typeof userId !== "number") continue;
+    byUser.set(userId, [...(byUser.get(userId) ?? []), row]);
+  }
+  return byUser;
+}
+
+/** One user's reminders from their own window start, at most 25. */
+function selectTrainingReminders(
+  rows: readonly TrainingReminderRow[],
+  since: Date,
+): NonNullable<DigestContent["training"]> {
+  const sinceMs = since.getTime();
+  return rows
+    .filter((row) => (instantMsOrNull(row.createdAt) ?? -Infinity) >= sinceMs)
+    .slice(0, 25)
+    .map((row) => ({ title: row.title ?? "", type: row.type, titleParams: row.titleParams }));
+}
+
 async function collectMentionsAndKudos(
   strapi: DigestStrapi,
   entry: Due,
@@ -487,14 +545,28 @@ export async function sendDigests(strapi: DigestStrapi, now = new Date()): Promi
       strapi.log.error(`[digest] could not load the announcements: ${(err as Error).message}`);
     }
 
+    let training: Map<number, TrainingReminderRow[]> | null = null;
+    try {
+      training = await loadTrainingReminders(strapi, due, now);
+    } catch (err) {
+      // Every recipient gets the section: without it every digest would be
+      // incomplete, so nobody gets one this run and lastDigestAt stays.
+      strapi.log.error(`[digest] could not load the training reminders: ${(err as Error).message}`);
+    }
+
     for (const entry of due) {
       const { user } = entry;
-      if (user.digestAnnouncements && window == null) {
+      if ((user.digestAnnouncements && window == null) || training == null) {
         failed++;
         continue;
       }
       try {
-        const content: DigestContent = { announcements: [], mentions: [], kudos: [] };
+        const content: DigestContent = {
+          announcements: [],
+          mentions: [],
+          kudos: [],
+          training: selectTrainingReminders(training.get(user.id) ?? [], entry.since),
+        };
         if (user.digestAnnouncements && window != null) {
           const { items, more } = selectAnnouncements(window.rows, {
             since: entry.since,

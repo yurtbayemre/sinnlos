@@ -51,8 +51,13 @@
  * the announcement and event lifecycles.
  */
 
-/** Content types whose publish triggers an audience-wide fan-out. */
-export type NotificationSourceType = "announcement" | "event";
+/**
+ * The anchor kinds: content types whose publish triggers an audience-wide
+ * fan-out, and "course" for the training expiry reminders
+ * (cron/training-reminders.ts), whose anchor is
+ * `<course documentId>@<due day>:soon|expired`, one per reminder cycle.
+ */
+export type NotificationSourceType = "announcement" | "event" | "course";
 
 /** The stable back-reference stored on every fan-out notification. */
 export interface SourceAnchor {

@@ -5,8 +5,8 @@
  * own: the overlap flag lives in the closure `buildCronTasks` returns.
  *
  * Order: the scheduled publisher runs every minute (decision 06 §D); the
- * janitors run from 03:30 to 03:50 APP_TIME_ZONE; the digest mails at
- * 07:30. When the host's nightly backup runs (infra/backup/pg-backup.sh,
+ * janitors run from 03:30 to 03:50 APP_TIME_ZONE; the training expiry
+ * reminders at 06:45, so the digest that mails at 07:30 carries them. When the host's nightly backup runs (infra/backup/pg-backup.sh,
  * or the host's backup-run at 04:00; docs/DEPLOYMENT.md §7.3) does not
  * matter for the janitors: they remove only old rows and files (orphaned
  * uploads after 24 hours, search logs, read notifications and expired ads
@@ -43,13 +43,15 @@ import { pruneSearchLogs } from "./prune-search-logs";
 import { purgeExpiredClassifieds, type ClassifiedJanitorStrapi } from "./purge-expired-classifieds";
 import { runScheduledPublishing, type ScheduledPublishStrapi } from "./scheduled-publish";
 import { sweepOrphanedUploads } from "./sweep-orphaned-uploads";
+import { sendTrainingReminders, type TrainingReminderStrapi } from "./training-reminders";
 
 /** The slice of the Strapi instance the tasks use: what each of them needs. */
 export type CronStrapi = DigestStrapi &
   NotificationJanitorStrapi &
   ClassifiedJanitorStrapi &
   AuditJanitorStrapi &
-  ScheduledPublishStrapi;
+  ScheduledPublishStrapi &
+  TrainingReminderStrapi;
 
 /** One cron task: a pure description, no state. */
 export interface CronTaskSpec {
@@ -127,6 +129,16 @@ export function cronRegistry(timeZone: string): readonly CronTaskSpec[] {
       tz: timeZone,
       fn: async (strapi) => {
         await pruneAuditEvents(strapi);
+      },
+    },
+    // v0.20: due-soon and expired mandatory training, once per reminder
+    // cycle (training-reminders.ts); before the digest, which lists them.
+    {
+      name: "training-reminders",
+      rule: "45 6 * * *",
+      tz: timeZone,
+      fn: async (strapi) => {
+        await sendTrainingReminders(strapi);
       },
     },
     // Morning e-mail digests (issue #18): daily users every day, weekly users

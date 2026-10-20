@@ -730,7 +730,14 @@ describe("schema.json enums = web unions and constants", () => {
     ],
     [
       "types.ts Notification.type",
-      unionValues<Notification["type"]>()(["announcement", "comment", "event", "kudos"]),
+      unionValues<Notification["type"]>()([
+        "announcement",
+        "comment",
+        "event",
+        "kudos",
+        "trainingDue",
+        "trainingExpired",
+      ]),
       "api::notification.notification",
       "type",
     ],
