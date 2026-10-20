@@ -108,16 +108,26 @@ export function listAckReportAnnouncements(): Promise<WalkResult<ReportAnnouncem
   );
 }
 
-/** One page of the caller's own acknowledgements of one target type, by id. */
+/**
+ * One page of the caller's own acknowledgements of one target type, by id.
+ * Filtered by the caller's user id explicitly: acknowledgement-visibility
+ * lets admin_role read everyone's rows, which must not count as the
+ * admin's own confirmations.
+ */
 export function myAcksPage(
   targetType: Acknowledgement["targetType"],
+  userId: number,
   page: number,
   pageSize: number,
 ): Promise<StrapiListResponse<Acknowledgement>> {
   return strapi<StrapiListResponse<Acknowledgement>>(
     withQuery(
       "/api/acknowledgements",
-      strapiQuery().filter("targetType", "$eq", targetType).sortBy("id:asc").page(page, pageSize),
+      strapiQuery()
+        .filter("targetType", "$eq", targetType)
+        .filter(["user", "id"], "$eq", userId)
+        .sortBy("id:asc")
+        .page(page, pageSize),
     ),
   );
 }

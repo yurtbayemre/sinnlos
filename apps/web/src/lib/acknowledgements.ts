@@ -2,6 +2,7 @@ import { indexAcks, type AckIndex } from "@/lib/ack-report";
 import { acksPage, myAcksPage } from "@/lib/api/announcements";
 import { walkAllPages } from "@/lib/paginate";
 import type { Acknowledgement } from "@/lib/types";
+import { getViewer } from "@/lib/viewer";
 
 /**
  * Server-side helpers around /api/acknowledgements (the requests
@@ -54,11 +55,17 @@ export function fetchMyDocumentAcks(): Promise<AnnouncementAcksResult> {
   return fetchMyAcks("document");
 }
 
-function fetchMyAcks(targetType: Acknowledgement["targetType"]): Promise<AnnouncementAcksResult> {
-  return walkAllPages<Acknowledgement>((page) => myAcksPage(targetType, page, PAGE_SIZE), {
-    maxPages: MY_ACKS_MAX_PAGES,
-    label: `${targetType} acknowledgements`,
-  }).then(({ data, truncated }) => ({ acks: data, truncated }));
+async function fetchMyAcks(
+  targetType: Acknowledgement["targetType"],
+): Promise<AnnouncementAcksResult> {
+  const { id } = await getViewer();
+  // Without an identity nothing is known: fail closed (the caller's tryFetch).
+  if (id === null) throw new Error("acknowledgements: no viewer id");
+  const { data, truncated } = await walkAllPages<Acknowledgement>(
+    (page) => myAcksPage(targetType, id, page, PAGE_SIZE),
+    { maxPages: MY_ACKS_MAX_PAGES, label: `${targetType} acknowledgements` },
+  );
+  return { acks: data, truncated };
 }
 
 /** Who confirmed which of the listed announcements, plus whether every walk finished. */

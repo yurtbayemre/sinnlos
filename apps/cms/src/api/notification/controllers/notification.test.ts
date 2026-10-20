@@ -212,10 +212,16 @@ const NOTIFICATION_DOC = "k3v9q2m8x7c4b1n6p5z0r2t8";
 interface DeleteCtx {
   params: { id?: unknown };
   notFound: ReturnType<typeof vi.fn>;
+  badRequest: ReturnType<typeof vi.fn>;
 }
 
+const REMINDER_DOC = "r3v9q2m8x7c4b1n6p5z0r2t8";
+
 function setupDelete(id: unknown) {
-  const rows = [{ id: 7, documentId: NOTIFICATION_DOC }];
+  const rows = [
+    { id: 7, documentId: NOTIFICATION_DOC, sourceType: null },
+    { id: 9, documentId: REMINDER_DOC, sourceType: "course" },
+  ];
   const findOne = vi.fn(async ({ where }: { where: Record<string, unknown> }) => {
     failLikePostgres(where);
     return (
@@ -232,7 +238,11 @@ function setupDelete(id: unknown) {
       delete(ctx: DeleteCtx): Promise<unknown>;
     }
   )({ strapi });
-  const ctx: DeleteCtx = { params: { id }, notFound: vi.fn(() => ({ status: 404 })) };
+  const ctx: DeleteCtx = {
+    params: { id },
+    notFound: vi.fn(() => ({ status: 404 })),
+    badRequest: vi.fn(() => ({ status: 400 })),
+  };
   return { controller, ctx, findOne };
 }
 
@@ -240,7 +250,10 @@ describe("notification delete: numeric id or documentId (PL01)", () => {
   it("translates a numeric row id to the documentId before the core delete", async () => {
     const { controller, ctx, findOne } = setupDelete("7");
     await controller.delete(ctx);
-    expect(findOne).toHaveBeenCalledWith({ where: { id: 7 }, select: ["id", "documentId"] });
+    expect(findOne).toHaveBeenCalledWith({
+      where: { id: 7 },
+      select: ["id", "documentId", "sourceType"],
+    });
     expect(ctx.params.id).toBe(NOTIFICATION_DOC);
     expect(mocks.superDelete).toHaveBeenCalledWith(ctx);
   });
@@ -257,6 +270,15 @@ describe("notification delete: numeric id or documentId (PL01)", () => {
       const { controller, ctx } = setupDelete(id);
       await controller.delete(ctx);
       expect(ctx.notFound, id).toHaveBeenCalled();
+    }
+    expect(mocks.superDelete).not.toHaveBeenCalled();
+  });
+
+  it("refuses to delete a training reminder: it is the reminder cron's ledger (v0.20)", async () => {
+    for (const id of ["9", REMINDER_DOC]) {
+      const { controller, ctx } = setupDelete(id);
+      await controller.delete(ctx);
+      expect(ctx.badRequest, id).toHaveBeenCalledWith("Training reminders cannot be deleted");
     }
     expect(mocks.superDelete).not.toHaveBeenCalled();
   });
