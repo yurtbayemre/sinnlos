@@ -302,6 +302,8 @@ Custom actions and plugin routes (`✓` = granted, `—` = not granted):
 | `api::course.course.publish` | `POST /api/courses/:id/publish` | ✓ | ✓ | — | — | — | — | — |
 | `api::course.course.unpublish` | `POST /api/courses/:id/unpublish` | ✓ | ✓ | — | — | — | — | — |
 | `api::course.course.discardDraft` | `POST /api/courses/:id/discard-draft` | ✓ | ✓ | — | — | — | — | — |
+| `api::course.course.report` | `GET /api/courses/report` | ✓ | — | ✓ | ✓ | — | — | — |
+| `api::course.course.reportCourse` | `GET /api/courses/:id/report` | ✓ | — | ✓ | ✓ | — | — | — |
 | `api::lesson.lesson.authoringList` | `GET /api/lessons/authoring` | ✓ | ✓ | — | — | — | — | — |
 | `api::lesson.lesson.editable` | `GET /api/lessons/:id/editable` | ✓ | ✓ | — | — | — | — | — |
 | `api::lesson.lesson.publish` | `POST /api/lessons/:id/publish` | ✓ | ✓ | — | — | — | — | — |
