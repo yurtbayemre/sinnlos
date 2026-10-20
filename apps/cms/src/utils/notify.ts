@@ -50,7 +50,8 @@ export const NOTIFICATION_TITLE_MAX = 255;
 const ELLIPSIS = "…";
 
 /** notification.type (schema enum). */
-export type NotificationType = "announcement" | "comment" | "event" | "kudos";
+export type NotificationType =
+  "announcement" | "comment" | "event" | "kudos" | "trainingDue" | "trainingExpired";
 
 /**
  * One piece of a title: fixed text, or a value that falls back to
@@ -243,7 +244,8 @@ export interface SourceAudience<TSource extends SourceRow> {
 
 export interface SourceFanoutOptions<TSource extends SourceRow> {
   strapi: NotifyStrapi;
-  sourceType: NotificationSourceType;
+  /** The publish fan-outs: their notification type is the source type. */
+  sourceType: Extract<NotificationSourceType, NotificationType>;
   /** The lifecycle's result row (the anchor when the re-read found nothing). */
   row: TSource;
   loadAudience: () => Promise<SourceAudience<TSource>>;

@@ -188,6 +188,7 @@ describe("config/server", () => {
       { name: "notification-janitor", rule: "40 3 * * *", tz: "Europe/Berlin" },
       { name: "classified-janitor", rule: "45 3 * * *", tz: "Europe/Berlin" },
       { name: "audit-janitor", rule: "50 3 * * *", tz: "Europe/Berlin" },
+      { name: "training-reminders", rule: "45 6 * * *", tz: "Europe/Berlin" },
       { name: "digest-mailer", rule: "30 7 * * *", tz: "Europe/Berlin" },
     ]);
   });
@@ -224,6 +225,7 @@ describe("CRON_ENABLED through @strapi/core's cron provider", () => {
         "notification-janitor",
         "classified-janitor",
         "audit-janitor",
+        "training-reminders",
         "digest-mailer",
       ]);
     }
@@ -250,6 +252,7 @@ describe("CRON_ENABLED through @strapi/core's cron provider", () => {
       "notification-janitor",
       "classified-janitor",
       "audit-janitor",
+      "training-reminders",
       "digest-mailer",
     ]);
   });

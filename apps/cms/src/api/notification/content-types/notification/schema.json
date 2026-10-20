@@ -11,7 +11,7 @@
   "attributes": {
     "type": {
       "type": "enumeration",
-      "enum": ["announcement", "comment", "event", "kudos"],
+      "enum": ["announcement", "comment", "event", "kudos", "trainingDue", "trainingExpired"],
       "required": true
     },
     "title": { "type": "string", "required": true },
@@ -30,7 +30,7 @@
     "readAt": { "type": "datetime" },
     "sourceType": {
       "type": "enumeration",
-      "enum": ["announcement", "event"]
+      "enum": ["announcement", "event", "course"]
     },
     "sourceDocumentId": { "type": "string" }
   }

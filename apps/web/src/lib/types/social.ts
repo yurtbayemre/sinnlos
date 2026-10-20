@@ -36,7 +36,7 @@ export interface ReactionSummary {
 export interface Notification {
   id: number;
   documentId?: string;
-  type: "announcement" | "comment" | "event" | "kudos";
+  type: "announcement" | "comment" | "event" | "kudos" | "trainingDue" | "trainingExpired";
   /** The English title; the bell shows it only for rows without titleParams. */
   title: string;
   /** The title's values, rendered in the reader's language (AC04); null on older rows. */

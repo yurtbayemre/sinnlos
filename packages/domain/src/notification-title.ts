@@ -8,7 +8,8 @@
  */
 
 /** notification.type (schema enum). */
-export type NotificationTitleType = "announcement" | "comment" | "event" | "kudos";
+export type NotificationTitleType =
+  "announcement" | "comment" | "event" | "kudos" | "trainingDue" | "trainingExpired";
 
 /** The values a title template names. */
 export interface NotificationTitleParams {
@@ -33,6 +34,12 @@ export const NOTIFICATION_TITLES: Readonly<
       { param: "subject", fallback: "an announcement" },
       '"',
     ],
+    trainingDue: ['Training "', { param: "subject", fallback: "a course" }, '" is due soon'],
+    trainingExpired: [
+      'Training "',
+      { param: "subject", fallback: "a course" },
+      '" has expired, please repeat it',
+    ],
   },
   de: {
     announcement: ["Neuigkeit: ", { param: "subject", fallback: "Ohne Titel" }],
@@ -43,6 +50,12 @@ export const NOTIFICATION_TITLES: Readonly<
       " hat „",
       { param: "subject", fallback: "eine Neuigkeit" },
       "“ kommentiert",
+    ],
+    trainingDue: ["Unterweisung „", { param: "subject", fallback: "ein Kurs" }, "“ läuft bald ab"],
+    trainingExpired: [
+      "Unterweisung „",
+      { param: "subject", fallback: "ein Kurs" },
+      "“ ist abgelaufen, bitte wiederholen",
     ],
   },
 };
