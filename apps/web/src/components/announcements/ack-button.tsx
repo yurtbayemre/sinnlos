@@ -5,22 +5,27 @@ import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { CheckCircle2, Clock } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { acknowledgeAnnouncement } from "@/lib/acknowledgement-actions";
+import { acknowledgeAnnouncement, acknowledgeDocument } from "@/lib/acknowledgement-actions";
 import { isSharedErrorCode, startCmsAction, type CommonCode } from "@/lib/action-result";
+import type { Acknowledgement } from "@/lib/types";
+
+const ACKNOWLEDGE = { announcement: acknowledgeAnnouncement, document: acknowledgeDocument };
 
 /**
- * Confirm-read control for mandatory announcements. Date labels are
- * pre-formatted on the server (only serializable props cross the RSC
- * boundary); after a successful action the server-side refresh() delivers
- * the authoritative acknowledged state as new props.
+ * Confirm-read control for mandatory announcements and documents (v0.20).
+ * Date labels are pre-formatted on the server (only serializable props
+ * cross the RSC boundary); after a successful action the server-side
+ * refresh() delivers the authoritative acknowledged state as new props.
  */
 export function AckButton({
-  announcementDocumentId,
+  targetType = "announcement",
+  targetDocumentId,
   acknowledgedAtLabel,
   deadlineLabel,
 }: {
-  /** Strapi documentId of the announcement (stable across re-publishes). */
-  announcementDocumentId: string;
+  targetType?: Acknowledgement["targetType"];
+  /** Strapi documentId of the target (stable across re-publishes). */
+  targetDocumentId: string;
   /** Pre-formatted date of the caller's own ack, or null when unacknowledged. */
   acknowledgedAtLabel: string | null;
   /** Pre-formatted ackDeadline, or null when none is set. */
@@ -39,7 +44,7 @@ export function AckButton({
     if (acknowledged || isPending) return;
     setError(null);
     startCmsAction(startTransition, {
-      action: () => acknowledgeAnnouncement(announcementDocumentId),
+      action: () => ACKNOWLEDGE[targetType](targetDocumentId),
       onSuccess: () => setJustAcked(true),
       onFailure: (code) => {
         // Refused (already acknowledged elsewhere, target changed, …) —

@@ -41,6 +41,7 @@
       "relation": "manyToOne",
       "target": "api::department.department"
     },
+    "requiresAck": { "type": "boolean", "default": false },
     "publishAt": { "type": "datetime" },
     "unpublishAt": { "type": "datetime" },
     "scheduleError": { "type": "string" }

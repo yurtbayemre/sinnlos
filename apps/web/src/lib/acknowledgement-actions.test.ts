@@ -25,7 +25,7 @@ const refreshMock = vi.fn();
 vi.mock("@/lib/strapi", () => ({ strapi: (...args: unknown[]) => strapiMock(...args) }));
 vi.mock("next/cache", () => ({ refresh: () => refreshMock() }));
 
-const { acknowledgeAnnouncement } = await import("./acknowledgement-actions");
+const { acknowledgeAnnouncement, acknowledgeDocument } = await import("./acknowledgement-actions");
 
 const DOC = "k3m9x0000000000000000000";
 const TARGET_GONE = "Target not available for acknowledgement";
@@ -120,5 +120,23 @@ describe("acknowledgeAnnouncement", () => {
       code: "invalid",
     });
     expect(strapiMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("acknowledgeDocument", () => {
+  it("posts the document target by documentId, then refreshes", async () => {
+    await expect(acknowledgeDocument(DOC)).resolves.toEqual({ ok: true });
+    const [, init] = strapiMock.mock.calls[0] as [string, { body: string }];
+    expect(JSON.parse(init.body)).toEqual({
+      data: { targetType: "document", targetDocumentId: DOC },
+    });
+    expect(refreshMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("answers the same refusal as notFound and an empty id as invalid", async () => {
+    strapiMock.mockRejectedValue(cmsError(400, TARGET_GONE));
+    await expect(acknowledgeDocument(DOC)).resolves.toEqual({ ok: false, code: "notFound" });
+    await expect(acknowledgeDocument("")).resolves.toEqual({ ok: false, code: "invalid" });
+    expect(strapiMock).toHaveBeenCalledTimes(1);
   });
 });

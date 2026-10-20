@@ -19,7 +19,7 @@ import { listWikiSpaces, wikiPageBySlug, wikiSpaceBySlug } from "@/lib/api/wiki"
 import { listAnnouncements, listRequiringAck } from "@/lib/api/announcements";
 import { eventsInWindow, pastEvents, rsvpSummaries, upcomingEvents } from "@/lib/api/events";
 import { listPolls, pollResults, pollResultsMany } from "@/lib/api/polls";
-import { listDocuments } from "@/lib/api/documents";
+import { listDocuments, listDocumentsRequiringAck } from "@/lib/api/documents";
 import { listCelebrations, listKudos } from "@/lib/api/kudos";
 import { classifiedById, listClassifieds, myClassifieds } from "@/lib/api/marketplace";
 import { listQuickLinks } from "@/lib/api/quick-links";
@@ -54,7 +54,7 @@ export const api = {
     rsvpSummaries,
   },
   polls: { list: listPolls, results: pollResults, resultsMany: pollResultsMany },
-  documents: { list: listDocuments },
+  documents: { list: listDocuments, requiringAck: listDocumentsRequiringAck },
   kudos: { list: listKudos },
   classifieds: { list: listClassifieds, mine: myClassifieds, one: classifiedById },
   quickLinks: { list: listQuickLinks },

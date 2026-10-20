@@ -13,6 +13,8 @@ const reads = {
   users: vi.fn<(params: string) => Promise<unknown>>(),
   teams: vi.fn<() => Promise<unknown>>(),
   acks: vi.fn<(documentIds: string[]) => Promise<unknown>>(),
+  documents: vi.fn<() => Promise<unknown>>(),
+  documentAcks: vi.fn<(documentIds: string[]) => Promise<unknown>>(),
 };
 
 vi.mock("@/lib/api/announcements", () => ({
@@ -20,8 +22,10 @@ vi.mock("@/lib/api/announcements", () => ({
 }));
 vi.mock("@/lib/users", () => ({ fetchAllUsers: (params: string) => reads.users(params) }));
 vi.mock("@/lib/teams", () => ({ fetchAllTeams: () => reads.teams() }));
+vi.mock("@/lib/api/documents", () => ({ listDocumentsRequiringAck: () => reads.documents() }));
 vi.mock("@/lib/acknowledgements", () => ({
   fetchAnnouncementAckIndex: (documentIds: string[]) => reads.acks(documentIds),
+  fetchDocumentAckIndex: (documentIds: string[]) => reads.documentAcks(documentIds),
 }));
 
 const { loadAckReport, ACK_REPORT_USER_QUERY } = await import("./ack-report");
@@ -94,6 +98,8 @@ beforeEach(() => {
   reads.users.mockReset().mockResolvedValue(USERS);
   reads.teams.mockReset().mockResolvedValue(TEAMS);
   reads.acks.mockReset().mockResolvedValue(ACKS);
+  reads.documents.mockReset().mockResolvedValue({ data: [], truncated: false });
+  reads.documentAcks.mockReset().mockResolvedValue({ index: new Map(), truncated: false });
   vi.spyOn(console, "error").mockImplementation(() => {});
 });
 
@@ -151,9 +157,57 @@ describe("loadAckReport", () => {
     expect(view).toMatchObject({ rows: [], empty: false, failed: true });
   });
 
-  it("no mandatory announcement is the empty state", async () => {
+  it("no mandatory announcement and no mandatory document is the empty state", async () => {
     reads.announcements.mockResolvedValue({ data: [], truncated: false });
-    await expect(loadAckReport()).resolves.toMatchObject({ rows: [], empty: true, failed: false });
+    await expect(loadAckReport()).resolves.toMatchObject({
+      rows: [],
+      documentRows: [],
+      empty: true,
+      failed: false,
+    });
+  });
+
+  it("documents (v0.20): one row per mandatory document over the acknowledging roles", async () => {
+    reads.documents.mockResolvedValue({
+      data: [
+        { id: 7, documentId: "doc-7", title: "Fire safety", requiresAck: true },
+        {
+          id: 8,
+          documentId: "doc-8",
+          title: "Forklift rules",
+          requiresAck: true,
+          audience: "departments",
+          departments: [{ id: 11, name: "Sales" }],
+        },
+        // Not mandatory (DEMO_MODE answers unfiltered): left out.
+        { id: 9, documentId: "doc-9", title: "Menu", requiresAck: false },
+      ],
+      truncated: false,
+    });
+    reads.documentAcks.mockResolvedValue({
+      index: new Map([
+        ["doc-7", new Set([1])],
+        ["doc-8", new Set<number>()],
+      ]),
+      truncated: false,
+    });
+    const view = await loadAckReport();
+    expect(reads.documentAcks).toHaveBeenCalledWith(["doc-7", "doc-8"]);
+    // The guest (user 5) and the blocked user 4 never count.
+    expect(view.documentRows.map((r) => [r.id, r.ackedCount, r.targetTotal, r.pct])).toEqual([
+      [7, 1, 3, 33],
+      [8, 0, 1, 0],
+    ]);
+    expect(view.documentRows[1]!.audience).toEqual({ department: "Sales", team: null, roles: [] });
+    expect(view.documentRows[1]!.openUsers).toEqual([{ id: 3, name: "User 3" }]);
+    expect(view.empty).toBe(false);
+  });
+
+  it("documents (v0.20): a failed document read is the banner, a cut walk the warning", async () => {
+    reads.documentAcks.mockResolvedValue({ index: new Map(), truncated: true });
+    await expect(loadAckReport()).resolves.toMatchObject({ truncated: true, failed: false });
+    reads.documents.mockRejectedValue(outage());
+    await expect(loadAckReport()).resolves.toMatchObject({ failed: true, empty: false });
   });
 });
 

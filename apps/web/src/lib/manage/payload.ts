@@ -446,6 +446,8 @@ const DOCUMENT_RULES: readonly FieldRule<DocumentValues>[] = [
     same: (a, b) => fileId(a) === fileId(b),
     convert: (v) => ({ value: fileId(v.file) }),
   },
+  // Moderators only (AUTHORING_FIELDS keeps department authors off it).
+  { key: "requiresAck", inputs: ["requiresAck"], convert: (v) => ({ value: v.requiresAck }) },
 ];
 
 /**

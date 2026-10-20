@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
   buildAckReportRows,
+  buildDocumentAckRows,
   eligibleReportUsers,
   indexAcks,
   reportCompleteness,
   type ReportAck,
   type ReportAnnouncement,
+  type ReportDocument,
   type ReportInputs,
   type ReportUser,
 } from "./ack-report";
@@ -246,6 +248,51 @@ describe("buildAckReportRows", () => {
     const list = [announcement(3), announcement(1), announcement(2)];
     expect(rows(list, [], [user(1)]).map((r) => r.announcement.id)).toEqual([3, 1, 2]);
     expect(rows([], [], [user(1)])).toEqual([]);
+  });
+});
+
+describe("buildDocumentAckRows (v0.20)", () => {
+  /** What the page passes: the roles holding the acknowledgement grants (no guest). */
+  const ACKNOWLEDGERS = new Set(["admin_role", "editor", "department_head", "team_lead", "member"]);
+  const user = (id: number, departmentId: number | null, type = "member"): ReportUser => ({
+    id,
+    role: { id: 5, type },
+    department: departmentId === null ? null : { id: departmentId },
+  });
+  const users = [user(1, 10), user(2, 11), user(3, null), user(4, 10, "guest")];
+  const doc = (id: number, extra: Partial<ReportDocument> = {}): ReportDocument => ({
+    id,
+    documentId: `doc${id}`,
+    requiresAck: true,
+    ...extra,
+  });
+  const rows = (documents: ReportDocument[], usersUnknown = false) =>
+    buildDocumentAckRows({
+      documents,
+      acks: indexAcks([{ targetDocumentId: "doc1", user: { id: 1 } }]),
+      eligibleUsers: eligibleReportUsers(users, ACKNOWLEDGERS),
+      usersUnknown,
+    });
+
+  it("targets everyone for a company-wide document, without guests", () => {
+    const [row] = rows([doc(1)]);
+    expect(row!.targetUsers.map((u) => u.id)).toEqual([1, 2, 3]);
+    expect(row).toMatchObject({ ackedCount: 1, pct: 33, targetUnknown: false });
+    expect(row!.openUsers.map((u) => u.id)).toEqual([2, 3]);
+  });
+
+  it("targets the linked departments only, and nobody when flagged without departments", () => {
+    const result = rows([
+      doc(1, { audience: "departments", departments: [{ id: 10 }] }),
+      doc(2, { audience: "all", departments: [{ id: 11 }] }),
+      doc(3, { audience: "departments", departments: [] }),
+    ]);
+    expect(result.map((r) => r.targetUsers.map((u) => u.id))).toEqual([[1], [2], []]);
+    expect(result[2]).toMatchObject({ pct: 0, ackedCount: 0 });
+  });
+
+  it("marks every row unknown when the directory is unknown", () => {
+    expect(rows([doc(1)], true)[0]!.targetUnknown).toBe(true);
   });
 });
 

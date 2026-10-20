@@ -155,6 +155,11 @@ export function DocumentPreview({ editable }: { editable: DocumentEditable }) {
           )}
           <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
             {category && <span>{tCategories(category)}</span>}
+            {editable.requiresAck && (
+              <span className="font-medium text-amber-700 dark:text-amber-400">
+                {tCategories("ackRequired")}
+              </span>
+            )}
             {editable.file ? (
               <>
                 <span className="break-all">{editable.file.name}</span>

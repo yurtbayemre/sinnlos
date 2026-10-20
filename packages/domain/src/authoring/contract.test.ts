@@ -134,7 +134,9 @@ describe("field lists per class (§N6)", () => {
       EVENT_MODERATOR_FIELDS.filter((field) => field !== "publishAt"),
     );
     expect([...DOCUMENT_DEPARTMENT_AUTHOR_FIELDS]).toEqual(
-      DOCUMENT_MODERATOR_FIELDS.filter((field) => !["publishAt", "unpublishAt"].includes(field)),
+      DOCUMENT_MODERATOR_FIELDS.filter(
+        (field) => !["requiresAck", "publishAt", "unpublishAt"].includes(field),
+      ),
     );
   });
 

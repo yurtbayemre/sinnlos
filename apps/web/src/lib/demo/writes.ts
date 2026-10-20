@@ -170,22 +170,28 @@ export const vote: DemoHandler = ({ data, body, match }) => {
   return { data: { id: tally.total, optionIndex } };
 };
 
-/** The cms's checks in its order (acknowledgement.ts); one receipt per announcement. */
+/** The cms's checks in its order (acknowledgement.ts); one receipt per announcement or document. */
 export const acknowledge: DemoHandler = ({ data, body }) => {
   const { targetType, targetDocumentId } = payload(body);
-  if (targetType !== "announcement") throw cmsError(400, "Invalid targetType");
+  if (targetType !== "announcement" && targetType !== "document") {
+    throw cmsError(400, "Invalid targetType");
+  }
   if (!text(targetDocumentId)) throw cmsError(400, "targetDocumentId required");
-  const announcement = data.announcements.find(
-    (a) => a.documentId === targetDocumentId && a.requiresAck,
-  );
-  if (!announcement) throw cmsError(400, "Target not available for acknowledgement");
-  if (data.acknowledgements.some((row) => row.targetDocumentId === announcement.documentId)) {
+  const targets: { documentId?: string; requiresAck?: boolean }[] =
+    targetType === "announcement" ? data.announcements : data.documents;
+  const target = targets.find((t) => t.documentId === targetDocumentId && t.requiresAck);
+  if (!target?.documentId) throw cmsError(400, "Target not available for acknowledgement");
+  if (
+    data.acknowledgements.some(
+      (row) => row.targetType === targetType && row.targetDocumentId === target.documentId,
+    )
+  ) {
     throw cmsError(400, "Already acknowledged");
   }
   const row = {
     id: nextId(data.acknowledgements),
-    targetType: "announcement" as const,
-    targetDocumentId: announcement.documentId,
+    targetType: targetType as "announcement" | "document",
+    targetDocumentId: target.documentId,
     acknowledgedAt: now(),
     user: data.users.ada,
   };

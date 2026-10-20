@@ -97,6 +97,8 @@ export interface DocumentValues {
    * `id` is sent; the rest is for the form's display.
    */
   file: EditableMedia | null;
+  /** Moderators only (v0.20): readers confirm they read it. */
+  requiresAck: boolean;
 }
 
 /**
@@ -187,7 +189,14 @@ export function emptyQuickLinkValues(): QuickLinkValues {
 }
 
 export function emptyDocumentValues(departments: string[] = []): DocumentValues {
-  return { title: "", description: "", category: "other", departments, file: null };
+  return {
+    title: "",
+    description: "",
+    category: "other",
+    departments,
+    file: null,
+    requiresAck: false,
+  };
 }
 
 export function emptyDutyPlanValues(department = ""): DutyPlanValues {
@@ -305,6 +314,7 @@ export function documentValuesFromEditable(editable: DocumentEditable): Document
     category: editable.category ?? "other",
     departments: [...(editable.departments ?? [])],
     file: editable.file ? { ...editable.file } : null,
+    requiresAck: editable.requiresAck ?? false,
   };
 }
 
@@ -432,6 +442,7 @@ export function coerceDocumentValues(raw: unknown): DocumentValues {
     category: str(r.category).trim(),
     departments: idList(r.departments),
     file: fileValue(r.file),
+    requiresAck: bool(r.requiresAck),
   };
 }
 

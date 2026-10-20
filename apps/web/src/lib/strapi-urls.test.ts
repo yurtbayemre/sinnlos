@@ -175,7 +175,12 @@ function describeCall([url, init]: Call): string {
 const { api } = await import("./strapi");
 const { fetchAllTeams } = await import("./teams");
 const { fetchAllUsers } = await import("./users");
-const { fetchAnnouncementAckIndex, fetchMyAnnouncementAcks } = await import("./acknowledgements");
+const {
+  fetchAnnouncementAckIndex,
+  fetchDocumentAckIndex,
+  fetchMyAnnouncementAcks,
+  fetchMyDocumentAcks,
+} = await import("./acknowledgements");
 const training = await import("./training");
 const { getViewer } = await import("./viewer");
 const { getNotifications } = await import("./notification-actions");
@@ -219,6 +224,7 @@ const API_READS: Record<string, () => Promise<unknown>> = {
       7,
     ]),
   "documents.list": () => api.documents.list(),
+  "documents.requiringAck": () => api.documents.requiringAck(),
   "kudos.list": () => api.kudos.list(),
   "classifieds.list": async () => {
     await api.classifieds.list("2026-09-28");
@@ -239,10 +245,12 @@ const DIRECT_READS: Record<string, () => Promise<unknown>> = {
   "users.fetchAllUsers(fields[0]=id)": () => fetchAllUsers("fields[0]=id"),
   "users.fetchAllUsers(sorted)": () => fetchAllUsers("fields[0]=displayName&sort=displayName:asc"),
   "acknowledgements.fetchMyAnnouncementAcks": () => fetchMyAnnouncementAcks(),
+  "acknowledgements.fetchMyDocumentAcks": () => fetchMyDocumentAcks(),
   "acknowledgements.fetchAnnouncementAckIndex": () =>
     fetchAnnouncementAckIndex(
       Array.from({ length: 21 }, (_, i) => `ann doc ${i}`).concat(["ann doc 0", ""]),
     ),
+  "acknowledgements.fetchDocumentAckIndex": () => fetchDocumentAckIndex(["doc doc 0"]),
   "training.fetchCourses": () => training.fetchCourses(),
   "training.fetchCourseBySlug": () => training.fetchCourseBySlug("security & safety"),
   "training.fetchLessonByDocumentId": () => training.fetchLessonByDocumentId("lesson/doc 1"),

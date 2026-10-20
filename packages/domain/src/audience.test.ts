@@ -4,6 +4,7 @@ import {
   announcementNeedsRetarget,
   eventNeedsRetarget,
   isAnnouncementTargetedTo,
+  isInScopedAudience,
   scopedNeedsRetarget,
   teamIdsByUser,
   type AnnouncementTargeting,
@@ -344,6 +345,28 @@ describe("needsRetarget helpers (contract K9)", () => {
           expect(isAnnouncementTargetedTo(row, scope)).toBe(false);
         }
       }
+    });
+  });
+
+  describe("isInScopedAudience (one document, quick link, poll or course row)", () => {
+    it("lets everyone into a company-wide row", () => {
+      expect(isInScopedAudience({ audience: "all", departments: [] }, null)).toBe(true);
+      expect(isInScopedAudience({ audience: null }, DESIGN)).toBe(true);
+    });
+
+    it("lets only a linked department into a targeted row", () => {
+      const row = { audience: "departments", departments: [{ id: DESIGN }] };
+      expect(isInScopedAudience(row, DESIGN)).toBe(true);
+      expect(isInScopedAudience(row, DESIGN + 1)).toBe(false);
+      expect(isInScopedAudience(row, null)).toBe(false);
+      // A link restricts whatever the flag says.
+      expect(isInScopedAudience({ audience: "all", departments: [{ id: DESIGN }] }, null)).toBe(
+        false,
+      );
+    });
+
+    it("lets nobody into a flagged row without departments", () => {
+      expect(isInScopedAudience({ audience: "departments", departments: [] }, DESIGN)).toBe(false);
     });
   });
 

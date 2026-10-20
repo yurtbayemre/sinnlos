@@ -103,6 +103,7 @@
     "featured": "Featured",
     "openAcksTitle": "Pending acknowledgements",
     "openAcksCount": "{count, plural, one {# mandatory announcement is waiting for your read confirmation.} other {# mandatory announcements are waiting for your read confirmation.}}",
+    "openAcksDocuments": "{count, plural, one {# mandatory document is waiting for your read confirmation.} other {# mandatory documents are waiting for your read confirmation.}}",
     "openAcksAction": "Confirm now",
     "friendFallback": "colleague",
     "trainingOpen": "{count, plural, one {# open mandatory course} other {# open mandatory courses}}",
@@ -354,7 +355,8 @@
     "other": "Other",
     "emptyTitle": "No documents yet",
     "emptyHint": "Editors, admins and department heads add documents under Manage.",
-    "noFile": "No file attached"
+    "noFile": "No file attached",
+    "ackRequired": "Read confirmation required"
   },
   "profile": {
     "title": "My profile",
@@ -402,7 +404,7 @@
     "analyticsDashboard": "Analytics dashboard",
     "analyticsDesc": "Content counts, engagement metrics, and recent activity.",
     "ackReportLink": "Read confirmations",
-    "ackReportLinkDesc": "Confirmation rate and outstanding users per mandatory announcement.",
+    "ackReportLinkDesc": "Confirmation rate and outstanding users per mandatory announcement and document.",
     "rolesSection": "Roles",
     "rolesDesc": "Sinnlos ships with six roles. Admins assign them in the Strapi admin panel; with Microsoft sign-in, the Entra app roles Intranet.Admin, Intranet.Editor, Intranet.DepartmentHead, Intranet.TeamLead, Intranet.Member and Intranet.Guest assign them at every sign-in.",
     "roleChangeHint": "Need to change who gets which role?",
@@ -450,9 +452,11 @@
   },
   "ackReport": {
     "title": "Read confirmations",
-    "description": "Acknowledgement status of every mandatory announcement: confirmation rate per post and who has not confirmed yet.",
-    "emptyTitle": "No mandatory announcements",
-    "emptyHint": "Announcements that require acknowledgement (requiresAck) will show up here with their confirmation rate.",
+    "description": "Acknowledgement status of every mandatory announcement and document: confirmation rate per entry and who has not confirmed yet.",
+    "emptyTitle": "No mandatory announcements or documents",
+    "emptyHint": "Announcements and documents that require acknowledgement will show up here with their confirmation rate.",
+    "sectionAnnouncements": "Mandatory announcements",
+    "sectionDocuments": "Mandatory documents",
     "audienceAll": "All employees",
     "audienceDepartment": "Department: {name}",
     "audienceTeam": "Team: {name}",

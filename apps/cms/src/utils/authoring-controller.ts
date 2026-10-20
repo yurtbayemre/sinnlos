@@ -706,6 +706,7 @@ export async function editableFields(
         needsRetarget: retarget,
         ...(moderator
           ? {
+              requiresAck: draft.requiresAck === true,
               publishAt: iso(draft.publishAt),
               unpublishAt: iso(draft.unpublishAt),
               scheduleError: text(draft.scheduleError),

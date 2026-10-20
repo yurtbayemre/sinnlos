@@ -1,14 +1,16 @@
 import { teamIdsByUser } from "@/lib/audience";
 import {
   buildAckReportRows,
+  buildDocumentAckRows,
   eligibleReportUsers,
   reportCompleteness,
   type ReportAnnouncement,
   type ReportUser,
 } from "@/lib/ack-report";
-import { fetchAnnouncementAckIndex } from "@/lib/acknowledgements";
+import { fetchAnnouncementAckIndex, fetchDocumentAckIndex } from "@/lib/acknowledgements";
 import { listAckReportAnnouncements } from "@/lib/api/announcements";
-import { ANNOUNCEMENT_READER_ROLES } from "@/lib/roles";
+import { listDocumentsRequiringAck } from "@/lib/api/documents";
+import { ACKNOWLEDGER_ROLES, ANNOUNCEMENT_READER_ROLES } from "@/lib/roles";
 import { tryFetch } from "@/lib/safe-fetch";
 import { fetchAllTeams } from "@/lib/teams";
 import { fetchAllUsers } from "@/lib/users";
@@ -56,7 +58,12 @@ export interface AckReportRowView {
 
 export interface AckReportView {
   rows: AckReportRowView[];
-  /** The announcements read answered with none: the empty state (not on an outage). */
+  /**
+   * The documents that require acknowledgement (v0.20), in the same shape:
+   * `audience.department` lists the linked departments' names.
+   */
+  documentRows: AckReportRowView[];
+  /** Both reads answered with none: the empty state (not on an outage). */
   empty: boolean;
   /** A read failed: the CMS-down banner (and the affected rows unknown). */
   failed: boolean;
@@ -77,7 +84,7 @@ function audienceOf(a: ReportAnnouncement): AckReportAudience {
 
 /** Everything the report renders; the reads are the ones of before WD03. */
 export async function loadAckReport(): Promise<AckReportView> {
-  const [announcementsResult, usersResult, teamsResult] = await Promise.all([
+  const [announcementsResult, usersResult, teamsResult, documentsResult] = await Promise.all([
     // Every mandatory announcement with its targeting fields, a full walk
     // (the audienceRoles populate needs the role.find grant admin_role
     // holds for exactly this page).
@@ -87,6 +94,9 @@ export async function loadAckReport(): Promise<AckReportView> {
     // inverse field on the user, so the mapping is built from the team
     // side (field-limited to ids, with its own truncated signal).
     tryFetch(() => fetchAllTeams(), "ack-report"),
+    // Every document that requires acknowledgement (admin_role bypasses
+    // document-visibility) with its departments and flag.
+    tryFetch(() => listDocumentsRequiringAck(), "ack-report"),
   ]);
 
   // Re-check requiresAck: DEMO_MODE's fixture answers announcement paths
@@ -94,13 +104,13 @@ export async function loadAckReport(): Promise<AckReportView> {
   const announcements = (announcementsResult.data?.data ?? []).filter((a) => a.requiresAck);
   // The acks of exactly the listed announcements, per chunk of documentIds
   // with a cap per chunk (FX32). They need the announcements first.
-  const acksResult = await tryFetch(
-    () =>
-      fetchAnnouncementAckIndex(
-        announcements.map((a) => a.documentId).filter((id): id is string => !!id),
-      ),
-    "ack-report",
-  );
+  const documents = (documentsResult.data?.data ?? []).filter((d) => d.requiresAck);
+  const idsOf = (rows: { documentId?: string }[]) =>
+    rows.map((row) => row.documentId).filter((id): id is string => !!id);
+  const [acksResult, documentAcksResult] = await Promise.all([
+    tryFetch(() => fetchAnnouncementAckIndex(idsOf(announcements)), "ack-report"),
+    tryFetch(() => fetchDocumentAckIndex(idsOf(documents)), "ack-report"),
+  ]);
 
   // Fail closed: a missing input never reads as "nobody is targeted"
   // (0 of 0 → 100% → a green "everyone confirmed"). Without the directory
@@ -111,10 +121,11 @@ export async function loadAckReport(): Promise<AckReportView> {
     usersTruncated: usersResult.data?.truncated ?? false,
     teamsFailed: teamsResult.failed,
     teamsTruncated: teamsResult.data?.truncated ?? false,
-    acksFailed: acksResult.failed,
-    acksTruncated: acksResult.data?.truncated ?? false,
-    announcementsFailed: announcementsResult.failed,
-    announcementsTruncated: announcementsResult.data?.truncated ?? false,
+    acksFailed: acksResult.failed || documentAcksResult.failed,
+    acksTruncated: !!acksResult.data?.truncated || !!documentAcksResult.data?.truncated,
+    announcementsFailed: announcementsResult.failed || documentsResult.failed,
+    announcementsTruncated:
+      !!announcementsResult.data?.truncated || !!documentsResult.data?.truncated,
   });
 
   const rows = buildAckReportRows({
@@ -127,6 +138,16 @@ export async function loadAckReport(): Promise<AckReportView> {
     teamsUnknown,
   });
 
+  const documentRows = buildDocumentAckRows({
+    documents,
+    acks: documentAcksResult.data?.index ?? new Map<string, Set<number>>(),
+    // Guest reads documents but holds no acknowledgement grant.
+    eligibleUsers: eligibleReportUsers(usersResult.data?.users ?? [], ACKNOWLEDGER_ROLES),
+    usersUnknown,
+  });
+  const openNames = (users: ReportUser[]) =>
+    users.map((u) => ({ id: u.id, name: displayNameOf(u, `#${u.id}`) }));
+
   return {
     rows: rows.map(
       ({ announcement: a, targetUsers, openUsers, ackedCount, pct, targetUnknown }) => ({
@@ -138,12 +159,39 @@ export async function loadAckReport(): Promise<AckReportView> {
         pct,
         ackedCount,
         targetTotal: targetUsers.length,
-        openUsers: openUsers.map((u) => ({ id: u.id, name: displayNameOf(u, `#${u.id}`) })),
+        openUsers: openNames(openUsers),
       }),
     ),
-    empty: !announcementsResult.failed && rows.length === 0,
+    documentRows: documentRows.map(
+      ({ document: d, targetUsers, openUsers, ackedCount, pct, targetUnknown }) => ({
+        id: d.id,
+        title: d.title ?? "",
+        audience: {
+          department:
+            (d.departments ?? []).map((dep) => dep.name ?? `#${dep.id}`).join(", ") || null,
+          team: null,
+          roles: [],
+        },
+        ackDeadline: null,
+        targetUnknown,
+        pct,
+        ackedCount,
+        targetTotal: targetUsers.length,
+        openUsers: openNames(openUsers),
+      }),
+    ),
+    empty:
+      !announcementsResult.failed &&
+      !documentsResult.failed &&
+      rows.length === 0 &&
+      documentRows.length === 0,
     failed:
-      announcementsResult.failed || acksResult.failed || usersResult.failed || teamsResult.failed,
+      announcementsResult.failed ||
+      acksResult.failed ||
+      usersResult.failed ||
+      teamsResult.failed ||
+      documentsResult.failed ||
+      documentAcksResult.failed,
     truncated,
   };
 }
