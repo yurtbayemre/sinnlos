@@ -66,6 +66,7 @@ import {
   type TrainingAuthoringType,
   type FieldCheck,
 } from "@sinnlos/domain";
+import { parseKpiNumber } from "@/lib/kpi-format";
 import { pollClosesAtForDay } from "@/lib/poll-close";
 import {
   dayStartInstant,
@@ -507,19 +508,6 @@ export function buildDutyPlanPayload(
 ): BuiltPayload {
   const { data, fields } = buildFields("dutyPlan", DUTY_PLAN_RULES, values, initial, ctx);
   return done(data, fields);
-}
-
-/**
- * A KPI value as typed: digits with an optional sign and one decimal
- * comma or point, no thousands separators ("1.250" would be 1.25), and an
- * exponent, as String() writes a very small stored value ("1e-7"). Blank
- * is no value (undefined); anything else unreadable is null.
- */
-export function parseKpiNumber(text: string): number | null | undefined {
-  const trimmed = text.trim();
-  if (trimmed === "") return undefined;
-  if (!/^-?\d+([.,]\d+)?(e[-+]?\d+)?$/i.test(trimmed)) return null;
-  return Number(trimmed.replace(",", "."));
 }
 
 /** The typed values as numbers by period start, sorted; null when one is unreadable. */

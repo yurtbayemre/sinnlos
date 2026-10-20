@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { kpiPeriodLabel } from "@/lib/kpi-format";
-import { buildKpiPayload, kpiNumbers, parseKpiNumber, type PayloadContext } from "./payload";
+import { kpiPeriodLabel, parseKpiNumber } from "@/lib/kpi-format";
+import { buildKpiPayload, kpiNumbers, type PayloadContext } from "./payload";
 import { coerceKpiValues, emptyKpiValues, type KpiValues } from "./values";
 
 /**

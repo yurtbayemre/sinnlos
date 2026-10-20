@@ -9,8 +9,8 @@ import { parseAdminJsonField } from "../../../../utils/json-field";
  * only a payload that carries `values` or `period` is checked; admin JSON
  * input is parsed first; a cleared field is stored as null (no values); the
  * sorted value replaces the input. Every key must start a period of the
- * KPI's rhythm as it will be stored: the payload over each row an update
- * matches (a partial admin update of `period` alone or `values` alone
+ * KPI's rhythm as it will be stored: the payload over the row an update
+ * writes (a partial admin update of `period` alone or `values` alone
  * included), the schema default `month` on a create without one. The
  * authoring allowlist checks the same (kpiCrossCheck).
  */
@@ -49,18 +49,16 @@ async function assertValidKpi(event: KpiLifecycleEvent, update: boolean): Promis
   }
 
   const where = event.params?.where;
-  // Joins the write's transaction (the query engine reuses the ambient one).
-  const rows: StoredKpi[] =
+  // The row update() writes: like the query engine, the first match (joins its transaction).
+  const row: StoredKpi =
     update && where
-      ? await strapi.db.query(KPI_UID).findMany({ where, select: ["period", "values"] })
-      : [];
-  for (const row of rows.length > 0 ? rows : [{}]) {
-    const period = carriesPeriod ? data.period : row.period;
-    const values = carriesValues ? data.values : row.values;
-    if (values === null || values === undefined) continue;
-    const aligned = validateKpiValues(values, isKpiPeriod(period) ? period : "month");
-    if ("error" in aligned) throw new errors.ValidationError(aligned.error);
-  }
+      ? ((await strapi.db.query(KPI_UID).findOne({ where, select: ["period", "values"] })) ?? {})
+      : {};
+  const period = carriesPeriod ? data.period : row.period;
+  const values = carriesValues ? data.values : row.values;
+  if (values === null || values === undefined) return;
+  const aligned = validateKpiValues(values, isKpiPeriod(period) ? period : "month");
+  if ("error" in aligned) throw new errors.ValidationError(aligned.error);
 }
 
 export default {

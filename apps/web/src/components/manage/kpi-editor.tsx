@@ -7,13 +7,14 @@ import {
   KPI_AGGREGATIONS,
   KPI_PERIODS,
   KPI_WINDOW,
+  MAX_KPI_ABS,
   recentKpiPeriods,
   type KpiAggregation,
   type KpiEditable,
   type KpiPeriod,
 } from "@sinnlos/domain";
 import { Button } from "@/components/ui/button";
-import { kpiPeriodLabel } from "@/lib/kpi-format";
+import { kpiPeriodLabel, parseKpiNumber } from "@/lib/kpi-format";
 import type { AreaAccess } from "@/lib/manage/access";
 import { deleteKpi, discardKpi, publishKpi, saveKpi, unpublishKpi } from "@/lib/manage/kpi-actions";
 import { fieldInputId } from "@/lib/manage/errors";
@@ -91,6 +92,11 @@ export function KpiEditor({
   // The values' error describes the group and every entry (focus lands on either).
   const valuesError = error("values");
   const valuesErrorId = `${id("values")}-error`;
+  /** An entry the cms would refuse: no number, or beyond MAX_KPI_ABS. */
+  const unreadable = (text: string) => {
+    const value = parseKpiNumber(text);
+    return value === null || (value !== undefined && Math.abs(value) > MAX_KPI_ABS);
+  };
 
   const today = zonedDateKey(new Date(), timeZone);
   const periods = recentKpiPeriods(today, values.period, count);
@@ -246,7 +252,9 @@ export function KpiEditor({
                     <input
                       {...a11y}
                       aria-describedby={valuesError ? valuesErrorId : undefined}
-                      aria-invalid={valuesError ? true : undefined}
+                      aria-invalid={
+                        valuesError && unreadable(values.values[period] ?? "") ? true : undefined
+                      }
                       inputMode="decimal"
                       autoComplete="off"
                       value={values.values[period] ?? ""}
