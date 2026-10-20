@@ -732,6 +732,7 @@ describe("WRITE_ALLOWLIST", () => {
         "api::poll.poll",
         "api::course.course",
         "api::lesson.lesson",
+        "api::duty-plan.duty-plan",
       ].sort(),
     );
   });
@@ -887,7 +888,17 @@ const QUICK_LINK = "api::quick-link.quick-link";
 const DOCUMENT = "api::document.document";
 const POLL = "api::poll.poll";
 /** The authored types the attribute-coverage pin walks (the wiki since batch 16). */
-const V2_UIDS = [ANNOUNCEMENT, EVENT, QUICK_LINK, DOCUMENT, POLL, WIKI_SPACE_UID, WIKI_PAGE_UID];
+const DUTY_PLAN = "api::duty-plan.duty-plan";
+const V2_UIDS = [
+  ANNOUNCEMENT,
+  EVENT,
+  QUICK_LINK,
+  DOCUMENT,
+  POLL,
+  WIKI_SPACE_UID,
+  WIKI_PAGE_UID,
+  DUTY_PLAN,
+];
 
 const ENG_DOC = "deng00000000000000000000";
 const SALES_DOC = "dsal00000000000000000000";

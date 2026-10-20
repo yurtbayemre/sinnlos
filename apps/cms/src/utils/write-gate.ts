@@ -1,6 +1,6 @@
 import type { WikiEditorClass } from "@sinnlos/domain";
 import { errors } from "@strapi/utils";
-import { DEPARTMENT_AUTHOR_ROLES, MODERATORS, STAFF_ROLES, hasRole } from "../bootstrap/roles";
+import { MODERATORS, STAFF_ROLES, hasRole } from "../bootstrap/roles";
 import {
   ANNOUNCEMENT_UID,
   AUTHORED_UIDS,
@@ -8,10 +8,12 @@ import {
   LESSON_UID,
   DEPARTMENT_AUTHORED_UIDS,
   DOCUMENT_UID,
+  DUTY_PLAN_UID,
   EVENT_UID,
   QUICK_LINK_UID,
   WIKI_PAGE_UID,
   WIKI_SPACE_UID,
+  departmentAuthorRolesOf,
 } from "./authoring-uids";
 import {
   authoringChecks,
@@ -45,7 +47,8 @@ import {
  *      of AUTHORED_UIDS or an unknown intent: no class;
  *   2. the role class (§B2, §N1): admin_role and editor are `moderator` on
  *      every authored type; a `department_head` (DEPARTMENT_AUTHOR_ROLES) is
- *      `departmentAuthor` on announcement, event and document only, and
+ *      `departmentAuthor` on announcement, event, document and duty plan, a
+ *      `team_lead` on duty plans only (departmentAuthorRolesOf), and
  *      only with a `user.department`, read per request with one query (the
  *      loader of can-edit-department.ts). Everyone else has none;
  *   3. a document intent (update, publish, unpublish, discardDraft,
@@ -183,6 +186,11 @@ export const AUTHORING_POPULATE: Readonly<Record<string, Record<string, unknown>
     departments: DEPARTMENT_REF,
     author: { select: ["id", "displayName", "username"] },
   },
+  [DUTY_PLAN_UID]: {
+    department: DEPARTMENT_REF,
+    ownerDepartment: DEPARTMENT_REF,
+    author: { select: ["id", "displayName", "username"] },
+  },
   [WIKI_SPACE_UID]: {
     allowedRoles: { select: ["id", "documentId", "type"] },
     department: DEPARTMENT_REF,
@@ -271,7 +279,8 @@ const relationIds = (value: unknown): number[] =>
  *   - every type: `ownerDepartment` is the department;
  *   - announcement: `department` is it; `team` null or a team of it;
  *     audience roles only staff role types (they only narrow);
- *   - event and document: `departments` exactly that one department.
+ *   - event and document: `departments` exactly that one department;
+ *   - duty plan: `department` is it.
  */
 export function rowInDepartmentScope(
   uid: string,
@@ -297,6 +306,7 @@ export function rowInDepartmentScope(
     const ids = relationIds(row.departments);
     return ids.length === 1 && ids[0] === department.id;
   }
+  if (uid === DUTY_PLAN_UID) return relationId(row.department) === department.id;
   return false;
 }
 
@@ -337,9 +347,8 @@ export function roleClassFor(
   uid: string,
 ): AuthoringRoleClass | null {
   if (hasRole(user, MODERATORS)) return MODERATOR_CLASS;
-  if (hasRole(user, DEPARTMENT_AUTHOR_ROLES) && DEPARTMENT_AUTHORED_UIDS.includes(uid)) {
-    return DEPARTMENT_AUTHOR_CLASS;
-  }
+  // Department heads on every department-authored type, team leads on duty plans.
+  if (hasRole(user, departmentAuthorRolesOf(uid))) return DEPARTMENT_AUTHOR_CLASS;
   return null;
 }
 
@@ -375,6 +384,9 @@ export function scopeClassifier(
 
 const toIso = (value: unknown): unknown => (value instanceof Date ? value.toISOString() : value);
 
+/** JSON attributes holding lists of objects: kept as stored, never read as relations. */
+const JSON_LISTS: ReadonlySet<string> = new Set(["quiz", "shiftTemplates", "shifts"]);
+
 /**
  * A stored row as the allowlist reads it: scalars as stored (instants as
  * ISO-Z), to-one relations as a documentId or null, to-many relations as
@@ -390,7 +402,7 @@ export function normaliseRow(row: AuthoringRow | null): Record<string, unknown> 
             .map((role) => (isRecord(role) ? role.type : null))
             .filter((type): type is string => typeof type === "string")
         : [];
-    } else if (key !== "quiz" && Array.isArray(value) && value.every(isRecord)) {
+    } else if (!JSON_LISTS.has(key) && Array.isArray(value) && value.every(isRecord)) {
       out[key] = value
         .map((entry) => entry.documentId)
         .filter((id): id is string => typeof id === "string");

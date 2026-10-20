@@ -507,10 +507,11 @@ describe.each(testEngines())("wiki revisions are closed on %s", (engine) => {
       // batch 15.1"): the five wiki-revision actions stay managed, now as
       // revocations, so the drift check covered 142 actions; batch 16 adds
       // 13 wiki actions and 2 learner actions; batch 17 adds 4 training core
-      // actions, 10 training authoring actions, 2 org reads and activity: 174.
+      // actions, 10 training authoring actions, 2 org reads and activity: 174;
+      // v0.18 adds 10 duty-plan actions (5 core, 5 authoring): 184.
       expect(lines).toEqual([
         "info [bootstrap] revoked 18 obsolete permission(s)",
-        "info [bootstrap] permission drift: none (report-only check of 174 managed actions)",
+        "info [bootstrap] permission drift: none (report-only check of 184 managed actions)",
       ]);
       expect(
         await t.strapi.db

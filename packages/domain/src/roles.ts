@@ -1,3 +1,5 @@
+import type { AuthoringType } from "./authoring/fields.js";
+
 /**
  * The intranet role vocabulary (roadmap B02): the users-permissions role
  * types the cms bootstrap seeds and the role sets its policies, controllers
@@ -58,6 +60,28 @@ export const MODERATORS: readonly RoleType[] = [ADMIN, "editor"];
  * request. Without a department they author nothing (fail closed).
  */
 export const DEPARTMENT_AUTHOR_ROLES: readonly RoleType[] = ["department_head"];
+
+/**
+ * The department authors of duty plans (owner decision 2026-10-20): team
+ * leads maintain the shift plans of their department too. Only for this
+ * type: DEPARTMENT_AUTHOR_ROLES stays the set for announcements, events and
+ * documents.
+ */
+export const DUTY_PLAN_AUTHOR_ROLES: readonly RoleType[] = ["department_head", "team_lead"];
+
+/**
+ * The role types that author each department-authored type for their own
+ * department: department heads, and for duty plans team leads too (owner
+ * decision 2026-10-20). Empty for the moderator-only types.
+ */
+export const DEPARTMENT_AUTHOR_ROLES_OF: Readonly<Record<AuthoringType, readonly RoleType[]>> = {
+  announcement: DEPARTMENT_AUTHOR_ROLES,
+  event: DEPARTMENT_AUTHOR_ROLES,
+  document: DEPARTMENT_AUTHOR_ROLES,
+  dutyPlan: DUTY_PLAN_AUTHOR_ROLES,
+  quickLink: [],
+  poll: [],
+};
 
 /**
  * The roles that may schedule a publish or an unpublish (`publishAt`,

@@ -1,6 +1,12 @@
 import { AUDIENCE_DEPARTMENTS } from "@sinnlos/domain";
 
-import { ANNOUNCEMENT_UID, DOCUMENT_UID, EVENT_UID, WIKI_PAGE_UID } from "./authoring-uids";
+import {
+  ANNOUNCEMENT_UID,
+  DOCUMENT_UID,
+  DUTY_PLAN_UID,
+  EVENT_UID,
+  WIKI_PAGE_UID,
+} from "./authoring-uids";
 import {
   advanceRevision,
   lockDocument,
@@ -151,6 +157,8 @@ export const DEPARTMENT_LINKED_DOCUMENTS: readonly { uid: string; attributes: st
   { uid: ANNOUNCEMENT_UID, attributes: ["department", "ownerDepartment"] },
   { uid: EVENT_UID, attributes: ["departments", "ownerDepartment"] },
   { uid: DOCUMENT_UID, attributes: ["departments", "ownerDepartment"] },
+  // A duty plan's departmentAuthor class (v0.18).
+  { uid: DUTY_PLAN_UID, attributes: ["department", "ownerDepartment"] },
   // The page's departmentHead class (batch 16, S16).
   { uid: WIKI_PAGE_UID, attributes: ["department"] },
 ];

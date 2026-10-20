@@ -7,6 +7,8 @@ import {
   announcementNeedsRetarget,
   eventNeedsRetarget,
   parseQuiz,
+  validateDutyShifts,
+  validateDutyTemplates,
   scopedNeedsRetarget,
   type AuthoringDocumentStatus,
   type AuthoringListRow,
@@ -28,6 +30,7 @@ import {
   DOCUMENT_UID,
   EVENT_UID,
   QUICK_LINK_UID,
+  DUTY_PLAN_UID,
   WIKI_PAGE_UID,
   WIKI_SPACE_UID,
 } from "./authoring-uids";
@@ -199,6 +202,16 @@ export const AUTHORING_SPECS: Readonly<Record<string, AuthoringSpec>> = {
     scheduled: true,
     unpublishScheduled: true,
     flagColumns: ["audience"],
+  },
+  [DUTY_PLAN_UID]: {
+    uid: DUTY_PLAN_UID,
+    type: "dutyPlan",
+    statusMode: AUTHORING_STATUS_MODES.dutyPlan,
+    labelField: "name",
+    authorField: "author",
+    scheduled: false,
+    unpublishScheduled: false,
+    flagColumns: [],
   },
   [POLL_UID]: {
     uid: POLL_UID,
@@ -737,6 +750,19 @@ export async function editableFields(
         needsRetarget: retarget,
         hasVotes: await pollHasVotes(strapi, rows.documentId),
       };
+    case DUTY_PLAN_UID: {
+      // The stored lists passed the lifecycle; anything else reads as empty.
+      const templates = validateDutyTemplates(draft.shiftTemplates);
+      const shifts = validateDutyShifts(draft.shifts);
+      return {
+        name: text(draft.name) ?? "",
+        note: text(draft.note),
+        department: documentIdOf(draft.department),
+        shiftTemplates: "error" in templates ? [] : templates.templates,
+        shifts: "error" in shifts ? [] : shifts.shifts,
+        ownerDepartment: ownerOf(draft),
+      };
+    }
     default:
       throw new Error(`authoring controller: no editable shape for ${uid}`);
   }

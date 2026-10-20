@@ -143,6 +143,7 @@ rules are in
 | `document`        | File library entry, company-wide or for selected departments                                                           |
 | `classified`      | Marketplace ad: 5 categories, up to 4 photos, listed for 30 days by default (at most 90)                               |
 | `quick-link`      | Dashboard link, company-wide or for selected departments; written at `/manage/quick-links` or in the admin             |
+| `duty-plan`       | Duty plan: who is on duty when (shift templates and shifts); written at `/manage/duty-plans`                           |
 | `course`          | Training course with ordered lessons, `mandatory` flag and completion mode; authoring API and Strapi panel             |
 | `lesson`          | One lesson: Markdown body, YouTube video, optional quiz                                                                |
 | `lesson-progress` | Completion receipt per user and lesson                                                                                 |
@@ -202,6 +203,7 @@ Content types: `C` = create, `R` = find + findOne, `U` = update,
 | `course`          | CRU          | CRU      | R                 | R           | R        | —       | R               |
 | `department`      | RU           | R        | RU                | R           | R        | —       | R               |
 | `document`        | CRUD         | CRUD     | CRU               | R           | R        | R       | R               |
+| `duty-plan`       | CRUD         | CRUD     | CRU               | CRU         | R        | —       | R               |
 | `event`           | CRUD         | CRUD     | CRU               | R           | R        | R       | R               |
 | `event-rsvp`      | CRUD         | CRU      | CRU               | CRU         | CRU      | —       | CRU             |
 | `kudos`           | CRD          | CRD      | CR                | CR          | CR       | —       | CR              |
@@ -249,6 +251,11 @@ Custom actions and plugin routes (`✓` = granted, `—` = not granted):
 | `api::document.document.discardDraft`           | `POST /api/documents/:id/discard-draft`         | ✓            | ✓        | ✓                 | —           | —        | —       | —               |
 | `api::document.document.authoringList`          | `GET /api/documents/authoring`                  | ✓            | ✓        | ✓                 | —           | —        | —       | —               |
 | `api::document.document.editable`               | `GET /api/documents/:id/editable`               | ✓            | ✓        | ✓                 | —           | —        | —       | —               |
+| `api::duty-plan.duty-plan.publish`              | `POST /api/duty-plans/:id/publish`              | ✓            | ✓        | ✓                 | ✓           | —        | —       | —               |
+| `api::duty-plan.duty-plan.unpublish`            | `POST /api/duty-plans/:id/unpublish`            | ✓            | ✓        | ✓                 | ✓           | —        | —       | —               |
+| `api::duty-plan.duty-plan.discardDraft`         | `POST /api/duty-plans/:id/discard-draft`        | ✓            | ✓        | ✓                 | ✓           | —        | —       | —               |
+| `api::duty-plan.duty-plan.authoringList`        | `GET /api/duty-plans/authoring`                 | ✓            | ✓        | ✓                 | ✓           | —        | —       | —               |
+| `api::duty-plan.duty-plan.editable`             | `GET /api/duty-plans/:id/editable`              | ✓            | ✓        | ✓                 | ✓           | —        | —       | —               |
 | `api::quick-link.quick-link.publish`            | `POST /api/quick-links/:id/publish`             | ✓            | ✓        | —                 | —           | —        | —       | —               |
 | `api::quick-link.quick-link.unpublish`          | `POST /api/quick-links/:id/unpublish`           | ✓            | ✓        | —                 | —           | —        | —       | —               |
 | `api::quick-link.quick-link.discardDraft`       | `POST /api/quick-links/:id/discard-draft`       | ✓            | ✓        | —                 | —           | —        | —       | —               |

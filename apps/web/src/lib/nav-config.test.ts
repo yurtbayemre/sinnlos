@@ -93,6 +93,7 @@ describe("navItemsFor", () => {
   const hrefs = (role: string | null) => navItemsFor(role).map((item) => item.href);
   const EVERYONE = ["/", "/people", "/events", "/wiki", "/polls", "/documents"];
   const READ_GATED = [
+    "/duties",
     "/training",
     "/departments",
     "/teams",
@@ -101,21 +102,18 @@ describe("navItemsFor", () => {
     "/marketplace",
   ];
 
-  it.each(["admin_role", "editor", "department_head"])(
-    "gives %s every entry, /manage included (batch 15)",
+  it.each(["admin_role", "editor", "department_head", "team_lead"])(
+    "gives %s every entry, /manage included (batch 15; team leads for duty plans, v0.18)",
     (role) => {
       expect(hrefs(role)).toEqual(NAV_ITEMS.map((item) => item.href));
     },
   );
 
-  it.each(["team_lead", "member", "authenticated"])(
-    "gives %s every section but /manage",
-    (role) => {
-      expect(hrefs(role)).toEqual(
-        NAV_ITEMS.map((item) => item.href).filter((href) => href !== "/manage"),
-      );
-    },
-  );
+  it.each(["member", "authenticated"])("gives %s every section but /manage", (role) => {
+    expect(hrefs(role)).toEqual(
+      NAV_ITEMS.map((item) => item.href).filter((href) => href !== "/manage"),
+    );
+  });
 
   it("hides from a guest the sections it cannot read", () => {
     expect(hrefs("guest").sort()).toEqual([...EVERYONE].sort());

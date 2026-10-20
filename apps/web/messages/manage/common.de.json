@@ -36,6 +36,10 @@
     "courses": {
       "title": "Schulungen",
       "description": "Kurse, Lektionen und Quizze erstellen, planen und veröffentlichen."
+    },
+    "dutyPlans": {
+      "title": "Zuständigkeiten",
+      "description": "Dienstpläne: wer wann zuständig ist, zum Beispiel Schlüsseldienst oder Schichtleitung."
     }
   },
   "counts": {

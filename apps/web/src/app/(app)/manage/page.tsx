@@ -8,6 +8,7 @@ import {
   ClipboardCheck,
   ExternalLink,
   FileText,
+  CalendarClock,
   GraduationCap,
   Link2,
   Lock,
@@ -48,6 +49,7 @@ const AREA_ICONS: Readonly<Record<Exclude<ManageArea, "lessons">, LucideIcon>> =
   documents: FileText,
   wiki: BookOpen,
   courses: GraduationCap,
+  dutyPlans: CalendarClock,
 };
 
 const ROLE_COLORS = [

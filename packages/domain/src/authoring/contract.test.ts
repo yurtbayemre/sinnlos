@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { DEPARTMENT_AUTHOR_ROLES_OF } from "../roles.js";
 
 import {
   AUTHORING_CODES,
@@ -91,13 +92,14 @@ describe("codes", () => {
 });
 
 describe("field lists per class (§N6)", () => {
-  it("covers the five types; department authors only on announcement, event, document", () => {
+  it("covers the six types; department authors only on announcement, event, document, duty plan", () => {
     expect([...AUTHORING_TYPES]).toEqual([
       "announcement",
       "event",
       "quickLink",
       "document",
       "poll",
+      "dutyPlan",
     ]);
     for (const type of AUTHORING_TYPES) {
       expect(AUTHORING_FIELDS[type].moderator, type).toBeDefined();
@@ -186,10 +188,23 @@ describe("route table (§B3)", () => {
       quickLink: "quick-links",
       document: "documents",
       poll: "polls",
+      dutyPlan: "duty-plans",
     });
     expect(AUTHORING_STATUS_MODES.poll).toBe("alwaysPublished");
-    for (const type of ["announcement", "event", "quickLink", "document"] as const) {
+    for (const type of ["announcement", "event", "quickLink", "document", "dutyPlan"] as const) {
       expect(AUTHORING_STATUS_MODES[type]).toBe("explicit");
+    }
+  });
+
+  it("lets team leads author duty plans only, next to department heads (owner decision 2026-10-20)", () => {
+    expect([...DEPARTMENT_AUTHOR_ROLES_OF.dutyPlan]).toEqual(["department_head", "team_lead"]);
+    for (const type of ["announcement", "event", "document"] as const) {
+      expect([...DEPARTMENT_AUTHOR_ROLES_OF[type]], type).toEqual(["department_head"]);
+    }
+    for (const type of AUTHORING_TYPES) {
+      expect(DEPARTMENT_AUTHOR_ROLES_OF[type].length > 0, type).toBe(
+        DEPARTMENT_AUTHORED_TYPES.includes(type),
+      );
     }
   });
 

@@ -28,6 +28,7 @@
 import {
   AUTHENTICATED,
   DEPARTMENT_AUTHOR_ROLES,
+  DUTY_PLAN_AUTHOR_ROLES,
   MODERATORS,
   ROLE_PRIVILEGE_ORDER,
   SCHEDULER_ROLES,
@@ -127,6 +128,9 @@ export const TRAINING_ROLES: ReadonlySet<string> = roleSet(...STAFF_AND_FALLBACK
 /** department.find and team.find: the org pages. */
 export const ORG_READER_ROLES: ReadonlySet<string> = roleSet(...STAFF_AND_FALLBACK);
 
+/** duty-plan.find (v0.18): every staff role and `authenticated`; guests none. */
+export const DUTY_READER_ROLES: ReadonlySet<string> = roleSet(...STAFF_AND_FALLBACK);
+
 /** kudos.find: the kudos wall. */
 export const KUDOS_READER_ROLES: ReadonlySet<string> = roleSet(...STAFF_AND_FALLBACK);
 
@@ -219,7 +223,8 @@ export type ReadSection =
   | "kudos"
   | "celebrations"
   | "marketplace"
-  | "training";
+  | "training"
+  | "duties";
 
 export const READ_SECTIONS: Readonly<Record<ReadSection, ReadonlySet<string>>> = Object.freeze({
   announcements: ANNOUNCEMENT_READER_ROLES,
@@ -230,6 +235,7 @@ export const READ_SECTIONS: Readonly<Record<ReadSection, ReadonlySet<string>>> =
   celebrations: CELEBRATION_ROLES,
   marketplace: AD_READER_ROLES,
   training: TRAINING_ROLES,
+  duties: DUTY_READER_ROLES,
 });
 
 /** Fail-closed like every gate: only a listed role reads the section. */
@@ -262,7 +268,8 @@ export type AuthoringArea =
   | "documents"
   | "wikiSpaces"
   | "courses"
-  | "lessons";
+  | "lessons"
+  | "dutyPlans";
 
 export type AuthoringVerb =
   "create" | "edit" | "publish" | "unpublish" | "schedule" | "discard" | "delete";
@@ -279,6 +286,7 @@ export const AUTHORING_AREAS: readonly AuthoringArea[] = [
   "wikiSpaces",
   "courses",
   "lessons",
+  "dutyPlans",
 ];
 
 export interface Capabilities {
@@ -336,6 +344,8 @@ const MODERATOR_AUTHORING: Readonly<Record<AuthoringArea, readonly AuthoringVerb
   wikiSpaces: ["create", "edit", "delete"],
   courses: ["create", "edit", "publish", "unpublish", "schedule", "discard"],
   lessons: ["create", "edit", "publish", "unpublish", "schedule", "discard"],
+  // Duty plans (v0.18) have no schedule: a shift list is live data.
+  dutyPlans: ["create", "edit", "publish", "unpublish", "discard", "delete"],
 };
 
 /**
@@ -353,6 +363,7 @@ const DEPARTMENT_AUTHOR_AUTHORING: Readonly<
   announcements: ["create", "edit", "publish", "unpublish", "discard"],
   events: ["create", "edit", "publish", "unpublish", "discard"],
   documents: ["create", "edit", "publish", "unpublish", "discard"],
+  dutyPlans: ["create", "edit", "publish", "unpublish", "discard"],
 };
 
 /** wiki-page create: moderators, department heads and team leads. */
@@ -374,6 +385,20 @@ const MODERATOR_ROLES: ReadonlySet<string> = roleSet(...MODERATORS);
 /** The department authors (amendment 1, §N1): role only, the department is checked per page. */
 const DEPARTMENT_AUTHOR_ROLE_SET: ReadonlySet<string> = roleSet(...DEPARTMENT_AUTHOR_ROLES);
 
+/**
+ * Who department-authors each area: department heads, and on duty plans
+ * team leads too (owner decision 2026-10-20, @sinnlos/domain
+ * DEPARTMENT_AUTHOR_ROLES_OF). An area without an entry has none.
+ */
+const DEPARTMENT_AUTHOR_ROLES_BY_AREA: Readonly<
+  Partial<Record<AuthoringArea, ReadonlySet<string>>>
+> = {
+  announcements: DEPARTMENT_AUTHOR_ROLE_SET,
+  events: DEPARTMENT_AUTHOR_ROLE_SET,
+  documents: DEPARTMENT_AUTHOR_ROLE_SET,
+  dutyPlans: roleSet(...DUTY_PLAN_AUTHOR_ROLES),
+};
+
 /** The roles that may schedule (`publishAt`, `unpublishAt`; §D rule 1, §L2). */
 const SCHEDULER_ROLE_SET: ReadonlySet<string> = roleSet(...SCHEDULER_ROLES);
 
@@ -384,14 +409,17 @@ const SCHEDULER_ROLE_SET: ReadonlySet<string> = roleSet(...SCHEDULER_ROLES);
 export function capabilitiesFor(role: Role): Capabilities {
   const admin = isAdmin(role);
   const moderator = hasRole(MODERATOR_ROLES, role);
-  const departmentAuthor = !moderator && hasRole(DEPARTMENT_AUTHOR_ROLE_SET, role);
   const scheduler = hasRole(SCHEDULER_ROLE_SET, role);
   const author = {} as Record<AuthoringArea, ReadonlySet<AuthoringVerb>>;
   const authorScope = {} as Record<AuthoringArea, AuthoringScope | null>;
+  let departmentAuthor = false;
   for (const area of AUTHORING_AREAS) {
+    const areaAuthor =
+      !moderator && hasRole(DEPARTMENT_AUTHOR_ROLES_BY_AREA[area] ?? new Set<string>(), role);
+    departmentAuthor ||= areaAuthor;
     const granted = moderator
       ? MODERATOR_AUTHORING[area]
-      : departmentAuthor
+      : areaAuthor
         ? (DEPARTMENT_AUTHOR_AUTHORING[area] ?? [])
         : [];
     // `schedule` is `update` plus SCHEDULER_ROLES (§L2): never for department authors.

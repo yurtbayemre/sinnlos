@@ -34,6 +34,7 @@ export const POLL = "api::poll.poll";
 export const DEPARTMENT = "api::department.department";
 export const TEAM = "api::team.team";
 export const WIKI_PAGE = "api::wiki-page.wiki-page";
+export const DUTY_PLAN = "api::duty-plan.duty-plan";
 
 interface LinkSpec {
   table: string;
@@ -43,6 +44,18 @@ interface LinkSpec {
 
 /** The link tables the hooks read, per content type and relation. */
 export const LINK_TABLES: Record<string, Record<string, LinkSpec>> = {
+  [DUTY_PLAN]: {
+    department: {
+      table: "duty_plans_department_lnk",
+      rowColumn: "duty_plan_id",
+      targetColumn: "department_id",
+    },
+    ownerDepartment: {
+      table: "duty_plans_owner_department_lnk",
+      rowColumn: "duty_plan_id",
+      targetColumn: "department_id",
+    },
+  },
   [ANNOUNCEMENT]: {
     department: {
       table: "announcements_department_lnk",

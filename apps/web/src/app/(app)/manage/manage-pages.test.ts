@@ -99,17 +99,18 @@ beforeEach(() => {
 });
 
 describe("the /manage shell", () => {
-  it.each(["member", "team_lead", "guest", "authenticated"])("sends %s home", async (role) => {
+  it.each(["member", "guest", "authenticated"])("sends %s home", async (role) => {
     viewerRef.current = viewer(role);
     expect(await redirectOf(() => ManageLayout({ children: null }))).toBe("/");
     expect(await redirectOf(() => ManagePage())).toBe("/");
   });
 
-  it("opens to moderators and department heads, with the flash region", async () => {
+  it("opens to moderators, department heads and team leads, with the flash region", async () => {
     for (const current of [
       viewer("editor"),
       viewer("admin_role"),
       viewer("department_head", ENG),
+      viewer("team_lead", ENG),
     ]) {
       viewerRef.current = current;
       const tree = elements(await ManageLayout({ children: "child" }));
@@ -119,7 +120,7 @@ describe("the /manage shell", () => {
 });
 
 describe("the landing", () => {
-  it("an editor: the seven area tiles, no reports and no Strapi links", async () => {
+  it("an editor: the eight area tiles, no reports and no Strapi links", async () => {
     const tree = elements(await ManagePage());
     expect(tileHrefs(tree).sort()).toEqual(
       [
@@ -130,6 +131,7 @@ describe("the landing", () => {
         "/manage/documents",
         "/manage/wiki",
         "/manage/training",
+        "/manage/duty-plans",
       ].sort(),
     );
     expect(hrefs(tree)).not.toContain("/manage/analytics");
@@ -150,12 +152,13 @@ describe("the landing", () => {
     expect(hrefs(tree).some((href) => href.includes("/admin/content-manager"))).toBe(true);
   });
 
-  it("a department head: announcements, events and documents only (§L1), never the wiki", async () => {
+  it("a department head: announcements, events, documents and duty plans only (§L1), never the wiki", async () => {
     viewerRef.current = viewer("department_head", ENG);
     const tree = elements(await ManagePage());
     expect(tileHrefs(tree).sort()).toEqual([
       "/manage/announcements",
       "/manage/documents",
+      "/manage/duty-plans",
       "/manage/events",
     ]);
     // Their counts come from their own lists; the wiki's page list is never asked.
@@ -166,11 +169,13 @@ describe("the landing", () => {
     expect(publishedOnly(paths)).toEqual([
       "/api/announcements/authoring?status=published",
       "/api/documents/authoring?status=published",
+      "/api/duty-plans/authoring?status=published",
       "/api/events/authoring?status=published",
     ]);
     expect(publishedOnly(hrefs(tree))).toEqual([
       "/manage/announcements?status=published",
       "/manage/documents?status=published",
+      "/manage/duty-plans?status=published",
       "/manage/events?status=published",
     ]);
   });
@@ -199,17 +204,19 @@ describe("the landing", () => {
         "/api/quick-links/authoring?status=published",
         "/api/wiki-pages/authoring?status=published",
         "/api/courses/authoring?status=published",
+        "/api/duty-plans/authoring?status=published",
       ].sort(),
     );
     const publishedCounts = tree.filter(
       (el) => el.type === StatCount && (el.props.count as { value: number }).value === 5,
     );
-    expect(publishedCounts).toHaveLength(7);
+    expect(publishedCounts).toHaveLength(8);
     // Polls have no status tabs and the wiki lists spaces: those counts are no link.
     const countLinks = hrefs(tree).filter((href) => href.includes("?status="));
     expect(publishedOnly(countLinks)).toEqual([
       "/manage/announcements?status=published",
       "/manage/documents?status=published",
+      "/manage/duty-plans?status=published",
       "/manage/events?status=published",
       "/manage/quick-links?status=published",
       "/manage/training?status=published",
@@ -384,11 +391,13 @@ describe("the documents area (batch 16, lane 16C)", () => {
     ).rejects.toMatchObject({ digest: expect.stringContaining("404") });
   });
 
-  it("members, team leads and guests are sent home; the area itself refuses them", async () => {
-    for (const role of ["member", "team_lead", "guest"]) {
+  it("members and guests are sent home, team leads back to /manage; the area itself refuses them", async () => {
+    for (const role of ["member", "guest"]) {
       viewerRef.current = viewer(role);
       expect(await redirectOf(() => NewDocumentPage())).toBe("/");
     }
+    viewerRef.current = viewer("team_lead", ENG);
+    expect(await redirectOf(() => NewDocumentPage())).toBe("/manage");
   });
 });
 
@@ -396,17 +405,20 @@ describe("the wiki area (batch 16, lane 16C)", () => {
   const SPACE = "spce00000000000000000001";
   const searchParams = Promise.resolve({});
 
-  it("department heads go back to /manage; members, team leads and guests home", async () => {
+  it("department heads and team leads go back to /manage; members and guests home", async () => {
     viewerRef.current = viewer("department_head", ENG);
     expect(await redirectOf(() => ManageWikiPage({ searchParams }))).toBe("/manage");
     expect(await redirectOf(() => NewWikiSpacePage())).toBe("/manage");
     expect(
       await redirectOf(() => ManageWikiSpacePage({ params: Promise.resolve({ space: SPACE }) })),
     ).toBe("/manage");
-    for (const role of ["member", "team_lead", "guest"]) {
+    for (const role of ["member", "guest"]) {
       viewerRef.current = viewer(role);
       expect(await redirectOf(() => ManageWikiPage({ searchParams }))).toBe("/");
     }
+    // Team leads have /manage for their duty plans (v0.18), not the wiki area.
+    viewerRef.current = viewer("team_lead", ENG);
+    expect(await redirectOf(() => ManageWikiPage({ searchParams }))).toBe("/manage");
     expect(strapiMock).not.toHaveBeenCalled();
   });
 

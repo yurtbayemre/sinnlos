@@ -53,6 +53,7 @@ const DRAFT_AND_PUBLISH: Readonly<Record<string, boolean>> = {
   // infra/migrations/org-dp/migrate.sql.
   "api::department.department": false,
   "api::document.document": true,
+  "api::duty-plan.duty-plan": true,
   "api::event.event": true,
   "api::event-rsvp.event-rsvp": false,
   "api::kudos.kudos": false,

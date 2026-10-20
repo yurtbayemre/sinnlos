@@ -11,6 +11,7 @@ import {
   TEAM,
   WIKI_PAGE,
   deleteHost,
+  DUTY_PLAN,
 } from "./targeting-flags.test.helper";
 import {
   ANNOUNCEMENT_TARGETING,
@@ -416,6 +417,16 @@ describe("delete-hook helpers", () => {
         },
         { id: 2, documentId: "doc-b", audience: "all", departments: [], publishedAt: null },
       ],
+      // Duty plans (v0.18): the department decides the head's and the lead's class.
+      [DUTY_PLAN]: [
+        {
+          id: 1,
+          documentId: "duty-a",
+          department: { id: ENG },
+          ownerDepartment: { id: ENG },
+          publishedAt: null,
+        },
+      ],
       // Wiki pages (batch 16): the department decides the head's class, the team the lead's.
       [WIKI_PAGE]: [
         { id: 1, documentId: "wiki-a", department: { id: ENG }, publishedAt: null },
@@ -463,6 +474,7 @@ describe("delete-hook helpers", () => {
       { uid: ANNOUNCEMENT, documentId: "ann-a" },
       { uid: ANNOUNCEMENT, documentId: "ann-b" },
       { uid: DOCUMENT, documentId: "doc-a" },
+      { uid: DUTY_PLAN, documentId: "duty-a" },
       { uid: EVENT, documentId: "ev-a" },
       { uid: EVENT, documentId: "ev-b" },
       { uid: EVENT, documentId: "ev-c" },
@@ -490,6 +502,7 @@ describe("delete-hook helpers", () => {
       [ANNOUNCEMENT]: many,
       [EVENT]: [],
       [DOCUMENT]: [],
+      [DUTY_PLAN]: [],
       [WIKI_PAGE]: [],
     });
     const reads: unknown[] = [];

@@ -23,6 +23,7 @@ import type manageWiki from "../messages/manage/wiki.en.json";
 import type manageTraining from "../messages/manage/training.en.json";
 import type manageOrg from "../messages/manage/org.en.json";
 import type manageActivity from "../messages/manage/activity.en.json";
+import type manageDutyPlans from "../messages/manage/dutyPlans.en.json";
 import type { Locale as AppLocale } from "@/i18n/locale";
 
 /**
@@ -40,6 +41,7 @@ interface ManageMessages {
   training: typeof manageTraining;
   org: typeof manageOrg;
   activity: typeof manageActivity;
+  dutyPlans: typeof manageDutyPlans;
 }
 
 declare module "next-intl" {

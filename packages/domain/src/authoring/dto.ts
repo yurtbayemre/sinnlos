@@ -184,6 +184,21 @@ export interface QuickLinkEditable extends EditableBase {
   scheduleError: string | null;
 }
 
+/**
+ * A duty plan (v0.18): its shift templates and shifts as the cms stores them
+ * (the shapes of duty.ts DutyShiftTemplate and DutyShift, spelled out: this
+ * module imports siblings only).
+ */
+export interface DutyPlanEditable extends EditableBase {
+  name: string;
+  note: string | null;
+  /** The department (documentId), or null for a company-wide plan. */
+  department: string | null;
+  shiftTemplates: { label: string; start: string; end: string }[];
+  shifts: { userId: number; startsAt: string; endsAt: string }[];
+  ownerDepartment: OwnerDepartment | null;
+}
+
 export interface DocumentEditable extends EditableBase {
   title: string;
   description: string | null;
@@ -434,6 +449,7 @@ export type ActivityTargetUid =
   | "api::quick-link.quick-link"
   | "api::document.document"
   | "api::poll.poll"
+  | "api::duty-plan.duty-plan"
   | "api::wiki-space.wiki-space"
   | "api::wiki-page.wiki-page"
   | "api::course.course"

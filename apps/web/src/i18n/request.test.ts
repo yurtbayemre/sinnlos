@@ -72,6 +72,7 @@ describe("i18n request config", () => {
         "announcements",
         "common",
         "documents",
+        "dutyPlans",
         "events",
         "org",
         "polls",

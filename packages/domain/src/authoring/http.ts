@@ -64,6 +64,7 @@ export const AUTHORING_PATHS: Readonly<Record<AuthoringType, string>> = {
   quickLink: "quick-links",
   document: "documents",
   poll: "polls",
+  dutyPlan: "duty-plans",
 };
 
 /** How a type's create and update treat `?status=` (§B3 step 3). */
@@ -75,6 +76,7 @@ export const AUTHORING_STATUS_MODES: Readonly<Record<AuthoringType, AuthoringSta
   quickLink: "explicit",
   document: "explicit",
   poll: "alwaysPublished",
+  dutyPlan: "explicit",
 };
 
 /** The authoring intents of the table above. */
@@ -107,6 +109,7 @@ export const AUTHORING_INTENTS: Readonly<Record<AuthoringType, readonly Authorin
   quickLink: EVERY_INTENT,
   document: EVERY_INTENT,
   poll: ["create", "update", "delete", "authoringList", "editable"],
+  dutyPlan: EVERY_INTENT,
 };
 
 /** One route of the table: method and path below `/api` (`:documentId` as written). */

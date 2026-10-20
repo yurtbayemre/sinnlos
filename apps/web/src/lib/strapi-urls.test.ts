@@ -227,6 +227,7 @@ const API_READS: Record<string, () => Promise<unknown>> = {
   "classifieds.mine": () => api.classifieds.mine(7),
   "classifieds.one": () => api.classifieds.one("12"),
   "quickLinks.list": () => api.quickLinks.list(),
+  "dutyPlans.list": () => api.dutyPlans.list(),
   celebrations: () => api.celebrations(),
 };
 

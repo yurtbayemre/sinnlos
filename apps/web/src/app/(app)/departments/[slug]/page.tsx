@@ -15,6 +15,7 @@ import { OrgDescription } from "@/components/org-description";
 import { buttonVariants } from "@/components/ui/button";
 import { canEditOrg } from "@/lib/manage/org-access";
 import { SectionUnavailablePage } from "@/components/section-unavailable";
+import { DutiesNowSection } from "@/components/duties/duty-lists";
 
 interface Props {
   params: Promise<{ slug: string }>;
@@ -141,6 +142,9 @@ export default async function DepartmentPage({ params }: Props) {
           </CardContent>
         </Card>
       </section>
+
+      {/* The department's duty plans (v0.18); nothing when it has none. */}
+      <DutiesNowSection department={slug} />
 
       <section>
         <h2 className="mb-3 text-lg font-semibold">{t("members")}</h2>

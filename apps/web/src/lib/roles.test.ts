@@ -31,6 +31,7 @@ import {
   KNOWN_ROLES,
   KUDOS_READER_ROLES,
   ORG_READER_ROLES,
+  DUTY_READER_ROLES,
   POLL_CREATOR_ROLES,
   READ_SECTIONS,
   REACTOR_ROLES,
@@ -202,6 +203,7 @@ describe("read sections", () => {
     celebrations: [CELEBRATION_ROLES, STAFF],
     marketplace: [AD_READER_ROLES, STAFF_AND_FALLBACK],
     training: [TRAINING_ROLES, STAFF_AND_FALLBACK],
+    duties: [DUTY_READER_ROLES, STAFF_AND_FALLBACK],
   };
 
   it("lists exactly these sections, each with its role set", () => {
@@ -283,11 +285,13 @@ describe("capabilitiesFor", () => {
     }
   });
 
-  it("opens /manage to moderators and department heads, the reports to admin_role only (§L1)", () => {
+  it("opens /manage to moderators, department heads and team leads, the reports to admin_role only (§L1)", () => {
     for (const role of ALL_ROLES) {
       const caps = capabilitiesFor(role);
       const admin = role === "admin_role";
-      expect(caps.manage, role).toBe(["admin_role", "editor", "department_head"].includes(role));
+      expect(caps.manage, role).toBe(
+        ["admin_role", "editor", "department_head", "team_lead"].includes(role),
+      );
       expect(caps.reports, role).toEqual({
         analytics: admin,
         acknowledgements: admin,
@@ -305,7 +309,11 @@ describe("capabilitiesFor", () => {
         const verbs = caps.author[area];
         if (["admin_role", "editor"].includes(role)) {
           expect(caps.authorScope[area], `${role} ${area}`).toBe(verbs.size > 0 ? "any" : null);
-        } else if (role === "department_head" && departmentAreas.includes(area)) {
+        } else if (
+          (role === "department_head" && departmentAreas.includes(area)) ||
+          // Duty plans (v0.18): department heads and team leads, their own department.
+          (["department_head", "team_lead"].includes(role) && area === "dutyPlans")
+        ) {
           expect(caps.authorScope[area], `${role} ${area}`).toBe("ownDepartment");
           expect([...verbs].sort(), `${role} ${area}`).toEqual(
             ["create", "discard", "edit", "publish", "unpublish"].sort(),

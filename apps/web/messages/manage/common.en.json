@@ -36,6 +36,10 @@
     "courses": {
       "title": "Training",
       "description": "Create courses, lessons and quizzes; schedule and publish them."
+    },
+    "dutyPlans": {
+      "title": "Responsibilities",
+      "description": "Duty plans: who is responsible when, for example key service or shift lead."
     }
   },
   "counts": {

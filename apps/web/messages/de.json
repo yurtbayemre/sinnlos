@@ -43,6 +43,7 @@
     "news": "News",
     "marketplace": "Kleinanzeigen",
     "training": "Schulungen",
+    "duties": "Zuständigkeiten",
     "more": "Mehr",
     "moreSections": "Weitere Bereiche"
   },
@@ -574,5 +575,20 @@
     "emptyHint": "Veröffentlichte Kurse mit Pflicht-Flag erscheinen hier mit ihrer Abschlussquote.",
     "completedOf": "{done} von {total} abgeschlossen",
     "updatedAt": "Stand {date}"
+  },
+  "duties": {
+    "title": "Zuständigkeiten",
+    "description": "Wer gerade und in den nächsten Tagen zuständig ist.",
+    "now": "Jetzt zuständig",
+    "today": "Heute",
+    "notStaffed": "nicht besetzt",
+    "until": "bis {time}",
+    "unknownPerson": "Unbekannte Person",
+    "allDepartments": "Alle Abteilungen",
+    "filter": "Nach Abteilung filtern",
+    "empty": "Noch keine Dienstpläne veröffentlicht.",
+    "loadFailed": "Die Zuständigkeiten konnten gerade nicht geladen werden.",
+    "noShifts": "Keine Schichten.",
+    "viewAll": "Alle Zuständigkeiten"
   }
 }

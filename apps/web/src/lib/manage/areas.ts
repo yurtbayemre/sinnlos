@@ -12,6 +12,7 @@ export const MANAGE_AREAS = [
   "documents",
   "wiki",
   "courses",
+  "dutyPlans",
 ] as const;
 
 export type ManageArea = (typeof MANAGE_AREAS)[number] | "lessons";
@@ -29,6 +30,7 @@ export const AREA_CAPABILITY: Readonly<Record<ManageArea, AuthoringArea>> = {
   wiki: "wikiSpaces",
   courses: "courses",
   lessons: "lessons",
+  dutyPlans: "dutyPlans",
 };
 
 /** The K7 authored type behind each typed area. */
@@ -40,6 +42,7 @@ export const AREA_TYPE: Readonly<Record<TypedArea, AuthoringType | TrainingAutho
   documents: "document",
   courses: "course",
   lessons: "lesson",
+  dutyPlans: "dutyPlan",
 };
 
 /** The list page of each area (the wiki: its spaces). */
@@ -52,6 +55,7 @@ export const AREA_PATH: Readonly<Record<ManageArea, Route>> = {
   wiki: "/manage/wiki",
   courses: "/manage/training",
   lessons: "/manage/training",
+  dutyPlans: "/manage/duty-plans",
 };
 
 /** The create page of each area (the wiki: a new space). */
@@ -64,6 +68,7 @@ export const AREA_NEW_PATH: Readonly<Record<ManageArea, Route>> = {
   wiki: "/manage/wiki/new",
   courses: "/manage/training/new",
   lessons: "/manage/training",
+  dutyPlans: "/manage/duty-plans/new",
 };
 
 /** The page of one item: its editor (the wiki: the space's page tree). */
@@ -101,6 +106,7 @@ export const SCHEDULE_FIELDS: Readonly<
   wiki: ["publishAt"],
   courses: ["publishAt"],
   lessons: ["publishAt"],
+  dutyPlans: [],
 };
 
 /**
@@ -114,8 +120,10 @@ export function notifiesOnPublish(area: ManageArea): boolean {
 
 /**
  * Areas that carry an owner department and the department-author class
- * (§N2): announcements, events and documents.
+ * (§N2): announcements, events, documents and duty plans.
  */
 export function hasOwnerDepartment(area: TypedArea): boolean {
-  return area === "announcements" || area === "events" || area === "documents";
+  return (
+    area === "announcements" || area === "events" || area === "documents" || area === "dutyPlans"
+  );
 }

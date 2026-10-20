@@ -43,6 +43,7 @@
     "news": "News",
     "marketplace": "Marketplace",
     "training": "Training",
+    "duties": "Responsibilities",
     "more": "More",
     "moreSections": "More sections"
   },
@@ -574,5 +575,20 @@
     "emptyHint": "Published courses flagged as mandatory will appear here with their completion rate.",
     "completedOf": "{done} of {total} completed",
     "updatedAt": "As of {date}"
+  },
+  "duties": {
+    "title": "Responsibilities",
+    "description": "Who is on duty now and in the next days.",
+    "now": "On duty now",
+    "today": "Today",
+    "notStaffed": "not staffed",
+    "until": "until {time}",
+    "unknownPerson": "Unknown person",
+    "allDepartments": "All departments",
+    "filter": "Filter by department",
+    "empty": "No duty plans published yet.",
+    "loadFailed": "The responsibilities could not be loaded right now.",
+    "noShifts": "No shifts.",
+    "viewAll": "All responsibilities"
   }
 }
