@@ -11,7 +11,7 @@ export default factories.createCoreController("api::lesson.lesson", ({ strapi })
     if (!ctx.state.user) return ctx.unauthorized();
     if (Object.keys(ctx.query ?? {}).length) return ctx.badRequest("Query parameters not allowed");
     ctx.set("Cache-Control", "private, no-store");
-    const lesson = await loadPublishedLesson(strapi, ctx.params.id);
+    const lesson = await loadPublishedLesson(strapi, ctx.params.id, ctx.state.user);
     if (!lesson) return ctx.notFound("Lesson not available");
     const validated = validateStoredQuiz(lesson.quiz);
     if ("error" in validated) {
@@ -53,7 +53,7 @@ export default factories.createCoreController("api::lesson.lesson", ({ strapi })
       !("answers" in body.data)
     )
       return ctx.badRequest("Expected data.answers only");
-    const lesson = await loadPublishedLesson(strapi, ctx.params.id);
+    const lesson = await loadPublishedLesson(strapi, ctx.params.id, ctx.state.user);
     if (!lesson) return ctx.notFound("Lesson not available");
     const result = checkStoredQuiz(
       lesson.quiz,

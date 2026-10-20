@@ -272,6 +272,22 @@ export function visibleIdsPolicy<Config = unknown>(
 /** The `audience` value that keeps a department-scoped row restricted (FX29 residual). */
 export const DEPARTMENTS_AUDIENCE = "departments";
 
+/** The caller's department row id, read from the database; undefined without one. */
+export async function callerDepartmentId(
+  strapi: PolicyStrapi,
+  user: { id: number } | null,
+): Promise<number | undefined> {
+  if (!user) return undefined;
+  const me = await strapi.db.query("plugin::users-permissions.user").findOne({
+    where: { id: user.id },
+    select: ["id"],
+    populate: { department: { select: ["id"] } },
+  });
+  const department = isRecord(me) ? me.department : null;
+  const id = isRecord(department) ? department.id : undefined;
+  return typeof id === "number" ? id : undefined;
+}
+
 /**
  * Loader for types scoped by a `departments` (manyToMany) relation
  * (document, quick-link): a row without departments is company-wide, every
@@ -298,17 +314,7 @@ export async function departmentScopedIds({
   user,
   uid,
 }: VisibleIdsInput<unknown>): Promise<number[]> {
-  let departmentId: number | undefined;
-  if (user) {
-    const me = await strapi.db.query("plugin::users-permissions.user").findOne({
-      where: { id: user.id },
-      select: ["id"],
-      populate: { department: { select: ["id"] } },
-    });
-    const department = isRecord(me) ? me.department : null;
-    const id = isRecord(department) ? department.id : undefined;
-    departmentId = typeof id === "number" ? id : undefined;
-  }
+  const departmentId = await callerDepartmentId(strapi, user);
 
   const rows = await strapi.db.query(uid).findMany({
     select: ["id", "audience"],

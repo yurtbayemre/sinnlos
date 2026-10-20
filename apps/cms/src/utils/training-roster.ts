@@ -48,7 +48,7 @@ const rows = (value: unknown): Record<string, any>[] =>
   Array.isArray(value) ? value.filter(isRecord) : [];
 
 /** Instants come back as Date or ISO string depending on the engine. */
-const toIso = (value: unknown): string | null =>
+export const toIso = (value: unknown): string | null =>
   value instanceof Date ? value.toISOString() : typeof value === "string" ? value : null;
 
 /** Published courses (mandatory only by default), with published lessons. */

@@ -88,6 +88,7 @@ const DEPARTMENT_UID = "api::department.department";
 export const DEPARTMENT_SCOPED_TYPES = [
   { uid: "api::document.document", label: "document" },
   { uid: "api::quick-link.quick-link", label: "quick-link" },
+  { uid: "api::course.course", label: "course" },
 ] as const;
 
 /** Ids per page and per `$in` of the department and link lookups. */

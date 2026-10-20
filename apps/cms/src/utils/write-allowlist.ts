@@ -3,6 +3,7 @@ import {
   DOCUMENT_CATEGORIES,
   MAX_POLL_OPTION_LENGTH,
   MAX_TARGET_DEPARTMENTS,
+  MAX_VALIDITY_MONTHS,
   QUICK_LINK_CATEGORIES,
   validateQuiz,
   youtubeVideoId,
@@ -688,9 +689,17 @@ const COURSE_MODERATOR: WriteRule = {
     description: value(checkMarkdown),
     mandatory: value(checkBoolean),
     completionMode: value(checkEnum(["confirm", "quizGate", "exam"])),
+    validityMonths: value((raw) =>
+      raw === null ||
+      (typeof raw === "number" && Number.isInteger(raw) && raw >= 1 && raw <= MAX_VALIDITY_MONTHS)
+        ? null
+        : "invalid",
+    ),
+    departments: toMany("departments"),
     coverImage: media("ownUpload"),
     publishAt: value(checkNullableInstant),
   },
+  derivedFromMerged: { audience: DEPARTMENTS_FLAG },
   crossCheck: scheduledCrossCheck,
   readinessWhenScheduled: true,
 };
@@ -1110,6 +1119,7 @@ export const REFUSED_ATTRIBUTES: Readonly<Record<string, Readonly<Record<string,
   [COURSE_UID]: {
     slug: "derived from title on create; fixed afterwards",
     lessons: "inverse relation: a lesson names its course",
+    audience: "derived targeting flag (derivedFromMerged, contract K10)",
     scheduleError: "scheduler bookkeeping",
   },
   [LESSON_UID]: { scheduleError: "scheduler bookkeeping" },

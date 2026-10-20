@@ -28,10 +28,12 @@ interface ContentRow {
 
 const DOCUMENT = "api::document.document";
 const QUICK_LINK = "api::quick-link.quick-link";
+const COURSE = "api::course.course";
 
 const LINKS: Record<string, { table: string; column: string }> = {
   [DOCUMENT]: { table: "documents_departments_lnk", column: "document_id" },
   [QUICK_LINK]: { table: "quick_links_departments_lnk", column: "quick_link_id" },
+  [COURSE]: { table: "courses_departments_lnk", column: "course_id" },
 };
 
 const metadataOf = (uid: string) => ({
@@ -75,6 +77,7 @@ function host(
   let tables: Record<string, ContentRow[]> = clone({
     [DOCUMENT]: initial[DOCUMENT] ?? [],
     [QUICK_LINK]: initial[QUICK_LINK] ?? [],
+    [COURSE]: initial[COURSE] ?? [],
   });
   const linkRows = (uid: string) => {
     const rows: Array<Record<string, number>> = [];
@@ -138,7 +141,7 @@ function host(
 }
 
 describe("backfillDepartmentAudience", () => {
-  it("flags every row that links a department, of both types, and nothing else", async () => {
+  it("flags every row that links a department, of every type, and nothing else", async () => {
     const { strapi, log, transaction, audiences } = host({
       [DOCUMENT]: [
         // A document's draft and published row, NULL from the first boot.
@@ -197,6 +200,11 @@ describe("backfillDepartmentAudience", () => {
         where: { id: { $gt: 0 } },
         limit: DEPARTMENT_DELETE_PAGE,
       },
+      {
+        table: "courses_departments_lnk",
+        where: { id: { $gt: 0 } },
+        limit: DEPARTMENT_DELETE_PAGE,
+      },
     ]);
     expect(updates).toEqual([{ uid: DOCUMENT, ids: [1] }]);
     expect(log.info).not.toHaveBeenCalled();
@@ -226,7 +234,7 @@ describe("backfillDepartmentAudience", () => {
       { failUpdateOf: QUICK_LINK },
     );
     await expect(backfillDepartmentAudience(strapi)).rejects.toThrow(
-      /^\[department-audience\] could not backfill the audience of documents and quick links \(deadlock detected\); nothing was changed .*the cms does not start/,
+      /^\[department-audience\] could not backfill the audience of documents, quick links and courses \(deadlock detected\); nothing was changed .*the cms does not start/,
     );
     // The document written before the failure is rolled back too.
     expect(audiences(DOCUMENT)).toEqual([[1, null]]);
