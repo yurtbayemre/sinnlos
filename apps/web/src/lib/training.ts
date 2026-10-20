@@ -15,9 +15,10 @@ import { walkAllPages, type WalkResult } from "@/lib/paginate";
 /**
  * Training data helpers (issue #29): the page walks, their caps and the
  * result shaping; each request is one function of lib/api/training.ts
- * (WD01). Every response is per-user: courses and lessons are status-gated
- * per role (admin/editor see drafts) and progress is strictly the caller's
- * own. Uncached like every strapi() read (D-DC01).
+ * (WD01). Every response is per-user: courses and lessons are status- and
+ * audience-gated per role (admin/editor see drafts) and progress is
+ * strictly the caller's own; the named report is the cms's
+ * /api/courses/report (v0.20). Uncached like every strapi() read (D-DC01).
  */
 
 export async function fetchCourses(): Promise<{ courses: CourseView[]; truncated: boolean }> {
