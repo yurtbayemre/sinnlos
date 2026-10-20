@@ -143,6 +143,7 @@ rules are in
 | `document`        | File library entry, company-wide or for selected departments                                                           |
 | `classified`      | Marketplace ad: 5 categories, up to 4 photos, listed for 30 days by default (at most 90)                               |
 | `quick-link`      | Dashboard link, company-wide or for selected departments; written at `/manage/quick-links` or in the admin             |
+| `duty-plan`       | Duty plan: who is on duty when (shift templates and shifts); written at `/manage/duty-plans`                           |
 | `course`          | Training course with ordered lessons, `mandatory` flag and completion mode; authoring API and Strapi panel             |
 | `lesson`          | One lesson: Markdown body, YouTube video, optional quiz                                                                |
 | `lesson-progress` | Completion receipt per user and lesson                                                                                 |

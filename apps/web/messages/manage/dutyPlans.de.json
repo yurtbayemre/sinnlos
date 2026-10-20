@@ -50,7 +50,7 @@
       "custom": "Eigene Zeiten",
       "start": "Beginn",
       "end": "Ende",
-      "nextDay": "Folgetag",
+      "endDay": "Endet am",
       "empty": "Noch keine Schichten.",
       "peopleFailed": "Das Personenverzeichnis konnte nicht geladen werden. Vorhandene Schichten bleiben erhalten.",
       "overlap": "Überschneidung: {first} und {second} sind gleichzeitig eingeteilt. Das ist erlaubt, prüfen Sie es aber bitte.",

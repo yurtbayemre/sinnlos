@@ -461,7 +461,7 @@ export function DutyPlanEditor({
                         />
                       )}
                     </Field>
-                    <Field id={`${rowId}-endDay`} label={t("fields.shifts.end")}>
+                    <Field id={`${rowId}-endDay`} label={t("fields.shifts.endDay")}>
                       {(a11y) => (
                         <input
                           {...a11y}

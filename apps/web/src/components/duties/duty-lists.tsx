@@ -121,30 +121,35 @@ export async function DutyDayList({
     .filter((row) => row.shifts.length > 0);
   if (rows.length === 0) return <p className="text-sm text-muted-foreground">{t("noShifts")}</p>;
   return (
-    <ul className="divide-y">
-      {await Promise.all(
-        rows.map(async ({ plan, shifts }) => (
-          <li
-            key={plan.documentId}
-            className="flex flex-wrap items-start justify-between gap-x-4 gap-y-1 py-3"
-          >
-            <PlanName plan={plan} />
-            <div className="space-y-0.5 text-sm sm:text-right">
-              {await Promise.all(
-                shifts.map(async (shift, i) => (
-                  <p key={i}>
-                    <span className="tabular-nums text-muted-foreground">
-                      {await timeLabel(shift.startsAt, day)}–{await timeLabel(shift.endsAt, day)}
-                    </span>{" "}
-                    <Person userId={shift.userId} people={people} />
-                  </p>
-                )),
-              )}
-            </div>
-          </li>
-        )),
-      )}
-    </ul>
+    <Card>
+      <CardContent className="py-1">
+        <ul className="divide-y">
+          {await Promise.all(
+            rows.map(async ({ plan, shifts }) => (
+              <li
+                key={plan.documentId}
+                className="flex flex-wrap items-start justify-between gap-x-4 gap-y-1 py-3"
+              >
+                <PlanName plan={plan} />
+                <div className="space-y-0.5 text-sm sm:text-right">
+                  {await Promise.all(
+                    shifts.map(async (shift, i) => (
+                      <p key={i}>
+                        <span className="tabular-nums text-muted-foreground">
+                          {await timeLabel(shift.startsAt, day)}–
+                          {await timeLabel(shift.endsAt, day)}
+                        </span>{" "}
+                        <Person userId={shift.userId} people={people} />
+                      </p>
+                    )),
+                  )}
+                </div>
+              </li>
+            )),
+          )}
+        </ul>
+      </CardContent>
+    </Card>
   );
 }
 

@@ -110,11 +110,7 @@ export default async function DutiesPage({
                       month: "long",
                     })}
               </h2>
-              <Card>
-                <CardContent className="py-1">
-                  <DutyDayList plans={plans} people={view.people} day={day} />
-                </CardContent>
-              </Card>
+              <DutyDayList plans={plans} people={view.people} day={day} />
             </section>
           ))}
         </>

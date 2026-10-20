@@ -50,7 +50,7 @@
       "custom": "Own times",
       "start": "Start",
       "end": "End",
-      "nextDay": "next day",
+      "endDay": "Ends on",
       "empty": "No shifts yet.",
       "peopleFailed": "The directory could not be loaded. Existing shifts are kept.",
       "overlap": "Overlap: {first} and {second} are on duty at the same time. That is allowed, but please check it.",
