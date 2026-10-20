@@ -269,7 +269,7 @@ describe.each(testEngines())("authoring wiki spaces on %s", (engine) => {
     await syncRolePermissions({ db: host.db, apis: host.apis, plugins: host.plugins, log });
     expect(lines).toEqual([
       "[bootstrap] granted 52 permission(s) across intranet roles",
-      "[bootstrap] permission drift: none (report-only check of 194 managed actions)",
+      "[bootstrap] permission drift: none (report-only check of 196 managed actions)",
     ]);
 
     if (engine !== "postgres") return;
