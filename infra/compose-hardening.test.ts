@@ -3,11 +3,12 @@
  * (batch 10, lane 5A):
  *   1. every service logs through the json-file driver with rotation
  *      (IN05), so a chatty container cannot fill the host's disk;
- *   2. the internal URLs use the unique aliases sinnlos-db, sinnlos-cms and
- *      sinnlos-web, defined on the project's own network only (IN04);
+ *   2. the internal URLs use the unique aliases sinnlos-db, sinnlos-cms,
+ *      sinnlos-web and sinnlos-meili, defined on the project's own network
+ *      only (IN04);
  *   3. every service runs with no-new-privileges and memory, CPU and pid
- *      limits (caddy since FX33), and cms and web drop every Linux
- *      capability (IN02, cms part);
+ *      limits (caddy since FX33), and cms, web and the optional meili
+ *      (v0.21) drop every Linux capability (IN02, cms part);
  *   4. the cms gets CRON_ENABLED (default true) for its cron registry
  *      (LF03) and runs without Strapi telemetry (B05).
  *
@@ -23,7 +24,7 @@ const COMPOSE = readFileSync(new URL("./docker-compose.yml", import.meta.url), "
   "\n",
 );
 
-const SERVICES = ["db", "cms", "web", "caddy"] as const;
+const SERVICES = ["db", "cms", "web", "meili", "caddy"] as const;
 
 /**
  * The lines of a top-level block (`x-logging: …`) or a service block
@@ -65,7 +66,12 @@ describe("compose logging (IN05)", () => {
 
 describe("internal service names (IN04)", () => {
   /** service → its alias on the project's own (default) network */
-  const ALIASES = { db: "sinnlos-db", cms: "sinnlos-cms", web: "sinnlos-web" } as const;
+  const ALIASES = {
+    db: "sinnlos-db",
+    cms: "sinnlos-cms",
+    web: "sinnlos-web",
+    meili: "sinnlos-meili",
+  } as const;
 
   it.each(Object.entries(ALIASES))(
     "%s has the alias %s on the default network",
@@ -122,8 +128,9 @@ describe("container hardening (IN02, FX33)", () => {
     }
   });
 
-  // The two app containers need no Linux capability at all.
-  it.each(["cms", "web"])("%s drops every capability", (service) => {
+  // The two app containers need no Linux capability at all, nor does the
+  // optional Meilisearch (root in its container, files it owns only).
+  it.each(["cms", "web", "meili"])("%s drops every capability", (service) => {
     const lines = block(`  ${service}:`);
     const drop = lines.indexOf("    cap_drop:");
     expect(drop, `${service} cap_drop`).toBeGreaterThanOrEqual(0);

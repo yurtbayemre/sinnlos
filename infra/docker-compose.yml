@@ -171,6 +171,13 @@ services:
       # Digest language for a user whose profile has none (en or de,
       # default en like the web's DEFAULT_LOCALE; AC04).
       DIGEST_DEFAULT_LOCALE: ${DIGEST_DEFAULT_LOCALE:-en}
+      # Optional search ranking (v0.21, docs/DEPLOYMENT.md "Meilisearch
+      # (optional search)"): off unless MEILISEARCH_ENABLED=1. The cms keeps
+      # the index sinnlos_search current with the write key; it never gets
+      # the master key.
+      MEILISEARCH_ENABLED: ${MEILISEARCH_ENABLED:-0}
+      MEILISEARCH_URL: ${MEILISEARCH_URL:-http://sinnlos-meili:7700}
+      MEILISEARCH_WRITE_KEY: ${MEILISEARCH_WRITE_KEY:-}
       # Shared secret guarding the raw /uploads bytes (issue #21, K1): the cms
       # uploads-auth middleware only serves /uploads to callers presenting this
       # token, i.e. the web session-gate proxy — closing the /api/../uploads
@@ -261,6 +268,13 @@ services:
       LIVE_EVENTS_DISABLED: ${LIVE_EVENTS_DISABLED:-0}
       # Shared secret the /uploads proxy route sends to cms (issue #21, K1).
       INTERNAL_UPLOAD_TOKEN: ${INTERNAL_UPLOAD_TOKEN:?INTERNAL_UPLOAD_TOKEN must be set - openssl rand -hex 32, same value for cms and web}
+      # Optional search ranking (v0.21): off unless MEILISEARCH_ENABLED=1.
+      # The web asks Meilisearch (search-only key, server side) for ranked
+      # candidates and reads them through Strapi with the user's JWT; on any
+      # Meilisearch error it uses its own search.
+      MEILISEARCH_ENABLED: ${MEILISEARCH_ENABLED:-0}
+      MEILISEARCH_URL: ${MEILISEARCH_URL:-http://sinnlos-meili:7700}
+      MEILISEARCH_SEARCH_KEY: ${MEILISEARCH_SEARCH_KEY:-}
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/ || exit 1"]
       interval: 15s
@@ -270,6 +284,47 @@ services:
     mem_limit: 512m
     cpus: 1.0
     pids_limit: 256
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+  # Optional search ranking (v0.21, docs/DEPLOYMENT.md "Meilisearch
+  # (optional search)"): runs only with COMPOSE_PROFILES=search in
+  # infra/.env. It ranks search candidates; Strapi still decides who reads
+  # what, and the web falls back to its own search while it is off, down or
+  # empty, so cms and web do not depend on it. The index is rebuilt from the
+  # database (no backup needed). MEILI_MASTER_KEY stays in this container:
+  # the cms and the web get restricted keys (infra/meilisearch/provision-keys.sh).
+  # Runs as root (the image has no user and /meili_data is root's), with no
+  # Linux capability at all.
+  meili:
+    image: getmeili/meilisearch:v1.54.3@sha256:e68913ab7d6f5b159529e472cfd362ce3c741fafd3c127961b2142abbe41b3c9
+    profiles: ["search"]
+    restart: unless-stopped
+    logging: *default-logging
+    # Unique DNS name on the project network only (IN04); see cms above.
+    networks:
+      default:
+        aliases:
+          - sinnlos-meili
+    environment:
+      MEILI_MASTER_KEY: ${MEILI_MASTER_KEY:-}
+      MEILI_ENV: production
+      MEILI_NO_ANALYTICS: "true"
+      MEILI_MAX_INDEXING_MEMORY: 256MiB
+      MEILI_MAX_INDEXING_THREADS: "1"
+    volumes:
+      - meili_data:/meili_data
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:7700/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    mem_limit: 512m
+    cpus: 1.0
+    pids_limit: 128
     security_opt:
       - no-new-privileges:true
     cap_drop:
@@ -305,3 +360,4 @@ volumes:
   cms_uploads:
   caddy_data:
   caddy_config:
+  meili_data:
