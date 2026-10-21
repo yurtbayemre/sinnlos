@@ -2,6 +2,7 @@ import type { Core } from "@strapi/strapi";
 import {
   INDEXED_SEARCH_KINDS,
   SEARCH_BUILD_INDEX_UID,
+  SEARCH_INDEX_SETTINGS,
   SEARCH_INDEX_UID,
   meilisearchEnabled,
   type IndexedSearchKind,
@@ -44,7 +45,6 @@ const SOURCES: Readonly<Record<IndexedSearchKind, Source>> = {
   poll: { uid: "api::poll.poll", title: "question", text: [] },
 };
 
-const SETTINGS = { searchableAttributes: ["title", "text"], filterableAttributes: ["kind"] };
 const TASK_TIMEOUT_MS = 30_000;
 const PUBLISHED = { publishedAt: { $notNull: true } };
 
@@ -158,12 +158,17 @@ async function meili(
   return (await res.json()) as Record<string, unknown>;
 }
 
-/** Waits for an enqueued Meilisearch task; a failed or slow task throws. */
+/**
+ * Waits for an enqueued Meilisearch task; a failed or slow task throws,
+ * except a failure with the code `tolerate` (deleting an index that is not
+ * there is accepted with 202 and fails later with index_not_found).
+ */
 async function settle(
   config: MeiliConfig,
   fetchImpl: Fetch,
   enqueued: Record<string, unknown> | null,
   sleep: (ms: number) => Promise<void>,
+  tolerate?: string,
 ): Promise<void> {
   const taskUid = enqueued?.taskUid;
   if (typeof taskUid !== "number") return;
@@ -173,6 +178,7 @@ async function settle(
     if (task?.status === "succeeded") return;
     if (task?.status === "failed" || task?.status === "canceled") {
       const error = (task.error as { code?: string } | undefined)?.code ?? task.status;
+      if (error === tolerate) return;
       throw new Error(`[search] task ${taskUid} ${String(error)}`);
     }
     if (Date.now() > deadline) throw new Error(`[search] task ${taskUid} did not finish`);
@@ -189,13 +195,21 @@ export async function rebuildSearchIndex(
 ): Promise<number> {
   const call = (method: string, path: string, body?: unknown, allowMissing = false) =>
     meili(config, fetchImpl, method, path, body, allowMissing);
-  const run = async (method: string, path: string, body?: unknown, allowMissing = false) =>
-    settle(config, fetchImpl, await call(method, path, body, allowMissing), sleep);
+  const run = async (method: string, path: string, body?: unknown) =>
+    settle(config, fetchImpl, await call(method, path, body), sleep);
+  const dropBuild = async () =>
+    settle(
+      config,
+      fetchImpl,
+      await call("DELETE", `/indexes/${SEARCH_BUILD_INDEX_UID}`, undefined, true),
+      sleep,
+      "index_not_found",
+    );
 
   const documents = await loadSearchDocuments(strapi);
-  await run("DELETE", `/indexes/${SEARCH_BUILD_INDEX_UID}`, undefined, true);
+  await dropBuild();
   await run("POST", "/indexes", { uid: SEARCH_BUILD_INDEX_UID, primaryKey: "id" });
-  await run("PATCH", `/indexes/${SEARCH_BUILD_INDEX_UID}/settings`, SETTINGS);
+  await run("PATCH", `/indexes/${SEARCH_BUILD_INDEX_UID}/settings`, SEARCH_INDEX_SETTINGS);
   if (documents.length)
     await run("POST", `/indexes/${SEARCH_BUILD_INDEX_UID}/documents`, documents);
   // A swap needs both indexes: the very first rebuild creates an empty live one.
@@ -203,7 +217,7 @@ export async function rebuildSearchIndex(
     await run("POST", "/indexes", { uid: SEARCH_INDEX_UID, primaryKey: "id" });
   }
   await run("POST", "/swap-indexes", [{ indexes: [SEARCH_INDEX_UID, SEARCH_BUILD_INDEX_UID] }]);
-  await run("DELETE", `/indexes/${SEARCH_BUILD_INDEX_UID}`, undefined, true);
+  await dropBuild();
   return documents.length;
 }
 

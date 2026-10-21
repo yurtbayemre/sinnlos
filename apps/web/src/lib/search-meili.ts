@@ -12,8 +12,8 @@
 import "server-only";
 import {
   INDEXED_SEARCH_KINDS,
-  SEARCH_INDEX_UID,
   meilisearchEnabled,
+  searchIndexQueries,
   type IndexedSearchKind,
 } from "@sinnlos/domain";
 
@@ -53,16 +53,7 @@ export async function meiliCandidates(
     const res = await fetchImpl(`${meili.url}/multi-search`, {
       method: "POST",
       headers: { Authorization: `Bearer ${meili.key}`, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        queries: INDEXED_SEARCH_KINDS.map((kind) => ({
-          indexUid: SEARCH_INDEX_UID,
-          q: term,
-          filter: `kind = "${kind}"`,
-          limit: MEILI_CANDIDATES,
-          attributesToRetrieve: ["documentId"],
-          matchingStrategy: "all",
-        })),
-      }),
+      body: JSON.stringify({ queries: searchIndexQueries(term, MEILI_CANDIDATES) }),
       signal: AbortSignal.timeout(TIMEOUT_MS),
       cache: "no-store",
     });

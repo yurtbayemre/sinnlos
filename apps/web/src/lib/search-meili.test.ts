@@ -80,7 +80,6 @@ describe("meiliCandidates", () => {
       filter: 'kind = "announcement"',
       limit: MEILI_CANDIDATES,
       attributesToRetrieve: ["documentId"],
-      matchingStrategy: "all",
     });
   });
 

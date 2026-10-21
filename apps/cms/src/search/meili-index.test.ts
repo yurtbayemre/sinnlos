@@ -117,8 +117,10 @@ function fakeMeili(options: { liveExists?: boolean; failTask?: string } = {}) {
   const calls: string[] = [];
   const bodies: Record<string, unknown> = {};
   let liveExists = options.liveExists ?? false;
+  let buildExists = false;
   let task = 0;
   const tasks = new Map<number, string>();
+  const failed = new Map<number, string>();
   const json = (status: number, body: unknown) =>
     new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
   const fetchImpl = vi.fn(async (url: string | URL, init?: RequestInit) => {
@@ -127,6 +129,7 @@ function fakeMeili(options: { liveExists?: boolean; failTask?: string } = {}) {
     expect((init?.headers as Record<string, string>).Authorization).toBe("Bearer w");
     if (method === "GET" && path.startsWith("/tasks/")) {
       const uid = Number(path.split("/")[2]);
+      if (failed.has(uid)) return json(200, { status: "failed", error: { code: failed.get(uid) } });
       return json(200, { status: tasks.get(uid) === options.failTask ? "failed" : "succeeded" });
     }
     calls.push(`${method} ${path}`);
@@ -142,6 +145,14 @@ function fakeMeili(options: { liveExists?: boolean; failTask?: string } = {}) {
       liveExists = true;
     }
     tasks.set(++task, `${method} ${path}`);
+    if (method === "POST" && path === "/indexes" && String(init?.body).includes("_build")) {
+      buildExists = true;
+    }
+    if (method === "DELETE" && path === "/indexes/sinnlos_search_build") {
+      // Like Meilisearch: accepted, then the task fails when the index is not there.
+      if (!buildExists) failed.set(task, "index_not_found");
+      buildExists = false;
+    }
     return json(202, { taskUid: task });
   });
   return { fetchImpl: fetchImpl as unknown as typeof fetch, calls, bodies };
@@ -186,6 +197,7 @@ describe("rebuildSearchIndex", () => {
     expect(meili.bodies["PATCH /indexes/sinnlos_search_build/settings"]).toEqual({
       searchableAttributes: ["title", "text"],
       filterableAttributes: ["kind"],
+      localizedAttributes: [{ attributePatterns: ["*"], locales: ["deu"] }],
     });
   });
 

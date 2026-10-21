@@ -33,6 +33,36 @@ export interface SearchIndexDocument {
   text: string;
 }
 
+/**
+ * The index settings. German segmentation for every field: it splits
+ * compound words ("Antrag" finds "Urlaubsantrag", "Stapler" finds
+ * "Gabelstapler"), and English still matches; measured on a German corpus
+ * 2026-10-21 (deep-dive plan-meilisearch.md: 23 of 25 against 17 with the
+ * automatic language detection). "Mueller" for "Müller" and "Strasse" for a
+ * compound with "straße" stay unfound.
+ */
+export const SEARCH_INDEX_SETTINGS = {
+  searchableAttributes: ["title", "text"],
+  filterableAttributes: ["kind"],
+  localizedAttributes: [{ attributePatterns: ["*"], locales: ["deu"] }],
+};
+
+/**
+ * The multi-search the web sends: one query per indexed kind, the ranked
+ * documentIds only. Meilisearch's default matching strategy ("last") drops
+ * trailing words when all of them match nothing, so "Führerschein Stapler"
+ * still finds the forklift licence.
+ */
+export function searchIndexQueries(term: string, limit: number) {
+  return INDEXED_SEARCH_KINDS.map((kind) => ({
+    indexUid: SEARCH_INDEX_UID,
+    q: term,
+    filter: `kind = "${kind}"`,
+    limit,
+    attributesToRetrieve: ["documentId"],
+  }));
+}
+
 /** Whether the env switches Meilisearch on: exactly "1", anything else is off. */
 export function meilisearchEnabled(env: Record<string, string | undefined>): boolean {
   return env.MEILISEARCH_ENABLED === "1";
