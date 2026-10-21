@@ -306,9 +306,10 @@ syncDepartment=<0|1> syncManager=<0|1> ttl=<ttl> local=<0|1>`.
   get their e-mail from Entra, unless another account uses that address.
 - **Department** and **manager** only with `ENTRA_SYNC_DEPARTMENT=1` /
   `ENTRA_SYNC_MANAGER=1` (table above).
-- **Blocking** a user in the admin panel takes effect on their next request
-  (Strapi refuses a blocked user's JWT) and refuses their next sign-in
-  (*entra_blocked*). Offboarding in Entra takes effect at the latest when
+- **Blocking** a user at `/manage/users` (since v0.23; it also raises the
+  token version, so old JWTs stay dead after an unblock) or in the admin
+  panel takes effect on their next request (Strapi refuses a blocked user's
+  JWT) and refuses their next sign-in (*entra_blocked*). Offboarding in Entra takes effect at the latest when
   the session ends (`ENTRA_SESSION_TTL`).
 
 ### Staging dry-run, then on

@@ -323,7 +323,10 @@ Custom actions and plugin routes (`✓` = granted, `—` = not granted):
 <!-- custom-action-grants:end -->
 
 The anonymous `public` role holds none of these, and the cms revokes the
-users-permissions forgot/reset-password endpoints from it. What the grants
+users-permissions forgot/reset-password endpoints from it. The plugin's
+generic user writes (`user.create`, `user.update`, `user.destroy`) are
+revoked for every role, `public` included (v0.23): users are changed through
+the user administration only. What the grants
 mean in practice (immutable read receipts, ownership gates, removed core
 routes, the deliberate `guest` exceptions, why every role reads users, the
 upload hardening) is in
@@ -463,7 +466,9 @@ instance runs.
 - **Accounts:** create users in the Strapi admin (**Content Manager →
   User**: e-mail, password, _confirmed_ on), or let people register on the
   sign-in page with `LOCAL_REGISTRATION=1` in **both** `apps/cms/.env` and
-  `apps/web/.env.local`. New local users get the `member` role.
+  `apps/web/.env.local`. New local users get the `member` role. Role,
+  department, manager and blocking are then managed in the web at
+  `/manage/users` (admins).
 - **Passwords:** users change their own on `/profile`, which signs that
   account out of every other browser and device (the tab that changed it
   stays signed in). There is no e-mail reset: the forgot/reset-password
@@ -880,7 +885,8 @@ Roles and access:
       their department
 - [ ] An admin and an editor see the _Manage_ link and `/manage` with the
       announcement, event, poll, quick-link, document and wiki areas (an
-      admin also the reports); a department head with a department sees
+      admin also the reports and the _Organisation_ section: departments,
+      teams and users); a department head with a department sees
       _Manage_ with announcements, events and documents of their department
       only; an editor sees _New poll_; a guest sees no RSVP controls and no
       _New ad_ button

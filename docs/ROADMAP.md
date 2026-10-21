@@ -12,6 +12,11 @@ Workvivo, Sociabble, Simpplr, MangoApps feature guides, June 2026).
 > shipped as optional Meilisearch in v0.21.0. 4.3 (AI assistant) is deferred
 > to after v1.0.0.
 >
+> **Done beyond this roadmap (2026-10):** duty rosters (v0.18), department
+> KPIs (v0.19), recurring safety training with renewal, reminders and a
+> named report (v0.20), and admin management of departments, teams (v0.22)
+> and users (v0.23) in the web instead of the Strapi admin.
+>
 > **Done beyond this roadmap (2026-09):** a full **training platform**
 > (courses + ordered lessons + per-user completion tracking + admin
 > report; admin-authored, YouTube-only videos behind a render gate,
