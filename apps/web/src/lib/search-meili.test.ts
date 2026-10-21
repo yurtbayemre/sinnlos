@@ -54,7 +54,7 @@ describe("meiliCandidates", () => {
   });
 
   it("sends one ranked query per indexed kind and returns the documentIds in order", async () => {
-    const fetchImpl = vi.fn(async (_url: string, _init: RequestInit) =>
+    const fetchImpl = vi.fn<(url: string, init: RequestInit) => Promise<Response>>(async () =>
       answer({
         results: [
           { hits: [{ documentId: "a2" }, { documentId: "a1" }] },
