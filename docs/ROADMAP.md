@@ -8,8 +8,9 @@ Workvivo, Sociabble, Simpplr, MangoApps feature guides, June 2026).
 > (analytics) are **implemented and live**. Each feature below carries a
 > status marker. **Status update (2026-09):** 2.2 Phase B (email digests)
 > and 2.4 (SSE/live updates) shipped 2026-09-01; 4.1 V2 is instrumented
-> (anonymous search analytics live — Meilisearch go/no-go once ~4 weeks of
-> data exist, ~October 2026). Still open: 4.3 (AI assistant).
+> (anonymous search analytics live). **Status update (2026-10):** 4.1 V2
+> shipped as optional Meilisearch in v0.21.0. 4.3 (AI assistant) is deferred
+> to after v1.0.0.
 >
 > **Done beyond this roadmap (2026-09):** a full **training platform**
 > (courses + ordered lessons + per-user completion tracking + admin
@@ -482,8 +483,9 @@ polls): see the README's content model section.
 `lib/search-action.ts`. Stage 1 of V2 is live: settled queries are logged
 anonymously (write-only `search-log`, term + result count), aggregated in
 the admin-only search section of `/manage/analytics`, 90-day retention
-cron. Meilisearch itself is deliberately NOT deployed — go/no-go once ~4
-weeks of data exist (~October 2026).
+cron. **V2 shipped in v0.21.0 (2026-10-21, #129):** optional Meilisearch
+behind `MEILISEARCH_ENABLED` (off by default); it only ranks, every hit is
+read through Strapi with the user's JWT. See docs/architecture.md §5.114.
 
 **V1 (no new infra):** route handler `GET /api/search?q=` fans out
 `filters[$containsi]` queries to announcements, wiki pages, documents, events,
@@ -518,7 +520,7 @@ lives at `/manage/analytics` and combines them with Strapi content stats.
 
 ### 4.3 AI assistant (exploratory — last)
 
-**Status: ⏳ open**
+**Status: ⏸ after v1.0.0** (decided 2026-10-21)
 
 - RAG over wiki + documents: nightly embed via Claude API, answer with
   citations in the search palette ("Ask Sinnlos").
@@ -530,15 +532,16 @@ lives at `/manage/analytics` and combines them with Strapi content stats.
 
 ## Suggested order & rough timeline
 
-| Sprint (≈1 wk) | Deliverables                                                                                                   |
-| -------------- | -------------------------------------------------------------------------------------------------------------- |
-| 1              | 1.1 Directory + org chart                                                                                      |
-| 2              | 1.2 Comments & reactions, 1.3 Recognition                                                                      |
-| 3              | 2.1 Events calendar, 2.3 Targeting                                                                             |
-| 4              | 2.2 Notifications (A then B)                                                                                   |
-| 5              | 3.1 Polls, 3.2 Documents                                                                                       |
-| 6              | 4.1 Search V1, 4.2 Analytics                                                                                   |
-| later          | ~~2.4 Live updates (SSE)~~ ✅ 2026-09, 4.1 V2 (Meilisearch — data-driven decision ~Oct 2026), 4.3 AI assistant |
+| Sprint (≈1 wk) | Deliverables                                                               |
+| -------------- | -------------------------------------------------------------------------- |
+| 1              | 1.1 Directory + org chart                                                  |
+| 2              | 1.2 Comments & reactions, 1.3 Recognition                                  |
+| 3              | 2.1 Events calendar, 2.3 Targeting                                         |
+| 4              | 2.2 Notifications (A then B)                                               |
+| 5              | 3.1 Polls, 3.2 Documents                                                   |
+| 6              | 4.1 Search V1, 4.2 Analytics                                               |
+| later          | ~~2.4 Live updates (SSE)~~ ✅ 2026-09, ~~4.1 V2 (Meilisearch)~~ ✅ v0.21.0 |
+| after v1.0.0   | 4.3 AI assistant                                                           |
 
 ## Cross-cutting checklist (applies to every feature)
 
