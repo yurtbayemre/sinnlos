@@ -89,6 +89,14 @@ export const AUTHORING_FIELD_CODES = [
   "parentCycle",
   /** A value another entry already has where it must be unique (a wiki space's `name`). */
   "taken",
+  /** User administration (v0.23): one's own role or blocked state. */
+  "selfChange",
+  /** User administration: it would leave no unblocked admin_role. */
+  "lastAdmin",
+  /** User administration: Entra's sync owns this field for this user. */
+  "entraManaged",
+  /** User administration: the manager would be the user or one of their reports. */
+  "managerCycle",
 ] as const;
 
 export type AuthoringFieldCode = (typeof AUTHORING_FIELD_CODES)[number];
@@ -103,6 +111,8 @@ export const AUTHORING_FORM_CODES = [
   "neverPublished",
   /** A wiki space delete while it still has pages (batch 16). */
   "spaceNotEmpty",
+  /** User administration: handing a role back to Entra for an account Entra does not sign in. */
+  "notEntraBound",
 ] as const;
 
 export type AuthoringFormCode = (typeof AUTHORING_FORM_CODES)[number];

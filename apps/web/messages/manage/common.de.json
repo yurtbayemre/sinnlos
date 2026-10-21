@@ -211,7 +211,12 @@
     "neverPublished": "Es gibt keine veröffentlichte Fassung, zu der zurückgekehrt werden kann; der Entwurf bleibt. Bitten Sie die Redaktion, ihn zu löschen, wenn er nicht mehr gebraucht wird.",
     "spaceNotEmpty": "Dieser Bereich enthält noch Seiten.",
     "timeRepeated": "Diese Uhrzeit gibt es an diesem Tag wegen der Zeitumstellung zweimal. Wählen Sie eine andere Uhrzeit.",
-    "timeSkipped": "Diese Uhrzeit gibt es an diesem Tag wegen der Zeitumstellung nicht. Wählen Sie eine andere Uhrzeit."
+    "timeSkipped": "Diese Uhrzeit gibt es an diesem Tag wegen der Zeitumstellung nicht. Wählen Sie eine andere Uhrzeit.",
+    "selfChange": "Die eigene Rolle und Sperre kann nur ein anderer Admin ändern.",
+    "lastAdmin": "Das wäre der letzte aktive Admin. Ernenne zuerst eine weitere Person zum Admin.",
+    "entraManaged": "Dieses Feld kommt für dieses Konto aus Microsoft Entra.",
+    "managerCycle": "Diese Person berichtet schon (auch indirekt) an den Benutzer.",
+    "notEntraBound": "Dieses Konto meldet sich nicht über Microsoft Entra an."
   },
   "fields": {
     "required": "Pflichtfeld",
