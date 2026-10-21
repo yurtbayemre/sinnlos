@@ -56,6 +56,8 @@ const POLL_REFERENCE = /api::poll\.poll\b|api::poll-vote\.poll-vote\b|\bPOLL_UID
  * "internal, no response".
  */
 const REVIEWED_CONSUMERS: Readonly<Record<string, string>> = {
+  "search/meili-index.ts":
+    "indexes published poll questions for ranking only (v0.21); the web reads every candidate through global::poll-visibility (canSeePoll), no index text reaches a response",
   "api/poll/controllers/poll.ts":
     "core find/findOne behind global::poll-visibility (canSeePoll); create/update/delete, the list and the form read are the authoring controller's (moderators only); batchResults (WD04) keeps only polls canSeePoll admits",
   "api/poll/routes/00-authoring.ts":

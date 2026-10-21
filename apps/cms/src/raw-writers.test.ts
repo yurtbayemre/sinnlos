@@ -92,6 +92,8 @@ const GUARDED_RAW_WRITERS: Readonly<Record<string, { rule: GuardRule; writes: st
 };
 
 const OTHER_RAW_WRITERS: Readonly<Record<string, string>> = {
+  "search/meili-index.ts":
+    "nothing in the database: reads published rows and writes only to Meilisearch (listed for the updateMany in its comment)",
   "api/acknowledgement/controllers/acknowledgement.ts": "acknowledgements",
   "api/classified/content-types/classified/lifecycles.ts": "comment only (uploads of classifieds)",
   "api/classified/controllers/classified.ts":
