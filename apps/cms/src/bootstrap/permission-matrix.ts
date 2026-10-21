@@ -434,6 +434,11 @@ export const AUTHORING_ACTION_GRANTS: Readonly<Record<string, readonly MatrixRol
 export const CUSTOM_ACTION_GRANTS: Record<string, readonly MatrixRoleType[] | "*"> = {
   ...AUTHORING_ACTION_GRANTS,
   "api::audit-event.audit-event.list": [ADMIN],
+  // User administration (v0.23): admin_role only; the controller checks again.
+  "api::user-management.user-management.list": [ADMIN],
+  "api::user-management.user-management.findOne": [ADMIN],
+  "api::user-management.user-management.update": [ADMIN],
+  "api::user-management.user-management.roleToEntra": [ADMIN],
   // Same readers as lessons; these actions enforce published lesson and parent.
   "api::lesson.lesson.player": [...STAFF_ROLES, AUTHENTICATED],
   "api::lesson.lesson.check": [...STAFF_ROLES, AUTHENTICATED],
