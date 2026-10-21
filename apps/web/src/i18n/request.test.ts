@@ -79,6 +79,7 @@ describe("i18n request config", () => {
         "polls",
         "quickLinks",
         "training",
+        "users",
         "wiki",
       ].sort(),
     );

@@ -30,6 +30,7 @@ export const MANAGE_MESSAGE_AREAS = [
   "activity",
   "dutyPlans",
   "kpis",
+  "users",
 ] as const;
 
 export type ManageMessageArea = (typeof MANAGE_MESSAGE_AREAS)[number];
@@ -55,6 +56,7 @@ const MANAGE: Readonly<Record<Locale, Readonly<Record<ManageMessageArea, () => J
     activity: () => import("../../messages/manage/activity.en.json"),
     dutyPlans: () => import("../../messages/manage/dutyPlans.en.json"),
     kpis: () => import("../../messages/manage/kpis.en.json"),
+    users: () => import("../../messages/manage/users.en.json"),
   },
   de: {
     common: () => import("../../messages/manage/common.de.json"),
@@ -69,6 +71,7 @@ const MANAGE: Readonly<Record<Locale, Readonly<Record<ManageMessageArea, () => J
     activity: () => import("../../messages/manage/activity.de.json"),
     dutyPlans: () => import("../../messages/manage/dutyPlans.de.json"),
     kpis: () => import("../../messages/manage/kpis.de.json"),
+    users: () => import("../../messages/manage/users.de.json"),
   },
 };
 

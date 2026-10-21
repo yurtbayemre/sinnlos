@@ -328,6 +328,8 @@ export interface Capabilities {
     manage: boolean;
   };
   reports: { analytics: boolean; acknowledgements: boolean; training: boolean; activity: boolean };
+  /** User administration at /manage/users (admin_role, v0.23). */
+  users: { manage: boolean };
   // The SH02 predicates above stay next to it: canComment, canReact, canRsvp,
   // canPostAds, canDeleteAnyAd, canEditAnyAd, canTrain.
 }
@@ -483,5 +485,7 @@ export function capabilitiesFor(role: Role): Capabilities {
       // The fixed activity read is admin-only.
       activity: admin,
     },
+    // api::user-management.user-management.*: admin_role only.
+    users: { manage: admin },
   };
 }

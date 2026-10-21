@@ -72,12 +72,6 @@ const QUICK_LINK_META = [
     descKey: "rolesPermissionsDesc",
     icon: Shield,
   },
-  {
-    href: "/admin/content-manager/collection-types/plugin::users-permissions.user",
-    labelKey: "users",
-    descKey: "usersDesc",
-    icon: Users,
-  },
 ] as const satisfies readonly {
   href: string;
   labelKey: keyof Messages["admin"];
@@ -115,7 +109,10 @@ export default async function ManagePage() {
     getTranslations("manage.activity"),
     noDepartment ? null : loadManageLanding(areas),
   ]);
-  const tOrg = await getTranslations("manage.org");
+  const [tOrg, tUsers] = await Promise.all([
+    getTranslations("manage.org"),
+    getTranslations("manage.users"),
+  ]);
   // Departments and teams are managed in the web since v0.22 (admin_role).
   const organisation = capabilities.org.manage
     ? [
@@ -133,6 +130,18 @@ export default async function ManagePage() {
         },
       ]
     : [];
+  // User administration since v0.23 (admin_role).
+  const userTiles = capabilities.users.manage
+    ? [
+        {
+          icon: Users,
+          label: tUsers("title"),
+          description: tUsers("tile"),
+          href: "/manage/users" as const,
+        },
+      ]
+    : [];
+  const organisationTiles = [...organisation, ...userTiles];
 
   const roles = [
     { name: "Admin", description: tAdmin("roleAdmin"), color: ROLE_COLORS[0] },
@@ -266,13 +275,13 @@ export default async function ManagePage() {
         </section>
       )}
 
-      {organisation.length > 0 && (
+      {organisationTiles.length > 0 && (
         <section aria-labelledby="manage-organisation" className="space-y-3">
           <h2 id="manage-organisation" className="text-lg font-semibold">
             {tOrg("section")}
           </h2>
           <div className="grid gap-4 sm:grid-cols-2">
-            {organisation.map((tile) => (
+            {organisationTiles.map((tile) => (
               <StatTile
                 key={tile.href}
                 icon={tile.icon}

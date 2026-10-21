@@ -50,6 +50,8 @@ const { default: ManageWikiPage } = await import("./wiki/page");
 const { default: NewWikiSpacePage } = await import("./wiki/new/page");
 const { default: ManageWikiSpacePage } = await import("./wiki/[space]/page");
 const { default: EditWikiSpacePage } = await import("./wiki/[space]/edit/page");
+const { default: ManageUsersPage } = await import("./users/page");
+const { default: EditUserPage } = await import("./users/[id]/page");
 
 const ENG = { id: 3, documentId: "deptengineering000000000", name: "Engineering", slug: "eng" };
 const DOC = "annc00000000000000000001";
@@ -139,7 +141,7 @@ describe("the landing", () => {
     expect(hrefs(tree).some((href) => href.includes("/admin"))).toBe(false);
   });
 
-  it("an admin also gets the reports and the Strapi links", async () => {
+  it("an admin also gets the reports, the organisation tiles and the Strapi roles link", async () => {
     viewerRef.current = viewer("admin_role");
     const tree = elements(await ManagePage());
     expect(hrefs(tree)).toEqual(
@@ -148,9 +150,14 @@ describe("the landing", () => {
         "/manage/acknowledgements",
         "/manage/training/report",
         "/manage/activity",
+        "/departments",
+        "/teams",
+        "/manage/users",
       ]),
     );
-    expect(hrefs(tree).some((href) => href.includes("/admin/content-manager"))).toBe(true);
+    expect(hrefs(tree).some((href) => href.includes("/admin/settings"))).toBe(true);
+    // Departments and users are managed in the web since v0.22/v0.23.
+    expect(hrefs(tree).some((href) => href.includes("/admin/content-manager"))).toBe(false);
   });
 
   it("a department head: announcements, events, documents, duty plans and KPIs only (§L1), never the wiki; the training report (v0.20)", async () => {
@@ -489,5 +496,51 @@ describe("the wiki area (batch 16, lane 16C)", () => {
 describe("/polls/new", () => {
   it("redirects to /manage/polls/new", async () => {
     expect(await redirectOf(() => NewPollRedirect())).toBe("/manage/polls/new");
+  });
+});
+
+describe("user administration pages (v0.23)", () => {
+  it.each(["editor", "department_head", "team_lead"])(
+    "%s is sent back to /manage without a request",
+    async (role) => {
+      viewerRef.current = viewer(role, ENG);
+      strapiMock.mockClear();
+      expect(await redirectOf(() => ManageUsersPage({ searchParams: Promise.resolve({}) }))).toBe(
+        "/manage",
+      );
+      expect(await redirectOf(() => EditUserPage({ params: Promise.resolve({ id: "12" }) }))).toBe(
+        "/manage",
+      );
+      expect(strapiMock).not.toHaveBeenCalled();
+    },
+  );
+  it("an admin's list asks the cms with the known parameters only", async () => {
+    viewerRef.current = viewer("admin_role");
+    strapiMock
+      .mockReset()
+      .mockResolvedValue({ data: [], meta: { page: 1, pageSize: 50, total: 0 } });
+    await ManageUsersPage({
+      searchParams: Promise.resolve({ q: "casey", role: "editor", blocked: "true", x: "1" }),
+    });
+    expect(strapiMock.mock.calls.map(([path]) => String(path))).toEqual([
+      "/api/user-management?q=casey&role=editor&blocked=true",
+    ]);
+  });
+  it("an outage shows the banner, never an empty list", async () => {
+    viewerRef.current = viewer("admin_role");
+    strapiMock.mockReset().mockRejectedValue(new StrapiError(503, "down", "{}"));
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const tree = elements(await ManageUsersPage({ searchParams: Promise.resolve({}) }));
+    expect(tree.some((el) => el.type === FetchErrorBanner)).toBe(true);
+  });
+  it("an unknown or malformed user id is a 404", async () => {
+    viewerRef.current = viewer("admin_role");
+    strapiMock.mockReset().mockImplementation(async (path: string) => {
+      if (path.startsWith("/api/user-management/")) throw new StrapiError(404, "nf", "{}");
+      return { data: [] };
+    });
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    for (const id of ["404", "abc", "0", "1e3"])
+      await expect(EditUserPage({ params: Promise.resolve({ id }) })).rejects.toThrow();
   });
 });

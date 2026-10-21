@@ -27,6 +27,8 @@ import dutyPlansDe from "../../../messages/manage/dutyPlans.de.json";
 import dutyPlansEn from "../../../messages/manage/dutyPlans.en.json";
 import kpisDe from "../../../messages/manage/kpis.de.json";
 import kpisEn from "../../../messages/manage/kpis.en.json";
+import usersDe from "../../../messages/manage/users.de.json";
+import usersEn from "../../../messages/manage/users.en.json";
 import { withManageMessages } from "@/i18n/messages";
 
 /**
@@ -49,6 +51,7 @@ export const MESSAGES = {
     activity: activityEn,
     dutyPlans: dutyPlansEn,
     kpis: kpisEn,
+    users: usersEn,
   }),
   de: withManageMessages(de, {
     common: commonDe,
@@ -63,6 +66,7 @@ export const MESSAGES = {
     activity: activityDe,
     dutyPlans: dutyPlansDe,
     kpis: kpisDe,
+    users: usersDe,
   }),
 };
 
