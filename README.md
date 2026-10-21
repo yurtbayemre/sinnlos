@@ -75,7 +75,9 @@ Further reading:
   concurrent changes; department heads write announcements, events and
   documents for their own department. Admins, editors, department heads and
   team leads write wiki pages in the wiki itself, with drafts and a page
-  history; admins and editors manage the spaces at `/manage/wiki`. Every change
+  history; admins and editors manage the spaces at `/manage/wiki`. Admins
+  also create, rename and delete departments and teams and set heads, team
+  leads and members. Every change
   advances a per-document revision and lands in an append-only activity
   trail that the admin panel lists.
 - **Global search (⌘K)** with anonymous search analytics.

@@ -665,9 +665,12 @@ Training and organisation authoring (batch 17):
   and internal fields are refused. The lesson list applies its validated
   course documentId filter before pagination/count. Only the authorised
   editable DTO and panel expose quiz keys; learner responses stay answerless.
-- Org writes allow only the exact role fields above. Names, slugs, head,
-  lead, membership, department changes and inverse links are refused even
-  for admins. Both editable and update reject every query key, including
+- Org writes allow only the exact role fields above. Since v0.22
+  admin_role also writes names, the display head, a team's department, lead
+  and members (a full replacement), and creates and deletes departments and
+  teams (If-Match; the delete hooks run in the same transaction); every other
+  role keeps the create/delete revocation. Slugs and inverse links are
+  refused for everyone. Both editable and update reject every query key, including
   `status`; the Document Service receives no publication option. Raw legacy
   descriptions are preserved when another field is saved.
 - Org update requires `If-Match`, returns only `documentId`/`version` with
