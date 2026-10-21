@@ -144,6 +144,17 @@ describe("searchLive with Meilisearch", () => {
     ]);
   });
 
+  it("keeps the readable candidates when the fill-up request fails", async () => {
+    const legacy = liveSearchPaths("Brand", null).document;
+    strapiMock.mockImplementation(async (path) => {
+      if (path === candidatePath("document", ["d9"])) return { data: [row("d9")] };
+      if (path === legacy) throw new Error("503");
+      return { data: [] };
+    });
+    const items = await searchLive("Brand", async () => "member", ranked({ document: ["d9"] }));
+    expect(items.filter((i) => i.kind === "document").map((i) => i.key)).toEqual(["document:d9"]);
+  });
+
   it("is exactly the search before when Meilisearch answers null or in demo mode", async () => {
     strapiMock.mockResolvedValue({ data: [] });
     await searchLive(

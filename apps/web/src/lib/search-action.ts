@@ -570,9 +570,9 @@ async function rankedRows(
   const rank = new Map(ids.map((id, i) => [id, i]));
   const at = (row: unknown) => rank.get(isRow(row) ? String(row.documentId) : "") ?? ids.length;
   rows.sort((a, b) => at(a) - at(b));
-  return rows.length >= LIVE_LIMIT
-    ? rows
-    : [...rows, ...rowList(await strapi<unknown>(legacyPath))];
+  if (rows.length >= LIVE_LIMIT) return rows;
+  // The fill is optional: its failure keeps the readable candidates (Codex review).
+  return [...rows, ...rowList(await rowsOf(() => strapi<unknown>(legacyPath)))];
 }
 
 // ---------------------------------------------------------------------------

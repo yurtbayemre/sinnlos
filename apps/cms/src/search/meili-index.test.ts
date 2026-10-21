@@ -3,8 +3,9 @@ import { describe, expect, it, vi } from "vitest";
 import {
   SearchConfigError,
   parseMeiliConfig,
+  loadSearchDocuments,
   rebuildSearchIndex,
-  searchSignature,
+  searchFingerprint,
   searchStatusLine,
   syncSearchIndex,
   toSearchDocument,
@@ -168,7 +169,7 @@ describe("rebuildSearchIndex", () => {
     const { strapi } = db(ROWS);
     const meili = fakeMeili();
     const count = await rebuildSearchIndex(
-      strapi,
+      await loadSearchDocuments(strapi),
       parseMeiliConfig(ON)!,
       meili.fetchImpl,
       async () => {},
@@ -208,7 +209,12 @@ describe("rebuildSearchIndex", () => {
       failTask: "POST /indexes/sinnlos_search_build/documents",
     });
     await expect(
-      rebuildSearchIndex(strapi, parseMeiliConfig(ON)!, meili.fetchImpl, async () => {}),
+      rebuildSearchIndex(
+        await loadSearchDocuments(strapi),
+        parseMeiliConfig(ON)!,
+        meili.fetchImpl,
+        async () => {},
+      ),
     ).rejects.toThrow(/task \d+ failed/);
     expect(meili.calls).not.toContain("POST /swap-indexes");
   });
@@ -249,11 +255,36 @@ describe("syncSearchIndex", () => {
   });
 });
 
-describe("searchSignature", () => {
-  it("changes with the published count and the newest write", async () => {
-    const a = await searchSignature(db(ROWS).strapi);
-    expect(await searchSignature(db(ROWS).strapi)).toBe(a);
-    expect(await searchSignature(db({ ...ROWS, "api::poll.poll": [] }).strapi)).not.toBe(a);
-    expect(await searchSignature(db(ROWS, "2026-10-21T10:01:00.000Z").strapi)).not.toBe(a);
+describe("searchFingerprint", () => {
+  it("changes with published content only, whatever the timestamps or the row order say", async () => {
+    const a = searchFingerprint(await loadSearchDocuments(db(ROWS).strapi));
+    // Same content, another newest updatedAt (a draft save): unchanged.
+    expect(
+      searchFingerprint(await loadSearchDocuments(db(ROWS, "2026-10-21T11:00:00.000Z").strapi)),
+    ).toBe(a);
+    // Same rows, another database order: unchanged.
+    const reversed = {
+      "api::announcement.announcement": [
+        { documentId: "a2", title: "Zweite" },
+        ...ROWS["api::announcement.announcement"],
+      ],
+    };
+    const forward = {
+      "api::announcement.announcement": [
+        ...ROWS["api::announcement.announcement"],
+        { documentId: "a2", title: "Zweite" },
+      ],
+    };
+    expect(searchFingerprint(await loadSearchDocuments(db(reversed).strapi))).toBe(
+      searchFingerprint(await loadSearchDocuments(db(forward).strapi)),
+    );
+    // A republish with the draft's updatedAt but new text (Codex review): changed.
+    const republished = {
+      ...ROWS,
+      "api::announcement.announcement": [
+        { documentId: "a1", title: "Kantine", body: "Neu ab Montag" },
+      ],
+    };
+    expect(searchFingerprint(await loadSearchDocuments(db(republished).strapi))).not.toBe(a);
   });
 });

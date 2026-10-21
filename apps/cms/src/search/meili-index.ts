@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type { Core } from "@strapi/strapi";
 import {
   INDEXED_SEARCH_KINDS,
@@ -17,11 +18,11 @@ import {
  * stale entry can never show anyone what they may not read.
  *
  * Kept current by the `search-index` cron (every minute, only registered
- * with MEILISEARCH_ENABLED=1): a cheap signature per type (published count,
- * newest updatedAt); when it changed, or the live index is missing, the whole
- * index is rebuilt into SEARCH_BUILD_INDEX_UID and swapped in. One mechanism
- * covers edits, publish/unpublish, deletes, the scheduler, raw updateMany,
- * cascades and database restores.
+ * with MEILISEARCH_ENABLED=1): a fingerprint of the published content
+ * (searchFingerprint); when it changed, or the live index is missing, the
+ * whole index is rebuilt into SEARCH_BUILD_INDEX_UID and swapped in. One
+ * mechanism covers edits, publish/unpublish, deletes, the scheduler, raw
+ * updateMany, cascades and database restores.
  * shortcut: changes are findable within about a minute; add after-commit
  * upserts in the Document Service chain if that is ever too slow.
  * Plain fetch against Meilisearch's HTTP API, no SDK.
@@ -45,7 +46,9 @@ const SOURCES: Readonly<Record<IndexedSearchKind, Source>> = {
   poll: { uid: "api::poll.poll", title: "question", text: [] },
 };
 
-const TASK_TIMEOUT_MS = 30_000;
+// Generous: a timed-out wait would restart the rebuild from scratch; the cron's
+// overlap guard skips the minutes a long rebuild takes.
+const TASK_TIMEOUT_MS = 10 * 60_000;
 const PUBLISHED = { publishedAt: { $notNull: true } };
 
 export class SearchConfigError extends Error {}
@@ -118,24 +121,19 @@ export async function loadSearchDocuments(strapi: SearchStrapi): Promise<SearchI
       if (document) documents.push(document);
     }
   }
-  return documents;
+  // A stable order: the fingerprint must not change with the database's row order.
+  return documents.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
 }
 
-/** Changes whenever a row of an indexed type is written, published, unpublished or deleted. */
-export async function searchSignature(strapi: SearchStrapi): Promise<string> {
-  const parts: string[] = [];
-  for (const kind of INDEXED_SEARCH_KINDS) {
-    const query = strapi.db.query(SOURCES[kind].uid);
-    const [published, newest] = await Promise.all([
-      query.count({ where: PUBLISHED }),
-      query.findOne({ select: ["updatedAt"], orderBy: { updatedAt: "desc" } }),
-    ]);
-    const updatedAt = (newest as { updatedAt?: unknown } | null)?.updatedAt;
-    parts.push(
-      `${kind}:${published}:${updatedAt instanceof Date ? updatedAt.toISOString() : String(updatedAt ?? "")}`,
-    );
-  }
-  return parts.join("|");
+/**
+ * A fingerprint of exactly what the index holds: it changes with every
+ * published change and with nothing else (a draft save, a republish that
+ * keeps the draft's updatedAt, a raw write all count only by their effect).
+ * shortcut: reads every published row each minute; at many thousand rows,
+ * compare per-type counts and publishedAt first.
+ */
+export function searchFingerprint(documents: readonly SearchIndexDocument[]): string {
+  return createHash("sha256").update(JSON.stringify(documents)).digest("hex");
 }
 
 /** One Meilisearch call; null for a 404 when `allowMissing`, otherwise any non-2xx throws. */
@@ -186,9 +184,9 @@ async function settle(
   }
 }
 
-/** Fills the build index from the database and swaps it in; returns the document count. */
+/** Fills the build index with `documents` and swaps it in; returns the document count. */
 export async function rebuildSearchIndex(
-  strapi: SearchStrapi,
+  documents: readonly SearchIndexDocument[],
   config: MeiliConfig,
   fetchImpl: Fetch = fetch,
   sleep: (ms: number) => Promise<void> = (ms) => new Promise((r) => setTimeout(r, ms)),
@@ -206,7 +204,6 @@ export async function rebuildSearchIndex(
       "index_not_found",
     );
 
-  const documents = await loadSearchDocuments(strapi);
   await dropBuild();
   await run("POST", "/indexes", { uid: SEARCH_BUILD_INDEX_UID, primaryKey: "id" });
   await run("PATCH", `/indexes/${SEARCH_BUILD_INDEX_UID}/settings`, SEARCH_INDEX_SETTINGS);
@@ -221,7 +218,7 @@ export async function rebuildSearchIndex(
   return documents.length;
 }
 
-/** The signature of the last successful rebuild in this process. */
+/** The fingerprint of the last successful rebuild in this process. */
 export interface SyncState {
   signature: string | null;
 }
@@ -240,7 +237,8 @@ export async function syncSearchIndex(
 ): Promise<void> {
   const config = parseMeiliConfig(env);
   if (!config) return;
-  const signature = await searchSignature(strapi);
+  const documents = await loadSearchDocuments(strapi);
+  const signature = searchFingerprint(documents);
   const live = await meili(
     config,
     fetchImpl,
@@ -250,7 +248,7 @@ export async function syncSearchIndex(
     true,
   );
   if (live && signature === state.signature) return;
-  const count = await rebuildSearchIndex(strapi, config, fetchImpl);
+  const count = await rebuildSearchIndex(documents, config, fetchImpl);
   state.signature = signature;
   strapi.log.info(`[search] index rebuilt: ${count} document(s)`);
 }

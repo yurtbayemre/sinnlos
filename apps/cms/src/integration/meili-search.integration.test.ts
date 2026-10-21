@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { INDEXED_SEARCH_KINDS, searchIndexQueries } from "@sinnlos/domain";
 
-import { rebuildSearchIndex, type SearchStrapi } from "../search/meili-index";
+import { loadSearchDocuments, rebuildSearchIndex, type SearchStrapi } from "../search/meili-index";
 
 /**
  * The optional Meilisearch index against a real Meilisearch (v0.21): the
@@ -70,10 +70,12 @@ describe.skipIf(!URL || !KEY)("the Meilisearch index on a real Meilisearch", () 
 
   it("rebuilds and swaps, and every query keeps to its kind", async () => {
     const count = await rebuildSearchIndex(
-      strapiWith({
-        document: DOCUMENTS,
-        poll: [{ documentId: "p1", question: "Urlaub im Sommer?" }],
-      }),
+      await loadSearchDocuments(
+        strapiWith({
+          document: DOCUMENTS,
+          poll: [{ documentId: "p1", question: "Urlaub im Sommer?" }],
+        }),
+      ),
       config,
     );
     expect(count).toBe(DOCUMENTS.length + 1);
@@ -103,15 +105,23 @@ describe.skipIf(!URL || !KEY)("the Meilisearch index on a real Meilisearch", () 
     ["Stapler", "stapler"],
     ["Führerschein Stapler", "stapler"],
   ])("finds %s (German corpus of the settings)", async (term, documentId) => {
-    await rebuildSearchIndex(strapiWith({ document: DOCUMENTS }), config);
+    await rebuildSearchIndex(
+      await loadSearchDocuments(strapiWith({ document: DOCUMENTS })),
+      config,
+    );
     expect((await search(term)).document[0]).toBe(documentId);
   });
 
   it("drops what a rebuild no longer has", async () => {
-    await rebuildSearchIndex(strapiWith({ document: DOCUMENTS }), config);
+    await rebuildSearchIndex(
+      await loadSearchDocuments(strapiWith({ document: DOCUMENTS })),
+      config,
+    );
     expect((await search("Gabelstapler")).document).toContain("stapler");
     await rebuildSearchIndex(
-      strapiWith({ document: DOCUMENTS.filter((d) => d.documentId !== "stapler") }),
+      await loadSearchDocuments(
+        strapiWith({ document: DOCUMENTS.filter((d) => d.documentId !== "stapler") }),
+      ),
       config,
     );
     expect((await search("Gabelstapler")).document).not.toContain("stapler");
