@@ -330,17 +330,19 @@ async function assertFreeDepartmentName(
     DEPARTMENT_NAMES_LOCK_UID,
     DEPARTMENT_NAMES_LOCK_DOCUMENT_ID,
   );
-  // Compared here, not with $eqi: SQLite's LOWER folds ASCII only ("Ä" vs "ä"); departments are few.
+  // Both foldings refuse: the database's (what Entra's $eqi match uses; Postgres folds per
+  // character, so "ΟΣ" = "οσ") and JavaScript's (SQLite's LOWER folds ASCII only, "Ä" vs "ä").
+  const others = documentId ? { documentId: { $ne: documentId } } : {};
   const wanted = data.name.toLowerCase();
   const rows = (await strapi.db.query(DEPARTMENT_UID).findMany({
-    select: ["documentId", "name"],
-  })) as Array<{ documentId?: unknown; name?: unknown }>;
-  const clash = rows.some(
-    (row) =>
-      row.documentId !== documentId &&
-      typeof row.name === "string" &&
-      row.name.toLowerCase() === wanted,
-  );
+    where: others,
+    select: ["name"],
+  })) as Array<{ name?: unknown }>;
+  const clash =
+    rows.some((row) => typeof row.name === "string" && row.name.toLowerCase() === wanted) ||
+    (await strapi.db
+      .query(DEPARTMENT_UID)
+      .count({ where: { ...others, name: { $eqi: data.name } } })) > 0;
   if (clash) refuseKeys(["name"], { name: "taken" });
 }
 
