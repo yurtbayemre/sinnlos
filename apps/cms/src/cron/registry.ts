@@ -36,6 +36,8 @@
  * uploadWeekly (which writes its own schedule into the core store) keep
  * running. None of them mails, sweeps or deletes anything.
  */
+import { meilisearchEnabled } from "@sinnlos/domain";
+
 import { parseEnvFlag, sendDigests, type DigestStrapi } from "../digest/send-digests";
 import { pruneAuditEvents, type AuditJanitorStrapi } from "./prune-audit-events";
 import { pruneNotifications, type NotificationJanitorStrapi } from "./prune-notifications";
@@ -44,6 +46,7 @@ import { purgeExpiredClassifieds, type ClassifiedJanitorStrapi } from "./purge-e
 import { runScheduledPublishing, type ScheduledPublishStrapi } from "./scheduled-publish";
 import { sweepOrphanedUploads } from "./sweep-orphaned-uploads";
 import { sendTrainingReminders, type TrainingReminderStrapi } from "./training-reminders";
+import { syncSearchIndex, type SearchStrapi } from "../search/meili-index";
 
 /** The slice of the Strapi instance the tasks use: what each of them needs. */
 export type CronStrapi = DigestStrapi &
@@ -51,7 +54,8 @@ export type CronStrapi = DigestStrapi &
   ClassifiedJanitorStrapi &
   AuditJanitorStrapi &
   ScheduledPublishStrapi &
-  TrainingReminderStrapi;
+  TrainingReminderStrapi &
+  SearchStrapi;
 
 /** One cron task: a pure description, no state. */
 export interface CronTaskSpec {
@@ -74,7 +78,10 @@ export interface StrapiCronTask {
  * The tasks, in firing order, every one in `timeZone` (APP_TIME_ZONE,
  * resolved and validated by config/server.ts).
  */
-export function cronRegistry(timeZone: string): readonly CronTaskSpec[] {
+export function cronRegistry(
+  timeZone: string,
+  env: Record<string, string | undefined> = process.env,
+): readonly CronTaskSpec[] {
   return [
     // Decision 06 §D: CE scheduled publishing, every minute; due unpublishes
     // first, then due publishes, through the Document Service
@@ -149,6 +156,19 @@ export function cronRegistry(timeZone: string): readonly CronTaskSpec[] {
       tz: timeZone,
       fn: (strapi) => sendDigests(strapi),
     },
+    // v0.21, optional: keeps the Meilisearch index current, every minute,
+    // rebuilding only after a change (search/meili-index.ts). Not registered
+    // while the module is off, so a cms without Meilisearch logs nothing.
+    ...(meilisearchEnabled(env)
+      ? [
+          {
+            name: "search-index",
+            rule: "* * * * *",
+            tz: timeZone,
+            fn: (strapi: CronStrapi) => syncSearchIndex(strapi, env),
+          },
+        ]
+      : []),
   ];
 }
 

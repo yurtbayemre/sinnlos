@@ -18,6 +18,7 @@ import { seedAdminUser } from "./utils/admin-seed";
 import { backfillDepartmentAudience } from "./utils/department-audience-backfill";
 import { ensureDraftTwins } from "./utils/draft-twins";
 import { enforceSecretGuard } from "./utils/env-guard";
+import { parseMeiliConfig, searchStatusLine } from "./search/meili-index";
 import { registerLiveEventSubscriber } from "./utils/live-events";
 import { registerMediaTombstoneGuard } from "./utils/media-tombstone-guard";
 import { assertNoOrgDrafts } from "./utils/org-dp-guard";
@@ -90,6 +91,9 @@ export default {
     // refuses the boot, naming every bad variable; with Entra off it only
     // parses (MS_* values are ignored then). bootstrap() re-reads it.
     checkEntraConfig(strapi.log);
+    // v0.21: with MEILISEARCH_ENABLED=1 a missing URL or write key refuses
+    // the boot (search/meili-index.ts); off, nothing is read.
+    parseMeiliConfig(process.env);
     registerUserContactSanitizer(strapi);
     registerRestrictedRelationGuard(strapi);
     // Every Document Service middleware, in its slot order
@@ -144,6 +148,7 @@ export default {
     await ensureEntraIdentityIndex(strapi, { entraEnabled: entra.enabled });
     await syncAuthProviders(strapi, entra);
     reportEntraStatus(strapi.log, entra);
+    strapi.log.info(searchStatusLine(parseMeiliConfig(process.env)));
     // Decision 02: give existing polls their `audience` flag ('departments'
     // when they link a department). A no-op once no row is NULL. One
     // transaction; on any error it rolls back and THROWS, so the cms does
