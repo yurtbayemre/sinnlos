@@ -420,6 +420,15 @@ describe("capabilitiesFor = the cms grants (decision 06 §L2)", () => {
       !holds(role, `${uid}.update`) ? "none" : MODERATORS.includes(role) ? "any" : "own";
     expect(org.editDepartment).toBe(scope(A.department));
     expect(org.editTeam).toBe(scope(A.team));
+    expect(capabilitiesFor(role).users.manage).toBe(
+      holds(
+        role,
+        "api::user-management.user-management.list",
+        "api::user-management.user-management.findOne",
+        "api::user-management.user-management.update",
+        "api::user-management.user-management.roleToEntra",
+      ),
+    );
     expect(org.manage).toBe(
       holds(
         role,

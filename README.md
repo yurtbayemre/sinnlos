@@ -77,7 +77,9 @@ Further reading:
   team leads write wiki pages in the wiki itself, with drafts and a page
   history; admins and editors manage the spaces at `/manage/wiki`. Admins
   also create, rename and delete departments and teams and set heads, team
-  leads and members. Every change
+  leads and members, and manage users at `/manage/users` (role, department,
+  manager, block; accounts are still created in the admin panel or by the
+  Microsoft sign-in). Every change
   advances a per-document revision and lands in an append-only activity
   trail that the admin panel lists.
 - **Global search (⌘K)** with anonymous search analytics.

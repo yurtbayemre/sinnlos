@@ -673,6 +673,12 @@ Training and organisation authoring (batch 17):
   refused for everyone. Both editable and update reject every query key, including
   `status`; the Document Service receives no publication option. Raw legacy
   descriptions are preserved when another field is saved.
+- User administration (v0.23): only admin_role reaches `/api/user-management`
+  (grant plus controller check); it writes role, department, manager and
+  blocked under one directory lock, refuses one's own role or block, keeps
+  the last unblocked admin, refuses Entra-synced fields of bound accounts and
+  manager cycles, raises the token version on a block and records an audit
+  row. The plugin's generic user writes stay ungranted.
 - Org update requires `If-Match`, returns only `documentId`/`version` with
   ETag, and reclassifies access under the existing lock before reporting a
   stale version. Missing access is 403 on update and 404 on editable.

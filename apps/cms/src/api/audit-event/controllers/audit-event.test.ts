@@ -111,7 +111,7 @@ describe("the fixed admin activity read", () => {
     { page: "1e2" },
     { page: ["1", "2"] },
     { page: {} },
-    { targetUid: "plugin::users-permissions.user" },
+    { targetUid: "plugin::users-permissions.role" },
     { targetUid: ["api::course.course"] },
     { actorKind: "editor" },
     { actorKind: ["user"] },
