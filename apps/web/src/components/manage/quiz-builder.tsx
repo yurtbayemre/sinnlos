@@ -28,12 +28,16 @@ export function removeQuizOption(question: QuizQuestion, index: number): QuizQue
 
 /**
  * Which parts of one question the shared validator (validateQuiz) refuses:
- * the question text, each answer, the missing correct answer. The builder
- * marks only these, never the whole quiz.
+ * the question text, each answer, the number of answers (only old or
+ * panel-written rows can break it; the form keeps 2–QUIZ_MAX_OPTIONS), the
+ * missing correct answer. The builder marks only these, never the whole
+ * quiz. Too many questions has no field: the quiz-wide error names the
+ * limits.
  */
 export function questionProblems(question: QuizQuestion): {
   question: boolean;
   options: boolean[];
+  count: boolean;
   correct: boolean;
 } {
   const bad = (text: unknown) =>
@@ -41,12 +45,16 @@ export function questionProblems(question: QuizQuestion): {
   return {
     question: bad(question.question),
     options: question.options.map(bad),
+    count: question.options.length < 2 || question.options.length > QUIZ_MAX_OPTIONS,
     correct:
       !Number.isInteger(question.correctIndex) ||
       question.correctIndex < 0 ||
       question.correctIndex >= question.options.length,
   };
 }
+
+const anyProblem = (p: ReturnType<typeof questionProblems>) =>
+  p.question || p.count || p.correct || p.options.some(Boolean);
 
 export function QuizBuilder({
   id,
@@ -64,16 +72,27 @@ export function QuizBuilder({
   const t = useTranslations("manage.training.quiz");
   const root = useRef<HTMLDivElement>(null);
   const [announcement, setAnnouncement] = useState("");
-  // "Check quiz" pressed since the last added question or answer: a field
-  // added afterwards stays unmarked until the next check or save.
+  // Checked since the last added question or answer ("Check quiz", or a
+  // save the cms refused, whose error arrives as `error`): a field added
+  // afterwards stays unmarked until the next check or save.
   const [checked, setChecked] = useState(false);
+  const [seenError, setSeenError] = useState<string | undefined>(undefined);
+  let marking = checked;
+  if (error !== seenError) {
+    setSeenError(error);
+    if (error) {
+      setChecked(true);
+      marking = true;
+    }
+  }
   const valid = !("error" in validateQuiz(value));
   const shownError = error || (checked && !valid ? t("invalid") : undefined);
-  const problems = checked || error ? value.map(questionProblems) : null;
+  const problems = marking ? value.map(questionProblems) : null;
   // A refusal the fields cannot explain (the cms's quizInvalid on content the
-  // form shows as valid) still needs one invalid control as its focus target.
-  const fallback =
-    !!error && !problems?.some((p) => p.question || p.correct || p.options.some(Boolean));
+  // form shows as valid) still needs one invalid control.
+  const fallback = !!error && !!problems && !problems.some(anyProblem);
+  // The first question is the editor's focus target for a quiz error, so it
+  // always carries the error's description.
   const describedBy = (invalidField: boolean) =>
     `${id}-hint${shownError && invalidField ? ` ${id}-error` : ""}`;
   const edit = (index: number, question: QuizQuestion) =>
@@ -108,7 +127,7 @@ export function QuizBuilder({
             {(a11y) => (
               <input
                 {...a11y}
-                aria-describedby={describedBy(!!problems?.[q].question || (fallback && q === 0))}
+                aria-describedby={describedBy(q === 0 || !!problems?.[q].question)}
                 aria-invalid={problems?.[q].question || (fallback && q === 0) ? true : undefined}
                 value={question.question}
                 maxLength={QUIZ_MAX_TEXT}
@@ -120,7 +139,11 @@ export function QuizBuilder({
           <fieldset className="space-y-2">
             <legend className="mb-2 text-sm font-medium">{t("correctAnswer")}</legend>
             <FieldError id={`${id}-correct-${q}-error`}>
-              {problems?.[q].correct ? t("chooseCorrectMissing") : undefined}
+              {problems?.[q].count
+                ? t("answerCount", { options: QUIZ_MAX_OPTIONS })
+                : problems?.[q].correct
+                  ? t("chooseCorrectMissing")
+                  : undefined}
             </FieldError>
             {question.options.map((option, o) => (
               <div key={o} className="flex items-end gap-2">
@@ -147,6 +170,7 @@ export function QuizBuilder({
                     <input
                       {...a11y}
                       aria-invalid={problems?.[q].options[o] ? true : undefined}
+                      aria-describedby={problems?.[q].options[o] ? `${id}-error` : undefined}
                       maxLength={QUIZ_MAX_TEXT}
                       value={option}
                       className={inputClass}

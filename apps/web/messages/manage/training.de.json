@@ -87,7 +87,8 @@
     "optionRemoved": "Antwort entfernt.",
     "empty": "Ohne Quizfragen markieren Leser die Lektion manuell als abgeschlossen.",
     "correct": "richtig",
-    "chooseCorrectMissing": "Markiere die richtige Antwort."
+    "chooseCorrectMissing": "Markiere die richtige Antwort.",
+    "answerCount": "2–{options} Antworten pro Frage."
   },
   "sections": {
     "audience": "Zielgruppe"

@@ -120,6 +120,44 @@ describe("quiz builder checking", () => {
   });
 });
 
+describe("quiz builder and the cms's refusal", () => {
+  const broken = { question: "Q", options: [" ", "B"], correctIndex: 1 };
+  const withError = (value: QuizQuestion[], error?: string) => {
+    harness.begin();
+    return renderToStaticMarkup(createElement(QuizBuilder, { ...props(value), error }));
+  };
+
+  it("marks the refused answer, describes the error on it and on the focus target", () => {
+    const page = withError([filled, broken], "Invalid quiz");
+    expect(tagById(page, "q-option-1-0")).toContain('aria-invalid="true"');
+    expect(tagById(page, "q-option-1-0")).toContain('aria-describedby="q-error"');
+    expect(tagById(page, "q")).not.toContain('aria-invalid="true"');
+    expect(tagById(page, "q")).toContain('aria-describedby="q-hint q-error"');
+  });
+
+  it("leaves fields added after a refused save unmarked until the next check", () => {
+    withError([broken], "Invalid quiz");
+    harness.begin();
+    const button = [...elements(QuizBuilder({ ...props([broken]), error: "Invalid quiz" }))].find(
+      (node) => node.props.children === "addQuestion",
+    );
+    (button!.props.onClick as () => void)();
+    const page = withError(onChange.mock.calls[0][0] as QuizQuestion[], "Invalid quiz");
+    expect(tagById(page, "q-question-1")).not.toContain('aria-invalid="true"');
+    expect(page).toContain(">Invalid quiz<");
+  });
+
+  it("names the answer limit for a question loaded with too many answers", () => {
+    const crowded = {
+      question: "Q",
+      options: Array.from({ length: 9 }, (_, i) => `A${i}`),
+      correctIndex: 0,
+    };
+    click([crowded], "validate");
+    expect(html([crowded])).toContain(">answerCount<");
+  });
+});
+
 describe("questionProblems", () => {
   it.each<[string, QuizQuestion]>([
     ["valid", filled],
@@ -128,9 +166,11 @@ describe("questionProblems", () => {
     ["no correct answer", { ...filled, correctIndex: -1 }],
     ["correct answer out of range", { ...filled, correctIndex: 3 }],
     ["too long", { ...filled, question: "x".repeat(501) }],
+    ["one answer", { ...filled, options: ["191"], correctIndex: 0 }],
+    ["nine answers", { ...filled, options: Array.from({ length: 9 }, (_, i) => `A${i}`) }],
   ])("agrees with the shared validator: %s", (_name, question) => {
     const p = questionProblems(question);
-    const flagged = p.question || p.correct || p.options.some(Boolean);
+    const flagged = p.question || p.count || p.correct || p.options.some(Boolean);
     expect(flagged).toBe("error" in validateQuiz([question]));
   });
 });

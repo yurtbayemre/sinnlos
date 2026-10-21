@@ -87,7 +87,8 @@
     "optionRemoved": "Answer removed.",
     "empty": "Without quiz questions, readers mark the lesson complete manually.",
     "correct": "correct",
-    "chooseCorrectMissing": "Mark the correct answer."
+    "chooseCorrectMissing": "Mark the correct answer.",
+    "answerCount": "2–{options} answers per question."
   },
   "sections": {
     "audience": "Audience"
