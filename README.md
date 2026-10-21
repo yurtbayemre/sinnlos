@@ -75,7 +75,9 @@ Further reading:
   concurrent changes; department heads write announcements, events and
   documents for their own department. Admins, editors, department heads and
   team leads write wiki pages in the wiki itself, with drafts and a page
-  history; admins and editors manage the spaces at `/manage/wiki`. Every change
+  history; admins and editors manage the spaces at `/manage/wiki`. Admins
+  also create, rename and delete departments and teams and set heads, team
+  leads and members. Every change
   advances a per-document revision and lands in an append-only activity
   trail that the admin panel lists.
 - **Global search (⌘K)** with anonymous search analytics.
@@ -202,7 +204,7 @@ Content types: `C` = create, `R` = find + findOne, `U` = update,
 | `classified`      | CRUD         | CRUD     | CRUD              | CRUD        | CRUD     | —       | R               |
 | `comment`         | CRD          | CRD      | CRD               | CRD         | CRD      | R       | CR              |
 | `course`          | CRU          | CRU      | R                 | R           | R        | —       | R               |
-| `department`      | RU           | R        | RU                | R           | R        | —       | R               |
+| `department`      | CRUD         | R        | RU                | R           | R        | —       | R               |
 | `document`        | CRUD         | CRUD     | CRU               | R           | R        | R       | R               |
 | `duty-plan`       | CRUD         | CRUD     | CRU               | CRU         | R        | —       | R               |
 | `kpi`             | CRUD         | CRUD     | CRU               | R           | R        | —       | R               |
@@ -217,7 +219,7 @@ Content types: `C` = create, `R` = find + findOne, `U` = update,
 | `quick-link`      | CRUD         | CRUD     | R                 | R           | R        | R       | R               |
 | `reaction`        | CRD          | CRD      | CRD               | CRD         | CRD      | R       | CR              |
 | `search-log`      | C            | C        | C                 | C           | C        | C       | C               |
-| `team`            | RU           | R        | RU                | RU          | R        | —       | R               |
+| `team`            | CRUD         | R        | RU                | RU          | R        | —       | R               |
 | `wiki-space`      | CRUD         | CRUD     | R                 | R           | R        | R       | R               |
 | `wiki-page`       | CRUD         | CRUD     | CRU               | CRU         | RU       | R       | R               |
 | `wiki-revision`   | —            | —        | —                 | —           | —        | —       | —               |

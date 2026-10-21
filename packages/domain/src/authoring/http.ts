@@ -218,8 +218,11 @@ export interface LessonAuthoringListQuery extends TrainingAuthoringListQuery {
   course?: string;
 }
 
-/** Single-row organisation content has only editable and If-Match update. */
-export const ORG_AUTHORING_INTENTS = ["update", "editable"] as const;
+/**
+ * Single-row organisation content: editable and If-Match update for every
+ * org editor; create and If-Match delete for admin_role (v0.22). No status.
+ */
+export const ORG_AUTHORING_INTENTS = ["create", "update", "editable", "delete"] as const;
 export type OrgAuthoringIntent = (typeof ORG_AUTHORING_INTENTS)[number];
 
 export const ORG_PATHS = { department: "departments", team: "teams" } as const;

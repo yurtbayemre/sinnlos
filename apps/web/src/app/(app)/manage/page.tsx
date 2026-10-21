@@ -16,6 +16,7 @@ import {
   Megaphone,
   Shield,
   Users,
+  Users2,
   Vote,
   type LucideIcon,
 } from "lucide-react";
@@ -77,12 +78,6 @@ const QUICK_LINK_META = [
     descKey: "usersDesc",
     icon: Users,
   },
-  {
-    href: "/admin/content-manager/collection-types/api::department.department",
-    labelKey: "departmentsLink",
-    descKey: "departmentsLinkDesc",
-    icon: Building2,
-  },
 ] as const satisfies readonly {
   href: string;
   labelKey: keyof Messages["admin"];
@@ -120,6 +115,24 @@ export default async function ManagePage() {
     getTranslations("manage.activity"),
     noDepartment ? null : loadManageLanding(areas),
   ]);
+  const tOrg = await getTranslations("manage.org");
+  // Departments and teams are managed in the web since v0.22 (admin_role).
+  const organisation = capabilities.org.manage
+    ? [
+        {
+          icon: Building2,
+          label: tOrg("departments"),
+          description: tOrg("departmentsTile"),
+          href: "/departments" as const,
+        },
+        {
+          icon: Users2,
+          label: tOrg("teams"),
+          description: tOrg("teamsTile"),
+          href: "/teams" as const,
+        },
+      ]
+    : [];
 
   const roles = [
     { name: "Admin", description: tAdmin("roleAdmin"), color: ROLE_COLORS[0] },
@@ -250,6 +263,25 @@ export default async function ManagePage() {
               })}
             </div>
           )}
+        </section>
+      )}
+
+      {organisation.length > 0 && (
+        <section aria-labelledby="manage-organisation" className="space-y-3">
+          <h2 id="manage-organisation" className="text-lg font-semibold">
+            {tOrg("section")}
+          </h2>
+          <div className="grid gap-4 sm:grid-cols-2">
+            {organisation.map((tile) => (
+              <StatTile
+                key={tile.href}
+                icon={tile.icon}
+                label={tile.label}
+                description={tile.description}
+                href={tile.href}
+              />
+            ))}
+          </div>
         </section>
       )}
 

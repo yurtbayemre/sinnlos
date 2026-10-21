@@ -1,4 +1,8 @@
 import { restrictRowsOfDeletedDepartments } from "../../../../utils/department-delete-restrict";
+import {
+  assertFreeDepartmentName,
+  type DepartmentNamesHost,
+} from "../../../../utils/department-names";
 import { flagPollsOfDeletedDepartments } from "../../../../utils/poll-department-delete";
 import {
   DEPARTMENT_LINKED_DOCUMENTS,
@@ -74,6 +78,13 @@ interface DeleteEvent {
   params?: { where?: Record<string, unknown> | null } | null;
 }
 
+interface WriteEvent {
+  params?: {
+    data?: Record<string, unknown> | null;
+    where?: Record<string, unknown> | null;
+  } | null;
+}
+
 const DEPARTMENT_UID = "api::department.department";
 
 const REFUSAL =
@@ -117,6 +128,17 @@ async function keepTargetsRestricted(event: DeleteEvent): Promise<void> {
 }
 
 export default {
+  // Department names are unique ignoring case, for every writer (utils/department-names.ts).
+  async beforeCreate(event: WriteEvent) {
+    await assertFreeDepartmentName(strapi as unknown as DepartmentNamesHost, event.params?.data);
+  },
+  async beforeUpdate(event: WriteEvent) {
+    await assertFreeDepartmentName(
+      strapi as unknown as DepartmentNamesHost,
+      event.params?.data,
+      event.params?.where,
+    );
+  },
   async beforeDelete(event: DeleteEvent) {
     await keepTargetsRestricted(event);
   },

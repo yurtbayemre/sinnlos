@@ -836,13 +836,18 @@ describe("WRITE_ALLOWLIST", () => {
             // Strapi checks uid/unique attributes on publish against every
             // published row of the type, including rows the caller cannot
             // read. Such attributes belong in derivedFields. The one
-            // exception: a wiki space's `name` for moderators, who read
-            // every space (wiki-visibility bypasses them), so a clash
-            // reveals nothing to them.
+            // exceptions: a wiki space's `name` for moderators, who read
+            // every space (wiki-visibility bypasses them), and a
+            // department's `name` for admin_role (every staff role reads
+            // every department), so a clash reveals nothing to them.
             const unique = Object.keys(rule.fields).filter(
               (name) =>
                 (attributes[name]?.type === "uid" || attributes[name]?.unique === true) &&
-                !(uid === WIKI_SPACE_UID && roleClass === MODERATOR_CLASS && name === "name"),
+                !(
+                  (uid === WIKI_SPACE_UID || uid === DEPARTMENT_UID) &&
+                  roleClass === MODERATOR_CLASS &&
+                  name === "name"
+                ),
             );
             expect(unique).toEqual([]);
           });
@@ -869,9 +874,11 @@ describe("the engine against the real table", () => {
             const error = await refusal(
               applyWriteRule({ [key]: null }, rule, { callerId: 1, relationChecks: {} }),
             );
-            expect(error.details, `${uid} ${key}`).toEqual({
-              keys: rule.fields.space && key !== "space" ? [key, "space"].sort() : [key],
-            });
+            // A required relation the payload leaves out is refused with it.
+            const required = Object.entries(rule.fields)
+              .filter(([name, spec]) => spec.kind === "relation" && spec.required && name !== key)
+              .map(([name]) => name);
+            expect(error.details, `${uid} ${key}`).toEqual({ keys: [key, ...required].sort() });
           }
         }
       }

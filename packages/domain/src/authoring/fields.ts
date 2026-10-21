@@ -234,14 +234,17 @@ export const TRAINING_FIELDS = {
 
 export type TrainingAuthoringType = keyof typeof TRAINING_FIELDS;
 
-/** Org moderator means admin_role only; heads/leads keep their existing row grants. */
+/**
+ * Org moderator means admin_role only: the structure (name, head, lead,
+ * members, a team's department) since v0.22; heads/leads keep their row grants.
+ */
 export const ORG_FIELDS = {
   department: {
-    moderator: ["description", "color", "headerImage"],
+    moderator: ["name", "description", "color", "headerImage", "head"],
     departmentHead: ["description", "color"],
   },
   team: {
-    moderator: ["description", "avatar"],
+    moderator: ["name", "description", "avatar", "department", "lead", "members"],
     departmentHead: ["description"],
     teamLead: ["description"],
   },

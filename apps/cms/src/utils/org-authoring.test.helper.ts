@@ -12,6 +12,8 @@ export const PLATFORM = { id: 20, documentId: "team00000000000000000000" };
 export const HEAD = { id: 3, role: { type: "department_head" } };
 export const LEAD = { id: 4, role: { type: "team_lead" } };
 export const ADMIN = { id: 1, role: { type: "admin_role" } };
+export const HEAD_USER_DOC = "uhead0000000000000000000";
+export const LEAD_USER_DOC = "ulead0000000000000000000";
 export function world() {
   const strapi = createStrapiStub({
     tables: {
@@ -38,7 +40,15 @@ export function world() {
           publishedAt: "2026-01-01",
         },
       ],
-      [USER]: [{ id: HEAD.id, department: { id: ENG.id } }, { id: LEAD.id }],
+      [USER]: [
+        {
+          id: HEAD.id,
+          documentId: HEAD_USER_DOC,
+          displayName: "Hanna Head",
+          department: { id: ENG.id },
+        },
+        { id: LEAD.id, documentId: LEAD_USER_DOC, displayName: "Lea Lead" },
+      ],
       [CONTENT_VERSION_UID]: [
         { id: 1, targetUid: DEPT, targetDocumentId: ENG.documentId, revision: 7 },
         { id: 2, targetUid: TEAM, targetDocumentId: PLATFORM.documentId, revision: 7 },

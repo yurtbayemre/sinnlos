@@ -321,7 +321,12 @@ export interface Capabilities {
     schedule: boolean;
     delete: boolean;
   };
-  org: { editDepartment: "own" | "any" | "none"; editTeam: "own" | "any" | "none" };
+  org: {
+    editDepartment: "own" | "any" | "none";
+    editTeam: "own" | "any" | "none";
+    /** Create, rename, restructure and delete departments and teams (admin_role, v0.22). */
+    manage: boolean;
+  };
   reports: { analytics: boolean; acknowledgements: boolean; training: boolean; activity: boolean };
   // The SH02 predicates above stay next to it: canComment, canReact, canRsvp,
   // canPostAds, canDeleteAnyAd, canEditAnyAd, canTrain.
@@ -468,6 +473,8 @@ export function capabilitiesFor(role: Role): Capabilities {
       editDepartment: admin ? "any" : role === "department_head" ? "own" : "none",
       // team.update: admin_role, the head of the team's department, its lead.
       editTeam: admin ? "any" : role === "department_head" || role === "team_lead" ? "own" : "none",
+      // department/team create and delete: admin_role only.
+      manage: admin,
     },
     reports: {
       analytics: admin,

@@ -418,8 +418,6 @@
     "rolesPermissionsDesc": "Configure what each role can read or write.",
     "users": "Users",
     "usersDesc": "Review users synced from Microsoft Entra ID.",
-    "departmentsLink": "Departments",
-    "departmentsLinkDesc": "Add or rename org units.",
     "roleAdmin": "Full CRUD on everything. Manages users, roles and departments.",
     "roleEditor": "CRUD on wiki pages and announcements. Read access to users.",
     "roleDeptManager": "Manages their own department, its teams and scoped wiki pages.",

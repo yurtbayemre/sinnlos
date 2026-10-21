@@ -418,8 +418,6 @@
     "rolesPermissionsDesc": "Konfigurieren Sie Lese- und Schreibrechte pro Rolle.",
     "users": "Benutzer",
     "usersDesc": "Über Microsoft Entra ID synchronisierte Benutzer verwalten.",
-    "departmentsLink": "Abteilungen",
-    "departmentsLinkDesc": "Organisationseinheiten hinzufügen oder umbenennen.",
     "roleAdmin": "Voller CRUD-Zugriff. Verwaltet Benutzer, Rollen und Abteilungen.",
     "roleEditor": "CRUD für Wiki-Seiten und Neuigkeiten. Lesezugriff auf Benutzer.",
     "roleDeptManager": "Verwaltet die eigene Abteilung, deren Teams und Wiki-Seiten.",

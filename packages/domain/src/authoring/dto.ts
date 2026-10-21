@@ -418,16 +418,32 @@ export interface OrgEditableBase {
   roleClass: OrgEditorClass;
 }
 
+/** A user named by an org relation (head, lead, member). */
+export interface OrgPersonRef {
+  /** The user's row id: what the web's people pickers name (the directory's id). */
+  id: number;
+  documentId: string;
+  displayName: string;
+}
+
 export interface DepartmentEditable extends OrgEditableBase {
   roleClass: Exclude<OrgEditorClass, "teamLead">;
   color: string | null;
-  /** Present only for the admin_role moderator. */
+  /** Present only for the admin_role moderator (as are the fields below). */
   headerImage?: EditableMedia | null;
+  head?: OrgPersonRef | null;
+  /** What a delete would detach: people whose department this is, and teams in it. */
+  memberCount?: number;
+  teamCount?: number;
 }
 
 export interface TeamEditable extends OrgEditableBase {
-  /** Present only for the admin_role moderator. */
+  /** Present only for the admin_role moderator (as are the fields below). */
   avatar?: EditableMedia | null;
+  department?: { documentId: string; name: string } | null;
+  lead?: OrgPersonRef | null;
+  /** Every member, sorted by name: the editor sends the list back as a full replacement. */
+  members?: OrgPersonRef[];
 }
 
 export interface OrgEditableResponse<T extends OrgEditableBase> {

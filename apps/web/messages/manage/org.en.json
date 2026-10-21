@@ -3,7 +3,7 @@
   "teamTitle": "Edit team",
   "edit": "Edit",
   "back": "Back to details",
-  "scopeHint": "Edit the description and appearance here. Names, membership and organisational structure are managed in the admin panel.",
+  "scopeHint": "Here you edit the description and appearance. Admins manage names, leads, members and structure.",
   "imageHint": "JPEG, PNG or WebP, up to 5 MB.",
   "fields": {
     "description": {
@@ -19,6 +19,50 @@
     },
     "avatar": {
       "label": "Team image"
+    },
+    "name": {
+      "label": "Name",
+      "entraHint": "If the department sync with Microsoft Entra is on, rename the department there as well. Otherwise its members lose it at their next sign-in."
+    },
+    "none": "Nobody",
+    "department": {
+      "label": "Department",
+      "placeholder": "Choose a department"
+    },
+    "head": {
+      "label": "Head (display)",
+      "hint": "Shown on the department page. Rights come from the department head role with this department in the profile."
+    },
+    "lead": {
+      "label": "Team lead",
+      "hint": "May edit the team description and reaches news for the team. The team lead role is assigned separately."
+    },
+    "members": {
+      "label": "Members ({count})",
+      "hint": "Members see the team's wiki spaces and news for the team.",
+      "empty": "No members yet.",
+      "remove": "Remove {name}",
+      "removeShort": "Remove",
+      "add": "Add member",
+      "addPlaceholder": "Choose a person"
     }
-  }
+  },
+  "adminScopeHint": "As an admin you also manage the name, lead and members. Changes apply at once.",
+  "newDepartment": "New department",
+  "newTeam": "New team",
+  "departments": "Departments",
+  "teams": "Teams",
+  "section": "Organisation",
+  "departmentsTile": "Create, rename, set the head of or delete departments.",
+  "teamsTile": "Create teams, set their lead and members, or delete them.",
+  "createdDepartment": "Department created.",
+  "createdTeam": "Team created.",
+  "optionsFailed": "The selection lists could not be loaded. Leads and members cannot be changed right now.",
+  "confirmDelete": {
+    "departmentTitle": "Delete the department “{name}”?",
+    "departmentBody": "{members, plural, =0 {Nobody belongs to it} one {# person loses the department} other {# people lose the department}}, {teams, plural, =0 {no team is affected} one {# team loses it} other {# teams lose it}}. Linked news, documents, quick links and courses are then visible to admins and editors only until they are re-targeted. This cannot be undone.",
+    "teamTitle": "Delete the team “{name}”?",
+    "teamBody": "{members, plural, =0 {The team has no members} one {# member loses the team} other {# members lose the team}}. News for this team is then visible to admins and editors only until it is re-targeted. This cannot be undone."
+  },
+  "deleteConflict": "Someone changed this entry meanwhile. Reload and check what the delete affects before you delete again."
 }

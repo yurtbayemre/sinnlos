@@ -116,7 +116,8 @@ export const PERMISSION_MATRIX: Record<
     "api::announcement.announcement": ALL_ACTIONS,
     "api::classified.classified": ALL_ACTIONS,
     "api::comment.comment": [...READ_ACTIONS, "create", "delete"],
-    "api::department.department": [...READ_ACTIONS, "update"],
+    // create/delete since v0.22 (org management, admin_role only).
+    "api::department.department": ALL_ACTIONS,
     "api::document.document": ALL_ACTIONS,
     "api::duty-plan.duty-plan": ALL_ACTIONS,
     "api::kpi.kpi": ALL_ACTIONS,
@@ -133,7 +134,7 @@ export const PERMISSION_MATRIX: Record<
     "api::quick-link.quick-link": ALL_ACTIONS,
     "api::search-log.search-log": ["create"],
     "api::reaction.reaction": [...READ_ACTIONS, "create", "delete"],
-    "api::team.team": [...READ_ACTIONS, "update"],
+    "api::team.team": ALL_ACTIONS,
     "api::wiki-space.wiki-space": ALL_ACTIONS,
     "api::wiki-page.wiki-page": ALL_ACTIONS,
   },
@@ -543,8 +544,6 @@ export const USER_UID = "plugin::users-permissions.user";
  * controller actions), and a revocation without a row costs nothing.
  */
 const REMOVED_CORE_ACTIONS: Partial<Record<ContentTypeUid, CrudAction[]>> = {
-  "api::department.department": ["create", "delete"],
-  "api::team.team": ["create", "delete"],
   "api::poll-vote.poll-vote": ALL_ACTIONS,
   "api::wiki-revision.wiki-revision": ALL_ACTIONS,
   "api::notification.notification": ["create", "update"],
@@ -553,6 +552,19 @@ const REMOVED_CORE_ACTIONS: Partial<Record<ContentTypeUid, CrudAction[]>> = {
   "api::reaction.reaction": ["update"],
   "api::lesson-progress.lesson-progress": ["update", "delete"],
 };
+
+/**
+ * department/team create and delete were removed core routes revoked for
+ * every role until v0.22; since then admin_role holds them, and every other
+ * role keeps the revocation (a row of an older bootstrap would grant the
+ * route again).
+ */
+const ORG_STRUCTURE_ACTIONS = [
+  "api::department.department.create",
+  "api::department.department.delete",
+  "api::team.team.create",
+  "api::team.team.delete",
+];
 
 /**
  * Permissions granted by earlier versions of this bootstrap that must be
@@ -567,7 +579,12 @@ const REMOVED_CORE_ACTIONS: Partial<Record<ContentTypeUid, CrudAction[]>> = {
  * revoked and a custom grant stays granted: the sync keeps it.)
  */
 const LEGACY_REVOKED_PERMISSIONS: Partial<Record<MatrixRoleType, string[]>> = {
+  editor: ORG_STRUCTURE_ACTIONS,
+  department_head: ORG_STRUCTURE_ACTIONS,
+  team_lead: ORG_STRUCTURE_ACTIONS,
+  member: ORG_STRUCTURE_ACTIONS,
   guest: [
+    ...ORG_STRUCTURE_ACTIONS,
     // NOTE: user.find/findOne are intentionally NOT revoked — doing so
     // 400s every guest read that populates a user relation (and the
     // notification visibility filter). See the guest matrix note above.
@@ -585,6 +602,7 @@ const LEGACY_REVOKED_PERMISSIONS: Partial<Record<MatrixRoleType, string[]>> = {
     "api::classified.classified.findOne",
   ],
   authenticated: [
+    ...ORG_STRUCTURE_ACTIONS,
     // Excluded from the celebrations grant (see CUSTOM_ACTION_GRANTS), but
     // an earlier bootstrap granted it, and the row survived on existing
     // databases (found by infra/diagnostics/prod-perm-diff.sql).

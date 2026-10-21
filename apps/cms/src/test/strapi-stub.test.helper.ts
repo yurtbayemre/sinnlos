@@ -311,6 +311,7 @@ const isNull = (value: unknown) => value === null || value === undefined;
 const COLUMN_OPERATORS = new Set([
   "$not",
   "$eq",
+  "$eqi",
   "$ne",
   "$in",
   "$notIn",
@@ -368,6 +369,13 @@ function matchOperator(value: unknown, op: string, operand: unknown): boolean {
   switch (op) {
     case "$eq":
       return operand === null ? isNull(value) : sqlEquals(value, operand);
+    case "$eqi":
+      // Strapi's case-insensitive equality: LOWER(column) = LOWER(value).
+      return (
+        typeof value === "string" &&
+        typeof operand === "string" &&
+        value.toLowerCase() === operand.toLowerCase()
+      );
     case "$ne":
       return operand === null ? !isNull(value) : !isNull(value) && !sqlEquals(value, operand);
     case "$in":

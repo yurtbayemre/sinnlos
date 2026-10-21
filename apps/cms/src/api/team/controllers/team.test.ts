@@ -8,13 +8,13 @@ vi.mock("@strapi/strapi", () => ({
 }));
 
 describe("team authoring controller wiring", () => {
-  it("overrides editable and update and fails closed without a gate decision", async () => {
+  it("overrides create, editable, update and delete and fails closed without a gate decision", async () => {
     const controller = (
       controllerFactory as unknown as (deps: {
         strapi: unknown;
       }) => Record<string, (ctx: unknown) => Promise<void>>
     )({ strapi: {} });
-    expect(Object.keys(controller).sort()).toEqual(["editable", "update"]);
+    expect(Object.keys(controller).sort()).toEqual(["create", "delete", "editable", "update"]);
     for (const action of Object.values(controller))
       await expect(action({ state: {} })).rejects.toMatchObject({ name: "ForbiddenError" });
   });

@@ -4,7 +4,12 @@ import { MAX_MARKDOWN_LENGTH } from "@sinnlos/domain";
 import { StrapiError } from "@/lib/strapi-error";
 import type { Viewer } from "@/lib/viewer";
 import { canEditOrg } from "./org-access";
-import { buildOrgPayload, orgValuesFromEditable, coerceOrgValues } from "./org-values";
+import {
+  buildOrgPayload,
+  orgValuesFromEditable,
+  coerceOrgValues,
+  emptyOrgValues,
+} from "./org-values";
 
 const strapi = vi.fn();
 const refresh = vi.fn();
@@ -12,7 +17,7 @@ let viewer: Viewer;
 vi.mock("@/lib/strapi/client", () => ({ strapi: (...args: unknown[]) => strapi(...args) }));
 vi.mock("next/cache", () => ({ refresh: () => refresh() }));
 vi.mock("@/lib/viewer", () => ({ getViewer: async () => viewer }));
-const { saveOrg } = await import("./org-actions");
+const { saveOrg, createOrg, deleteOrg } = await import("./org-actions");
 const DOC = "dept00000000000000000001";
 const department = { id: 3, documentId: DOC, name: "Engineering", slug: "eng" };
 const media = { id: 40, name: "cover.png", mime: "image/png", url: "/uploads/cover.png", size: 10 };
@@ -20,6 +25,11 @@ const initial = {
   description: " <p>Legacy &amp; <b>text</b></p>\r\n",
   color: "#123456",
   image: media,
+  name: "Engineering",
+  head: null,
+  department: "",
+  lead: null,
+  members: [],
 };
 const input = { documentId: DOC, version: "4", initial, values: { ...initial, color: "#abcdef" } };
 const cmsError = (status: number, details = {}) =>
@@ -237,5 +247,149 @@ describe("org save actions", () => {
     }
     strapi.mockRejectedValueOnce(expired);
     await expect(saveOrg("department", input)).rejects.toBe(expired);
+  });
+});
+
+describe("org structure (admin_role, v0.22)", () => {
+  const SALES = "dept00000000000000000002";
+  it("sends the structure fields an admin changed, trimmed and by id", () => {
+    expect(
+      buildOrgPayload(
+        "team",
+        "moderator",
+        { ...initial, name: "  Lager ", department: SALES, lead: 9, members: [10, 9] },
+        initial,
+      ),
+    ).toEqual({
+      ok: true,
+      data: {
+        name: "Lager",
+        department: SALES,
+        lead: 9,
+        members: { connect: [10, 9], disconnect: [] },
+      },
+    });
+    // Members travel as changes against the form's start (Codex v0.22).
+    expect(
+      buildOrgPayload(
+        "team",
+        "moderator",
+        { ...initial, members: [2, 3] },
+        { ...initial, members: [1, 2] },
+      ),
+    ).toEqual({ ok: true, data: { members: { connect: [3], disconnect: [1] } } });
+    // A different order of the same members is no change; a cleared department is null.
+    expect(
+      buildOrgPayload(
+        "team",
+        "moderator",
+        { ...initial, department: "", members: [2, 1] },
+        { ...initial, department: SALES, members: [1, 2] },
+      ),
+    ).toEqual({ ok: true, data: { department: null } });
+    expect(
+      buildOrgPayload("department", "moderator", { ...initial, name: " ", head: 9 }, initial),
+    ).toEqual({ ok: false, fields: { name: "required" } });
+  });
+  it("heads and leads never send the structure, whatever the values say", () => {
+    const changed = {
+      ...initial,
+      name: "Other",
+      head: 9,
+      department: SALES,
+      lead: 9,
+      members: [9],
+    };
+    expect(buildOrgPayload("department", "departmentHead", changed, initial)).toEqual({
+      ok: true,
+      data: {},
+    });
+    for (const roleClass of ["departmentHead", "teamLead"] as const)
+      expect(buildOrgPayload("team", roleClass, changed, initial)).toEqual({ ok: true, data: {} });
+  });
+  it("a create sends every admin field; a team needs a name and a department", () => {
+    expect(
+      buildOrgPayload(
+        "department",
+        "moderator",
+        { ...emptyOrgValues("department"), name: "Logistik" },
+        emptyOrgValues("department"),
+        "create",
+      ),
+    ).toEqual({
+      ok: true,
+      data: {
+        name: "Logistik",
+        description: null,
+        color: "#6366f1",
+        headerImage: null,
+        head: null,
+      },
+    });
+    expect(
+      buildOrgPayload(
+        "team",
+        "moderator",
+        emptyOrgValues("team"),
+        emptyOrgValues("team"),
+        "create",
+      ),
+    ).toEqual({ ok: false, fields: { name: "required", department: "required" } });
+  });
+  it("coerces structure values strictly when present and defaults them when absent", () => {
+    expect(coerceOrgValues({ description: "", color: "", image: null })).toMatchObject({
+      name: "",
+      head: null,
+      department: "",
+      lead: null,
+      members: [],
+    });
+    for (const bad of [{ head: "9" }, { lead: 0 }, { members: [1, "2"] }, { name: 3 }])
+      expect(coerceOrgValues({ ...initial, ...bad }), JSON.stringify(bad)).toBeNull();
+    expect(coerceOrgValues({ ...initial, members: [3, 3, 4] })?.members).toEqual([3, 4]);
+  });
+  it("createOrg: admin only, one POST without query", async () => {
+    await expect(
+      createOrg("department", { ...emptyOrgValues("department"), name: "Logistik" }),
+    ).resolves.toEqual({ ok: true, data: { documentId: DOC, version: "5" } });
+    expect(strapi).toHaveBeenCalledWith(
+      "/api/departments",
+      expect.objectContaining({ method: "POST" }),
+    );
+    expect(body()).toMatchObject({ name: "Logistik" });
+    strapi.mockClear();
+    for (const role of ["editor", "department_head", "team_lead", "member", null]) {
+      viewer.role = role;
+      await expect(
+        createOrg("team", { ...emptyOrgValues("team"), name: "X", department: DOC }),
+      ).resolves.toEqual({ ok: false, code: "forbidden" });
+    }
+    expect(strapi).not.toHaveBeenCalled();
+  });
+  it("createOrg maps a taken name to the field", async () => {
+    strapi.mockRejectedValueOnce(cmsError(400, { keys: ["name"], codes: { name: "taken" } }));
+    await expect(
+      createOrg("department", { ...emptyOrgValues("department"), name: "Sales" }),
+    ).resolves.toMatchObject({ ok: false, code: "invalid", fields: { name: "taken" } });
+  });
+  it("deleteOrg: admin only, DELETE with If-Match", async () => {
+    strapi.mockResolvedValueOnce(undefined);
+    await expect(deleteOrg("team", DOC, "4")).resolves.toEqual({ ok: true, data: null });
+    expect(strapi).toHaveBeenCalledWith(
+      `/api/teams/${DOC}`,
+      expect.objectContaining({ method: "DELETE", headers: { "If-Match": '"4"' } }),
+    );
+    strapi.mockClear();
+    viewer.role = "department_head";
+    await expect(deleteOrg("department", DOC, "4")).resolves.toEqual({
+      ok: false,
+      code: "forbidden",
+    });
+    viewer.role = "admin_role";
+    await expect(deleteOrg("department", "../users", "4")).resolves.toEqual({
+      ok: false,
+      code: "invalid",
+    });
+    expect(strapi).not.toHaveBeenCalled();
   });
 });

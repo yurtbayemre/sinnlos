@@ -159,10 +159,13 @@ describe("batch 17 consumer contracts", () => {
     expect(department.data.description).toBe("<p>Legacy description</p>");
     expect(saved.data.version).toBe("10");
     expect(query).toEqual({});
-    expect(ORG_AUTHORING_INTENTS).toEqual(["update", "editable"]);
+    expect(ORG_AUTHORING_INTENTS).toEqual(["create", "update", "editable", "delete"]);
     expect(ORG_FIELDS.department.departmentHead).not.toContain("headerImage");
     expect(ORG_FIELDS.team.teamLead).toEqual(["description"]);
-    expect(ORG_FIELDS.team.moderator).not.toContain("department");
+    // The structure is admin_role's alone (v0.22): heads and leads keep text fields.
+    expect(ORG_FIELDS.team.departmentHead).toEqual(["description"]);
+    expect(ORG_FIELDS.department.departmentHead).not.toContain("name");
+    expect(ORG_FIELDS.team.moderator).toContain("members");
     expectTypeOf<OrgWriteQuery["status"]>().toBeNever();
     // @ts-expect-error A single organisation row has no publication status.
     expectTypeOf<DepartmentEditable>().toHaveProperty("status");

@@ -35,6 +35,8 @@ admin_role|api::course.course.report
 admin_role|api::course.course.reportCourse
 admin_role|api::course.course.unpublish
 admin_role|api::course.course.update
+admin_role|api::department.department.create
+admin_role|api::department.department.delete
 admin_role|api::department.department.editable
 admin_role|api::department.department.find
 admin_role|api::department.department.findOne
@@ -138,6 +140,8 @@ admin_role|api::reaction.reaction.find
 admin_role|api::reaction.reaction.findOne
 admin_role|api::search-log.search-log.create
 admin_role|api::search-log.search-log.summary
+admin_role|api::team.team.create
+admin_role|api::team.team.delete
 admin_role|api::team.team.editable
 admin_role|api::team.team.find
 admin_role|api::team.team.findOne

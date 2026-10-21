@@ -17,6 +17,8 @@ import type {
   RoleTypesCheck,
 } from "./write-allowlist";
 
+const USER_UID = "plugin::users-permissions.user";
+
 /**
  * The database-backed checks the v2 write gate hands to the allowlist
  * (deep-dive decision 06 §B1.2, §E2, §N4; batch 15 plan item 5). Each one
@@ -275,9 +277,11 @@ export function authoringChecks(
             populate: { department: { select: ["id"] } },
           })
         : refuse,
+      user: toOneCheck(strapi, USER_UID, undefined, EXACTLY_ONE_OR_CLEAR),
     },
     relationListChecks: {
       departments: listCheck(strapi, DEPARTMENT_UID),
+      users: listCheck(strapi, USER_UID),
       callerDepartments: mine ? callerDepartments : refuseList,
     },
     roleTypesCheck: roleTypesCheck(strapi),
