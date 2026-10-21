@@ -8,6 +8,9 @@
 #      when SMTP is, JWT_SECRET rotated when the running web still exposed
 #      Strapi JWTs (D-SESSION-01), a valid Entra configuration when
 #      ENTRA_ENABLED=1 (D-ENTRA-01: cms and web would refuse to start),
+#      the profile and keys of the optional Meilisearch when
+#      MEILISEARCH_ENABLED=1, and a master key whenever its profile is on
+#      (v0.21: the meili container would not start),
 #      DATETIME_LEGACY_ZONE set while the running database still holds
 #      pre-contract datetime columns (the new cms would refuse to start),
 #      no wiki revision draft rows while this release runs wiki revisions
@@ -184,10 +187,14 @@ PREFLIGHT_WARN_KEYS="DATABASE_PASSWORD"
 # (without ENTRA_ENABLED=1, a real app registration: a GUID client id and a
 # client secret, with which the running release may have offered Microsoft
 # sign-in) or "entra-inert MS_CLIENT_ID" (other MS_* values left in
-# infra/.env without ENTRA_ENABLED=1: ignored).
-# The key lists, the markers, the digest rule and the Entra rules are
-# pinned against env-guard.ts, send-digests.ts, entra/config.ts and the web's
-# auth-config.ts by apps/cms/src/utils/deploy-preflight.test.ts.
+# infra/.env without ENTRA_ENABLED=1: ignored), "meili-invalid KEY" (v0.21:
+# MEILISEARCH_ENABLED=1 without the search profile or a key of the
+# optional Meilisearch, or the profile on with a master key the meili
+# container refuses to start with).
+# The key lists, the markers, the digest rule, the Entra and the
+# Meilisearch rules are pinned against env-guard.ts, send-digests.ts,
+# entra/config.ts, the web's auth-config.ts and infra/docker-compose.yml by
+# apps/cms/src/utils/deploy-preflight.test.ts.
 preflight_scan() {
   awk -v fatal_keys="${PREFLIGHT_FATAL_KEYS}" -v warn_keys="${PREFLIGHT_WARN_KEYS}" '
     function placeholder(v,    n, i, parts, p) {
@@ -289,6 +296,20 @@ preflight_scan() {
         print "entra-was-on MS_CLIENT_ID"
       } else if (env["MS_CLIENT_ID"] != "" || env["AUTH_MICROSOFT_ENTRA_ID_SECRET"] != "") {
         print "entra-inert MS_CLIENT_ID"
+      }
+      # v0.21 Meilisearch: compose renders MEILI_MASTER_KEY (the meili
+      # service) only while the search profile is on (COMPOSE_PROFILES in
+      # infra/.env). In production Meilisearch does not start without a
+      # master key of 16+ bytes. MEILISEARCH_ENABLED is on at exactly "1",
+      # as the cms and the web read it, and then needs the profile and both
+      # restricted keys.
+      meili = ("MEILI_MASTER_KEY" in env)
+      if (meili && (length(trim(env["MEILI_MASTER_KEY"])) < 16 || placeholder(env["MEILI_MASTER_KEY"]))) print "meili-invalid MEILI_MASTER_KEY"
+      if (env["MEILISEARCH_ENABLED"] == "1") {
+        if (!meili) print "meili-invalid COMPOSE_PROFILES"
+        if (trim(env["MEILISEARCH_URL"]) == "") print "meili-invalid MEILISEARCH_URL"
+        if (trim(env["MEILISEARCH_WRITE_KEY"]) == "" || placeholder(env["MEILISEARCH_WRITE_KEY"])) print "meili-invalid MEILISEARCH_WRITE_KEY"
+        if (trim(env["MEILISEARCH_SEARCH_KEY"]) == "" || placeholder(env["MEILISEARCH_SEARCH_KEY"])) print "meili-invalid MEILISEARCH_SEARCH_KEY"
       }
     }' | sort -u
 }
@@ -1199,6 +1220,7 @@ digest_keys="$(keys_of digest)"
 entra_invalid_keys="$(keys_of entra-invalid)"
 entra_inert_keys="$(keys_of entra-inert)"
 entra_was_on_keys="$(keys_of entra-was-on)"
+meili_invalid_keys="$(keys_of meili-invalid)"
 # Not fatal: the owner instance may keep an unused registration in
 # infra/.env. But an instance that still signs users in with the old
 # Microsoft flow loses it with this deploy.
@@ -1251,6 +1273,19 @@ if [[ -n "${entra_invalid_keys}" ]]; then
   echo "       32+ characters (openssl rand -hex 32), ENTRA_SYNC_MODE on|dry-run, ENTRA_DEFAULT_ROLE" >&2
   echo "       member|guest|deny, ENTRA_SESSION_TTL <n>m|h|d up to 7d, ENTRA_GROUP_ROLES <role>:<guid>,..." >&2
   echo "       (docs/DEPLOYMENT.md, \"Microsoft Entra ID sign-in\"). Or unset ENTRA_ENABLED." >&2
+  preflight_failed=1
+fi
+# v0.21: the optional Meilisearch. With the profile on and no usable master
+# key the meili container restarts forever; MEILISEARCH_ENABLED=1 without
+# the profile or a key leaves the search on its fallback with a broken
+# indexer. Refused here instead.
+if [[ -n "${meili_invalid_keys}" ]]; then
+  echo "ERROR: Meilisearch settings in infra/.env are missing or invalid: ${meili_invalid_keys}" >&2
+  echo "       MEILISEARCH_ENABLED=1 needs COMPOSE_PROFILES=search, MEILI_MASTER_KEY (16+ characters," >&2
+  echo "       openssl rand -hex 32), MEILISEARCH_WRITE_KEY and MEILISEARCH_SEARCH_KEY (printed by" >&2
+  echo "       infra/meilisearch/provision-keys.sh) and a MEILISEARCH_URL; the search profile alone" >&2
+  echo "       needs the master key. docs/DEPLOYMENT.md, \"Meilisearch (optional search)\"." >&2
+  echo "       Or unset MEILISEARCH_ENABLED and COMPOSE_PROFILES." >&2
   preflight_failed=1
 fi
 # 5A-T1: the host the Traefik routers match, from the rendered labels.

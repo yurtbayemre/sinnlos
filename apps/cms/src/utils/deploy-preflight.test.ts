@@ -557,6 +557,105 @@ describe("Entra preflight (D-ENTRA-01)", () => {
   });
 });
 
+describe("Meilisearch preflight (v0.21)", () => {
+  const MASTER = "93c0a2576c0bab96c0cfe2dc8f969cdd";
+  const KEY = "5f0e1c2d3b4a59687766554433221100ffeeddccbbaa99887766554433221100";
+  /**
+   * What compose renders from infra/.env: MEILI_MASTER_KEY only while the
+   * search profile is on (the meili service), the MEILISEARCH_* keys always.
+   */
+  const rendered = (env: { profile?: boolean } & Record<string, string | boolean>) => {
+    const { profile, ...keys } = env;
+    return {
+      MEILISEARCH_ENABLED: "0",
+      MEILISEARCH_URL: "http://sinnlos-meili:7700",
+      MEILISEARCH_WRITE_KEY: "",
+      MEILISEARCH_SEARCH_KEY: "",
+      ...(profile ? { MEILI_MASTER_KEY: "" } : {}),
+      ...(keys as Record<string, string>),
+    };
+  };
+  const scan = (env: { profile?: boolean } & Record<string, string | boolean>) =>
+    runAwk(PREFLIGHT_AWK, { fatal_keys: "", warn_keys: "" }, composeJson(rendered(env)));
+  const on = {
+    profile: true,
+    MEILI_MASTER_KEY: MASTER,
+    MEILISEARCH_ENABLED: "1",
+    MEILISEARCH_WRITE_KEY: KEY,
+    MEILISEARCH_SEARCH_KEY: KEY,
+  };
+
+  it.skipIf(!HAS_AWK)("says nothing while the module is off, with or without the profile", () => {
+    expect(scan({})).toEqual([]);
+    expect(scan({ profile: true, MEILI_MASTER_KEY: MASTER })).toEqual([]);
+    // On at exactly "1", as the apps read it.
+    for (const flag of ["0", "", "true", "yes", " 1"]) {
+      expect(scan({ MEILISEARCH_ENABLED: flag }), flag).toEqual([]);
+    }
+    expect(scan(on)).toEqual([]);
+  });
+
+  it.skipIf(!HAS_AWK)("refuses a master key the meili container would not start with", () => {
+    for (const master of [
+      "",
+      "   ",
+      "0123456789abcde",
+      "change-me-meili-master-key",
+      "<openssl rand -hex 32>",
+    ]) {
+      expect(scan({ profile: true, MEILI_MASTER_KEY: master }), master).toEqual([
+        "meili-invalid MEILI_MASTER_KEY",
+      ]);
+    }
+  });
+
+  it.skipIf(!HAS_AWK)("refuses MEILISEARCH_ENABLED=1 without the profile or a key", () => {
+    expect(scan({ MEILISEARCH_ENABLED: "1" })).toEqual([
+      "meili-invalid COMPOSE_PROFILES",
+      "meili-invalid MEILISEARCH_WRITE_KEY",
+      "meili-invalid MEILISEARCH_SEARCH_KEY",
+    ]);
+    // Profile off: compose renders no MEILI_MASTER_KEY at all.
+    const { MEILI_MASTER_KEY: _master, ...profileOff } = on;
+    expect(scan({ ...profileOff, profile: false })).toEqual(["meili-invalid COMPOSE_PROFILES"]);
+    expect(scan({ ...on, MEILISEARCH_URL: " " })).toEqual(["meili-invalid MEILISEARCH_URL"]);
+    expect(scan({ ...on, MEILISEARCH_WRITE_KEY: "change-me" })).toEqual([
+      "meili-invalid MEILISEARCH_WRITE_KEY",
+    ]);
+    expect(scan({ ...on, MEILISEARCH_SEARCH_KEY: "" })).toEqual([
+      "meili-invalid MEILISEARCH_SEARCH_KEY",
+    ]);
+  });
+
+  it("wires the keys as the apps read them, the master key only into the meili service", () => {
+    const service = (name: string) => {
+      const start = COMPOSE.indexOf(`\n  ${name}:\n`);
+      const next = COMPOSE.slice(start + 1).search(/\n {2}[a-z]+:\n/);
+      // Without comments: the meili service's comment sits above it, at the end of web's block.
+      return COMPOSE.slice(start, next < 0 ? undefined : start + 1 + next)
+        .split("\n")
+        .filter((line) => !line.trimStart().startsWith("#"))
+        .join("\n");
+    };
+    const [cms, web, meili] = [service("cms"), service("web"), service("meili")];
+    for (const block of [cms, web]) {
+      expect(block).toContain("MEILISEARCH_ENABLED: ${MEILISEARCH_ENABLED:-0}");
+      expect(block).toContain("MEILISEARCH_URL: ${MEILISEARCH_URL:-http://sinnlos-meili:7700}");
+      expect(block).not.toContain("MEILI_MASTER_KEY");
+    }
+    expect(cms).toContain("MEILISEARCH_WRITE_KEY: ${MEILISEARCH_WRITE_KEY:-}");
+    expect(cms).not.toContain("MEILISEARCH_SEARCH_KEY");
+    expect(web).toContain("MEILISEARCH_SEARCH_KEY: ${MEILISEARCH_SEARCH_KEY:-}");
+    expect(web).not.toContain("MEILISEARCH_WRITE_KEY");
+    expect(meili).toContain('profiles: ["search"]');
+    expect(meili).toContain("MEILI_MASTER_KEY: ${MEILI_MASTER_KEY:-}");
+    expect(meili).toContain("MEILI_ENV: production");
+    expect(meili).toMatch(/image: getmeili\/meilisearch:v\d+\.\d+\.\d+@sha256:[0-9a-f]{64}\n/);
+    // cms and web start without it: their search falls back.
+    for (const block of [cms, web]) expect(block).not.toMatch(/^\s+(- )?meili:?$/m);
+  });
+});
+
 describe("D-SESSION-01 JWT rotation gate (C3)", () => {
   it("checks the label the web image carries", () => {
     const label = shellAssignment("JWT_OFF_SESSION_LABEL");
@@ -1362,6 +1461,36 @@ describe("Entra preflight messages and exit code (D-ENTRA-01)", BASH_BUDGET, () 
 
   it.skipIf(!HAS_BASH)("says nothing about Entra without MS_* values", () => {
     const run = preflightRun(entraOff("", ""));
+    expect(run.status, run.stderr).toBe(0);
+    expect(run.stderr).toBe("");
+  });
+});
+
+describe("Meilisearch preflight message and exit code (v0.21)", BASH_BUDGET, () => {
+  it.skipIf(!HAS_BASH)(
+    "refuses MEILISEARCH_ENABLED=1 without the profile, naming keys only",
+    () => {
+      const run = preflightRun({
+        MEILISEARCH_ENABLED: "1",
+        MEILISEARCH_URL: "http://sinnlos-meili:7700",
+        MEILISEARCH_WRITE_KEY: "write-key-value-0123456789",
+        MEILISEARCH_SEARCH_KEY: "",
+      });
+      expect(run.status).toBe(1);
+      expect(run.stderr).toContain(
+        "ERROR: Meilisearch settings in infra/.env are missing or invalid: COMPOSE_PROFILES MEILISEARCH_SEARCH_KEY",
+      );
+      expect(run.stderr).toContain('"Meilisearch (optional search)"');
+      expect(run.stderr).not.toContain("write-key-value-0123456789");
+      expect(run.stdout).not.toContain("Preflight OK");
+    },
+  );
+
+  it.skipIf(!HAS_BASH)("passes silently while the module is off", () => {
+    const run = preflightRun({
+      MEILISEARCH_ENABLED: "0",
+      MEILISEARCH_URL: "http://sinnlos-meili:7700",
+    });
     expect(run.status, run.stderr).toBe(0);
     expect(run.stderr).toBe("");
   });
