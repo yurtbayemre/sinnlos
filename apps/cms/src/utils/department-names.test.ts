@@ -1,10 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 
-const lockDocument = vi.fn(async () => 1);
-vi.mock("./document-lock", () => ({
-  lockDocument: (...args: unknown[]) => lockDocument(...(args as [])),
-}));
-const { assertFreeDepartmentName, DEPARTMENT_NAMES_LOCK_UID } = await import("./department-names");
+import { assertFreeDepartmentName, DEPARTMENT_NAMES_LOCK_UID } from "./department-names";
+
+const { lockDocument } = vi.hoisted(() => ({ lockDocument: vi.fn(async () => 1) }));
+vi.mock("./document-lock", () => ({ lockDocument }));
 
 type Row = Record<string, unknown>;
 const ROWS = [
