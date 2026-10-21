@@ -53,9 +53,6 @@ export function questionProblems(question: QuizQuestion): {
   };
 }
 
-const anyProblem = (p: ReturnType<typeof questionProblems>) =>
-  p.question || p.count || p.correct || p.options.some(Boolean);
-
 export function QuizBuilder({
   id,
   value,
@@ -86,11 +83,10 @@ export function QuizBuilder({
     }
   }
   const valid = !("error" in validateQuiz(value));
-  const shownError = error || (checked && !valid ? t("invalid") : undefined);
+  // The form and the cms check with the same validateQuiz, so a refusal of a
+  // quiz that is valid now is stale (fixed since): it is no longer shown.
+  const shownError = valid ? undefined : error || (checked ? t("invalid") : undefined);
   const problems = marking ? value.map(questionProblems) : null;
-  // A refusal the fields cannot explain (the cms's quizInvalid on content the
-  // form shows as valid) still needs one invalid control.
-  const fallback = !!error && !!problems && !problems.some(anyProblem);
   // The first question is the editor's focus target for a quiz error, so it
   // always carries the error's description.
   const describedBy = (invalidField: boolean) =>
@@ -128,7 +124,7 @@ export function QuizBuilder({
               <input
                 {...a11y}
                 aria-describedby={describedBy(q === 0 || !!problems?.[q].question)}
-                aria-invalid={problems?.[q].question || (fallback && q === 0) ? true : undefined}
+                aria-invalid={problems?.[q].question ? true : undefined}
                 value={question.question}
                 maxLength={QUIZ_MAX_TEXT}
                 className={inputClass}

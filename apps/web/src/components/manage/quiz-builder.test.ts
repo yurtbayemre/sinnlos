@@ -147,6 +147,16 @@ describe("quiz builder and the cms's refusal", () => {
     expect(page).toContain(">Invalid quiz<");
   });
 
+  it("retires a refusal once the quiz is valid again: no contradictory messages", () => {
+    const page = withError([filled], "Invalid quiz");
+    expect(page).not.toContain(">Invalid quiz<");
+    expect(page).not.toContain('aria-invalid="true"');
+    click([filled], "validate");
+    const checkedPage = withError([filled], "Invalid quiz");
+    expect(checkedPage).toContain(">valid</p>");
+    expect(checkedPage).not.toContain(">Invalid quiz<");
+  });
+
   it("names the answer limit for a question loaded with too many answers", () => {
     const crowded = {
       question: "Q",
