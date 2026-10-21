@@ -340,6 +340,12 @@ describe.each(testEngines())("organisation authoring HTTP on %s", (engine) => {
     );
     expect(takenCase.status, takenCase.text).toBe(400);
     expect(takenCase.body.error?.details).toMatchObject({ codes: { name: "taken" } });
+    // The admin panel passes the same check (the department's beforeCreate; Codex round 4).
+    const panelCase = await panel.create(DEPT, {
+      name: String(t.fixtures.departments.sales.name).toLowerCase(),
+      slug: "panel-sales-lower",
+    });
+    expect(panelCase.status, panelCase.text).toBe(400);
     // Beyond ASCII too (SQLite's LOWER folds ASCII only; Codex v0.22 round 2).
     const umlaut = await t.api<OrgWriteResponse>("admin_role", "/api/departments", {
       json: { data: { name: "Ärztlicher Dienst" } },
