@@ -47,6 +47,22 @@ describe.each(testEngines())("user administration (v0.23) on %s", (engine) => {
       }
     }
     expect((await row(member)).blocked).not.toBe(true);
+    // The plugin's generic user writes stay closed for everyone, admin_role included.
+    for (const caller of ["admin_role", "member", null] as const) {
+      expect(
+        (await t.api(caller, `/api/users/${member}`, { method: "PUT", json: { blocked: true } }))
+          .status,
+      ).toBe(403);
+      expect(
+        (
+          await t.api(caller, "/api/users", {
+            json: { username: "x", email: "x@example.com", password: "Secret123!" },
+          })
+        ).status,
+      ).toBe(403);
+      expect((await t.api(caller, `/api/users/${member}`, { method: "DELETE" })).status).toBe(403);
+    }
+    expect((await row(member)).blocked).not.toBe(true);
   });
 
   it("lists by name with search and filters, without a private field", async () => {

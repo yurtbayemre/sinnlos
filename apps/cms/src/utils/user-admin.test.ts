@@ -47,18 +47,18 @@ afterEach(() => {
 });
 
 describe("user administration rules (v0.23)", () => {
-  it("keeps the last unblocked admin: a race where the other admin was demoted first", async () => {
-    // Caller 2 passed the admin check before admin 1 demoted them; under the lock only 1 is an admin.
-    const { host } = world([
+  it("refuses a caller who is no unblocked admin any more under the lock (a queued request)", async () => {
+    // Caller 2 passed the request's admin check, then admin 1 demoted them.
+    const { host, strapi } = world([
       { id: 1, role: { id: 1 }, blocked: false },
       { id: 2, role: { id: 2 }, blocked: false },
+      { id: 3, role: { id: 1 }, blocked: true },
     ]);
-    await expect(updateUser(host, 2, 1, { role: "editor" })).rejects.toMatchObject({
-      details: { keys: ["role"], codes: { role: "lastAdmin" } },
-    });
-    await expect(updateUser(host, 2, 1, { blocked: true })).rejects.toMatchObject({
-      details: { codes: { blocked: "lastAdmin" } },
-    });
+    for (const callerId of [2, 3])
+      await expect(updateUser(host, callerId, 1, { role: "editor" })).rejects.toMatchObject({
+        name: "ForbiddenError",
+      });
+    expect(strapi.tables[USER][0]).toMatchObject({ role: { id: 1 } });
   });
   it("lets an admin demote another admin while one stays", async () => {
     const { host, strapi } = world([
@@ -69,15 +69,11 @@ describe("user administration rules (v0.23)", () => {
     expect(detail.role).toBe("editor");
     expect(strapi.tables[USER][1]).toMatchObject({ roleSource: "manual", entraAppliedRole: null });
   });
-  it("a blocked admin never counts, and a block raises the token version once", async () => {
+  it("a block raises the token version once", async () => {
     const { host } = world([
       { id: 1, role: { id: 1 }, blocked: false },
-      { id: 2, role: { id: 1 }, blocked: true },
       { id: 3, role: { id: 2 }, blocked: false },
     ]);
-    await expect(updateUser(host, 3, 1, { blocked: true })).rejects.toMatchObject({
-      details: { codes: { blocked: "lastAdmin" } },
-    });
     await updateUser(host, 1, 3, { blocked: true });
     expect(bump).toHaveBeenCalledOnce();
     await updateUser(host, 1, 3, { blocked: true });

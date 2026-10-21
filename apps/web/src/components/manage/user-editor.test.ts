@@ -64,8 +64,11 @@ describe("user form (v0.23)", () => {
         options,
       }),
     );
-    expect(tagById(html, "user-department")).toContain("<p");
-    expect(tagById(html, "user-manager")).toContain("<p");
+    // Read-only inputs: a refused save can focus them (Codex v0.23).
+    for (const id of ["user-department", "user-manager"]) {
+      expect(tagById(html, id)).toContain("<input");
+      expect(tagById(html, id)).toContain("readOnly");
+    }
     expect(html.split(en.lockedHint)).toHaveLength(3);
   });
   it("hand-back only for an Entra-bound user with a hand-set role, never for oneself", () => {

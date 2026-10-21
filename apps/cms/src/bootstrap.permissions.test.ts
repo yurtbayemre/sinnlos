@@ -215,6 +215,10 @@ describe("role vocabulary of the permission constants (S02)", () => {
     expect(REVOKED_PERMISSIONS.public).toEqual([
       "plugin::users-permissions.auth.forgotPassword",
       "plugin::users-permissions.auth.resetPassword",
+      // The plugin's generic user writes (v0.23): no field allowlist, revoked everywhere.
+      "plugin::users-permissions.user.create",
+      "plugin::users-permissions.user.update",
+      "plugin::users-permissions.user.destroy",
     ]);
   });
 

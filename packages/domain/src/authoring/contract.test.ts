@@ -75,7 +75,6 @@ describe("codes", () => {
         "taken",
         // User administration (v0.23).
         "selfChange",
-        "lastAdmin",
         "entraManaged",
         "managerCycle",
       ].sort(),

@@ -213,7 +213,6 @@
     "timeRepeated": "This time occurs twice on this day because of the clock change. Choose another time.",
     "timeSkipped": "This time does not exist on this day because of the clock change. Choose another time.",
     "selfChange": "Only another admin can change your own role or block.",
-    "lastAdmin": "That is the last active admin. Make someone else admin first.",
     "entraManaged": "Microsoft Entra manages this field for this account.",
     "managerCycle": "That person already reports to this user, directly or indirectly.",
     "notEntraBound": "This account does not sign in with Microsoft Entra."

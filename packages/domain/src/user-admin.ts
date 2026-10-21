@@ -7,7 +7,7 @@
  *
  * Refusals use the authoring vocabulary (authoring/codes.ts): 400 with
  * `details.keys`/`details.codes`, e.g. `{ role: "selfChange" }`,
- * `{ blocked: "lastAdmin" }`, `{ department: "entraManaged" }`,
+ * `{ department: "entraManaged" }`,
  * `{ manager: "managerCycle" }`, `{ _form: "notEntraBound" }`.
  */
 import type { RoleType } from "./roles.js";

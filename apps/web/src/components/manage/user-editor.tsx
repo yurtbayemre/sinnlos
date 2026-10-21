@@ -11,7 +11,7 @@ import { fieldInputId } from "@/lib/manage/errors";
 import { handRoleToEntra, saveUser } from "@/lib/manage/user-actions";
 import { userValuesFromDetail, type UserValues } from "@/lib/manage/user-values";
 import { ActionBar, FormAlert, useFieldError } from "./editor-chrome";
-import { CheckboxField } from "./form-controls";
+import { CheckboxField, Field, inputClass } from "./form-controls";
 import { SinglePicker } from "./pickers";
 import { useAuthoringEditor } from "./use-authoring-editor";
 import { sameValues } from "./use-item-editor";
@@ -250,24 +250,10 @@ function LockedField({
   hint: string;
   error?: string;
 }) {
+  // A read-only input, not text: a refused save focuses it, and the error describes it.
   return (
-    <div className="space-y-1.5">
-      <span id={`${id}-label`} className="block text-sm font-medium">
-        {label}
-      </span>
-      <p
-        id={id}
-        tabIndex={-1}
-        aria-labelledby={`${id}-label`}
-        aria-describedby={`${id}-hint`}
-        className="text-sm"
-      >
-        {value}
-      </p>
-      <p id={`${id}-hint`} className="text-xs text-muted-foreground">
-        {hint}
-      </p>
-      {error ? <p className="text-sm text-destructive">{error}</p> : null}
-    </div>
+    <Field id={id} label={label} hint={hint} error={error}>
+      {(a11y) => <input {...a11y} type="text" readOnly value={value} className={inputClass} />}
+    </Field>
   );
 }

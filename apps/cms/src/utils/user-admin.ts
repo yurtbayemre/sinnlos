@@ -9,11 +9,13 @@
  * password field leaves this module.
  *
  * EVERY WRITE, in one transaction under ONE directory lock (a reserved
- * version row, like the wiki structure lock), so two admins cannot race the
+ * version row, like the wiki structure lock; the Entra sign-in's role write
+ * takes it too), so two admins, or an admin and a sign-in, cannot race the
  * invariants:
+ *   - the caller is read again under the lock: still an unblocked admin_role;
  *   - nobody changes their own role or blocked state (`selfChange`);
- *   - the last unblocked admin_role is neither demoted nor blocked
- *     (`lastAdmin`);
+ *   - so at least one unblocked admin_role always remains: a write needs
+ *     an unblocked admin caller, and the caller is never the target;
  *   - a role change makes the role the intranet's (`roleSource: manual`,
  *     `entraAppliedRole` cleared), so the next Entra sign-in keeps it;
  *     "hand back to Entra" undoes that (the DEPLOYMENT.md procedure);
@@ -289,15 +291,19 @@ async function lockDirectory(strapi: UserAdminHost): Promise<void> {
 
 const roleTypeOf = (row: Row): string | null => (isRecord(row.role) ? text(row.role.type) : null);
 
-/** Unblocked admin_role users other than `exceptId`. */
-async function otherActiveAdmins(strapi: UserAdminHost, exceptId: number): Promise<number> {
-  return strapi.db.query(USER_UID).count({
-    where: {
-      id: { $ne: exceptId },
-      role: { type: ADMIN_ROLE },
-      $or: [{ blocked: false }, { blocked: { $null: true } }],
-    },
+/**
+ * The caller is still an unblocked admin_role, read under the directory
+ * lock: the request's own check ran on a snapshot, and an admin demoted or
+ * blocked meanwhile must not finish a queued write (Codex review).
+ */
+async function assertActiveAdmin(strapi: UserAdminHost, callerId: number): Promise<void> {
+  const caller = await strapi.db.query(USER_UID).findOne({
+    where: { id: callerId },
+    select: ["id", "blocked"],
+    populate: { role: { select: ["type"] } },
   });
+  if (!isRecord(caller) || caller.blocked === true || roleTypeOf(caller) !== ADMIN_ROLE)
+    throw new errors.ForbiddenError("Forbidden");
 }
 
 /** Whether `managerId`'s chain of managers reaches `userId` (or runs too long). */
@@ -346,6 +352,7 @@ export async function updateUser(
 ): Promise<UserAdminDetail> {
   await strapi.db.transaction(async () => {
     await lockDirectory(strapi);
+    await assertActiveAdmin(strapi, callerId);
     const user = await loadUser(strapi, id);
     if (!user) throw new errors.NotFoundError("Not Found");
     const codes: Record<string, string> = {};
@@ -393,14 +400,6 @@ export async function updateUser(
     if (update.blocked !== undefined) data.blocked = update.blocked;
 
     const wasBlocked = user.blocked === true;
-    const wasActiveAdmin = roleTypeOf(user) === ADMIN_ROLE && !wasBlocked;
-    const willBeActiveAdmin =
-      (update.role ?? roleTypeOf(user)) === ADMIN_ROLE && !(update.blocked ?? wasBlocked);
-    if (wasActiveAdmin && !willBeActiveAdmin && (await otherActiveAdmins(strapi, id)) === 0) {
-      const key = update.role !== undefined && update.role !== ADMIN_ROLE ? "role" : "blocked";
-      refuseKeys([key], { [key]: "lastAdmin" });
-    }
-
     await strapi.db.query(USER_UID).update({ where: { id }, data });
     if (update.blocked === true && !wasBlocked)
       await bumpTokenVersion(strapi as unknown as TokenVersionStrapi, id);
@@ -417,6 +416,7 @@ export async function handRoleToEntra(
 ): Promise<UserAdminDetail> {
   await strapi.db.transaction(async () => {
     await lockDirectory(strapi);
+    await assertActiveAdmin(strapi, callerId);
     const user = await loadUser(strapi, id);
     if (!user) throw new errors.NotFoundError("Not Found");
     // Entra may demote at the next sign-in: never one's own role (the last admin stays reachable).

@@ -98,12 +98,12 @@ describe("user actions (v0.23)", () => {
   });
   it("maps a refusal to the field", async () => {
     strapi.mockRejectedValueOnce(
-      cmsError(400, { keys: ["blocked"], codes: { blocked: "lastAdmin" } }),
+      cmsError(400, { keys: ["blocked"], codes: { blocked: "selfChange" } }),
     );
     await expect(saveUser(12, { ...initial, blocked: true }, initial)).resolves.toMatchObject({
       ok: false,
       code: "invalid",
-      fields: { blocked: "lastAdmin" },
+      fields: { blocked: "selfChange" },
     });
   });
   it("hands the role back with one POST", async () => {

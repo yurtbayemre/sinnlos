@@ -91,8 +91,6 @@ export const AUTHORING_FIELD_CODES = [
   "taken",
   /** User administration (v0.23): one's own role or blocked state. */
   "selfChange",
-  /** User administration: it would leave no unblocked admin_role. */
-  "lastAdmin",
   /** User administration: Entra's sync owns this field for this user. */
   "entraManaged",
   /** User administration: the manager would be the user or one of their reports. */

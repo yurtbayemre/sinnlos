@@ -71,6 +71,8 @@ import {
   syncedEmail,
 } from "./profile";
 import { decideRoleWrite, resolveEntraRole, type RoleResolution } from "./roles";
+import { lockDocument, type DocumentLockHost } from "../utils/document-lock";
+import { USER_DIRECTORY_LOCK_DOCUMENT_ID, USER_DIRECTORY_LOCK_UID } from "../utils/user-admin";
 
 export const USER_UID = "plugin::users-permissions.user";
 export const ROLE_UID = "plugin::users-permissions.role";
@@ -569,6 +571,13 @@ async function writeRole(
 ): Promise<RoleStep> {
   return strapi.db.transaction(async () => {
     if (strapi.db.dialect.client === "postgres") {
+      // The user administration's directory lock first (utils/user-admin.ts, same order):
+      // a sign-in's demotion and a web demotion never both pass the last-admin check.
+      await lockDocument(
+        strapi as unknown as DocumentLockHost,
+        USER_DIRECTORY_LOCK_UID,
+        USER_DIRECTORY_LOCK_DOCUMENT_ID,
+      );
       await strapi.db
         .queryBuilder(USER_UID)
         .select(["id"])

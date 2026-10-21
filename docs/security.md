@@ -675,10 +675,12 @@ Training and organisation authoring (batch 17):
   descriptions are preserved when another field is saved.
 - User administration (v0.23): only admin_role reaches `/api/user-management`
   (grant plus controller check); it writes role, department, manager and
-  blocked under one directory lock, refuses one's own role or block, keeps
-  the last unblocked admin, refuses Entra-synced fields of bound accounts and
+  blocked under one directory lock (the Entra sign-in's role write takes it
+  too), re-reads the caller there (an admin demoted meanwhile gets 403),
+  refuses one's own role or block, Entra-synced fields of bound accounts and
   manager cycles, raises the token version on a block and records an audit
-  row. The plugin's generic user writes stay ungranted.
+  row. The plugin's generic user writes are revoked for every role,
+  `public` included.
 - Org update requires `If-Match`, returns only `documentId`/`version` with
   ETag, and reclassifies access under the existing lock before reporting a
   stale version. Missing access is 403 on update and 404 on editable.
