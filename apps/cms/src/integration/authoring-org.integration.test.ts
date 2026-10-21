@@ -340,6 +340,26 @@ describe.each(testEngines())("organisation authoring HTTP on %s", (engine) => {
     );
     expect(takenCase.status, takenCase.text).toBe(400);
     expect(takenCase.body.error?.details).toMatchObject({ codes: { name: "taken" } });
+    // Beyond ASCII too (SQLite's LOWER folds ASCII only; Codex v0.22 round 2).
+    const umlaut = await t.api<OrgWriteResponse>("admin_role", "/api/departments", {
+      json: { data: { name: "Ärztlicher Dienst" } },
+    });
+    expect(umlaut.status, umlaut.text).toBe(201);
+    const umlautCase = await t.api<OrgWriteResponse & { error?: ErrorBody["error"] }>(
+      "admin_role",
+      "/api/departments",
+      { json: { data: { name: "ärztlicher dienst" } } },
+    );
+    expect(umlautCase.status, umlautCase.text).toBe(400);
+    expect(umlautCase.body.error?.details).toMatchObject({ codes: { name: "taken" } });
+    expect(
+      (
+        await t.api("admin_role", `/api/departments/${umlaut.body.data.documentId}`, {
+          method: "DELETE",
+          headers: { "If-Match": `"${umlaut.body.data.version}"` },
+        })
+      ).status,
+    ).toBe(204);
     expect(await storedRevision(t, DEPT, target.documentId)).toBe(Number(old.body.data.version));
     const renamed = await save(
       "admin_role",

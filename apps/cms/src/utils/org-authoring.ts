@@ -330,13 +330,18 @@ async function assertFreeDepartmentName(
     DEPARTMENT_NAMES_LOCK_UID,
     DEPARTMENT_NAMES_LOCK_DOCUMENT_ID,
   );
-  const clashes = await strapi.db.query(DEPARTMENT_UID).count({
-    where: {
-      name: { $eqi: data.name },
-      ...(documentId ? { documentId: { $ne: documentId } } : {}),
-    },
-  });
-  if (clashes > 0) refuseKeys(["name"], { name: "taken" });
+  // Compared here, not with $eqi: SQLite's LOWER folds ASCII only ("Ä" vs "ä"); departments are few.
+  const wanted = data.name.toLowerCase();
+  const rows = (await strapi.db.query(DEPARTMENT_UID).findMany({
+    select: ["documentId", "name"],
+  })) as Array<{ documentId?: unknown; name?: unknown }>;
+  const clash = rows.some(
+    (row) =>
+      row.documentId !== documentId &&
+      typeof row.name === "string" &&
+      row.name.toLowerCase() === wanted,
+  );
+  if (clash) refuseKeys(["name"], { name: "taken" });
 }
 
 /** Status-free org writes reuse the revision lock/audit and return only the committed identity. */
