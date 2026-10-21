@@ -26,6 +26,28 @@ export function removeQuizOption(question: QuizQuestion, index: number): QuizQue
   };
 }
 
+/**
+ * Which parts of one question the shared validator (validateQuiz) refuses:
+ * the question text, each answer, the missing correct answer. The builder
+ * marks only these, never the whole quiz.
+ */
+export function questionProblems(question: QuizQuestion): {
+  question: boolean;
+  options: boolean[];
+  correct: boolean;
+} {
+  const bad = (text: unknown) =>
+    typeof text !== "string" || text.trim() === "" || text.length > QUIZ_MAX_TEXT;
+  return {
+    question: bad(question.question),
+    options: question.options.map(bad),
+    correct:
+      !Number.isInteger(question.correctIndex) ||
+      question.correctIndex < 0 ||
+      question.correctIndex >= question.options.length,
+  };
+}
+
 export function QuizBuilder({
   id,
   value,
@@ -42,9 +64,18 @@ export function QuizBuilder({
   const t = useTranslations("manage.training.quiz");
   const root = useRef<HTMLDivElement>(null);
   const [announcement, setAnnouncement] = useState("");
+  // "Check quiz" pressed since the last added question or answer: a field
+  // added afterwards stays unmarked until the next check or save.
   const [checked, setChecked] = useState(false);
-  const invalid = checked && "error" in validateQuiz(value);
-  const shownError = error || (invalid ? t("invalid") : undefined);
+  const valid = !("error" in validateQuiz(value));
+  const shownError = error || (checked && !valid ? t("invalid") : undefined);
+  const problems = checked || error ? value.map(questionProblems) : null;
+  // A refusal the fields cannot explain (the cms's quizInvalid on content the
+  // form shows as valid) still needs one invalid control as its focus target.
+  const fallback =
+    !!error && !problems?.some((p) => p.question || p.correct || p.options.some(Boolean));
+  const describedBy = (invalidField: boolean) =>
+    `${id}-hint${shownError && invalidField ? ` ${id}-error` : ""}`;
   const edit = (index: number, question: QuizQuestion) =>
     onChange(value.map((q, i) => (i === index ? question : q)));
   const focusAfter = (target: string) =>
@@ -77,8 +108,8 @@ export function QuizBuilder({
             {(a11y) => (
               <input
                 {...a11y}
-                aria-describedby={`${id}-hint${shownError ? ` ${id}-error` : ""}`}
-                aria-invalid={shownError ? true : undefined}
+                aria-describedby={describedBy(!!problems?.[q].question || (fallback && q === 0))}
+                aria-invalid={problems?.[q].question || (fallback && q === 0) ? true : undefined}
                 value={question.question}
                 maxLength={QUIZ_MAX_TEXT}
                 className={inputClass}
@@ -88,6 +119,9 @@ export function QuizBuilder({
           </Field>
           <fieldset className="space-y-2">
             <legend className="mb-2 text-sm font-medium">{t("correctAnswer")}</legend>
+            <FieldError id={`${id}-correct-${q}-error`}>
+              {problems?.[q].correct ? t("chooseCorrectMissing") : undefined}
+            </FieldError>
             {question.options.map((option, o) => (
               <div key={o} className="flex items-end gap-2">
                 <label className="flex h-10 shrink-0 items-center gap-2 text-sm">
@@ -96,6 +130,9 @@ export function QuizBuilder({
                     name={`${id}-correct-${q}`}
                     checked={question.correctIndex === o}
                     onChange={() => edit(q, { ...question, correctIndex: o })}
+                    aria-describedby={
+                      problems?.[q].correct ? `${id}-correct-${q}-error` : undefined
+                    }
                     className="h-4 w-4 accent-primary"
                   />
                   <span className="sr-only">{t("chooseCorrect", { number: o + 1 })}</span>
@@ -109,6 +146,7 @@ export function QuizBuilder({
                   {(a11y) => (
                     <input
                       {...a11y}
+                      aria-invalid={problems?.[q].options[o] ? true : undefined}
                       maxLength={QUIZ_MAX_TEXT}
                       value={option}
                       className={inputClass}
@@ -146,6 +184,7 @@ export function QuizBuilder({
               disabled={disabled || question.options.length >= QUIZ_MAX_OPTIONS}
               onClick={() => {
                 edit(q, { ...question, options: [...question.options, ""] });
+                setChecked(false);
                 setAnnouncement(t("optionAdded"));
                 focusAfter(`${id}-option-${q}-${question.options.length}`);
               }}
@@ -172,9 +211,10 @@ export function QuizBuilder({
           type="button"
           variant="outline"
           disabled={disabled || value.length >= QUIZ_MAX_QUESTIONS}
-          aria-describedby={`${id}-hint${shownError ? ` ${id}-error` : ""}`}
+          aria-describedby={describedBy(true)}
           onClick={() => {
             onChange([...value, { question: "", options: ["", ""], correctIndex: -1 }]);
+            setChecked(false);
             setAnnouncement(t("questionAdded"));
             focusAfter(value.length === 0 ? id : `${id}-question-${value.length}`);
           }}
@@ -187,12 +227,15 @@ export function QuizBuilder({
           disabled={disabled}
           onClick={() => {
             setChecked(true);
-            setAnnouncement("error" in validateQuiz(value) ? t("invalid") : t("valid"));
+            setAnnouncement(valid ? t("valid") : t("invalid"));
           }}
         >
           {t("validate")}
         </Button>
       </div>
+      {checked && valid && value.length > 0 && (
+        <p className="text-sm text-emerald-700 dark:text-emerald-400">{t("valid")}</p>
+      )}
       {value.length === 0 && <p className="text-sm text-muted-foreground">{t("empty")}</p>}
     </div>
   );

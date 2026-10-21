@@ -86,7 +86,8 @@
     "optionAdded": "Answer added.",
     "optionRemoved": "Answer removed.",
     "empty": "Without quiz questions, readers mark the lesson complete manually.",
-    "correct": "correct"
+    "correct": "correct",
+    "chooseCorrectMissing": "Mark the correct answer."
   },
   "sections": {
     "audience": "Audience"
