@@ -260,7 +260,7 @@ export function QuizBuilder({
           disabled={disabled}
           onClick={() => {
             setChecked(true);
-            setAnnouncement(valid ? t("valid") : t("invalid"));
+            setAnnouncement(valid && !shownError ? t("valid") : t("invalid"));
           }}
         >
           {t("validate")}

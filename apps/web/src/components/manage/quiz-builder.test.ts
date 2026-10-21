@@ -85,6 +85,7 @@ describe("quiz builder checking", () => {
     click([filled], "validate");
     const page = html([filled]);
     expect(page).toContain(">valid</p>");
+    expect(page).toMatch(/aria-live="polite"[^>]*>valid</);
     expect(page).not.toContain('aria-invalid="true"');
   });
 
@@ -162,7 +163,10 @@ describe("quiz builder and the cms's refusal", () => {
     expect(page).toContain(">Invalid quiz<");
     expect(tagById(page, "q")).toContain('aria-invalid="true"');
     click([filled], "validate", "Invalid quiz");
-    expect(withError([filled], "Invalid quiz")).not.toContain(">valid</p>");
+    const checkedPage = withError([filled], "Invalid quiz");
+    expect(checkedPage).not.toContain(">valid</p>");
+    // The live region says the same as the page.
+    expect(checkedPage).toMatch(/aria-live="polite"[^>]*>invalid</);
   });
 
   it("names the answer limit for a question loaded with too many answers", () => {
