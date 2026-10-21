@@ -117,7 +117,7 @@ describe("training editor presentation", () => {
     const html = render(
       createElement(QuizBuilder, {
         id: "lesson-quiz",
-        value: quiz,
+        value: [{ ...quiz[0], question: "" }],
         error: "Invalid quiz",
         onChange: vi.fn(),
       }),
