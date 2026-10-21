@@ -4,7 +4,9 @@ import {
   ADMIN,
   ENG,
   HEAD,
+  HEAD_USER_DOC,
   LEAD,
+  LEAD_USER_DOC,
   PLATFORM,
   SALES,
   TEAM,
@@ -70,10 +72,10 @@ describe("team single-row gate", () => {
     ).toBe(false);
   });
   it.each(["name", "slug", "lead", "members", "department", "pages"])(
-    "refuses structural %s for every class",
+    "refuses structural %s for leads and heads",
     async (key) => {
       const { host } = world();
-      for (const caller of [ADMIN, LEAD, HEAD])
+      for (const caller of [LEAD, HEAD])
         await expect(
           canEditTeam(context(caller, PLATFORM.documentId, { [key]: null }).ctx, undefined, {
             strapi: host,
@@ -81,6 +83,86 @@ describe("team single-row gate", () => {
         ).rejects.toMatchObject({ details: { keys: [key] } });
     },
   );
+  it.each(["slug", "pages"])("refuses derived and inverse %s even for admin", async (key) => {
+    const { host } = world();
+    await expect(
+      canEditTeam(context(ADMIN, PLATFORM.documentId, { [key]: null }).ctx, undefined, {
+        strapi: host,
+      }),
+    ).rejects.toMatchObject({ details: { keys: [key] } });
+  });
+  it("lets admin_role rename, move, set the lead and replace the members (v0.22)", async () => {
+    const { host } = world();
+    const { ctx } = context(ADMIN, PLATFORM.documentId, {
+      name: "Plattform",
+      department: SALES.documentId,
+      lead: HEAD_USER_DOC,
+      members: [LEAD_USER_DOC, HEAD_USER_DOC, LEAD_USER_DOC],
+    });
+    expect(await canEditTeam(ctx, undefined, { strapi: host })).toBe(true);
+    expect(ctx.request.body).toEqual({
+      data: {
+        name: "Plattform",
+        department: { set: [{ documentId: SALES.documentId }] },
+        lead: { set: [{ documentId: HEAD_USER_DOC }] },
+        members: { set: [{ documentId: LEAD_USER_DOC }, { documentId: HEAD_USER_DOC }] },
+      },
+    });
+    await expect(
+      canEditTeam(
+        context(ADMIN, PLATFORM.documentId, { members: ["unknown0000000000000000000"] }).ctx,
+        undefined,
+        { strapi: host },
+      ),
+    ).rejects.toMatchObject({ details: { keys: ["members"] } });
+  });
+  it("create: admin_role only, needs a department, slug derived", async () => {
+    const { host } = world();
+    const { ctx } = context(ADMIN, undefined, { name: "Lager", department: ENG.documentId });
+    expect(await canEditTeam(ctx, { intent: "create" }, { strapi: host })).toBe(true);
+    expect((ctx.request.body as { data: { slug: string } }).data.slug).toMatch(
+      /^lager-[0-9a-f]{8}$/,
+    );
+    await expect(
+      canEditTeam(
+        context(ADMIN, undefined, { name: "Lager" }).ctx,
+        { intent: "create" },
+        {
+          strapi: host,
+        },
+      ),
+    ).rejects.toMatchObject({ details: { keys: ["department"] } });
+    for (const caller of [LEAD, HEAD])
+      expect(
+        await canEditTeam(
+          context(caller, undefined, { name: "Lager", department: ENG.documentId }).ctx,
+          { intent: "create" },
+          { strapi: host },
+        ),
+      ).toBe(false);
+  });
+  it("delete: admin_role only", async () => {
+    const { host } = world();
+    expect(
+      await canEditTeam(
+        context(ADMIN, PLATFORM.documentId).ctx,
+        { intent: "delete" },
+        {
+          strapi: host,
+        },
+      ),
+    ).toBe(true);
+    for (const caller of [LEAD, HEAD])
+      expect(
+        await canEditTeam(
+          context(caller, PLATFORM.documentId).ctx,
+          { intent: "delete" },
+          {
+            strapi: host,
+          },
+        ),
+      ).toBe(false);
+  });
   it("heads and leads cannot attach or clear the avatar", async () => {
     const { host } = world();
     for (const caller of [LEAD, HEAD])

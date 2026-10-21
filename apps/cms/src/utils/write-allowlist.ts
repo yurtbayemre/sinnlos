@@ -193,7 +193,7 @@ export type RelationCheckName = "wikiSpace" | "wikiParent";
 
 /** Names of the to-one relation checks the v2 write gate supplies (utils/authoring-checks.ts). */
 export type AuthoringRelationCheckName =
-  "department" | "team" | "callerDepartment" | "teamOfCallerDepartment" | "course";
+  "department" | "team" | "callerDepartment" | "teamOfCallerDepartment" | "course" | "user";
 
 /** Every named to-one relation check. */
 export type AnyRelationCheckName = RelationCheckName | AuthoringRelationCheckName;
@@ -209,7 +209,7 @@ export interface RelationField {
 }
 
 /** Names of the async to-many relation checks a policy can supply. */
-export type RelationListCheckName = "departments" | "callerDepartments";
+export type RelationListCheckName = "departments" | "callerDepartments" | "users";
 
 /** A to-many relation, written as a full replacement and resolved by a named check. */
 export interface RelationListField {
@@ -683,6 +683,27 @@ const TEAM_EDIT: WriteRule = {
 const DEPARTMENT_EDIT: WriteRule = {
   fields: { description: value(checkMarkdown), color: value(valueChecks.hexColor) },
 };
+/** Most members one team payload may name (a full replacement list). */
+const MAX_TEAM_MEMBERS = 1000;
+/** admin_role manages the structure (v0.22, deep-dive plan-org-users.md); the slug stays as created. */
+const DEPARTMENT_MODERATOR: WriteRule = {
+  fields: {
+    ...DEPARTMENT_EDIT.fields,
+    name: value(checkRequiredString),
+    headerImage: media("ownUpload"),
+    head: toOne("user"),
+  },
+};
+const TEAM_MODERATOR: WriteRule = {
+  fields: {
+    ...TEAM_EDIT.fields,
+    name: value(checkRequiredString),
+    avatar: media("ownUpload"),
+    department: toOne("department"),
+    lead: toOne("user"),
+    members: toMany("users", { max: MAX_TEAM_MEMBERS }),
+  },
+};
 const COURSE_MODERATOR: WriteRule = {
   fields: {
     title: value(checkRequiredString),
@@ -984,8 +1005,8 @@ const KPI_RULES = {
 /*
  * v2 follow-ups, kept OUT of the table on purpose until each has its own
  * batch and check:
- *   - team `members` / `lead`: stay admin-managed. Lead-managed membership
- *     belongs on a dedicated route with its own rules, not in this table.
+ *   - team `members` / `lead`: admin_role only (v0.22). Lead-managed
+ *     membership belongs on a dedicated route with its own rules.
  *   - wiki `space` on update (moving a page) stays in the admin panel; a
  *     move would need the page's whole subtree to follow it.
  *   - wiki `slug` stays server-derived (uniqueSlugFrom); editable slugs
@@ -1013,14 +1034,23 @@ export const WRITE_ALLOWLIST = {
     update: { moderator: LESSON_MODERATOR },
   },
   [DEPARTMENT_UID]: {
+    create: {
+      moderator: { ...DEPARTMENT_MODERATOR, derivedFields: { slug: uniqueSlugFrom("name") } },
+    },
     update: {
-      moderator: { fields: { ...DEPARTMENT_EDIT.fields, headerImage: media("ownUpload") } },
+      moderator: DEPARTMENT_MODERATOR,
       departmentHead: DEPARTMENT_EDIT,
     },
   },
   [TEAM_UID]: {
+    create: {
+      moderator: {
+        fields: { ...TEAM_MODERATOR.fields, department: toOne("department", { required: true }) },
+        derivedFields: { slug: uniqueSlugFrom("name") },
+      },
+    },
     update: {
-      moderator: { fields: { ...TEAM_EDIT.fields, avatar: media("ownUpload") } },
+      moderator: TEAM_MODERATOR,
       teamLead: TEAM_EDIT,
       // department_head of the team's department: same rights as the lead.
       departmentHead: TEAM_EDIT,
@@ -1125,20 +1155,14 @@ export const REFUSED_ATTRIBUTES: Readonly<Record<string, Readonly<Record<string,
   },
   [LESSON_UID]: { scheduleError: "scheduler bookkeeping" },
   [DEPARTMENT_UID]: {
-    name: "structure stays in the panel",
-    slug: "structure stays in the panel",
-    head: "display only; does not grant rights",
-    members: "membership stays in the panel",
-    teams: "inverse structure stays in the panel",
-    pages: "inverse structure stays in the panel",
+    slug: "derived from name on create; fixed afterwards",
+    members: "inverse relation: a user names their department",
+    teams: "inverse relation: a team names its department",
+    pages: "inverse relation: a wiki page names its department",
   },
   [TEAM_UID]: {
-    name: "structure stays in the panel",
-    slug: "structure stays in the panel",
-    lead: "membership stays in the panel",
-    members: "membership stays in the panel",
-    department: "structure stays in the panel",
-    pages: "inverse structure stays in the panel",
+    slug: "derived from name on create; fixed afterwards",
+    pages: "inverse relation: a wiki page names its team",
   },
   [ANNOUNCEMENT_UID]: {
     author: "ownership: the caller, set on create (callerFields)",

@@ -77,7 +77,14 @@ describe.each(testEngines())("organisation authoring HTTP on %s", (engine) => {
         expect(res.headers.get("etag")).toBe(`"${res.body.data.version}"`);
         const admin = await form("admin_role", plural, id);
         expect(admin.status, admin.text).toBe(200);
-        expect(Object.keys(admin.body.data).sort()).toEqual([...expected, media].sort());
+        // admin_role also reads the structure it manages (v0.22).
+        const structure =
+          kind === "department"
+            ? ["head", "memberCount", "teamCount"]
+            : ["department", "lead", "members"];
+        expect(Object.keys(admin.body.data).sort()).toEqual(
+          [...expected, media, ...structure].sort(),
+        );
         expect(admin.body.data.roleClass).toBe("moderator");
       }
       for (const denied of [
@@ -173,16 +180,14 @@ describe.each(testEngines())("organisation authoring HTTP on %s", (engine) => {
       expect((await form(caller, plural, target().documentId)).body).toEqual(old.body);
     });
 
-    it(`${kind}: refuses structural payloads even for admin, and media for row authors`, async () => {
+    it(`${kind}: refuses derived/inverse payloads even for admin, structure and media for row authors`, async () => {
       const old = await form("admin_role", plural, target().documentId);
       for (const key of [
-        "name",
         "slug",
-        "members",
         "pages",
         "publishedAt",
         "publishAt",
-        ...(kind === "department" ? ["head", "teams"] : ["lead", "department"]),
+        ...(kind === "department" ? ["members", "teams"] : []),
       ]) {
         const res = await save(
           "admin_role",
@@ -197,10 +202,16 @@ describe.each(testEngines())("organisation authoring HTTP on %s", (engine) => {
       for (const role of kind === "department"
         ? (["department_head"] as const)
         : (["department_head", "team_lead"] as const))
-        expect(
-          (await save(role, plural, target().documentId, { [media]: null }, old.body.data.version))
-            .status,
-        ).toBe(400);
+        for (const key of [
+          media,
+          "name",
+          ...(kind === "department" ? ["head"] : ["lead", "members", "department"]),
+        ])
+          expect(
+            (await save(role, plural, target().documentId, { [key]: null }, old.body.data.version))
+              .status,
+            `${role} ${key}`,
+          ).toBe(400);
       expect(await storedRevision(t, uid, target().documentId)).toBe(Number(old.body.data.version));
     });
 
@@ -226,20 +237,229 @@ describe.each(testEngines())("organisation authoring HTTP on %s", (engine) => {
       expect(stale.body.error?.details?.current).toBe(Number(current.body.data.version));
     });
 
-    it(`${kind}: no create/delete route; panel remains available for structural edits`, async () => {
-      expect(
-        (await t.api("admin_role", `/api/${plural}`, { json: { data: { name: "No API create" } } }))
-          .status,
-      ).toBe(405);
-      expect(
-        (await t.api("admin_role", `/api/${plural}/${target().documentId}`, { method: "DELETE" }))
-          .status,
-      ).toBe(405);
-      const created = await panel.create(uid, { name: `Panel ${kind}`, slug: `panel-${kind}` });
-      expect([200, 201], created.text).toContain(created.status);
-      expect([200, 204]).toContain((await panel.delete(uid, created.body.data.documentId)).status);
+    it(`${kind}: admin_role creates and deletes through the API (v0.22), every other role is refused`, async () => {
+      const data =
+        kind === "department"
+          ? { name: "API Logistik", color: "#00aa00", head: t.fixtures.users.member.documentId }
+          : {
+              name: "API Lager",
+              department: t.fixtures.departments.sales.documentId,
+              lead: t.fixtures.users.team_lead.documentId,
+              members: [t.fixtures.users.member.documentId, t.fixtures.users.team_lead.documentId],
+            };
+      const create = (caller: Caller, json: Record<string, unknown>) =>
+        t.api<OrgWriteResponse & { error?: ErrorBody["error"] }>(caller, `/api/${plural}`, {
+          json: { data: json },
+        });
+      for (const denied of [
+        "editor",
+        "department_head",
+        "team_lead",
+        "member",
+        "guest",
+        "authenticated",
+      ] as const)
+        expect((await create(denied, data)).status, denied).toBe(403);
+      expect((await create("admin_role", { ...data, slug: "chosen" })).status).toBe(400);
+      if (kind === "team")
+        expect((await create("admin_role", { name: "No department" })).status).toBe(400);
+      const created = await create("admin_role", data);
+      expect(created.status, created.text).toBe(201);
+      const { documentId, version } = created.body.data;
+      expect(created.headers.get("etag")).toBe(`"${version}"`);
+      const rows = await t.strapi.db.query(uid).findMany({
+        where: { documentId },
+        populate:
+          kind === "department" ? { head: true } : { department: true, lead: true, members: true },
+      });
+      expect(rows).toHaveLength(1);
+      expect(rows[0].slug).toMatch(
+        new RegExp(`^${kind === "department" ? "api-logistik" : "api-lager"}-[0-9a-f]{8}$`),
+      );
+      if (kind === "department") expect(rows[0].head?.id).toBe(t.fixtures.users.member.id);
+      else {
+        expect(rows[0].department?.id).toBe(t.fixtures.departments.sales.id);
+        expect(rows[0].lead?.id).toBe(t.fixtures.users.team_lead.id);
+        expect((rows[0].members as Row[]).map((row) => row.id).sort()).toEqual(
+          [t.fixtures.users.member.id, t.fixtures.users.team_lead.id].sort(),
+        );
+      }
+      const remove = (caller: Caller, token?: string) =>
+        t.api(caller, `/api/${plural}/${documentId}`, {
+          method: "DELETE",
+          headers: token === undefined ? {} : { "If-Match": `"${token}"` },
+        });
+      for (const denied of ["editor", "department_head", "team_lead", "member"] as const)
+        expect((await remove(denied, version)).status, denied).toBe(403);
+      expect((await remove("admin_role")).status).toBe(428);
+      expect((await remove("admin_role", String(Number(version) + 5))).status).toBe(412);
+      const removed = await remove("admin_role", version);
+      expect(removed.status, removed.text).toBe(204);
+      expect(await t.strapi.db.query(uid).count({ where: { documentId } })).toBe(0);
+      expect((await remove("admin_role", version)).status).toBe(404);
+      const audit = await t.strapi.db.query(AUDIT).findMany({
+        where: { targetUid: uid, targetDocumentId: documentId },
+        orderBy: { id: "asc" },
+      });
+      expect(audit.map((row) => [row.action, row.actorClass, row.source])).toEqual([
+        ["create", "moderator", "content-api"],
+        ["delete", "moderator", "content-api"],
+      ]);
+      // The panel stays available for repairs.
+      const panelRow = await panel.create(uid, { name: `Panel ${kind}`, slug: `panel-${kind}` });
+      expect([200, 201], panelRow.text).toContain(panelRow.status);
+      expect([200, 204]).toContain((await panel.delete(uid, panelRow.body.data.documentId)).status);
     });
   }
+
+  it("admin renames a department; a taken name answers 400 name/taken without a write", async () => {
+    const target = t.fixtures.departments.engineering;
+    const old = await form("admin_role", "departments", target.documentId);
+    const taken = await save(
+      "admin_role",
+      "departments",
+      target.documentId,
+      { name: t.fixtures.departments.sales.name },
+      old.body.data.version,
+    );
+    expect(taken.status, taken.text).toBe(400);
+    expect(taken.body.error?.details).toMatchObject({ keys: ["name"], codes: { name: "taken" } });
+    expect(await storedRevision(t, DEPT, target.documentId)).toBe(Number(old.body.data.version));
+    const renamed = await save(
+      "admin_role",
+      "departments",
+      target.documentId,
+      { name: "IT Engineering (renamed)" },
+      old.body.data.version,
+    );
+    expect(renamed.status, renamed.text).toBe(200);
+    const row = await t.strapi.db.query(DEPT).findOne({ where: { documentId: target.documentId } });
+    expect(row).toMatchObject({ name: "IT Engineering (renamed)", slug: target.slug });
+    const back = await save(
+      "admin_role",
+      "departments",
+      target.documentId,
+      { name: old.body.data.name },
+      renamed.body.data.version,
+    );
+    expect(back.status, back.text).toBe(200);
+  });
+
+  it("admin replaces a team's members and lead; an unknown user refuses the whole save", async () => {
+    const target = t.fixtures.teams.platform;
+    const old = await form("admin_role", "teams", target.documentId);
+    const users = t.fixtures.users;
+    const refused = await save(
+      "admin_role",
+      "teams",
+      target.documentId,
+      { members: [users.member.documentId, "zzzzzzzzzzzzzzzzzzzzzzzz"] },
+      old.body.data.version,
+    );
+    expect(refused.status, refused.text).toBe(400);
+    expect(refused.body.error?.details?.keys).toEqual(["members"]);
+    const saved = await save(
+      "admin_role",
+      "teams",
+      target.documentId,
+      {
+        members: [users.member.documentId, users.editor.documentId],
+        lead: users.editor.documentId,
+      },
+      old.body.data.version,
+    );
+    expect(saved.status, saved.text).toBe(200);
+    const after = await form("admin_role", "teams", target.documentId);
+    const data = after.body.data as TeamEditable;
+    expect(data.lead?.documentId).toBe(users.editor.documentId);
+    expect(data.members?.map((person) => person.documentId).sort()).toEqual(
+      [users.member.documentId, users.editor.documentId].sort(),
+    );
+    const audit = await t.strapi.db.query(AUDIT).findMany({
+      where: { targetUid: TEAM, targetDocumentId: target.documentId },
+      orderBy: { id: "desc" },
+      limit: 1,
+    });
+    expect(audit[0]).toMatchObject({ action: "update", actorClass: "moderator" });
+    expect((audit[0].keys as string[]).sort()).toEqual(["lead", "members"]);
+    // Restore the fixture for the tests after this one.
+    const restored = await save(
+      "admin_role",
+      "teams",
+      target.documentId,
+      {
+        members: old.body.data.members?.map((person) => person.documentId) ?? [],
+        lead: old.body.data.lead?.documentId ?? null,
+      },
+      saved.body.data.version,
+    );
+    expect(restored.status, restored.text).toBe(200);
+  });
+
+  it("one user leading a second team: the first team keeps its lead (no silent move)", async () => {
+    const users = t.fixtures.users;
+    const created = await t.api<OrgWriteResponse>("admin_role", "/api/teams", {
+      json: {
+        data: {
+          name: "Second lead",
+          department: t.fixtures.departments.engineering.documentId,
+          lead: users.team_lead.documentId,
+        },
+      },
+    });
+    expect(created.status, created.text).toBe(201);
+    const platform = await t.strapi.db.query(TEAM).findOne({
+      where: { documentId: t.fixtures.teams.platform.documentId },
+      populate: { lead: true },
+    });
+    const second = await t.strapi.db.query(TEAM).findOne({
+      where: { documentId: created.body.data.documentId },
+      populate: { lead: true },
+    });
+    expect(second?.lead?.id).toBe(users.team_lead.id);
+    expect(platform?.lead?.id).toBe(users.team_lead.id);
+  });
+
+  it("deleting a department detaches its people and teams (the hooks run in the transaction)", async () => {
+    const users = t.fixtures.users;
+    const created = await t.api<OrgWriteResponse>("admin_role", "/api/departments", {
+      json: { data: { name: "Short-lived" } },
+    });
+    expect(created.status, created.text).toBe(201);
+    const { documentId, version } = created.body.data;
+    const department = await t.strapi.db.query(DEPT).findOne({ where: { documentId } });
+    const team = await t.api<OrgWriteResponse>("admin_role", "/api/teams", {
+      json: { data: { name: "Short-lived team", department: documentId } },
+    });
+    expect(team.status, team.text).toBe(201);
+    const memberBefore = await t.strapi.db
+      .query("plugin::users-permissions.user")
+      .findOne({ where: { id: users.member.id }, populate: { department: true } });
+    await t.strapi.db
+      .query("plugin::users-permissions.user")
+      .update({ where: { id: users.member.id }, data: { department: department!.id } });
+    const counts = await form("admin_role", "departments", documentId);
+    expect(counts.body.data).toMatchObject({ memberCount: 1, teamCount: 1 });
+    const removed = await t.api("admin_role", `/api/departments/${documentId}`, {
+      method: "DELETE",
+      headers: { "If-Match": `"${counts.body.data.version}"` },
+    });
+    expect(removed.status, removed.text).toBe(204);
+    expect(Number(counts.body.data.version)).toBeGreaterThanOrEqual(Number(version));
+    const member = await t.strapi.db
+      .query("plugin::users-permissions.user")
+      .findOne({ where: { id: users.member.id }, populate: { department: true } });
+    expect(member?.department ?? null).toBeNull();
+    const orphan = await t.strapi.db.query(TEAM).findOne({
+      where: { documentId: team.body.data.documentId },
+      populate: { department: true },
+    });
+    expect(orphan?.department ?? null).toBeNull();
+    await t.strapi.db.query("plugin::users-permissions.user").update({
+      where: { id: users.member.id },
+      data: { department: memberBefore?.department?.id ?? null },
+    });
+  });
 
   it("department color-only save preserves an unsanitized legacy description byte-for-byte", async () => {
     const target = t.fixtures.departments.engineering;

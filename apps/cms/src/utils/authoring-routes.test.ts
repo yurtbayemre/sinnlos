@@ -208,7 +208,7 @@ describe("batch 17 route contracts", () => {
   );
 
   it.each(["department", "team"] as const)(
-    "%s exposes only the org editable action with the exact update classes",
+    "%s exposes only the org editable action; create is admin_role's (moderator) alone",
     async (type) => {
       const uid = `api::${type}.${type}`;
       const routes = await customRoutes(uid);
@@ -216,7 +216,7 @@ describe("batch 17 route contracts", () => {
         { method: "GET", path: `/${ORG_PATHS[type]}/:id/editable`, handler: `${uid}.editable` },
       ]);
       expect(writeClassesFor(uid, "update")).toEqual(Object.keys(ORG_FIELDS[type]).sort());
-      expect(writeClassesFor(uid, "create")).toEqual([]);
+      expect(writeClassesFor(uid, "create")).toEqual(["moderator"]);
     },
   );
 });

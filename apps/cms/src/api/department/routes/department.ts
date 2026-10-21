@@ -10,13 +10,17 @@ import { factories } from "@strapi/strapi";
  * global relation guard (FX05, registerRestrictedRelationGuard in
  * src/bootstrap/restricted-relation-guard.ts), because /api/users,
  * wiki-spaces, events, ... reach `department.pages` just as well as these
- * routes do.
+ * routes do. create and delete are admin_role's (v0.22): the org gate
+ * refuses every other role, the delete hooks run in the controller's
+ * transaction.
  */
 export default factories.createCoreRouter("api::department.department", {
-  only: ["find", "findOne", "update"],
+  only: ["find", "findOne", "create", "update", "delete"],
   config: {
     find: { policies: ["global::published-only"] },
     findOne: { policies: ["global::published-only"] },
+    create: { policies: [{ name: "global::can-edit-department", config: { intent: "create" } }] },
     update: { policies: ["global::can-edit-department"] },
+    delete: { policies: [{ name: "global::can-edit-department", config: { intent: "delete" } }] },
   },
 });

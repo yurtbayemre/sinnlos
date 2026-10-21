@@ -360,7 +360,13 @@ const GOLDEN: Record<string, PolicySpec[]> = {
 
   "api::department.department.find": ["global::published-only"],
   "api::department.department.findOne": ["global::published-only"],
+  "api::department.department.create": [
+    { name: "global::can-edit-department", config: { intent: "create" } },
+  ],
   "api::department.department.update": ["global::can-edit-department"],
+  "api::department.department.delete": [
+    { name: "global::can-edit-department", config: { intent: "delete" } },
+  ],
   "api::department.department.editable": [
     { name: "global::can-edit-department", config: { intent: "editable" } },
   ],
@@ -466,7 +472,9 @@ const GOLDEN: Record<string, PolicySpec[]> = {
 
   "api::team.team.find": ["global::published-only"],
   "api::team.team.findOne": ["global::published-only"],
+  "api::team.team.create": [{ name: "global::can-edit-team", config: { intent: "create" } }],
   "api::team.team.update": ["global::can-edit-team"],
+  "api::team.team.delete": [{ name: "global::can-edit-team", config: { intent: "delete" } }],
   "api::team.team.editable": [{ name: "global::can-edit-team", config: { intent: "editable" } }],
 
   "api::wiki-page.wiki-page.find": wiki("page"),
@@ -625,10 +633,16 @@ const WRITE_ALLOWLIST_ENFORCERS: Record<string, { policy: string; classes: reado
   "api::lesson.lesson.update": { policy: "global::can-author", classes: ["moderator"] },
   "api::course.course.create": { policy: "global::can-author", classes: ["moderator"] },
   "api::course.course.update": { policy: "global::can-author", classes: ["moderator"] },
+  // create is admin_role's alone (v0.22, the org gate's `create` intent).
+  "api::department.department.create": {
+    policy: "global::can-edit-department",
+    classes: ["moderator"],
+  },
   "api::department.department.update": {
     policy: "global::can-edit-department",
     classes: ["departmentHead", "moderator"],
   },
+  "api::team.team.create": { policy: "global::can-edit-team", classes: ["moderator"] },
   "api::team.team.update": {
     policy: "global::can-edit-team",
     classes: ["departmentHead", "moderator", "teamLead"],

@@ -7,7 +7,9 @@ import {
   DEPT,
   ENG,
   HEAD,
+  HEAD_USER_DOC,
   LEAD,
+  LEAD_USER_DOC,
   PLATFORM,
   TEAM,
   context,
@@ -133,3 +135,82 @@ for (const [uid, target, caller] of [
     });
   });
 }
+
+describe("org structure for admin_role (v0.22)", () => {
+  it("the admin editable names the department head and what a delete would detach", async () => {
+    const { host, strapi } = world();
+    strapi.tables[DEPT][0].head = { id: HEAD.id };
+    const { ctx } = context(ADMIN, ENG.documentId);
+    await orgGate(DEPT)(ctx, { intent: "editable" }, { strapi: host });
+    await orgAuthoringActions(host, DEPT).editable(ctx);
+    expect(ctx.body).toMatchObject({
+      data: {
+        roleClass: "moderator",
+        head: { documentId: HEAD_USER_DOC, displayName: "Hanna Head" },
+        memberCount: 1,
+        teamCount: 1,
+      },
+    });
+  });
+  it("the admin editable names the team's department, lead and sorted members", async () => {
+    const { host, strapi } = world();
+    strapi.tables[TEAM][0].members = [{ id: LEAD.id }, { id: HEAD.id }];
+    const { ctx } = context(ADMIN, PLATFORM.documentId);
+    await orgGate(TEAM)(ctx, { intent: "editable" }, { strapi: host });
+    await orgAuthoringActions(host, TEAM).editable(ctx);
+    expect(ctx.body).toMatchObject({
+      data: {
+        department: { documentId: ENG.documentId, name: "Engineering" },
+        lead: { documentId: LEAD_USER_DOC, displayName: "Lea Lead" },
+        members: [
+          { documentId: HEAD_USER_DOC, displayName: "Hanna Head" },
+          { documentId: LEAD_USER_DOC, displayName: "Lea Lead" },
+        ],
+      },
+    });
+  });
+  it.each([DEPT, TEAM])(
+    "%s create runs in a scope and answers 201 with the new identity",
+    async (uid) => {
+      const { host, strapi } = world();
+      const data =
+        uid === DEPT ? { name: "Logistik" } : { name: "Lager", department: ENG.documentId };
+      const { ctx, headers } = context(ADMIN, undefined, data);
+      expect(await orgGate(uid)(ctx, { intent: "create" }, { strapi: host })).toBe(true);
+      const create = vi.fn(async () => {
+        expect(getAuthoringScope()).toMatchObject({
+          uid,
+          roleClass: "moderator",
+          source: "content-api",
+        });
+        getAuthoringScope()!.committedRevision = 1;
+        return { documentId: "dnew00000000000000000000" };
+      });
+      strapi.documents = vi.fn(() => ({ create })) as never;
+      await orgAuthoringActions(host, uid).create(ctx);
+      expect(ctx.status).toBe(201);
+      expect(ctx.body).toEqual({ data: { documentId: "dnew00000000000000000000", version: "1" } });
+      expect(headers.ETag).toBe('"1"');
+    },
+  );
+  it.each([
+    [DEPT, ENG],
+    [TEAM, PLATFORM],
+  ] as const)("%s delete needs If-Match and runs inside a transaction", async (uid, target) => {
+    const { host, strapi } = world();
+    const { ctx } = context(ADMIN, target.documentId);
+    await orgGate(uid)(ctx, { intent: "delete" }, { strapi: host });
+    ctx.get = () => "";
+    await orgAuthoringActions(host, uid).delete(ctx);
+    expect(ctx.status).toBe(428);
+    ctx.get = () => '"7"';
+    const remove = vi.fn(async (params: unknown) => {
+      expect(params).toEqual({ documentId: target.documentId });
+      expect(getAuthoringScope()).toMatchObject({ expectedRevision: 7, missingClass: 404 });
+    });
+    strapi.documents = vi.fn(() => ({ delete: remove })) as never;
+    await orgAuthoringActions(host, uid).delete(ctx);
+    expect(remove).toHaveBeenCalledOnce();
+    expect(ctx.status).toBe(204);
+  });
+});
