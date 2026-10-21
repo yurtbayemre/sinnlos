@@ -352,6 +352,28 @@ describe.each(testEngines())("organisation authoring HTTP on %s", (engine) => {
     );
     expect(umlautCase.status, umlautCase.text).toBe(400);
     expect(umlautCase.body.error?.details).toMatchObject({ codes: { name: "taken" } });
+    if (engine === "postgres") {
+      // Postgres folds per character ("ΟΣ" = "οσ"), JavaScript knows the final sigma ("ος"):
+      // the database's folding refuses too, since Entra's $eqi match uses it (Codex round 3).
+      const sigma = await t.api<OrgWriteResponse>("admin_role", "/api/departments", {
+        json: { data: { name: "ΟΣ" } },
+      });
+      expect(sigma.status, sigma.text).toBe(201);
+      const sigmaCase = await t.api<OrgWriteResponse & { error?: ErrorBody["error"] }>(
+        "admin_role",
+        "/api/departments",
+        { json: { data: { name: "οσ" } } },
+      );
+      expect(sigmaCase.status, sigmaCase.text).toBe(400);
+      expect(
+        (
+          await t.api("admin_role", `/api/departments/${sigma.body.data.documentId}`, {
+            method: "DELETE",
+            headers: { "If-Match": `"${sigma.body.data.version}"` },
+          })
+        ).status,
+      ).toBe(204);
+    }
     expect(
       (
         await t.api("admin_role", `/api/departments/${umlaut.body.data.documentId}`, {
