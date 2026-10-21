@@ -202,8 +202,25 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 20
+      # The optional search (v0.21): the cms indexer's suite against the
+      # Meilisearch release infra/docker-compose.yml pins (MEILI_TEST_URL;
+      # the suite skips without it). The master key is a CI-only literal.
+      meilisearch:
+        image: getmeili/meilisearch:v1.54.3@sha256:e68913ab7d6f5b159529e472cfd362ce3c741fafd3c127961b2142abbe41b3c9
+        env:
+          MEILI_MASTER_KEY: ci-only-meili-master-key-0123456789
+          MEILI_NO_ANALYTICS: "true"
+        ports:
+          - 7700:7700
+        options: >-
+          --health-cmd "wget -qO- http://127.0.0.1:7700/health || exit 1"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
     env:
       SINNLOS_TEST_PG_URL: postgres://sinnlos:sinnlos@localhost:5432/sinnlos
+      MEILI_TEST_URL: http://localhost:7700
+      MEILI_TEST_MASTER_KEY: ci-only-meili-master-key-0123456789
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -348,6 +365,12 @@ jobs:
           DATETIME_LEGACY_ZONE=Europe/Berlin compose -f infra/docker-compose.traefik.yml \
             -f infra/docker-compose.cms-legacy-tz.yml \
             -f infra/docker-compose.web-legacy-tz.yml config -q
+          echo "Optional search: meili only with its profile, on the project network only"
+          compose -f infra/docker-compose.traefik.yml config --format json | jq -e '.services.meili == null'
+          COMPOSE_PROFILES=search compose -f infra/docker-compose.traefik.yml config --format json | jq -e '
+            .services.meili.networks == {"default": {"aliases": ["sinnlos-meili"]}}
+            and (.services.meili.ports // []) == []
+            and (.services.meili.labels // {}) == {}'
 
   # Both production images build from a clean checkout, exactly as
   # infra/deploy.sh builds them (context = repo root). Nothing is pushed;

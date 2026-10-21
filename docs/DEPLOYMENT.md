@@ -22,7 +22,9 @@ and set up [backup & restore](#backup--restore) for any production environment.
 
 All methods share the same [prerequisites](#prerequisites); the optional
 [Microsoft Entra ID sign-in](#microsoft-entra-id-sign-in) is off by default
-(`ENTRA_ENABLED=1` switches it on) and set up the same way for each.
+(`ENTRA_ENABLED=1` switches it on) and set up the same way for each, and so
+is the optional [Meilisearch search ranking](#meilisearch-optional-search)
+(`MEILISEARCH_ENABLED=1` with the `search` compose profile).
 
 > **Upgrading an existing instance?** On an instance that runs `main`
 > `0b1a2df` (batch 9), batch 10 (the CI and edge changes, the deploy,
@@ -13968,6 +13970,77 @@ the secret, 401 for a missing, wrong or length-mismatched header, and with
 `LIVE_EVENTS_DISABLED=1` a 204 without publishing, after the secret check.
 The move there (2026-09-28) changed no behaviour: it ships with a normal
 deploy; run `infra/live-smoke.sh` afterwards as usual.
+
+---
+
+## Meilisearch (optional search)
+
+Off by default. With it on, the ⌘K search answers typos ("Brandshutz" finds
+"Brandschutz"), matches several words in any order and ranks title hits first,
+for announcements, wiki pages, documents, events and polls. People,
+departments, teams and wiki spaces stay on the built-in search.
+
+**How it works.** Meilisearch only ranks. The web server asks it for
+candidate ids (search-only key, server side), then reads exactly those
+through Strapi with the user's own JWT, so every read rule (department
+audiences, announcement targeting and expiry, wiki spaces, guests, drafts)
+still decides what anyone sees; nothing from the index reaches the browser.
+While Meilisearch is off, unreachable, slow or empty, the web answers with
+its built-in search. The cms keeps the index `sinnlos_search` current: about
+once a minute it checks for changes and rebuilds into `sinnlos_search_build`,
+then swaps it in. The index holds published content only and is rebuilt from
+the database at any time, so it needs no backup.
+
+| Variable | Where | Purpose |
+|---|---|---|
+| `COMPOSE_PROFILES=search` | infra/.env (compose) | starts the `meili` container (`sinnlos-meili:7700`, project network only, no port, no Traefik route) |
+| `MEILI_MASTER_KEY` | meili only | 16+ characters (`openssl rand -hex 32`); never handed to cms or web |
+| `MEILISEARCH_ENABLED` | cms + web | `1` switches the module on; anything else is off |
+| `MEILISEARCH_URL` | cms + web | default `http://sinnlos-meili:7700` |
+| `MEILISEARCH_WRITE_KEY` | cms | rebuilds the index (index, document, settings and task actions) |
+| `MEILISEARCH_SEARCH_KEY` | web | `search` on `sinnlos_search` only |
+
+**Switch it on** (each step is a normal deploy; `infra/deploy.sh` refuses
+`MEILISEARCH_ENABLED=1` without the profile and the keys, and the profile
+without a usable master key):
+
+1. In `infra/.env`: `COMPOSE_PROFILES=search` and `MEILI_MASTER_KEY=` a fresh
+   `openssl rand -hex 32`. Deploy: the `meili` container starts; the search
+   stays as it was.
+2. Create the two restricted keys: `COMPOSE_PROJECT=infra
+   infra/meilisearch/provision-keys.sh`. It runs inside the `meili`
+   container with that container's master key and prints
+   `MEILISEARCH_WRITE_KEY=…` and `MEILISEARCH_SEARCH_KEY=…`; put both lines
+   into `infra/.env`. The key uids are fixed, so a re-run prints the same
+   values (a new master key gives new ones).
+3. `MEILISEARCH_ENABLED=1` in `infra/.env`, deploy. cms and web are
+   recreated; within about a minute the cms has built the index.
+
+**Switch it off / roll back:** `MEILISEARCH_ENABLED=0` (or remove it) and
+deploy: cms and web go back to the built-in search, nothing else changes.
+To stop the container as well, remove `search` from `COMPOSE_PROFILES`, then
+`docker compose -p infra -f infra/docker-compose.yml -f
+infra/docker-compose.traefik.yml --profile search rm -sf meili`. The volume
+`infra_meili_data` only holds the rebuildable index; delete it when the
+module is not coming back.
+
+**After a database restore** nothing is needed: the next minute's check sees
+the changed content and rebuilds the index. Until then a stale hit is
+harmless, because Strapi drops anything gone or hidden.
+
+**Resources:** `mem_limit: 512m`, one CPU, one indexing thread with
+`MEILI_MAX_INDEXING_MEMORY=256MiB`; idle use is well below 100 MB at
+intranet size. The container runs as root (the image has no user and its
+data directory is root's) with every Linux capability dropped and
+`no-new-privileges`.
+
+**Upgrading Meilisearch:** the image is pinned by version and digest in
+`infra/docker-compose.yml`. A newer Meilisearch may not open an older data
+volume; since the index is rebuildable, the simplest upgrade is: bump the
+pin, stop the container, delete `infra_meili_data`, deploy. The keys are
+gone with the volume: run `provision-keys.sh` again and update
+`infra/.env` (deploy once more), or keep the volume and use Meilisearch's
+own dump/import.
 
 ---
 

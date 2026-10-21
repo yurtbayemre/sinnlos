@@ -122,6 +122,12 @@ test("CI scopes use the whole change and keep the browser E2E exclusions narrow"
     check("push", { before, after }, true, false);
     check("pull_request", pr(before, after), true, false);
   }
+  // The web search reads the Meilisearch index the cms writes (v0.21): database tests too.
+  for (const path of ["apps/web/src/lib/search-action.ts", "apps/web/src/lib/search-meili.ts"]) {
+    const before = git("rev-parse", "HEAD");
+    write(path);
+    check("push", { before, after: commit() }, true, true);
+  }
   const pollPage = "apps/web/src/app/(app)/polls/page.tsx";
   const pollLoading = "apps/web/src/app/(app)/polls/loading.tsx";
   const beforePolls = git("rev-parse", "HEAD");

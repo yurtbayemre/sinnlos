@@ -33,6 +33,12 @@
  *     guest and announcements, departments, teams) is empty without a
  *     request, in the preload (app/search/route.ts) and the live search. A
  *     role that could not be read (null) still reads, the cms decides.
+ *   - Optional Meilisearch (v0.21, lib/search-meili.ts): when on, the
+ *     content kinds are ranked by Meilisearch and the candidates are read
+ *     through the same Strapi paths by documentId, so the read policies
+ *     still decide what the viewer sees; fewer than LIVE_LIMIT readable
+ *     candidates are filled up from the `$containsi` search, and when
+ *     Meilisearch is off or failing the search is exactly the one before.
  */
 import "server-only";
 import type { Route } from "next";
@@ -41,7 +47,10 @@ import { getLocale, getTranslations } from "next-intl/server";
 import { appTimeZone } from "@/lib/app-time-zone";
 import { walkAllPages } from "@/lib/paginate";
 import { instantEpochMs, zonedDateKey, zonedDayStart } from "@/lib/plain-date";
+import type { IndexedSearchKind } from "@sinnlos/domain";
+import { DEMO_MODE } from "@/lib/config";
 import { isReadDenied, type ReadSection } from "@/lib/roles";
+import { meiliCandidates } from "@/lib/search-meili";
 import { strapi, type StrapiListResponse } from "@/lib/strapi";
 
 export const SEARCH_KINDS = [
@@ -157,6 +166,51 @@ export function normalizeTerm(term: string): string {
 // Query building (pure)
 // ---------------------------------------------------------------------------
 
+/**
+ * The content kinds' live-search parts: the endpoint, the `$containsi`
+ * filter for a term, and the fields, populate and sort of the answer.
+ */
+const CONTENT_QUERIES: Readonly<
+  Record<IndexedSearchKind, { path: string; filter: (q: string) => string; select: string }>
+> = {
+  announcement: {
+    path: "/api/announcements",
+    filter: (q) => `filters[$or][0][title][$containsi]=${q}&filters[$or][1][body][$containsi]=${q}`,
+    select: "fields[0]=title&populate[author][fields][0]=displayName&sort[0]=createdAt:desc",
+  },
+  "wiki-page": {
+    path: "/api/wiki-pages",
+    filter: (q) => `filters[$or][0][title][$containsi]=${q}&filters[$or][1][body][$containsi]=${q}`,
+    select:
+      "fields[0]=title&fields[1]=slug&fields[2]=summary&populate[space][fields][0]=name&populate[space][fields][1]=slug&sort[0]=title:asc",
+  },
+  document: {
+    path: "/api/documents",
+    filter: (q) =>
+      `filters[$or][0][title][$containsi]=${q}&filters[$or][1][description][$containsi]=${q}`,
+    select: "fields[0]=title&fields[1]=description&fields[2]=category&sort[0]=title:asc",
+  },
+  event: {
+    path: "/api/events",
+    filter: (q) => `filters[title][$containsi]=${q}`,
+    select: "fields[0]=title&fields[1]=start&sort[0]=start:desc",
+  },
+  poll: {
+    path: "/api/polls",
+    filter: (q) => `filters[question][$containsi]=${q}`,
+    select: "fields[0]=question&fields[1]=closesAt&sort[0]=createdAt:desc",
+  },
+};
+
+/** The Strapi path of `ids` of one content kind, with the live search's fields. */
+export function candidatePath(kind: IndexedSearchKind, ids: readonly string[]): string {
+  const { path, select } = CONTENT_QUERIES[kind];
+  const filter = ids
+    .map((id, i) => `filters[documentId][$in][${i}]=${encodeURIComponent(id)}`)
+    .join("&");
+  return `${path}?${filter}&${select}&pagination[pageSize]=${ids.length}`;
+}
+
 /** The Strapi path of each live-search kind for `term` and the viewer's role. */
 export function liveSearchPaths(term: string, role: string | null): Record<LiveKind, string> {
   const q = encodeURIComponent(normalizeTerm(term));
@@ -174,12 +228,16 @@ export function liveSearchPaths(term: string, role: string | null): Record<LiveK
     "start=0",
     `limit=${LIVE_LIMIT}`,
   ].join("&");
+  const content = (kind: IndexedSearchKind) => {
+    const { path, filter, select } = CONTENT_QUERIES[kind];
+    return `${path}?${filter(q)}&${select}&${page}`;
+  };
   return {
-    announcement: `/api/announcements?filters[$or][0][title][$containsi]=${q}&filters[$or][1][body][$containsi]=${q}&fields[0]=title&populate[author][fields][0]=displayName&sort[0]=createdAt:desc&${page}`,
-    "wiki-page": `/api/wiki-pages?filters[$or][0][title][$containsi]=${q}&filters[$or][1][body][$containsi]=${q}&fields[0]=title&fields[1]=slug&fields[2]=summary&populate[space][fields][0]=name&populate[space][fields][1]=slug&sort[0]=title:asc&${page}`,
-    document: `/api/documents?filters[$or][0][title][$containsi]=${q}&filters[$or][1][description][$containsi]=${q}&fields[0]=title&fields[1]=description&fields[2]=category&sort[0]=title:asc&${page}`,
-    event: `/api/events?filters[title][$containsi]=${q}&fields[0]=title&fields[1]=start&sort[0]=start:desc&${page}`,
-    poll: `/api/polls?filters[question][$containsi]=${q}&fields[0]=question&fields[1]=closesAt&sort[0]=createdAt:desc&${page}`,
+    announcement: content("announcement"),
+    "wiki-page": content("wiki-page"),
+    document: content("document"),
+    event: content("event"),
+    poll: content("poll"),
     person: `/api/users?${people}`,
   };
 }
@@ -471,20 +529,50 @@ export async function loadPreload(
 export async function searchLive(
   term: string,
   viewerRole: () => Promise<string | null>,
+  candidates: (term: string) => ReturnType<typeof meiliCandidates> = meiliCandidates,
 ): Promise<SearchItem[]> {
   if (term.length < MIN_TERM_LENGTH) return [];
   const role = viewerRole();
   const paths = liveSearchPaths(term, null);
+  const ranked = DEMO_MODE ? Promise.resolve(null) : candidates(normalizeTerm(term));
   const read = async (kind: LiveKind): Promise<unknown> => {
     if (kind === "person") return strapi<unknown>(liveSearchPaths(term, await role).person);
     if (isRoleGatedKind(kind) && searchKindDenied(kind, await role)) return [];
-    return strapi<unknown>(paths[kind]);
+    const ids = (await ranked)?.get(kind);
+    return ids ? rankedRows(kind, ids, paths[kind]) : strapi<unknown>(paths[kind]);
   };
   const [format, ...lists] = await Promise.all([
     searchFormat(),
     ...LIVE_KINDS.map((kind) => rowsOf(() => read(kind))),
   ]);
-  return LIVE_KINDS.flatMap((kind, index) => toSearchItems(kind, lists[index], format));
+  return LIVE_KINDS.flatMap((kind, index) =>
+    toSearchItems(kind, lists[index], format).slice(0, LIVE_LIMIT),
+  );
+}
+
+const rowList = (answer: unknown): unknown[] =>
+  isRow(answer) && Array.isArray(answer.data) ? answer.data : [];
+
+/**
+ * Meilisearch's candidates the viewer may read (the Strapi policies drop the
+ * others), in Meilisearch's order; fewer than LIVE_LIMIT are followed by the
+ * `$containsi` rows (toSearchItems drops the duplicates), so a result is
+ * never poorer than without Meilisearch.
+ * shortcut: MEILI_CANDIDATES per kind; with many unreadable top hits a
+ * readable typo match further down is missed (the fill still finds exact ones).
+ */
+async function rankedRows(
+  kind: IndexedSearchKind,
+  ids: readonly string[],
+  legacyPath: string,
+): Promise<unknown[]> {
+  const rows = ids.length ? rowList(await strapi<unknown>(candidatePath(kind, ids))) : [];
+  const rank = new Map(ids.map((id, i) => [id, i]));
+  const at = (row: unknown) => rank.get(isRow(row) ? String(row.documentId) : "") ?? ids.length;
+  rows.sort((a, b) => at(a) - at(b));
+  if (rows.length >= LIVE_LIMIT) return rows;
+  // The fill is optional: its failure keeps the readable candidates (Codex review).
+  return [...rows, ...rowList(await rowsOf(() => strapi<unknown>(legacyPath)))];
 }
 
 // ---------------------------------------------------------------------------
