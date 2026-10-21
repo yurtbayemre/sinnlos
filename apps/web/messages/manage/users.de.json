@@ -1,0 +1,72 @@
+{
+  "title": "Benutzer",
+  "description": "Rolle, Abteilung, vorgesetzte Person und Sperre festlegen. Konten anlegen und löschen bleibt im Strapi-Admin.",
+  "tile": "Rollen, Abteilungen und Vorgesetzte festlegen, Konten sperren.",
+  "editTitle": "Benutzer bearbeiten",
+  "email": "E-Mail",
+  "signIn": "Anmeldung",
+  "signInEntra": "Microsoft Entra",
+  "signInLocal": "Passwort",
+  "selfHint": "Das bist du. Deine eigene Rolle und Sperre kann nur ein anderer Admin ändern.",
+  "lockedHint": "Kommt aus Microsoft Entra und wird bei jeder Anmeldung abgeglichen.",
+  "optionsFailed": "Die Auswahllisten konnten nicht geladen werden. Abteilung und vorgesetzte Person lassen sich gerade nicht ändern.",
+  "search": {
+    "label": "Suche",
+    "placeholder": "Name oder E-Mail",
+    "role": "Rolle",
+    "anyRole": "Alle Rollen",
+    "status": "Status",
+    "anyStatus": "Alle",
+    "active": "Aktiv",
+    "blocked": "Gesperrt",
+    "submit": "Suchen"
+  },
+  "list": {
+    "empty": "Keine Benutzer gefunden.",
+    "entra": "aus Entra",
+    "manual": "von Hand",
+    "blocked": "Gesperrt",
+    "noDepartment": "Keine Abteilung"
+  },
+  "roles": {
+    "admin_role": "Admin",
+    "editor": "Redaktion",
+    "department_head": "Abteilungsleitung",
+    "team_lead": "Teamleitung",
+    "member": "Mitarbeiter",
+    "guest": "Gast",
+    "none": "Keine Rolle"
+  },
+  "roleSource": {
+    "entra": "Die Rolle kommt aus Microsoft Entra.",
+    "manual": "Die Rolle ist von Hand gesetzt."
+  },
+  "fields": {
+    "none": "Keine",
+    "role": {
+      "label": "Rolle",
+      "hint": "Eine von Hand gesetzte Rolle überschreibt Entra für dieses Konto."
+    },
+    "department": {
+      "label": "Abteilung"
+    },
+    "manager": {
+      "label": "Vorgesetzte Person"
+    },
+    "blocked": {
+      "label": "Konto gesperrt",
+      "hint": "Gesperrte Konten werden sofort abgemeldet und können sich nicht mehr anmelden."
+    }
+  },
+  "handBack": {
+    "button": "Rolle wieder an Entra geben",
+    "title": "Rolle wieder an Entra geben?",
+    "body": "Bei der nächsten Anmeldung übernimmt das Konto die Rolle aus Entra. Bis dahin bleibt die jetzige Rolle.",
+    "confirm": "An Entra geben"
+  },
+  "teams": {
+    "label": "Teams",
+    "none": "In keinem Team.",
+    "hint": "Mitglieder werden im jeweiligen Team gepflegt."
+  }
+}

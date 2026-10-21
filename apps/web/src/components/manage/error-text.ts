@@ -11,7 +11,7 @@ import { knownCode } from "@/lib/manage/errors";
  * (`manage.<area>.<scope>.fields`, the wiki editor's `editor`).
  */
 export function useFieldErrorText(
-  area: ManageArea | "org",
+  area: ManageArea | "org" | "users",
   scope?: string,
 ): (field: string, code: string) => string {
   const t = useTranslations("manage");

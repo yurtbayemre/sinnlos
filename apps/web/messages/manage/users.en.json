@@ -1,0 +1,72 @@
+{
+  "title": "Users",
+  "description": "Set the role, department, manager and block. Creating and deleting accounts stays in the Strapi admin.",
+  "tile": "Set roles, departments and managers, block accounts.",
+  "editTitle": "Edit user",
+  "email": "E-mail",
+  "signIn": "Sign-in",
+  "signInEntra": "Microsoft Entra",
+  "signInLocal": "Password",
+  "selfHint": "This is you. Only another admin can change your own role or block.",
+  "lockedHint": "Comes from Microsoft Entra and is synced at every sign-in.",
+  "optionsFailed": "The selection lists could not be loaded. Department and manager cannot be changed right now.",
+  "search": {
+    "label": "Search",
+    "placeholder": "Name or e-mail",
+    "role": "Role",
+    "anyRole": "All roles",
+    "status": "Status",
+    "anyStatus": "All",
+    "active": "Active",
+    "blocked": "Blocked",
+    "submit": "Search"
+  },
+  "list": {
+    "empty": "No users found.",
+    "entra": "from Entra",
+    "manual": "set by hand",
+    "blocked": "Blocked",
+    "noDepartment": "No department"
+  },
+  "roles": {
+    "admin_role": "Admin",
+    "editor": "Editor",
+    "department_head": "Department head",
+    "team_lead": "Team lead",
+    "member": "Member",
+    "guest": "Guest",
+    "none": "No role"
+  },
+  "roleSource": {
+    "entra": "The role comes from Microsoft Entra.",
+    "manual": "The role is set by hand."
+  },
+  "fields": {
+    "none": "None",
+    "role": {
+      "label": "Role",
+      "hint": "A role set by hand overrides Entra for this account."
+    },
+    "department": {
+      "label": "Department"
+    },
+    "manager": {
+      "label": "Manager"
+    },
+    "blocked": {
+      "label": "Account blocked",
+      "hint": "Blocked accounts are signed out at once and cannot sign in any more."
+    }
+  },
+  "handBack": {
+    "button": "Hand the role back to Entra",
+    "title": "Hand the role back to Entra?",
+    "body": "At the next sign-in the account takes its role from Entra. Until then it keeps the current role.",
+    "confirm": "Hand back"
+  },
+  "teams": {
+    "label": "Teams",
+    "none": "In no team.",
+    "hint": "Members are managed on each team."
+  }
+}
