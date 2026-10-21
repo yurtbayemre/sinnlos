@@ -66,9 +66,9 @@ const html = (value: QuizQuestion[]) => {
   harness.begin();
   return renderToStaticMarkup(createElement(QuizBuilder, props(value)));
 };
-const click = (value: QuizQuestion[], label: string) => {
+const click = (value: QuizQuestion[], label: string, error?: string) => {
   harness.begin();
-  const button = [...elements(QuizBuilder(props(value)))].find(
+  const button = [...elements(QuizBuilder({ ...props(value), error }))].find(
     (node) => node.props.children === label && typeof node.props.onClick === "function",
   );
   (button!.props.onClick as () => void)();
@@ -147,14 +147,22 @@ describe("quiz builder and the cms's refusal", () => {
     expect(page).toContain(">Invalid quiz<");
   });
 
-  it("retires a refusal once the quiz is valid again: no contradictory messages", () => {
-    const page = withError([filled], "Invalid quiz");
+  it("retires a refusal once the quiz was edited and is valid again: no contradictory messages", () => {
+    withError([broken], "Invalid quiz");
+    const fixed = [{ ...broken, options: ["A", "B"] }];
+    const page = withError(fixed, "Invalid quiz");
     expect(page).not.toContain(">Invalid quiz<");
     expect(page).not.toContain('aria-invalid="true"');
-    click([filled], "validate");
-    const checkedPage = withError([filled], "Invalid quiz");
-    expect(checkedPage).toContain(">valid</p>");
-    expect(checkedPage).not.toContain(">Invalid quiz<");
+    click(fixed, "validate", "Invalid quiz");
+    expect(withError(fixed, "Invalid quiz")).toContain(">valid</p>");
+  });
+
+  it("keeps a refusal of an unchanged quiz the form shows as valid (a stored question it could not load)", () => {
+    const page = withError([filled], "Invalid quiz");
+    expect(page).toContain(">Invalid quiz<");
+    expect(tagById(page, "q")).toContain('aria-invalid="true"');
+    click([filled], "validate", "Invalid quiz");
+    expect(withError([filled], "Invalid quiz")).not.toContain(">valid</p>");
   });
 
   it("names the answer limit for a question loaded with too many answers", () => {

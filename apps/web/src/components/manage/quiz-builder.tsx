@@ -74,19 +74,32 @@ export function QuizBuilder({
   // afterwards stays unmarked until the next check or save.
   const [checked, setChecked] = useState(false);
   const [seenError, setSeenError] = useState<string | undefined>(undefined);
+  // The quiz as it was when the refusal arrived.
+  const [refused, setRefused] = useState<string | null>(null);
   let marking = checked;
+  let refusedQuiz = refused;
   if (error !== seenError) {
     setSeenError(error);
     if (error) {
+      refusedQuiz = JSON.stringify(value);
+      setRefused(refusedQuiz);
       setChecked(true);
       marking = true;
     }
   }
   const valid = !("error" in validateQuiz(value));
-  // The form and the cms check with the same validateQuiz, so a refusal of a
-  // quiz that is valid now is stale (fixed since): it is no longer shown.
-  const shownError = valid ? undefined : error || (checked ? t("invalid") : undefined);
+  // A refusal is stale once the quiz was edited since and is valid now (the
+  // form checks with the cms's validateQuiz); an unchanged quiz keeps it,
+  // e.g. a stored question the editor could not load (parseQuiz drops it).
+  const stale = !!error && valid && JSON.stringify(value) !== refusedQuiz;
+  const shownError = stale ? undefined : error || (checked && !valid ? t("invalid") : undefined);
   const problems = marking ? value.map(questionProblems) : null;
+  // A refusal no field explains still marks the editor's focus target.
+  const unexplained =
+    !!error &&
+    !!shownError &&
+    !!problems &&
+    !problems.some((p) => p.question || p.count || p.correct || p.options.some(Boolean));
   // The first question is the editor's focus target for a quiz error, so it
   // always carries the error's description.
   const describedBy = (invalidField: boolean) =>
@@ -124,7 +137,7 @@ export function QuizBuilder({
               <input
                 {...a11y}
                 aria-describedby={describedBy(q === 0 || !!problems?.[q].question)}
-                aria-invalid={problems?.[q].question ? true : undefined}
+                aria-invalid={problems?.[q].question || (unexplained && q === 0) ? true : undefined}
                 value={question.question}
                 maxLength={QUIZ_MAX_TEXT}
                 className={inputClass}
@@ -253,7 +266,7 @@ export function QuizBuilder({
           {t("validate")}
         </Button>
       </div>
-      {checked && valid && value.length > 0 && (
+      {checked && valid && !shownError && value.length > 0 && (
         <p className="text-sm text-emerald-700 dark:text-emerald-400">{t("valid")}</p>
       )}
       {value.length === 0 && <p className="text-sm text-muted-foreground">{t("empty")}</p>}
