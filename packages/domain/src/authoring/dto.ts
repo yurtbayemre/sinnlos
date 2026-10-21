@@ -488,7 +488,9 @@ export type ActivityTargetUid =
   | "api::department.department"
   | "api::team.team"
   | "api::classified.classified"
-  | "plugin::upload.file";
+  | "plugin::upload.file"
+  /** User administration (v0.23): role, department, manager, blocked, role source. */
+  | "plugin::users-permissions.user";
 
 /** No user/admin objects or email; deleted actors retain their kind, id and a display label. */
 export interface ActivityActor {

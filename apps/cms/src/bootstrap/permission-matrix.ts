@@ -434,6 +434,11 @@ export const AUTHORING_ACTION_GRANTS: Readonly<Record<string, readonly MatrixRol
 export const CUSTOM_ACTION_GRANTS: Record<string, readonly MatrixRoleType[] | "*"> = {
   ...AUTHORING_ACTION_GRANTS,
   "api::audit-event.audit-event.list": [ADMIN],
+  // User administration (v0.23): admin_role only; the controller checks again.
+  "api::user-management.user-management.list": [ADMIN],
+  "api::user-management.user-management.findOne": [ADMIN],
+  "api::user-management.user-management.update": [ADMIN],
+  "api::user-management.user-management.roleToEntra": [ADMIN],
   // Same readers as lessons; these actions enforce published lesson and parent.
   "api::lesson.lesson.player": [...STAFF_ROLES, AUTHENTICATED],
   "api::lesson.lesson.check": [...STAFF_ROLES, AUTHENTICATED],
@@ -559,6 +564,18 @@ const REMOVED_CORE_ACTIONS: Partial<Record<ContentTypeUid, CrudAction[]>> = {
  * role keeps the revocation (a row of an older bootstrap would grant the
  * route again).
  */
+/**
+ * The plugin's generic user writes (`POST`/`PUT`/`DELETE /api/users`) carry
+ * no field allowlist (role, blocked, provider, oid): no role holds them, and
+ * since v0.23 every role, `public` included, has them revoked, so a row of
+ * an older database cannot reopen them next to the user administration.
+ */
+const USER_WRITE_ACTIONS = [
+  "plugin::users-permissions.user.create",
+  "plugin::users-permissions.user.update",
+  "plugin::users-permissions.user.destroy",
+];
+
 const ORG_STRUCTURE_ACTIONS = [
   "api::department.department.create",
   "api::department.department.delete",
@@ -579,12 +596,14 @@ const ORG_STRUCTURE_ACTIONS = [
  * revoked and a custom grant stays granted: the sync keeps it.)
  */
 const LEGACY_REVOKED_PERMISSIONS: Partial<Record<MatrixRoleType, string[]>> = {
-  editor: ORG_STRUCTURE_ACTIONS,
-  department_head: ORG_STRUCTURE_ACTIONS,
-  team_lead: ORG_STRUCTURE_ACTIONS,
-  member: ORG_STRUCTURE_ACTIONS,
+  admin_role: USER_WRITE_ACTIONS,
+  editor: [...ORG_STRUCTURE_ACTIONS, ...USER_WRITE_ACTIONS],
+  department_head: [...ORG_STRUCTURE_ACTIONS, ...USER_WRITE_ACTIONS],
+  team_lead: [...ORG_STRUCTURE_ACTIONS, ...USER_WRITE_ACTIONS],
+  member: [...ORG_STRUCTURE_ACTIONS, ...USER_WRITE_ACTIONS],
   guest: [
     ...ORG_STRUCTURE_ACTIONS,
+    ...USER_WRITE_ACTIONS,
     // NOTE: user.find/findOne are intentionally NOT revoked — doing so
     // 400s every guest read that populates a user relation (and the
     // notification visibility filter). See the guest matrix note above.
@@ -603,6 +622,7 @@ const LEGACY_REVOKED_PERMISSIONS: Partial<Record<MatrixRoleType, string[]>> = {
   ],
   authenticated: [
     ...ORG_STRUCTURE_ACTIONS,
+    ...USER_WRITE_ACTIONS,
     // Excluded from the celebrations grant (see CUSTOM_ACTION_GRANTS), but
     // an earlier bootstrap granted it, and the row survived on existing
     // databases (found by infra/diagnostics/prod-perm-diff.sql).
@@ -627,6 +647,7 @@ export const PUBLIC = "public";
 const PUBLIC_REVOKED_PERMISSIONS = [
   "plugin::users-permissions.auth.forgotPassword",
   "plugin::users-permissions.auth.resetPassword",
+  ...USER_WRITE_ACTIONS,
 ];
 
 export const REVOKED_PERMISSIONS: Record<string, string[]> = {

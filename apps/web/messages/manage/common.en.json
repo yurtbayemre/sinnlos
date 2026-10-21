@@ -211,7 +211,11 @@
     "neverPublished": "There is no published version to go back to, so the draft stays. Ask an editor to delete it if it is no longer needed.",
     "spaceNotEmpty": "This space still has pages.",
     "timeRepeated": "This time occurs twice on this day because of the clock change. Choose another time.",
-    "timeSkipped": "This time does not exist on this day because of the clock change. Choose another time."
+    "timeSkipped": "This time does not exist on this day because of the clock change. Choose another time.",
+    "selfChange": "Only another admin can change your own role or block.",
+    "entraManaged": "Microsoft Entra manages this field for this account.",
+    "managerCycle": "That person already reports to this user, directly or indirectly.",
+    "notEntraBound": "This account does not sign in with Microsoft Entra."
   },
   "fields": {
     "required": "required",

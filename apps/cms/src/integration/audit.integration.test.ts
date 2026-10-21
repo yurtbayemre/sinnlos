@@ -196,7 +196,7 @@ describe.each(testEngines())("the audit trail on %s", (engine) => {
       "actorKind=user&actorId[$ne]=1",
       "actorKind=editor",
       "actorClass=admin_role",
-      "targetUid=plugin::users-permissions.user",
+      "targetUid=plugin::users-permissions.role",
       "from=2026-10-17T09:00:00",
       "from=2026-02-30T09:00:00Z",
       "from=2026-10-18T09:00:00Z&to=2026-10-17T09:00:00Z",

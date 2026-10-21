@@ -77,7 +77,9 @@ Further reading:
   team leads write wiki pages in the wiki itself, with drafts and a page
   history; admins and editors manage the spaces at `/manage/wiki`. Admins
   also create, rename and delete departments and teams and set heads, team
-  leads and members. Every change
+  leads and members, and manage users at `/manage/users` (role, department,
+  manager, block; accounts are still created in the admin panel or by the
+  Microsoft sign-in). Every change
   advances a per-document revision and lands in an append-only activity
   trail that the admin panel lists.
 - **Global search (⌘K)** with anonymous search analytics.
@@ -314,6 +316,10 @@ Custom actions and plugin routes (`✓` = granted, `—` = not granted):
 | `api::department.department.editable` | `GET /api/departments/:id/editable` | ✓ | — | ✓ | — | — | — | — |
 | `api::team.team.editable` | `GET /api/teams/:id/editable` | ✓ | — | ✓ | ✓ | — | — | — |
 | `api::audit-event.audit-event.list` | `GET /api/audit-events` | ✓ | — | — | — | — | — | — |
+| `api::user-management.user-management.list` | `GET /api/user-management` | ✓ | — | — | — | — | — | — |
+| `api::user-management.user-management.findOne` | `GET /api/user-management/:id` | ✓ | — | — | — | — | — | — |
+| `api::user-management.user-management.update` | `PUT /api/user-management/:id` | ✓ | — | — | — | — | — | — |
+| `api::user-management.user-management.roleToEntra` | `POST /api/user-management/:id/role-to-entra` | ✓ | — | — | — | — | — | — |
 <!-- custom-action-grants:end -->
 
 The anonymous `public` role holds none of these, and the cms revokes the

@@ -452,6 +452,11 @@ const GOLDEN: Record<string, PolicySpec[]> = {
   "api::poll-vote.poll-vote.results": [],
 
   "api::audit-event.audit-event.list": [],
+  // User administration (v0.23): admin_role grants, the controller checks again.
+  "api::user-management.user-management.list": [],
+  "api::user-management.user-management.findOne": [],
+  "api::user-management.user-management.update": [],
+  "api::user-management.user-management.roleToEntra": [],
   "api::profile.profile.me": [],
   "api::profile.profile.updateMe": [],
 
@@ -945,6 +950,10 @@ describe("route → policy matrix (S01)", async () => {
       expect(REVOKED_PERMISSIONS.public).toEqual([
         "plugin::users-permissions.auth.forgotPassword",
         "plugin::users-permissions.auth.resetPassword",
+        // The plugin's generic user writes (v0.23): no field allowlist, revoked everywhere.
+        "plugin::users-permissions.user.create",
+        "plugin::users-permissions.user.update",
+        "plugin::users-permissions.user.destroy",
       ]);
       const granted = new Set(computeDesiredGrants().map((grant) => grant.action));
       for (const action of REVOKED_PERMISSIONS.public)

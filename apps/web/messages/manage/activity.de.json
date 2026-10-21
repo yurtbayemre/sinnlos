@@ -33,7 +33,8 @@
     "department": "Abteilung",
     "team": "Team",
     "classified": "Kleinanzeige",
-    "file": "Datei"
+    "file": "Datei",
+    "user": "Benutzer"
   },
   "kinds": {
     "user": "Benutzer",

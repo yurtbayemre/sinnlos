@@ -33,7 +33,8 @@
     "department": "Department",
     "team": "Team",
     "classified": "Classified",
-    "file": "File"
+    "file": "File",
+    "user": "User"
   },
   "kinds": {
     "user": "User",

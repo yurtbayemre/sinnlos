@@ -73,9 +73,13 @@ describe("codes", () => {
         "fileTooLarge",
         "parentCycle",
         "taken",
+        // User administration (v0.23).
+        "selfChange",
+        "entraManaged",
+        "managerCycle",
       ].sort(),
     );
-    expect([...AUTHORING_FORM_CODES]).toEqual(["neverPublished", "spaceNotEmpty"]);
+    expect([...AUTHORING_FORM_CODES]).toEqual(["neverPublished", "spaceNotEmpty", "notEntraBound"]);
     expect(AUTHORING_CODES).toHaveLength(
       AUTHORING_FIELD_CODES.length + AUTHORING_FORM_CODES.length,
     );

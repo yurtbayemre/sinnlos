@@ -290,8 +290,11 @@ syncDepartment=<0|1> syncManager=<0|1> ttl=<ttl> local=<0|1>`.
   `ENTRA_GROUP_ROLES` check fails, the result is unknown even with an
   app-role match (same rules in
   [security.md](./security.md#microsoft-entra-id), "When Graph fails").
-  To hand a user back to Entra, set *Role source* = `entra` and clear *Entra applied
-  role* on the user; the next sign-in applies Entra's role.
+  To hand a user back to Entra, use *Rolle an Entra zurückgeben* on the
+  user's page at `/manage/users` (since v0.23), or set *Role source* =
+  `entra` and clear *Entra applied role* in the admin panel; the next
+  sign-in applies Entra's role. A role set at `/manage/users` makes the
+  user manual at once.
 - **Profile**: display name (only overwritten with a non-empty value), job
   title, phone (first business phone) and office location are copied from
   Entra at every sign-in with `ENTRA_SYNC_MODE=on` and a successful Graph

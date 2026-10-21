@@ -14,12 +14,14 @@ import { AUDIT_ACTOR_KINDS, AUDIT_EVENT_UID } from "../../../utils/audit";
 import { GUARDED_UIDS } from "../../../utils/authoring-uids";
 import { CLASSIFIED_UID, UPLOAD_FILE_UID } from "../../../utils/delete-audit";
 import { isRowId, parseRowId } from "../../../utils/entry-id";
+import { USER_UID } from "../../../utils/write-allowlist";
 import { isOffsetLessInstantString } from "../../../utils/offsetless-datetime-guard";
 import { instantMsOrNull, toIsoZ } from "../../../utils/time";
 
 const PAGE_SIZE = 25;
 const QUERY_KEYS = ["page", "targetUid", "actorKind", "actorId", "actorClass", "from", "to"];
-const TARGET_UIDS = [...GUARDED_UIDS, CLASSIFIED_UID, UPLOAD_FILE_UID];
+// Users: the user administration's rows (v0.23, utils/user-admin.ts).
+const TARGET_UIDS = [...GUARDED_UIDS, CLASSIFIED_UID, UPLOAD_FILE_UID, USER_UID];
 const ACTOR_CLASSES: readonly string[] = [...AUTHORING_ROLE_CLASSES, ...WIKI_EDITOR_CLASSES];
 const EVENT_FIELDS = [
   "id",

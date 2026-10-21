@@ -28,4 +28,5 @@ export * from "./poll-close.js";
 export * from "./roles.js";
 export * from "./search.js";
 export * from "./training.js";
+export * from "./user-admin.js";
 export * from "./wiki-edit.js";

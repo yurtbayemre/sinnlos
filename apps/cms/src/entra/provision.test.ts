@@ -1,4 +1,10 @@
 import { describe, expect, it, vi, type Mock } from "vitest";
+
+const { lockDocument } = vi.hoisted(() => ({ lockDocument: vi.fn(async () => 1) }));
+vi.mock("../utils/document-lock", async (original) => ({
+  ...(await original<typeof import("../utils/document-lock")>()),
+  lockDocument,
+}));
 import { handleExchange, type ExchangeContext } from "../api/entra-auth/controllers/entra-auth";
 import { parseEntraConfig, type EntraConfig } from "./config";
 import type { EntraIdClaims } from "./id-token";
@@ -404,8 +410,14 @@ describe("runEntraExchange: role writes are atomic (spec I)", () => {
 
   it("writes a role change inside the transaction, with the row locked on Postgres only", async () => {
     for (const dialect of ["postgres", "sqlite"]) {
+      lockDocument.mockClear();
       const host = fakeHost([entraRow()], { dialect });
       const outcome = await run(host, { ...PERSON, roles: ["Intranet.Editor"] });
+      // The user administration's directory lock first (v0.23), on Postgres like the row lock.
+      expect(
+        lockDocument.mock.calls.map((call) => (call as unknown[]).slice(1)),
+        dialect,
+      ).toEqual(dialect === "postgres" ? [["sinnlos::user-directory", "global"]] : []);
       expect(outcome.status, dialect).toBe(200);
       const roleWrites = host.calls.update.filter((call) => "role" in call.data);
       expect(roleWrites, dialect).toEqual([

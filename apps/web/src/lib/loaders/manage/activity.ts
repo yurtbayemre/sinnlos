@@ -27,6 +27,7 @@ export const ACTIVITY_TARGETS = {
   "api::team.team": "team",
   "api::classified.classified": "classified",
   "plugin::upload.file": "file",
+  "plugin::users-permissions.user": "user",
 } as const satisfies Record<ActivityTargetUid, string>;
 export const ACTIVITY_KINDS = ["user", "admin", "system"] as const;
 export const ACTIVITY_CLASSES = [...new Set([...AUTHORING_ROLE_CLASSES, ...WIKI_EDITOR_CLASSES])];
