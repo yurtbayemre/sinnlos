@@ -63,5 +63,6 @@
     "departmentBody": "{members, plural, =0 {Niemand ist ihr zugeordnet} one {# Person verliert die Abteilung} other {# Personen verlieren die Abteilung}}, {teams, plural, =0 {kein Team ist betroffen} one {# Team verliert sie} other {# Teams verlieren sie}}. Verknüpfte Neuigkeiten, Dokumente, Quick Links und Kurse sehen danach nur noch Admins und Editoren, bis sie neu zugeordnet sind. Das lässt sich nicht rückgängig machen.",
     "teamTitle": "Team „{name}“ löschen?",
     "teamBody": "{members, plural, =0 {Das Team hat keine Mitglieder} one {# Mitglied verliert das Team} other {# Mitglieder verlieren das Team}}. Neuigkeiten an dieses Team sehen danach nur noch Admins und Editoren, bis sie neu zugeordnet sind. Das lässt sich nicht rückgängig machen."
-  }
+  },
+  "deleteConflict": "Jemand hat diesen Eintrag inzwischen geändert. Lade neu und prüfe die Auswirkungen, bevor du erneut löschst."
 }

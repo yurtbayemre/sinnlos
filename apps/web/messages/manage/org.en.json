@@ -63,5 +63,6 @@
     "departmentBody": "{members, plural, =0 {Nobody belongs to it} one {# person loses the department} other {# people lose the department}}, {teams, plural, =0 {no team is affected} one {# team loses it} other {# teams lose it}}. Linked news, documents, quick links and courses are then visible to admins and editors only until they are re-targeted. This cannot be undone.",
     "teamTitle": "Delete the team “{name}”?",
     "teamBody": "{members, plural, =0 {The team has no members} one {# member loses the team} other {# members lose the team}}. News for this team is then visible to admins and editors only until it is re-targeted. This cannot be undone."
-  }
+  },
+  "deleteConflict": "Someone changed this entry meanwhile. Reload and check what the delete affects before you delete again."
 }

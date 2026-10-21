@@ -121,6 +121,7 @@ export function OrgEditor({
       : []),
   ];
   const pickersOff = editor.pending || options === undefined || options.failed;
+  const deleteConflict = editor.conflict?.intent === "delete";
 
   const save = (snapshot = values) => {
     if (creating) {
@@ -395,6 +396,26 @@ export function OrgEditor({
           </>
         )}
         <FormAlert area="org" failure={editor.failure} alertRef={editor.alertRef} />
+        {deleteConflict && (
+          // A delete is never repeated over a newer version: reload, read the counts again, confirm again.
+          <div
+            role="alert"
+            className="flex flex-wrap items-center gap-3 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm"
+          >
+            <span className="min-w-0 flex-1">{t("deleteConflict")}</span>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                editor.clearConflict();
+                editor.requestReset();
+              }}
+            >
+              {tc("conflict.reload")}
+            </Button>
+          </div>
+        )}
         <p role="status" className="text-sm text-muted-foreground">
           {saved && !dirty ? tc("success.saved") : ""}
         </p>
@@ -444,7 +465,7 @@ export function OrgEditor({
         </ActionBar>
       </form>
       <ConflictDialog
-        conflict={editor.conflict}
+        conflict={deleteConflict ? null : editor.conflict}
         copyText={values.description}
         pending={editor.pending}
         onReload={() => {

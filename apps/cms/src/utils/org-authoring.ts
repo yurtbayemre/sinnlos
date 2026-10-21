@@ -24,16 +24,18 @@ import {
 import { DEPARTMENT_UID, TEAM_UID } from "./authoring-uids";
 import {
   etagOf,
+  lockDocument,
   parseIfMatch,
   readRevision,
   runInAuthoringScope,
   type AuthoringScope,
+  type DocumentLockHost,
   type ScopeClassifier,
 } from "./document-lock";
 import { parseEntryRef } from "./entry-id";
 import { identifiedCaller, type PolicyCaller } from "./policy-factories";
 import { getMutableQuery } from "./policy-query";
-import { enforceWriteAllowlist, USER_UID } from "./write-allowlist";
+import { enforceWriteAllowlist, refuseKeys, USER_UID } from "./write-allowlist";
 import {
   loadCallerDepartment,
   normaliseRow,
@@ -299,6 +301,44 @@ async function editableDto(
   };
 }
 
+/**
+ * The reserved version row that serialises department names (like the wiki
+ * structure lock). Taken before the Document Service call, so before the
+ * department's own version row; only department creates and renames take
+ * it, and nothing that holds a department's version row waits for it, so
+ * the two cannot deadlock.
+ */
+const DEPARTMENT_NAMES_LOCK_UID = "sinnlos::department-names";
+const DEPARTMENT_NAMES_LOCK_DOCUMENT_ID = "global";
+
+/**
+ * A department name nobody else has, ignoring case (Strapi's own unique
+ * check is case-sensitive and has no database index): Entra's department
+ * sync matches names case-insensitively and clears an ambiguous match.
+ * Under one lock, so two creates or renames to one name cannot both pass.
+ * shortcut: panel writes keep Strapi's case-sensitive check without this lock; one admin at a time makes a clash there rare.
+ */
+async function assertFreeDepartmentName(
+  strapi: AuthoringControllerHost,
+  uid: string,
+  data: Record<string, unknown>,
+  documentId?: string,
+): Promise<void> {
+  if (uid !== DEPARTMENT_UID || typeof data.name !== "string") return;
+  await lockDocument(
+    strapi as unknown as DocumentLockHost,
+    DEPARTMENT_NAMES_LOCK_UID,
+    DEPARTMENT_NAMES_LOCK_DOCUMENT_ID,
+  );
+  const clashes = await strapi.db.query(DEPARTMENT_UID).count({
+    where: {
+      name: { $eqi: data.name },
+      ...(documentId ? { documentId: { $ne: documentId } } : {}),
+    },
+  });
+  if (clashes > 0) refuseKeys(["name"], { name: "taken" });
+}
+
 /** Status-free org writes reuse the revision lock/audit and return only the committed identity. */
 export function orgAuthoringActions(
   strapiValue: unknown,
@@ -338,6 +378,7 @@ export function orgAuthoringActions(
         const scope: AuthoringScope = { uid, roleClass: gate.roleClass, source: "content-api" };
         const documentId = await strapi.db.transaction(async () =>
           runInAuthoringScope(scope, async () => {
+            await assertFreeDepartmentName(strapi, uid, data);
             const created = documentIdOf(await strapi.documents(uid).create({ data }));
             if (!created) throw new Error(`org authoring: ${uid} create returned no document`);
             return created;
@@ -358,6 +399,7 @@ export function orgAuthoringActions(
         const scope: AuthoringScope = scopeOf(ctx, gate, 403);
         await strapi.db.transaction(async () =>
           runInAuthoringScope(scope, async () => {
+            await assertFreeDepartmentName(strapi, uid, data, scope.documentId);
             await strapi.documents(uid).update({ documentId: scope.documentId, data });
           }),
         );

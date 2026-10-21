@@ -22,7 +22,7 @@ export interface OrgValues {
   department: string;
   /** A team's lead (user id), or null. */
   lead: number | null;
-  /** A team's members (user ids): sent as a full replacement. */
+  /** A team's members (user ids): sent as the changes against the form's start. */
   members: number[];
 }
 
@@ -100,6 +100,11 @@ export function coerceOrgValues(raw: unknown): OrgValues | null {
   };
 }
 
+interface OrgPayloadContext {
+  mode: "create" | "update";
+  initial: OrgValues;
+}
+
 export function buildOrgPayload(
   type: OrgAuthoringType,
   roleClass: OrgEditorClass,
@@ -114,7 +119,7 @@ export function buildOrgPayload(
         ? []
         : ORG_FIELDS.department[roleClass]
       : ORG_FIELDS.team[roleClass];
-  const rules: FieldRule<OrgValues, { mode: "create" | "update" }>[] = [
+  const rules: FieldRule<OrgValues, OrgPayloadContext>[] = [
     {
       key: "name",
       inputs: ["name"],
@@ -150,10 +155,21 @@ export function buildOrgPayload(
             : { value: null },
     },
     { key: "lead", inputs: ["lead"], convert: (v) => ({ value: v.lead }) },
-    { key: "members", inputs: ["members"], convert: (v) => ({ value: v.members }) },
+    {
+      key: "members",
+      inputs: ["members"],
+      // Changes, not the list: a membership change made elsewhere meanwhile stays (Codex v0.22).
+      convert: (v, ctx) => ({
+        value: {
+          connect: v.members.filter((id) => !ctx.initial.members.includes(id)),
+          disconnect: ctx.initial.members.filter((id) => !v.members.includes(id)),
+        },
+      }),
+    },
   ];
   const { data, fields } = collectFields(new Set(allowed), new Set(), rules, values, initial, {
     mode,
+    initial,
   });
   return done(data, fields);
 }

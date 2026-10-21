@@ -10,6 +10,7 @@ import { EmptyState } from "@/components/empty-state";
 import { FetchErrorBanner } from "@/components/fetch-error";
 import { PageHeader } from "@/components/page-header";
 import { SectionUnavailablePage } from "@/components/section-unavailable";
+import { ManageFlashProvider } from "@/components/manage/flash";
 import { buttonVariants } from "@/components/ui/button";
 import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
@@ -30,46 +31,49 @@ export default async function TeamsPage() {
   const { data, failed } = await tryFetch(() => api.teams.list(), "teams");
   const items = (data?.data ?? []) as Team[];
 
+  // The flash of a create or delete in the web lands here (v0.22).
   return (
-    <div className="space-y-6">
-      <PageHeader title={t("title")} description={t("description")}>
-        {/* admin_role manages the structure in the web (v0.22). */}
-        {capabilitiesFor(viewer.role).org.manage && (
-          <Link href="/manage/teams/new" className={buttonVariants()}>
-            {tManage("newTeam")}
-          </Link>
-        )}
-      </PageHeader>
-
-      {failed && <FetchErrorBanner />}
-
-      {items.length === 0 ? (
-        <EmptyState icon={Users2} title={t("emptyTitle")} hint={t("emptyHint")} />
-      ) : (
-        <div className="stagger grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {items.map((team) => (
-            <Link key={team.id} href={`/teams/${team.slug}`} className="focus-card group">
-              <Card interactive className="card-lift h-full">
-                <CardHeader>
-                  <div
-                    aria-hidden="true"
-                    className="mb-1 flex h-9 w-9 items-center justify-center rounded-xl bg-primary/10 text-primary"
-                  >
-                    <Users2 className="h-4 w-4" />
-                  </div>
-                  <CardTitle as="h2" className="transition-colors group-hover:text-primary">
-                    {team.name}
-                  </CardTitle>
-                  <CardDescription>
-                    {team.department?.name ? `${team.department.name} · ` : ""}
-                    {tCommon("member", { count: team.members?.length ?? 0 })}
-                  </CardDescription>
-                </CardHeader>
-              </Card>
+    <ManageFlashProvider>
+      <div className="space-y-6">
+        <PageHeader title={t("title")} description={t("description")}>
+          {/* admin_role manages the structure in the web (v0.22). */}
+          {capabilitiesFor(viewer.role).org.manage && (
+            <Link href="/manage/teams/new" className={buttonVariants()}>
+              {tManage("newTeam")}
             </Link>
-          ))}
-        </div>
-      )}
-    </div>
+          )}
+        </PageHeader>
+
+        {failed && <FetchErrorBanner />}
+
+        {items.length === 0 ? (
+          <EmptyState icon={Users2} title={t("emptyTitle")} hint={t("emptyHint")} />
+        ) : (
+          <div className="stagger grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {items.map((team) => (
+              <Link key={team.id} href={`/teams/${team.slug}`} className="focus-card group">
+                <Card interactive className="card-lift h-full">
+                  <CardHeader>
+                    <div
+                      aria-hidden="true"
+                      className="mb-1 flex h-9 w-9 items-center justify-center rounded-xl bg-primary/10 text-primary"
+                    >
+                      <Users2 className="h-4 w-4" />
+                    </div>
+                    <CardTitle as="h2" className="transition-colors group-hover:text-primary">
+                      {team.name}
+                    </CardTitle>
+                    <CardDescription>
+                      {team.department?.name ? `${team.department.name} · ` : ""}
+                      {tCommon("member", { count: team.members?.length ?? 0 })}
+                    </CardDescription>
+                  </CardHeader>
+                </Card>
+              </Link>
+            ))}
+          </div>
+        )}
+      </div>
+    </ManageFlashProvider>
   );
 }

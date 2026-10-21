@@ -262,8 +262,22 @@ describe("org structure (admin_role, v0.22)", () => {
       ),
     ).toEqual({
       ok: true,
-      data: { name: "Lager", department: SALES, lead: 9, members: [10, 9] },
+      data: {
+        name: "Lager",
+        department: SALES,
+        lead: 9,
+        members: { connect: [10, 9], disconnect: [] },
+      },
     });
+    // Members travel as changes against the form's start (Codex v0.22).
+    expect(
+      buildOrgPayload(
+        "team",
+        "moderator",
+        { ...initial, members: [2, 3] },
+        { ...initial, members: [1, 2] },
+      ),
+    ).toEqual({ ok: true, data: { members: { connect: [3], disconnect: [1] } } });
     // A different order of the same members is no change; a cleared department is null.
     expect(
       buildOrgPayload(

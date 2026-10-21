@@ -91,13 +91,13 @@ describe("team single-row gate", () => {
       }),
     ).rejects.toMatchObject({ details: { keys: [key] } });
   });
-  it("lets admin_role rename, move, set the lead and replace the members (v0.22)", async () => {
+  it("lets admin_role rename, move, set the lead and change the members (v0.22)", async () => {
     const { host } = world();
     const { ctx } = context(ADMIN, PLATFORM.documentId, {
       name: "Plattform",
       department: SALES.documentId,
       lead: HEAD_USER_DOC,
-      members: [LEAD_USER_DOC, HEAD_USER_DOC, LEAD_USER_DOC],
+      members: { connect: [LEAD_USER_DOC, HEAD_USER_DOC, LEAD_USER_DOC], disconnect: [] },
     });
     expect(await canEditTeam(ctx, undefined, { strapi: host })).toBe(true);
     expect(ctx.request.body).toEqual({
@@ -105,16 +105,33 @@ describe("team single-row gate", () => {
         name: "Plattform",
         department: { set: [{ documentId: SALES.documentId }] },
         lead: { set: [{ documentId: HEAD_USER_DOC }] },
-        members: { set: [{ documentId: LEAD_USER_DOC }, { documentId: HEAD_USER_DOC }] },
+        members: {
+          connect: [{ documentId: LEAD_USER_DOC }, { documentId: HEAD_USER_DOC }],
+          disconnect: [],
+        },
       },
     });
     await expect(
       canEditTeam(
-        context(ADMIN, PLATFORM.documentId, { members: ["unknown0000000000000000000"] }).ctx,
+        context(ADMIN, PLATFORM.documentId, {
+          members: { connect: ["unknown0000000000000000000"] },
+        }).ctx,
         undefined,
         { strapi: host },
       ),
     ).rejects.toMatchObject({ details: { keys: ["members"] } });
+    // Changes only (Codex v0.22): a full list, a set and a target on both sides are refused.
+    for (const members of [
+      [LEAD_USER_DOC],
+      { set: [LEAD_USER_DOC] },
+      { connect: [LEAD_USER_DOC], disconnect: [LEAD_USER_DOC] },
+      {},
+    ])
+      await expect(
+        canEditTeam(context(ADMIN, PLATFORM.documentId, { members }).ctx, undefined, {
+          strapi: host,
+        }),
+      ).rejects.toMatchObject({ details: { keys: ["members"] } });
   });
   it("create: admin_role only, needs a department, slug derived", async () => {
     const { host } = world();

@@ -1,5 +1,11 @@
 import { errors } from "@strapi/utils";
 import { describe, expect, it, vi } from "vitest";
+
+const lockDocument = vi.fn(async () => 1);
+vi.mock("./document-lock", async (original) => ({
+  ...(await original<typeof import("./document-lock")>()),
+  lockDocument: (...args: unknown[]) => lockDocument(...(args as [])),
+}));
 import { CONTENT_VERSION_UID, ClassLost, RevisionStale, getAuthoringScope } from "./document-lock";
 import { orgAuthoringActions, orgGate } from "./org-authoring";
 import {
@@ -187,7 +193,10 @@ describe("org structure for admin_role (v0.22)", () => {
         return { documentId: "dnew00000000000000000000" };
       });
       strapi.documents = vi.fn(() => ({ create })) as never;
+      lockDocument.mockClear();
       await orgAuthoringActions(host, uid).create(ctx);
+      // Department names are serialised under one lock; teams take none.
+      expect(lockDocument).toHaveBeenCalledTimes(uid === DEPT ? 1 : 0);
       expect(ctx.status).toBe(201);
       expect(ctx.body).toEqual({ data: { documentId: "dnew00000000000000000000", version: "1" } });
       expect(headers.ETag).toBe('"1"');
@@ -212,5 +221,34 @@ describe("org structure for admin_role (v0.22)", () => {
     await orgAuthoringActions(host, uid).delete(ctx);
     expect(remove).toHaveBeenCalledOnce();
     expect(ctx.status).toBe(204);
+  });
+});
+
+describe("department names (v0.22, Codex)", () => {
+  it.each(["engineering", "ENGINEERING"])(
+    "refuses %s for another department, ignoring case, before any write",
+    async (name) => {
+      const { host, strapi } = world();
+      const { ctx } = context(ADMIN, undefined, { name });
+      expect(await orgGate(DEPT)(ctx, { intent: "create" }, { strapi: host })).toBe(true);
+      const create = vi.fn();
+      strapi.documents = vi.fn(() => ({ create })) as never;
+      await expect(orgAuthoringActions(host, DEPT).create(ctx)).rejects.toMatchObject({
+        details: { keys: ["name"], codes: { name: "taken" } },
+      });
+      expect(create).not.toHaveBeenCalled();
+    },
+  );
+  it("a department keeps its own name in another case", async () => {
+    const { host, strapi } = world();
+    const { ctx } = context(ADMIN, ENG.documentId, { name: "ENGINEERING" });
+    expect(await orgGate(DEPT)(ctx, undefined, { strapi: host })).toBe(true);
+    const update = vi.fn(async () => {
+      getAuthoringScope()!.committedRevision = 8;
+    });
+    strapi.documents = vi.fn(() => ({ update })) as never;
+    await orgAuthoringActions(host, DEPT).update(ctx);
+    expect(update).toHaveBeenCalledOnce();
+    expect(ctx.status).toBe(200);
   });
 });

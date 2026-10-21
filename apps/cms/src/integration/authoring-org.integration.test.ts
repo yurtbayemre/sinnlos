@@ -245,7 +245,12 @@ describe.each(testEngines())("organisation authoring HTTP on %s", (engine) => {
               name: "API Lager",
               department: t.fixtures.departments.sales.documentId,
               lead: t.fixtures.users.team_lead.documentId,
-              members: [t.fixtures.users.member.documentId, t.fixtures.users.team_lead.documentId],
+              members: {
+                connect: [
+                  t.fixtures.users.member.documentId,
+                  t.fixtures.users.team_lead.documentId,
+                ],
+              },
             };
       const create = (caller: Caller, json: Record<string, unknown>) =>
         t.api<OrgWriteResponse & { error?: ErrorBody["error"] }>(caller, `/api/${plural}`, {
@@ -325,6 +330,16 @@ describe.each(testEngines())("organisation authoring HTTP on %s", (engine) => {
     );
     expect(taken.status, taken.text).toBe(400);
     expect(taken.body.error?.details).toMatchObject({ keys: ["name"], codes: { name: "taken" } });
+    // Ignoring case too: Entra's department sync would find both (Codex v0.22).
+    const takenCase = await save(
+      "admin_role",
+      "departments",
+      target.documentId,
+      { name: String(t.fixtures.departments.sales.name).toUpperCase() },
+      old.body.data.version,
+    );
+    expect(takenCase.status, takenCase.text).toBe(400);
+    expect(takenCase.body.error?.details).toMatchObject({ codes: { name: "taken" } });
     expect(await storedRevision(t, DEPT, target.documentId)).toBe(Number(old.body.data.version));
     const renamed = await save(
       "admin_role",
@@ -346,35 +361,49 @@ describe.each(testEngines())("organisation authoring HTTP on %s", (engine) => {
     expect(back.status, back.text).toBe(200);
   });
 
-  it("admin replaces a team's members and lead; an unknown user refuses the whole save", async () => {
+  it("admin changes a team's members and lead by delta; a change made elsewhere meanwhile stays", async () => {
     const target = t.fixtures.teams.platform;
     const old = await form("admin_role", "teams", target.documentId);
     const users = t.fixtures.users;
+    const before = ((old.body.data as TeamEditable).members ?? []).map((person) => person.id);
     const refused = await save(
       "admin_role",
       "teams",
       target.documentId,
-      { members: [users.member.documentId, "zzzzzzzzzzzzzzzzzzzzzzzz"] },
+      { members: { connect: [users.member.documentId, "zzzzzzzzzzzzzzzzzzzzzzzz"] } },
       old.body.data.version,
     );
     expect(refused.status, refused.text).toBe(400);
     expect(refused.body.error?.details?.keys).toEqual(["members"]);
+    for (const members of [[users.member.documentId], { set: [users.member.documentId] }]) {
+      const full = await save(
+        "admin_role",
+        "teams",
+        target.documentId,
+        { members },
+        old.body.data.version,
+      );
+      expect(full.status, `${JSON.stringify(members)}: ${full.text}`).toBe(400);
+    }
+    // Meanwhile the admin panel's user form puts the member into the team
+    // (the user's side: no team revision advances).
+    await t.strapi.db
+      .query("plugin::users-permissions.user")
+      .update({ where: { id: users.member.id }, data: { teams: { connect: [target.id] } } });
     const saved = await save(
       "admin_role",
       "teams",
       target.documentId,
-      {
-        members: [users.member.documentId, users.editor.documentId],
-        lead: users.editor.documentId,
-      },
+      { members: { connect: [users.editor.documentId] }, lead: users.editor.documentId },
       old.body.data.version,
     );
     expect(saved.status, saved.text).toBe(200);
     const after = await form("admin_role", "teams", target.documentId);
     const data = after.body.data as TeamEditable;
     expect(data.lead?.documentId).toBe(users.editor.documentId);
-    expect(data.members?.map((person) => person.documentId).sort()).toEqual(
-      [users.member.documentId, users.editor.documentId].sort(),
+    // The member added elsewhere is still there: the stale form only added the editor.
+    expect(data.members?.map((person) => person.id).sort()).toEqual(
+      [...new Set([...before, users.member.id, users.editor.id])].sort(),
     );
     const audit = await t.strapi.db.query(AUDIT).findMany({
       where: { targetUid: TEAM, targetDocumentId: target.documentId },
@@ -383,18 +412,25 @@ describe.each(testEngines())("organisation authoring HTTP on %s", (engine) => {
     });
     expect(audit[0]).toMatchObject({ action: "update", actorClass: "moderator" });
     expect((audit[0].keys as string[]).sort()).toEqual(["lead", "members"]);
-    // Restore the fixture for the tests after this one.
-    const restored = await save(
+    const removed = await save(
       "admin_role",
       "teams",
       target.documentId,
       {
-        members: (old.body.data as TeamEditable).members?.map((person) => person.documentId) ?? [],
+        // Back to the fixture: drop only who this test added.
+        members: {
+          disconnect: [users.member, users.editor]
+            .filter((user) => !before.includes(user.id))
+            .map((user) => user.documentId),
+        },
         lead: (old.body.data as TeamEditable).lead?.documentId ?? null,
       },
       saved.body.data.version,
     );
-    expect(restored.status, restored.text).toBe(200);
+    expect(removed.status, removed.text).toBe(200);
+    const restored = (await form("admin_role", "teams", target.documentId)).body
+      .data as TeamEditable;
+    expect(restored.members?.map((person) => person.id).sort()).toEqual([...before].sort());
   });
 
   it("one user leading a second team: the first team keeps its lead (no silent move)", async () => {

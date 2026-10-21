@@ -219,6 +219,13 @@ export interface RelationListField {
   max: number;
   /** On create, a missing key is `[the caller's department]` (§N4 callerDepartment). */
   callerDepartmentOnCreate?: boolean;
+  /**
+   * `{ connect, disconnect }` changes instead of a full replacement (team
+   * members, v0.22): a stale form cannot undo a change it did not see, made
+   * through a path that does not advance the document's revision (the
+   * user's side of the relation in the admin panel).
+   */
+  delta?: boolean;
 }
 
 /**
@@ -368,12 +375,13 @@ const toOne = (
 ): RelationField => ({ kind: "relation", check, ...options });
 const toMany = (
   check: RelationListCheckName,
-  options: { max?: number; callerDepartmentOnCreate?: boolean } = {},
+  options: { max?: number; callerDepartmentOnCreate?: boolean; delta?: boolean } = {},
 ): RelationListField => ({
   kind: "relationList",
   check,
   max: options.max ?? MAX_TARGET_DEPARTMENTS,
   ...(options.callerDepartmentOnCreate ? { callerDepartmentOnCreate: true } : {}),
+  ...(options.delta ? { delta: true } : {}),
 });
 /** A single media field authorized by a named check (§B1.2 media; retain passes unchecked). */
 const media = (check: MediaCheckName): MediaField => ({ kind: "media", check });
@@ -701,7 +709,7 @@ const TEAM_MODERATOR: WriteRule = {
     avatar: media("ownUpload"),
     department: toOne("department"),
     lead: toOne("user"),
-    members: toMany("users", { max: MAX_TEAM_MEMBERS }),
+    members: toMany("users", { max: MAX_TEAM_MEMBERS, delta: true }),
   },
 };
 const COURSE_MODERATOR: WriteRule = {
@@ -1372,6 +1380,33 @@ export function parseRelationList(value: unknown, max: number): RelationRef[] | 
   return parseRefList(list);
 }
 
+/**
+ * A to-many payload as CHANGES (`delta` fields): `{ connect?: refs,
+ * disconnect?: refs }`, at most `max` refs together; any other shape, a set
+ * or a bare list is refused (null).
+ */
+export function parseRelationDelta(
+  value: unknown,
+  max: number,
+): { connect: RelationRef[]; disconnect: RelationRef[] } | null {
+  if (!isPlainObject(value)) return null;
+  const keys = Object.keys(value);
+  if (keys.length === 0 || !keys.every((key) => key === "connect" || key === "disconnect"))
+    return null;
+  const listOf = (raw: unknown): RelationRef[] | null =>
+    raw === undefined
+      ? []
+      : Array.isArray(raw)
+        ? raw.length === 0
+          ? []
+          : parseRefList(raw)
+        : null;
+  const connect = listOf(value.connect);
+  const disconnect = listOf(value.disconnect);
+  if (!connect || !disconnect || connect.length + disconnect.length > max) return null;
+  return { connect, disconnect };
+}
+
 /** Role types as a list of distinct strings (no shape but a flat list or null). */
 function parseRoleTypes(value: unknown, field: RoleTypesField): string[] | null {
   if (value === null) return [];
@@ -1509,6 +1544,7 @@ export async function applyWriteRule(
   const mergedPart: Record<string, unknown> = {};
   const relationInputs = new Map<string, ToOneRelationInput>();
   const listInputs = new Map<string, RelationRef[]>();
+  const deltaInputs = new Map<string, { connect: RelationRef[]; disconnect: RelationRef[] }>();
   const roleInputs = new Map<string, string[]>();
   const mediaInputs = new Map<string, number | null>();
   const frozenCandidates: string[] = [];
@@ -1522,6 +1558,10 @@ export async function applyWriteRule(
       const singleTarget = parsed?.target != null && parsed.disconnect.length === 0;
       if (!parsed || (spec.required && !singleTarget)) refused.add(key);
       else relationInputs.set(key, parsed);
+    } else if (spec.kind === "relationList" && spec.delta) {
+      const changes = parseRelationDelta(raw, spec.max);
+      if (!changes) refused.add(key);
+      else deltaInputs.set(key, changes);
     } else if (spec.kind === "relationList") {
       const refs = parseRelationList(raw, spec.max);
       if (!refs) refused.add(key);
@@ -1581,6 +1621,20 @@ export async function applyWriteRule(
     if (!documentIds) refuseKeys([key]);
     out[key] = { set: documentIds.map((documentId) => ({ documentId })) };
     mergedPart[key] = documentIds;
+  }
+  // Changes (no merged value: no rule derives anything from a delta field).
+  for (const [key, changes] of deltaInputs) {
+    const spec = rule.fields[key] as RelationListField;
+    const check = env.relationListChecks?.[spec.check];
+    if (!check) missingCheck("relation list", spec.check);
+    const connect = await check(changes.connect);
+    const disconnect = await check(changes.disconnect);
+    // One target on both sides says nothing clear: refused like any other bad value.
+    if (!connect || !disconnect || connect.some((id) => disconnect.includes(id))) refuseKeys([key]);
+    out[key] = {
+      connect: connect.map((documentId) => ({ documentId })),
+      disconnect: disconnect.map((documentId) => ({ documentId })),
+    };
   }
   for (const [key, types] of roleInputs) {
     let documentIds: string[] | null = [];
