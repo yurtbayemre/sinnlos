@@ -420,6 +420,15 @@ describe("capabilitiesFor = the cms grants (decision 06 §L2)", () => {
       !holds(role, `${uid}.update`) ? "none" : MODERATORS.includes(role) ? "any" : "own";
     expect(org.editDepartment).toBe(scope(A.department));
     expect(org.editTeam).toBe(scope(A.team));
+    expect(org.manage).toBe(
+      holds(
+        role,
+        `${A.department}.create`,
+        `${A.department}.delete`,
+        `${A.team}.create`,
+        `${A.team}.delete`,
+      ),
+    );
   });
 
   it.each(MATRIX_ROLES)("%s: manage and the reports follow the page gates (§L1)", (role) => {

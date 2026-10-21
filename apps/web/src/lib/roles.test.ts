@@ -277,7 +277,7 @@ describe("capabilitiesFor", () => {
         schedule: false,
         delete: false,
       });
-      expect(caps.org).toEqual({ editDepartment: "none", editTeam: "none" });
+      expect(caps.org).toEqual({ editDepartment: "none", editTeam: "none", manage: false });
       expect(caps.reports).toEqual({
         analytics: false,
         acknowledgements: false,

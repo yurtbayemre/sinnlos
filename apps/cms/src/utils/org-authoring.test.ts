@@ -146,7 +146,7 @@ describe("org structure for admin_role (v0.22)", () => {
     expect(ctx.body).toMatchObject({
       data: {
         roleClass: "moderator",
-        head: { documentId: HEAD_USER_DOC, displayName: "Hanna Head" },
+        head: { id: HEAD.id, documentId: HEAD_USER_DOC, displayName: "Hanna Head" },
         memberCount: 1,
         teamCount: 1,
       },
@@ -161,10 +161,10 @@ describe("org structure for admin_role (v0.22)", () => {
     expect(ctx.body).toMatchObject({
       data: {
         department: { documentId: ENG.documentId, name: "Engineering" },
-        lead: { documentId: LEAD_USER_DOC, displayName: "Lea Lead" },
+        lead: { id: LEAD.id, documentId: LEAD_USER_DOC, displayName: "Lea Lead" },
         members: [
-          { documentId: HEAD_USER_DOC, displayName: "Hanna Head" },
-          { documentId: LEAD_USER_DOC, displayName: "Lea Lead" },
+          { id: HEAD.id, documentId: HEAD_USER_DOC, displayName: "Hanna Head" },
+          { id: LEAD.id, documentId: LEAD_USER_DOC, displayName: "Lea Lead" },
         ],
       },
     });

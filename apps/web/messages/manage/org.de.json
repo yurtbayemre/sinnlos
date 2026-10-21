@@ -3,7 +3,7 @@
   "teamTitle": "Team bearbeiten",
   "edit": "Bearbeiten",
   "back": "Zurück zur Detailseite",
-  "scopeHint": "Hier bearbeitest du Beschreibung und Darstellung. Namen, Mitgliedschaften und Organisationsstruktur werden im Admin-Panel verwaltet.",
+  "scopeHint": "Hier bearbeitest du Beschreibung und Darstellung. Namen, Leitung, Mitglieder und Struktur verwalten Admins.",
   "imageHint": "JPEG, PNG oder WebP, bis zu 5 MB.",
   "fields": {
     "description": {
@@ -19,6 +19,49 @@
     },
     "avatar": {
       "label": "Teambild"
+    },
+    "name": {
+      "label": "Name",
+      "entraHint": "Ist der Abteilungsabgleich mit Microsoft Entra aktiv, benenne die Abteilung dort genauso um. Sonst verlieren die Mitglieder sie bei ihrer nächsten Anmeldung."
+    },
+    "none": "Niemand",
+    "department": {
+      "label": "Abteilung",
+      "placeholder": "Abteilung wählen"
+    },
+    "head": {
+      "label": "Leitung (Anzeige)",
+      "hint": "Wird auf der Abteilungsseite gezeigt. Rechte gibt die Rolle Abteilungsleitung mit dieser Abteilung im Profil."
+    },
+    "lead": {
+      "label": "Teamleitung",
+      "hint": "Darf die Teambeschreibung bearbeiten und erreicht Neuigkeiten an das Team. Die Rolle Teamleitung wird separat vergeben."
+    },
+    "members": {
+      "label": "Mitglieder ({count})",
+      "hint": "Mitglieder sehen die Wiki-Bereiche des Teams und Neuigkeiten an das Team.",
+      "empty": "Noch keine Mitglieder.",
+      "remove": "{name} entfernen",
+      "removeShort": "Entfernen",
+      "add": "Mitglied hinzufügen",
+      "addPlaceholder": "Person wählen"
     }
+  },
+  "adminScopeHint": "Als Admin verwaltest du auch Name, Leitung und Mitglieder. Änderungen gelten sofort.",
+  "newDepartment": "Neue Abteilung",
+  "newTeam": "Neues Team",
+  "departments": "Abteilungen",
+  "teams": "Teams",
+  "section": "Organisation",
+  "departmentsTile": "Abteilungen anlegen, umbenennen, Leitung festlegen oder löschen.",
+  "teamsTile": "Teams anlegen, Teamleitung und Mitglieder festlegen oder löschen.",
+  "createdDepartment": "Abteilung angelegt.",
+  "createdTeam": "Team angelegt.",
+  "optionsFailed": "Die Auswahllisten konnten nicht geladen werden. Leitung und Mitglieder lassen sich gerade nicht ändern.",
+  "confirmDelete": {
+    "departmentTitle": "Abteilung „{name}“ löschen?",
+    "departmentBody": "{members, plural, =0 {Niemand ist ihr zugeordnet} one {# Person verliert die Abteilung} other {# Personen verlieren die Abteilung}}, {teams, plural, =0 {kein Team ist betroffen} one {# Team verliert sie} other {# Teams verlieren sie}}. Verknüpfte Neuigkeiten, Dokumente, Quick Links und Kurse sehen danach nur noch Admins und Editoren, bis sie neu zugeordnet sind. Das lässt sich nicht rückgängig machen.",
+    "teamTitle": "Team „{name}“ löschen?",
+    "teamBody": "{members, plural, =0 {Das Team hat keine Mitglieder} one {# Mitglied verliert das Team} other {# Mitglieder verlieren das Team}}. Neuigkeiten an dieses Team sehen danach nur noch Admins und Editoren, bis sie neu zugeordnet sind. Das lässt sich nicht rückgängig machen."
   }
 }

@@ -20,6 +20,26 @@ export function fetchOrgEditable(
   return strapi(`/api/${ORG_PATHS[type]}/${encodeURIComponent(documentId)}/editable`);
 }
 
+/** admin_role only (v0.22): POST /api/{departments,teams}, no query. */
+export function sendOrgCreate(
+  type: OrgAuthoringType,
+  data: Record<string, unknown>,
+): Promise<OrgWriteResponse> {
+  return strapi(`/api/${ORG_PATHS[type]}`, { method: "POST", body: JSON.stringify({ data }) });
+}
+
+/** admin_role only (v0.22); 204, the delete hooks run in the cms's transaction. */
+export function sendOrgDelete(
+  type: OrgAuthoringType,
+  documentId: string,
+  version: string,
+): Promise<undefined> {
+  return strapi(`/api/${ORG_PATHS[type]}/${encodeURIComponent(documentId)}`, {
+    method: "DELETE",
+    headers: { [IF_MATCH_HEADER]: ifMatch(version) },
+  });
+}
+
 export function sendOrgUpdate(
   type: OrgAuthoringType,
   documentId: string,

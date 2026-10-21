@@ -420,6 +420,8 @@ export interface OrgEditableBase {
 
 /** A user named by an org relation (head, lead, member). */
 export interface OrgPersonRef {
+  /** The user's row id: what the web's people pickers name (the directory's id). */
+  id: number;
   documentId: string;
   displayName: string;
 }

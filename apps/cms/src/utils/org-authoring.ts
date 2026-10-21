@@ -239,8 +239,10 @@ function gateFor(ctx: AuthoringContext, uid: string, intent: OrgIntent): OrgGate
 }
 
 function personOf(value: unknown): OrgPersonRef | null {
-  if (!isRecord(value) || typeof value.documentId !== "string") return null;
+  if (!isRecord(value) || typeof value.id !== "number" || typeof value.documentId !== "string")
+    return null;
   return {
+    id: value.id,
     documentId: value.documentId,
     displayName: text(value.displayName) || text(value.username) || "",
   };

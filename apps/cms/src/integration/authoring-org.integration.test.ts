@@ -276,10 +276,11 @@ describe.each(testEngines())("organisation authoring HTTP on %s", (engine) => {
       expect(rows[0].slug).toMatch(
         new RegExp(`^${kind === "department" ? "api-logistik" : "api-lager"}-[0-9a-f]{8}$`),
       );
-      if (kind === "department") expect(rows[0].head?.id).toBe(t.fixtures.users.member.id);
+      if (kind === "department")
+        expect((rows[0].head as Row | null)?.id).toBe(t.fixtures.users.member.id);
       else {
-        expect(rows[0].department?.id).toBe(t.fixtures.departments.sales.id);
-        expect(rows[0].lead?.id).toBe(t.fixtures.users.team_lead.id);
+        expect((rows[0].department as Row | null)?.id).toBe(t.fixtures.departments.sales.id);
+        expect((rows[0].lead as Row | null)?.id).toBe(t.fixtures.users.team_lead.id);
         expect((rows[0].members as Row[]).map((row) => row.id).sort()).toEqual(
           [t.fixtures.users.member.id, t.fixtures.users.team_lead.id].sort(),
         );
@@ -388,8 +389,8 @@ describe.each(testEngines())("organisation authoring HTTP on %s", (engine) => {
       "teams",
       target.documentId,
       {
-        members: old.body.data.members?.map((person) => person.documentId) ?? [],
-        lead: old.body.data.lead?.documentId ?? null,
+        members: (old.body.data as TeamEditable).members?.map((person) => person.documentId) ?? [],
+        lead: (old.body.data as TeamEditable).lead?.documentId ?? null,
       },
       saved.body.data.version,
     );
@@ -416,8 +417,8 @@ describe.each(testEngines())("organisation authoring HTTP on %s", (engine) => {
       where: { documentId: created.body.data.documentId },
       populate: { lead: true },
     });
-    expect(second?.lead?.id).toBe(users.team_lead.id);
-    expect(platform?.lead?.id).toBe(users.team_lead.id);
+    expect((second?.lead as Row | null)?.id).toBe(users.team_lead.id);
+    expect((platform?.lead as Row | null)?.id).toBe(users.team_lead.id);
   });
 
   it("deleting a department detaches its people and teams (the hooks run in the transaction)", async () => {
@@ -457,7 +458,7 @@ describe.each(testEngines())("organisation authoring HTTP on %s", (engine) => {
     expect(orphan?.department ?? null).toBeNull();
     await t.strapi.db.query("plugin::users-permissions.user").update({
       where: { id: users.member.id },
-      data: { department: memberBefore?.department?.id ?? null },
+      data: { department: (memberBefore?.department as Row | null)?.id ?? null },
     });
   });
 
