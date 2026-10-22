@@ -518,7 +518,13 @@ describe.skipIf(!HAS_BASH)("pg-backup.sh runs (docker and gpg stubbed)", BASH_BU
     expect(predeploy.log).toContain("done predeploy partial (skipped: sinnlos-env)");
     expect(predeploy.log.at(-1)).toBe("FAIL predeploy partial-predeploy (exit 1)");
     expect(predeploy.lastPredeploy).toBe("");
-    expect(predeploy.offsite.filter((n) => n.startsWith("sinnlos-db-"))).toHaveLength(1);
+    // Its incomplete set is removed, so restore-drill.sh --all keeps finding a complete one.
+    expect(
+      predeploy.log.some((l) =>
+        l.startsWith("removed the partial predeploy artifacts sinnlos-db-"),
+      ),
+    ).toBe(true);
+    expect(predeploy.offsite.filter((n) => n.startsWith("sinnlos-db-"))).toHaveLength(0);
 
     // Without the quick-access copy (never created, only refreshed) the run is complete.
     const noQuick = backupRun({ quickAccess: false, setup });

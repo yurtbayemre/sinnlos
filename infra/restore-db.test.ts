@@ -853,6 +853,8 @@ describe.skipIf(!FAST)(`restore-db.sh: a state file is data to check${FAST_TITLE
           args: ["status"],
         },
         /* 8 */ { before: `rm "$S/infra.state"; cp "$T/saved" "$S/infra.state"`, args: ["apply"] },
+        // A setgid home (Alpine's adduser) gives the state dir mode 2700 (v0.26 fresh host).
+        /* 9 */ { before: `chmod 2700 "$S"`, args: ["status"] },
       ],
       MODE as ShellMode,
     );
@@ -873,6 +875,8 @@ describe.skipIf(!FAST)(`restore-db.sh: a state file is data to check${FAST_TITLE
       expect(r[n].db, `step ${n}`).toEqual(["up_users 3", "posts 5", "rsvps 2"]);
     }
     expect(r[8].status, r[8].stderr).toBe(0);
+    expect(r[9].status, r[9].stderr).toBe(0);
+    expect(stopLine(r[9])).toBe("");
   });
 });
 
