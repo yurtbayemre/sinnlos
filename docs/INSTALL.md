@@ -171,7 +171,7 @@ On the machine with the private key:
 
 1. **Database:**
    1. Decrypt the database artifact: `gpg --decrypt sinnlos-db-<ts>.dump.gz.gpg | gunzip > sinnlos.dump`.
-   2. Copy it to the host.
+   2. Copy it to the host, into the checkout directory (or give `restore-db.sh` its full path).
    3. Run `infra/restore-db.sh prepare sinnlos.dump`, then `apply`, `rotate-jwt` and `start`. Each step says what it did. The rotation signs everyone out.
 2. **Uploads:** untar the uploads artifact into the `infra_cms_uploads` volume with cms and web stopped.
 3. **Configuration:** the `.env` artifact holds the `infra/.env` of that day.
