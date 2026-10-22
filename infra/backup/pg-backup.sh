@@ -78,8 +78,6 @@ LOG="$OFFSITE/backup.log"
 RETENTION_DAYS=7
 RETENTION_KEEP=7
 RETENTION_VICTIMS=()
-# The encrypted artifacts this run wrote (a partial pre-deploy run removes them).
-WRITTEN=()
 
 KIND="${SINNLOS_BACKUP_KIND:-nightly}"
 case "$KIND" in
@@ -217,7 +215,6 @@ finalize() {  # <file(uncompressed)> <stem> <ext> <label>
   own_like_offsite "$PARTIAL"
   mv -f "$PARTIAL" "$target"
   PARTIAL=""
-  WRITTEN+=("$target")
   rm -f "$f.gz"
   size="$(du -h "$target")"
   log_line "ok $label ${target##*/} ${size%%[[:space:]]*}"
@@ -297,15 +294,7 @@ STEP="last-success"
 if ((${#SKIPPED[@]})); then
   log_line "done $KIND partial (skipped: ${SKIPPED[*]})"
   echo "pg-backup: WARNING: partial $KIND run, skipped ${SKIPPED[*]} (see $LOG); ${LAST_SUCCESS##*/} not refreshed" >&2
-  if [[ "$KIND" == predeploy ]]; then
-    PARTIAL_PREDEPLOY=1
-    # Its artifacts go too: restore-drill.sh --all takes the newest set, and
-    # an incomplete one there would fail the next drill.
-    if ((${#WRITTEN[@]})); then
-      rm -f -- "${WRITTEN[@]}"
-      log_line "removed the partial predeploy artifacts ${WRITTEN[*]##*/}"
-    fi
-  fi
+  [[ "$KIND" != predeploy ]] || PARTIAL_PREDEPLOY=1
 else
   [[ -e "$LAST_SUCCESS" ]] || { : > "$LAST_SUCCESS"; own_like_offsite "$LAST_SUCCESS"; }
   iso_now
@@ -329,7 +318,9 @@ if [[ -f "$LOG" ]]; then
 fi
 STEP="done"
 # A partial pre-deploy backup fails the run (deploy.sh then stops before it
-# changes anything); the artifacts it did write were removed above.
+# changes anything); the artifacts it did write stay (no lock serialises
+# backup runs, so removing them could hit another run's set; restore-drill.sh
+# --all names the incomplete set, docs/INSTALL.md §4).
 if [[ -n "${PARTIAL_PREDEPLOY:-}" ]]; then
   STEP="partial-predeploy"
   exit 1

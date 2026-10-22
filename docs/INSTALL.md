@@ -71,7 +71,7 @@ Every deploy starts with a backup, the first install excepted, so set the backup
    ```
 
 4. **Off-site copies:** copy `/srv/sinnlos-backup/offsite/sinnlos` off the host (rsync, a NAS pull). Keep copies of `infra/.env` and `infra/deploy.env` somewhere safe too.
-5. **Restore drill:** run it once a month on the machine that holds the private key: `infra/backup/restore-drill.sh --all /path/to/copy/of/offsite/sinnlos`. It restores into a throwaway Postgres and checks all three artifacts.
+5. **Restore drill:** run it once a month on the machine that holds the private key: `infra/backup/restore-drill.sh --all /path/to/copy/of/offsite/sinnlos`. It restores into a throwaway Postgres and checks all three artifacts. If it names a missing uploads or `.env` artifact, the newest set is a partial run (for example a refused pre-deploy backup, see `backup.log`): give it the database file of a complete set instead, or run it again after the next nightly backup.
 
 ## 5. First deploy
 
