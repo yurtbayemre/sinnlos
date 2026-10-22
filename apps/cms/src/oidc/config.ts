@@ -110,7 +110,11 @@ export function parseOidcConfig(env: Env = process.env): OidcSettings {
   }
   const allowHttp = env.OIDC_ALLOW_HTTP === "1";
   const issuer = trimmed(env.OIDC_ISSUER);
-  if (!isAllowedUrl(issuer, allowHttp) || /\s/.test(issuer) || issuer.length > MAX_IDENTITY_LENGTH) {
+  if (
+    !isAllowedUrl(issuer, allowHttp) ||
+    /\s/.test(issuer) ||
+    issuer.length > MAX_IDENTITY_LENGTH
+  ) {
     issue(
       "OIDC_ISSUER",
       `must be the issuer URL exactly as the identity provider's discovery document writes it, https (http only with OIDC_ALLOW_HTTP=1), at most ${MAX_IDENTITY_LENGTH} characters`,
