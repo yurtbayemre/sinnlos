@@ -34,6 +34,10 @@ import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
+const DEPLOY_ENV = readFileSync(new URL("../deploy-env.sh", import.meta.url), "utf8").replace(
+  /\r\n/g,
+  "\n",
+);
 const SCRIPT = readFileSync(new URL("./pg-backup.sh", import.meta.url), "utf8").replace(
   /\r\n/g,
   "\n",
@@ -64,8 +68,9 @@ describe("pg-backup.sh: what a cron line relies on", () => {
   // quick-access copy exists only when configured.
   it("keeps the default names, and takes the paths from the settings", () => {
     for (const line of [
-      'DB_C="${SINNLOS_DB_CONTAINER:-infra-db-1}"',
-      'UPLOADS_VOL="${SINNLOS_UPLOADS_VOLUME:-infra_cms_uploads}"',
+      'PROJECT="${COMPOSE_PROJECT:-infra}"',
+      'DB_C="${SINNLOS_DB_CONTAINER:-$PROJECT-db-1}"',
+      'UPLOADS_VOL="${SINNLOS_UPLOADS_VOLUME:-${PROJECT}_cms_uploads}"',
       'BK="$SINNLOS_BACKUP_DIR"',
       'OFFSITE="$BK/offsite/sinnlos"',
       'export GNUPGHOME="${SINNLOS_GNUPGHOME:-$BK/.gnupg}"',
@@ -249,6 +254,12 @@ interface RunOptions {
   killDuringGpg?: boolean;
   /** Run as if root ran it (deploy.sh): EUID reads 0, chown is recorded, not run. */
   root?: boolean;
+  /**
+   * An infra/deploy.env with this content next to the script (with
+   * infra/deploy-env.sh): the script then runs from a checkout layout,
+   * $T/co/infra/backup/pg-backup.sh.
+   */
+  deployEnv?: string;
 }
 
 interface RunReport {
@@ -270,6 +281,8 @@ interface RunReport {
   gpgCalls: string[];
   /** Mode of each offsite dir level that exists ("offsite", "offsite/sinnlos"). */
   dirs: Record<string, string>;
+  /** The stubbed docker calls. */
+  docker: string[];
 }
 
 /**
@@ -302,6 +315,7 @@ function backupRun(options: RunOptions = {}): RunReport {
     'STUB_MARK="$T/gpg-started"',
     "export STUB_UPLOADS STUB_GPG_FAIL STUB_GPG_SLEEP STUB_MARK",
     "docker() {",
+    '  printf "docker %s\n" "$*" >> "$T/docker.log"',
     '  case "$1" in',
     "    exec)",
     '      shift; if [[ "$1" == "-i" ]]; then shift; fi; shift',
@@ -333,7 +347,18 @@ function backupRun(options: RunOptions = {}): RunReport {
     '  echo old > "$OFFSITE/$1-$ts$3.$4.gz.gpg"',
     "}",
     options.setup ?? "",
-    "cat > \"$T/pg-backup.sh\" <<'PG_BACKUP_SH_EOF'",
+    options.deployEnv === undefined
+      ? 'S="$T/pg-backup.sh"'
+      : [
+          'mkdir -p "$T/co/infra/backup"',
+          'S="$T/co/infra/backup/pg-backup.sh"',
+          "cat > \"$T/co/infra/deploy-env.sh\" <<'DEPLOY_ENV_SH_EOF'",
+          DEPLOY_ENV.trimEnd(),
+          "DEPLOY_ENV_SH_EOF",
+          `printf '%s' '${Buffer.from(options.deployEnv).toString("base64")}' | base64 -d > "$T/co/infra/deploy.env"`,
+          'chmod 600 "$T/co/infra/deploy.env"',
+        ].join("\n"),
+    "cat > \"$S\" <<'PG_BACKUP_SH_EOF'",
     (options.root
       ? SCRIPT.replace(/\(\(EUID == 0\)\)/g, "((${STUB_EUID:-$EUID} == 0))")
       : SCRIPT
@@ -344,13 +369,13 @@ function backupRun(options: RunOptions = {}): RunReport {
     "rc=0",
     options.killDuringGpg
       ? [
-          'bash "$T/pg-backup.sh" 2> "$T/stderr" &',
+          'bash "$S" 2> "$T/stderr" &',
           "pid=$!",
           'for _ in $(seq 1 100); do [[ -e "$STUB_MARK" ]] && break; sleep 0.1; done',
           'kill -TERM "$pid"',
           'wait "$pid" || rc=$?',
         ].join("\n")
-      : 'bash "$T/pg-backup.sh" 2> "$T/stderr" || rc=$?',
+      : 'bash "$S" 2> "$T/stderr" || rc=$?',
     'echo "STATUS $rc"',
     'for f in "$BK"/* "$BK"/.[!.]*; do [[ -e "$f" ]] && echo "ROOT ${f##*/}"; done',
     '(cd "$OFFSITE" 2> /dev/null && stat -c "OFFSITE %n %a" -- * .[!.]* 2> /dev/null) || true',
@@ -361,6 +386,7 @@ function backupRun(options: RunOptions = {}): RunReport {
     'sed "s/^/STDERR /" "$T/stderr"',
     'if [[ -f "$T/chown.log" ]]; then sed "s/^/CHOWN /" "$T/chown.log"; fi',
     'if [[ -f "$T/gpg.log" ]]; then sed "s/^/GPG /" "$T/gpg.log"; fi',
+    'if [[ -f "$T/docker.log" ]]; then sed "s/^/DOCKER /" "$T/docker.log"; fi',
     'for d in offsite offsite/sinnlos; do if [[ -d "$BK/$d" ]]; then echo "DIR $d $(stat -c %a "$BK/$d")"; fi; done',
     "",
   ].join("\n");
@@ -383,6 +409,7 @@ function backupRun(options: RunOptions = {}): RunReport {
     chowns: pick("CHOWN"),
     gpgCalls: pick("GPG"),
     dirs: Object.fromEntries(pick("DIR").map((l) => l.split(" "))),
+    docker: pick("DOCKER"),
   };
 }
 
@@ -552,6 +579,23 @@ describe.skipIf(!HAS_BASH)("pg-backup.sh runs (docker and gpg stubbed)", BASH_BU
     expect(run.stderr).toContain("pg-backup: SINNLOS_BACKUP_DIR is not set");
     expect(run.offsite).toEqual([]);
     expect(run.gpgCalls).toEqual([]);
+  });
+
+  it("backs up the containers of the project infra/deploy.env names (v0.26)", () => {
+    const run = backupRun({ deployEnv: "COMPOSE_PROJECT=staging\n" });
+    expect(run.status, run.stderr).toBe(0);
+    expect(run.docker).toContain("docker exec staging-db-1 printenv POSTGRES_USER");
+    expect(run.docker).toContain("docker volume inspect staging_cms_uploads");
+    expect(run.docker.filter((c) => c.includes("infra"))).toEqual([]);
+    // Explicit names still win.
+    const named = backupRun({
+      deployEnv: "COMPOSE_PROJECT=staging\n",
+      env: { SINNLOS_DB_CONTAINER: "pg-main", SINNLOS_UPLOADS_VOLUME: "media" },
+    });
+    expect(named.docker).toContain("docker exec pg-main printenv POSTGRES_USER");
+    expect(named.docker).toContain("docker volume inspect media");
+    // Without deploy.env: project infra.
+    expect(backupRun().docker).toContain("docker exec infra-db-1 printenv POSTGRES_USER");
   });
 
   it("keeps no quick-access copy unless SINNLOS_LOCAL_ENV_BACKUP names one", () => {
