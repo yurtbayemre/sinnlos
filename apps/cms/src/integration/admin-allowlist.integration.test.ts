@@ -1,3 +1,4 @@
+import { request } from "node:http";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { createTestStrapi, type TestStrapi } from "./harness.test.helper";
@@ -10,7 +11,11 @@ import { createTestStrapi, type TestStrapi } from "./harness.test.helper";
  *   1. default (ADMIN_ALLOW_CIDRS unset): loopback reaches the admin API, a
  *      forwarded outside client gets the 403 on every admin root, in every
  *      spelling the router accepts; /api and /uploads are not gated;
- *   2. a configured list replaces loopback: its networks get in, others and
+ *   2. raw paths the router matches against parameterised admin routes
+ *      (`/content-manager/collection-types/../..`) are refused although
+ *      they normalise out of the admin roots (sent with node:http, which,
+ *      unlike fetch, keeps `..` in the request line);
+ *   3. a configured list replaces loopback: its networks get in, others and
  *      loopback do not.
  * SQLite only: the gate runs before any database work.
  */
@@ -24,13 +29,33 @@ interface Answer {
   gated: boolean;
 }
 
-async function get(t: TestStrapi, path: string, forwardedFor?: string): Promise<Answer> {
-  const res = await fetch(`${t.baseUrl}${path}`, {
-    headers: forwardedFor ? { "x-forwarded-for": forwardedFor } : {},
-    redirect: "manual",
+/** GET of `path` exactly as written (no client-side `..` resolution). */
+function get(t: TestStrapi, path: string, forwardedFor?: string): Promise<Answer> {
+  const { hostname, port } = new URL(t.baseUrl);
+  return new Promise((resolve, reject) => {
+    const req = request(
+      {
+        hostname,
+        port,
+        path,
+        method: "GET",
+        headers: forwardedFor ? { "x-forwarded-for": forwardedFor } : {},
+      },
+      (res) => {
+        let text = "";
+        res.setEncoding("utf8");
+        res.on("data", (chunk: string) => (text += chunk));
+        res.on("end", () =>
+          resolve({
+            status: res.statusCode ?? 0,
+            gated: res.statusCode === 403 && text.includes(GATE),
+          }),
+        );
+      },
+    );
+    req.on("error", reject);
+    req.end();
   });
-  const text = await res.text();
-  return { status: res.status, gated: res.status === 403 && text.includes(GATE) };
 }
 
 describe("admin allowlist: default, loopback only", () => {
@@ -58,12 +83,18 @@ describe("admin allowlist: default, loopback only", () => {
     "/users-permissions/roles",
     "/i18n/locales",
     "/content-type-builder/content-types",
+    "/api/../admin/init",
+    "/ADM%C4%B1N/init",
+    // Raw admin prefixes the router routes although they normalise elsewhere.
+    "/content-manager/collection-types/../..",
+    "/admin/../admin/users",
+    "/admin/x/../../api/users",
   ])("refuses %s to a forwarded outside client", async (path) => {
     const res = await get(t, path, OUTSIDE);
     expect(res).toEqual({ status: 403, gated: true });
   });
 
-  it.each(["/api/polls", "/api/upload/files", "/uploads/missing.png", "/_health"])(
+  it.each(["/api/polls", "/api/upload", "/api/upload/files", "/uploads/x", "/_health"])(
     "does not gate %s",
     async (path) => {
       const res = await get(t, path, OUTSIDE);

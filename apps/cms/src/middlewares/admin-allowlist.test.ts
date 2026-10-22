@@ -29,6 +29,17 @@ describe("isAdminPath", () => {
     "//admin",
     "/api/../admin/init",
     "/x/..%2Fupload/files",
+    // The router matches the RAW path against parameterised admin routes,
+    // so a raw admin prefix counts even when the normalised form leaves it.
+    "/content-manager/collection-types/../..",
+    "/admin/../admin/users",
+    "/admin/x/../../api/users",
+    // Case folded as a JS `i` regex does (toUpperCase): dotless ı, long ſ.
+    "/ADMıN/init",
+    "/ADM%C4%B1N/init",
+    "/emaıl",
+    "/userſ-permiſſionſ/roles",
+    "/u%C5%BFers-permissions/roles",
   ])("covers %s", (path) => {
     expect(isAdminPath(path)).toBe(true);
   });

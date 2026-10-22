@@ -20,9 +20,15 @@
  * The roots are the admin route prefixes Strapi 5.58 mounts (the panel's own
  * /admin/content-api/* included under /admin; review-workflows and
  * content-releases are EE-gated but listed so the gate stays whole), checked
- * on segment boundaries, case-insensitively (Strapi's router matches
- * `/ADMIN/init`), on the raw and the once-decoded path, normalised like
- * middlewares/auth-path-guard.ts. `/uploads` (the file bytes) and the content
+ * on segment boundaries. Fail-closed: a request is an admin request when ANY
+ * of four forms is a root or lies under one: the raw path, the raw path
+ * normalised, the once-decoded path, the once-decoded path normalised
+ * (backslashes as slashes). The raw forms matter because Strapi's router
+ * matches the RAW path against parameterised admin routes:
+ * `/content-manager/collection-types/../..` normalises to `/` but routes to
+ * `/content-manager/collection-types/:model/:id`. Case is folded the way a JS
+ * `i` regex canonicalises (toUpperCase), so dotless-ı, long-ſ or Kelvin-K
+ * spellings of a root count too. `/uploads` (the file bytes) and the content
  * API under /api are not admin paths.
  */
 import { BlockList, isIP } from "node:net";
@@ -44,16 +50,19 @@ export const DEFAULT_ADMIN_ALLOW_CIDRS = "127.0.0.0/8,::1/128";
 
 /** True when `rawPath` is an admin root or lies under one, in any spelling the router accepts. */
 export function isAdminPath(rawPath: string): boolean {
-  const forms = [rawPath];
+  const spellings = [rawPath];
   try {
-    forms.push(decodeURIComponent(rawPath));
+    spellings.push(decodeURIComponent(rawPath));
   } catch {
-    // Malformed %-escape: only the raw form is checked (the router cannot
+    // Malformed %-escape: only the raw spelling is checked (the router cannot
     // match it either).
   }
-  return forms.some((form) => {
-    const norm = posix.normalize(form.replace(/\\/g, "/")).toLowerCase();
-    return ADMIN_ROOTS.some((root) => norm === root || norm.startsWith(`${root}/`));
+  return spellings.some((spelling) => {
+    const slashed = spelling.replace(/\\/g, "/");
+    return [slashed, posix.normalize(slashed)].some((form) => {
+      const folded = form.toUpperCase().toLowerCase();
+      return ADMIN_ROOTS.some((root) => folded === root || folded.startsWith(`${root}/`));
+    });
   });
 }
 
