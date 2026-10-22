@@ -75,6 +75,8 @@ export function UserEditor({ user, options }: { user: UserAdminDetail; options: 
     setConfirmHandBack(false);
     editor.run("save", () => handRoleToEntra(user.id));
   };
+  // The identity provider's texts: Entra's own wording, generic ones for OIDC.
+  const oidc = user.idp === "oidc";
 
   const people = options.people.filter((person) => person.id !== user.id);
   const managerOptions = [
@@ -111,7 +113,9 @@ export function UserEditor({ user, options }: { user: UserAdminDetail; options: 
         <dt className="text-muted-foreground">{t("email")}</dt>
         <dd className="min-w-0 wrap-break-word">{user.email}</dd>
         <dt className="text-muted-foreground">{t("signIn")}</dt>
-        <dd>{user.entraBound ? t("signInEntra") : t("signInLocal")}</dd>
+        <dd>
+          {user.idp === "entra" ? t("signInEntra") : oidc ? t("oidc.signIn") : t("signInLocal")}
+        </dd>
       </dl>
       {user.self && <p className="text-sm text-muted-foreground">{t("selfHint")}</p>}
       {dirty && (
@@ -123,19 +127,23 @@ export function UserEditor({ user, options }: { user: UserAdminDetail; options: 
         <SinglePicker
           id={id("role")}
           label={t("fields.role.label")}
-          hint={user.entraBound ? t("fields.role.hint") : undefined}
+          hint={user.idp ? (oidc ? t("oidc.roleHint") : t("fields.role.hint")) : undefined}
           error={error("role")}
           value={values.role}
           options={roleOptions}
           disabled={off || user.self}
           onChange={(value) => setValue("role", value as UserValues["role"])}
         />
-        {user.entraBound && (
+        {user.idp && (
           <p className="text-sm text-muted-foreground">
-            {user.roleSource === "entra" ? t("roleSource.entra") : t("roleSource.manual")}
+            {user.roleSource === "manual"
+              ? t("roleSource.manual")
+              : oidc
+                ? t("oidc.roleSource")
+                : t("roleSource.entra")}
           </p>
         )}
-        {user.entraBound && user.roleSource === "manual" && !user.self && (
+        {user.idp && user.roleSource === "manual" && !user.self && (
           <ConfirmDialog
             open={confirmHandBack}
             onOpenChange={setConfirmHandBack}
@@ -147,12 +155,12 @@ export function UserEditor({ user, options }: { user: UserAdminDetail; options: 
                 disabled={off || dirty}
                 onClick={(event) => editor.rememberInvoker(event.currentTarget)}
               >
-                {t("handBack.button")}
+                {oidc ? t("oidc.handBack.button") : t("handBack.button")}
               </Button>
             }
-            title={t("handBack.title")}
-            description={t("handBack.body")}
-            confirmLabel={t("handBack.confirm")}
+            title={oidc ? t("oidc.handBack.title") : t("handBack.title")}
+            description={oidc ? t("oidc.handBack.body") : t("handBack.body")}
+            confirmLabel={oidc ? t("oidc.handBack.confirm") : t("handBack.confirm")}
             tone="default"
             pending={off}
             onConfirm={handBack}
@@ -165,7 +173,7 @@ export function UserEditor({ user, options }: { user: UserAdminDetail; options: 
           id={id("department")}
           label={t("fields.department.label")}
           value={user.department?.name ?? t("fields.none")}
-          hint={t("lockedHint")}
+          hint={oidc ? t("oidc.lockedHint") : t("lockedHint")}
           error={error("department")}
         />
       ) : (
@@ -185,7 +193,7 @@ export function UserEditor({ user, options }: { user: UserAdminDetail; options: 
           id={id("manager")}
           label={t("fields.manager.label")}
           value={user.manager?.displayName ?? t("fields.none")}
-          hint={t("lockedHint")}
+          hint={oidc ? t("oidc.lockedHint") : t("lockedHint")}
           error={error("manager")}
         />
       ) : (

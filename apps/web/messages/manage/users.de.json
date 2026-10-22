@@ -64,6 +64,19 @@
     "body": "Bei der nächsten Anmeldung übernimmt das Konto die Rolle aus Entra. Bis dahin bleibt die jetzige Rolle.",
     "confirm": "An Entra geben"
   },
+  "oidc": {
+    "signIn": "Single Sign-On",
+    "lockedHint": "Kommt aus dem Anmeldedienst und wird bei jeder Anmeldung abgeglichen.",
+    "list": "aus der Anmeldung",
+    "roleSource": "Die Rolle kommt aus dem Anmeldedienst.",
+    "roleHint": "Eine von Hand gesetzte Rolle überschreibt den Anmeldedienst für dieses Konto. Ohne Intranet-Rolle im Anmeldedienst kommt das Konto trotzdem nicht herein.",
+    "handBack": {
+      "button": "Rolle wieder an den Anmeldedienst geben",
+      "title": "Rolle wieder an den Anmeldedienst geben?",
+      "body": "Bei der nächsten Anmeldung übernimmt das Konto die Rolle aus dem Anmeldedienst. Bis dahin bleibt die jetzige Rolle.",
+      "confirm": "Zurückgeben"
+    }
+  },
   "teams": {
     "label": "Teams",
     "none": "In keinem Team.",

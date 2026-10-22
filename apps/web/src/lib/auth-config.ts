@@ -15,8 +15,11 @@
  *    in with zero auth config (localSignInEnabled, plan-oidc.md C1). The cms
  *    mirrors the same rule (utils/sign-in-policy.ts) into users-permissions'
  *    grant.email.
- *  - OIDC_ENABLED=1 is refused on first import until v0.25.0 ships the OIDC
- *    sign-in, like the cms refuses its boot.
+ *  - OIDC (Keycloak, authentik, Zitadel; v0.25.0, deep-dive plan-oidc.md):
+ *    on only with OIDC_ENABLED=1, validated the same way (parseOidcWebConfig,
+ *    an invalid one throws on first import outside `next build`). Never
+ *    together with ENTRA_ENABLED=1: one identity provider per install. The
+ *    cms validates its own half (apps/cms/src/oidc/config.ts).
  *  - Registration form: LOCAL_REGISTRATION=1 (must match the CMS env).
  */
 
@@ -125,9 +128,104 @@ export function entraLogoutUrl(tenantId: string, postLogoutRedirect: string): st
   return url.toString();
 }
 
-function loadEntra(env: Env): EntraWebConfig | null {
+/** The OIDC half of the web's configuration (OIDC_ENABLED=1). */
+export interface OidcWebConfig {
+  /** As configured: exactly what the IdP's discovery document says (Auth.js compares it). */
+  issuer: string;
+  clientId: string;
+  clientSecret: string;
+  /** Shared with the cms, sent as x-oidc-exchange-secret. */
+  exchangeSecret: string;
+  /** OIDC_SCOPE plus, with OIDC_ZITADEL_ORG_ID, Zitadel's organisation scopes. */
+  scope: string;
+  /** The sign-in button's label. */
+  displayName: string;
+}
+
+export const OIDC_DEFAULT_SCOPE = "openid profile email";
+export const OIDC_DEFAULT_DISPLAY_NAME = "Single Sign-On";
+
+/** OIDC_ENABLED=1 with an invalid configuration. */
+export class OidcWebConfigError extends Error {
+  readonly variables: readonly string[];
+
+  constructor(problems: readonly { variable: string; message: string }[]) {
+    super(
+      `[auth] OIDC_ENABLED=1, but the OIDC configuration is invalid: ${problems
+        .map(({ variable, message }) => `${variable} ${message}`)
+        .join("; ")}. Fix the web env (docs/DEPLOYMENT.md, "OIDC sign-in"), or unset OIDC_ENABLED.`,
+    );
+    this.name = "OidcWebConfigError";
+    this.variables = problems.map(({ variable }) => variable);
+  }
+}
+
+const urlProtocol = (value: string): string => {
   try {
-    return parseEntraWebConfig(env);
+    return new URL(value).protocol;
+  } catch {
+    return "";
+  }
+};
+
+/**
+ * The OIDC configuration for this env: null while OIDC_ENABLED is not '1';
+ * throws OidcWebConfigError when it is and anything is invalid. Values are
+ * never echoed (secrets).
+ */
+export function parseOidcWebConfig(env: Env): OidcWebConfig | null {
+  if (env.OIDC_ENABLED !== "1") return null;
+  const problems: { variable: string; message: string }[] = [];
+  const problem = (variable: string, message: string) => problems.push({ variable, message });
+  if (env.ENTRA_ENABLED === "1") {
+    problem(
+      "ENTRA_ENABLED",
+      "must not be 1 next to OIDC_ENABLED=1 (one identity provider per install)",
+    );
+  }
+  // Trimmed only: a trailing slash belongs to the issuer (authentik's has one).
+  const issuer = (env.OIDC_ISSUER ?? "").trim();
+  const protocol = urlProtocol(issuer);
+  const httpAllowed = env.OIDC_ALLOW_HTTP === "1";
+  if (issuer.length > 255 || !(protocol === "https:" || (protocol === "http:" && httpAllowed))) {
+    problem(
+      "OIDC_ISSUER",
+      "must be the issuer URL exactly as the IdP's discovery document writes it, https (http only with OIDC_ALLOW_HTTP=1), at most 255 characters",
+    );
+  }
+  const clientId = (env.OIDC_CLIENT_ID ?? "").trim();
+  if (clientId === "" || clientId.length > 255) {
+    problem("OIDC_CLIENT_ID", "must be set (at most 255 characters)");
+  }
+  const clientSecret = env.OIDC_CLIENT_SECRET ?? "";
+  if (clientSecret.trim() === "") problem("OIDC_CLIENT_SECRET", "must be set");
+  const exchangeSecret = env.OIDC_EXCHANGE_SECRET ?? "";
+  if (exchangeSecret.trim().length < EXCHANGE_SECRET_MIN_LENGTH) {
+    problem(
+      "OIDC_EXCHANGE_SECRET",
+      `must have at least ${EXCHANGE_SECRET_MIN_LENGTH} characters (openssl rand -hex 32, same value for cms and web)`,
+    );
+  }
+  let scope = (env.OIDC_SCOPE ?? "").trim() || OIDC_DEFAULT_SCOPE;
+  if (!scope.split(/\s+/).includes("openid")) problem("OIDC_SCOPE", "must contain openid");
+  const displayName = (env.OIDC_DISPLAY_NAME ?? "").trim() || OIDC_DEFAULT_DISPLAY_NAME;
+  if (displayName.length > 40) problem("OIDC_DISPLAY_NAME", "must have at most 40 characters");
+  const zitadelOrgId = (env.OIDC_ZITADEL_ORG_ID ?? "").trim();
+  if (zitadelOrgId !== "") {
+    if (/^\d+$/.test(zitadelOrgId)) {
+      // Zitadel then signs in members of this organisation only; the cms checks it again.
+      scope += ` urn:zitadel:iam:org:id:${zitadelOrgId} urn:zitadel:iam:user:resourceowner`;
+    } else {
+      problem("OIDC_ZITADEL_ORG_ID", "must be the Zitadel organisation id (digits only)");
+    }
+  }
+  if (problems.length > 0) throw new OidcWebConfigError(problems);
+  return { issuer, clientId, clientSecret, exchangeSecret, scope, displayName };
+}
+
+function loadOrNullDuringBuild<T>(parse: (env: Env) => T | null, env: Env): T | null {
+  try {
+    return parse(env);
   } catch (err) {
     // `next build` imports this without any runtime env: never fail there.
     if (env.NEXT_PHASE === "phase-production-build") return null;
@@ -136,7 +234,10 @@ function loadEntra(env: Env): EntraWebConfig | null {
 }
 
 /** The Entra configuration, or null while Microsoft sign-in is off. */
-export const ENTRA: EntraWebConfig | null = loadEntra(process.env);
+export const ENTRA: EntraWebConfig | null = loadOrNullDuringBuild(parseEntraWebConfig, process.env);
+
+/** The OIDC configuration, or null while OIDC sign-in is off. */
+export const OIDC: OidcWebConfig | null = loadOrNullDuringBuild(parseOidcWebConfig, process.env);
 
 export const MICROSOFT_ENABLED = ENTRA !== null;
 
@@ -147,14 +248,6 @@ export const MICROSOFT_ENABLED = ENTRA !== null;
  */
 export function localSignInEnabled(env: Env): boolean {
   return env.AUTH_LOCAL_ENABLED === "1" || (env.ENTRA_ENABLED !== "1" && env.OIDC_ENABLED !== "1");
-}
-
-// shortcut: OIDC sign-in arrives with v0.25.0 (plan-oidc.md); until then
-// OIDC_ENABLED=1 would only switch local sign-in off. Remove with the adapter.
-if (process.env.OIDC_ENABLED === "1" && process.env.NEXT_PHASE !== "phase-production-build") {
-  throw new Error(
-    "[auth] OIDC_ENABLED=1, but OIDC sign-in arrives with v0.25.0. Unset OIDC_ENABLED.",
-  );
 }
 
 export const LOCAL_ENABLED = localSignInEnabled(process.env);

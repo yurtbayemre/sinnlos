@@ -18,8 +18,10 @@ type MeProfile = ProfileInitial & {
   username?: string | null;
   email?: string | null;
   avatar?: UserLite["avatar"];
-  /** Fields the Microsoft Entra sign-in owns (D-ENTRA-01); [] for local accounts. */
+  /** Fields the identity provider's sign-in owns (Entra: four, OIDC: the name); [] for local accounts. */
   entraManagedFields?: string[] | null;
+  /** The identity provider the account is bound to (v0.25.0). */
+  managedBy?: "entra" | "oidc" | null;
 };
 
 export async function generateMetadata() {
@@ -75,6 +77,7 @@ export default async function ProfilePage() {
               <ProfileForm
                 viewerRole={viewer.role}
                 managedFields={Array.isArray(me.entraManagedFields) ? me.entraManagedFields : []}
+                managedBy={me.managedBy ?? null}
                 initial={{
                   displayName: me.displayName ?? null,
                   jobTitle: me.jobTitle ?? null,
@@ -103,7 +106,11 @@ export default async function ProfilePage() {
             {isLocal ? (
               <ChangePasswordForm />
             ) : (
-              <p className="text-sm text-muted-foreground">{t("passwordManagedByMicrosoft")}</p>
+              <p className="text-sm text-muted-foreground">
+                {session?.provider === "oidc"
+                  ? t("passwordManagedBySso")
+                  : t("passwordManagedByMicrosoft")}
+              </p>
             )}
           </CardContent>
         </Card>

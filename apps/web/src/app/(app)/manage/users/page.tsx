@@ -125,10 +125,14 @@ export default async function ManageUsersPage({ searchParams }: Props) {
               </div>
               <span className="text-sm">
                 {user.role ? t(`roles.${user.role}`) : t("roles.none")}
-                {user.entraBound && (
+                {user.idp && (
                   <span className="text-muted-foreground">
                     {" · "}
-                    {user.roleSource === "entra" ? t("list.entra") : t("list.manual")}
+                    {user.roleSource === "manual"
+                      ? t("list.manual")
+                      : user.idp === "oidc"
+                        ? t("oidc.list")
+                        : t("list.entra")}
                   </span>
                 )}
               </span>

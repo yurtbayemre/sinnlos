@@ -25,14 +25,23 @@ const initial = {
   birthday: "1990-02-03",
 };
 
-function render(managedFields?: readonly string[], messages: typeof en = en) {
+function render(
+  managedFields?: readonly string[],
+  messages: typeof en = en,
+  managedBy: "entra" | "oidc" | null = "entra",
+) {
   return renderToStaticMarkup(
     // eslint-disable-next-line react/no-children-prop -- a .test.ts has no JSX, and createElement's types want the provider's required children in the props
     createElement(NextIntlClientProvider, {
       locale: messages === en ? "en" : "de",
       messages,
       timeZone: "Europe/Berlin",
-      children: createElement(ProfileForm, { initial, viewerRole: "member", managedFields }),
+      children: createElement(ProfileForm, {
+        initial,
+        viewerRole: "member",
+        managedFields,
+        managedBy,
+      }),
     }),
   );
 }
@@ -61,6 +70,15 @@ describe("ProfileForm with Entra-managed fields", () => {
       expect(html).not.toContain(en.profile.entraManagedHint);
       expect(html).not.toContain("entra-managed-hint");
     }
+  });
+
+  it("an OIDC account (v0.25): only the name is locked, with the OIDC hint", () => {
+    const html = render(["displayName"], en, "oidc");
+    expect(inputOf(html, "displayName")).toContain('disabled=""');
+    expect(inputOf(html, "jobTitle")).not.toContain('disabled=""');
+    expect(html).toContain(en.profile.oidcManagedHint);
+    expect(html).not.toContain(en.profile.entraManagedHint);
+    expect(render(["displayName"], de, "oidc")).toContain(de.profile.oidcManagedHint);
   });
 
   it("has the hint in German too", () => {
