@@ -122,6 +122,8 @@ const OTHER_RAW_WRITERS: Readonly<Record<string, string>> = {
   "cron/purge-expired-classifieds.ts": "classifieds through the Document Service",
   "digest/send-digests.ts": "users (lastDigestAt)",
   "entra/provision.ts": "users (the Entra sign-in)",
+  "idp/exchange-core.ts":
+    "users (the identity and role write every sign-in exchange shares, v0.24.0)",
   "extensions/upload/strapi-server.ts": "upload files",
   "extensions/users-permissions/strapi-server.ts": "users (the token version)",
   "utils/audit.ts": "audit events (the recorder)",

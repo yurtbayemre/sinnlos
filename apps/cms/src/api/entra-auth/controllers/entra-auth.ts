@@ -9,12 +9,11 @@
  *     values bound to it; never a token.
  */
 import { EntraConfigError, parseEntraConfig } from "../../../entra/config";
+import { errorLabel, type ExchangeHost } from "../../../idp/exchange-core";
 import {
   EXCHANGE_SECRET_HEADER,
-  errorLabel,
   runEntraExchange,
   type ExchangeDeps,
-  type ExchangeHost,
 } from "../../../entra/provision";
 
 /** The slice of the Koa context the handler uses. */

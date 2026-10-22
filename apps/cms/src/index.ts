@@ -18,6 +18,7 @@ import { seedAdminUser } from "./utils/admin-seed";
 import { backfillDepartmentAudience } from "./utils/department-audience-backfill";
 import { ensureDraftTwins } from "./utils/draft-twins";
 import { enforceSecretGuard } from "./utils/env-guard";
+import { refuseOidcBeforeAdapter } from "./utils/sign-in-policy";
 import { parseMeiliConfig, searchStatusLine } from "./search/meili-index";
 import { registerLiveEventSubscriber } from "./utils/live-events";
 import { registerMediaTombstoneGuard } from "./utils/media-tombstone-guard";
@@ -91,6 +92,8 @@ export default {
     // refuses the boot, naming every bad variable; with Entra off it only
     // parses (MS_* values are ignored then). bootstrap() re-reads it.
     checkEntraConfig(strapi.log);
+    // plan-oidc.md: OIDC_ENABLED=1 refuses the boot until v0.25.0 ships the adapter.
+    refuseOidcBeforeAdapter(process.env);
     // v0.21: with MEILISEARCH_ENABLED=1 a missing URL or write key refuses
     // the boot (search/meili-index.ts); off, nothing is read.
     parseMeiliConfig(process.env);

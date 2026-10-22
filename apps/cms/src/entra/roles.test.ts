@@ -2,13 +2,13 @@ import { describe, expect, it } from "vitest";
 import { ROLE_PRIVILEGE_ORDER, type RoleType } from "../bootstrap/roles";
 import type { EntraDefaultRole, EntraGroupRule } from "./config";
 import type { GraphResult } from "./graph";
+import type { UserRoleState } from "../idp/exchange-core";
 import {
   DRY_RUN_ROLE_CAP,
   decideRoleWrite,
   resolveEntraRole,
   type RoleResolution,
   type RoleResolutionInput,
-  type UserRoleState,
 } from "./roles";
 
 /**

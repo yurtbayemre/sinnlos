@@ -1,12 +1,7 @@
 import { describe, expect, it, vi, type Mock } from "vitest";
 import type { IdTokenResult } from "../../../entra/id-token";
-import {
-  MAX_TOKEN_BYTES,
-  readTokens,
-  secretMatches,
-  type ExchangeDeps,
-  type ExchangeHost,
-} from "../../../entra/provision";
+import { MAX_TOKEN_BYTES, readTokens, type ExchangeDeps } from "../../../entra/provision";
+import { secretMatches, type ExchangeHost } from "../../../idp/exchange-core";
 import controller, { handleExchange, type ExchangeContext } from "./entra-auth";
 
 /**

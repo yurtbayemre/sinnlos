@@ -33,6 +33,10 @@ vi.mock("./database/ensure-timestamptz", () => ({
   assertTimestamptzContract: step("assertTimestamptzContract"),
 }));
 vi.mock("./utils/env-guard", () => ({ enforceSecretGuard: step("enforceSecretGuard") }));
+vi.mock("./utils/sign-in-policy", () => ({
+  localSignInEnabled: () => true,
+  refuseOidcBeforeAdapter: syncStep("refuseOidcBeforeAdapter"),
+}));
 vi.mock("./bootstrap/user-contact-sanitizer", () => ({
   registerUserContactSanitizer: step("registerUserContactSanitizer"),
 }));
@@ -98,6 +102,7 @@ describe("src/index.ts lifecycle order (B01)", () => {
       "registerTimestamptzGuard",
       "enforceSecretGuard",
       "checkEntraConfig",
+      "refuseOidcBeforeAdapter",
       "registerUserContactSanitizer",
       "registerRestrictedRelationGuard",
       "registerDocumentMiddlewares",

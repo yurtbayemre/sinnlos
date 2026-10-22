@@ -95,8 +95,8 @@ type UpdatableToken = {
 
 /**
  * Takes the Strapi JWT of a session update into `token` (see the header):
- * true when it did. Refused, and the token left as it was: a Microsoft
- * session, an update without a string `strapiJwt` or without the server's
+ * true when it did. Refused, and the token left as it was: any session
+ * but a local one (Microsoft, a provider added later, none recorded), an update without a string `strapiJwt` or without the server's
  * proof of it (a JWT the browser made up, whatever it claims), a JWT of
  * another user or without a user id, and one without a future `exp`. The
  * JWT is decoded, not verified: the proof says it came from the server,
@@ -107,7 +107,8 @@ export function applyStrapiJwtUpdate(
   update: unknown,
   { nowMs = Date.now(), secret = authSecret() }: { nowMs?: number; secret?: string } = {},
 ): boolean {
-  if (token.provider === ENTRA_PROVIDER_ID) return false;
+  // Local sessions only (plan-oidc.md C3): an identity provider's session keeps its own TTL.
+  if (token.provider !== "local") return false;
   if (typeof update !== "object" || update === null) return false;
   const { strapiJwt: jwt, proof } = update as { strapiJwt?: unknown; proof?: unknown };
   if (typeof jwt !== "string" || jwt === "") return false;

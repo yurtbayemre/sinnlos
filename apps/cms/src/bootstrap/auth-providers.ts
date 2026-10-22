@@ -2,8 +2,8 @@
  * The users-permissions sign-in providers (the plugin store's `grant` key),
  * converged on every boot (D-ENTRA-01 spec L, roadmap FX44):
  *   - `email` (local e-mail + password, POST /api/auth/local) is enabled
- *     exactly when local sign-in is: AUTH_LOCAL_ENABLED=1, or Entra off
- *     (ENTRA_ENABLED is not '1'). An Entra-only install thereby refuses
+ *     exactly when local sign-in is (utils/sign-in-policy.ts):
+ *     AUTH_LOCAL_ENABLED=1, or no identity provider on. An Entra-only install thereby refuses
  *     password sign-ins in the cms itself, not only in the web's UI
  *     (users-permissions controllers/auth.js callback checks the flag);
  *   - `microsoft` (Strapi's own OAuth provider, /api/connect/microsoft) is
