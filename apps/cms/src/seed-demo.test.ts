@@ -7,7 +7,7 @@
  */
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { seedDemoData, type SeedDemoHost, type SeedRow } from "./seed-demo";
 
@@ -106,7 +106,7 @@ function fakeStrapi(existing: { departments?: number; users?: number } = {}) {
         },
       }),
     }),
-    log: { info: (message) => logs.push(message) },
+    log: { info: (message) => logs.push(message), error: (message) => logs.push(message) },
   };
   return { strapi, writes, logs, order };
 }
@@ -121,6 +121,23 @@ describe("seedDemoData", () => {
   afterEach(() => {
     if (previous === undefined) delete process.env.SEED_DEMO_DATA;
     else process.env.SEED_DEMO_DATA = previous;
+  });
+
+  it("refuses in production before any demo query or write (v0.26, M8)", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    try {
+      const { strapi, writes, logs } = fakeStrapi();
+      const query = vi.spyOn(strapi.db, "query");
+      await seedDemoData(strapi);
+      expect(query).not.toHaveBeenCalled();
+      expect(writes.dbCreate).toEqual([]);
+      expect(writes.documentsCreate).toEqual([]);
+      expect(logs).toEqual([
+        "[seed-demo] SEED_DEMO_DATA=1 is refused in production; nothing seeded",
+      ]);
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
   it("does nothing without SEED_DEMO_DATA=1", async () => {

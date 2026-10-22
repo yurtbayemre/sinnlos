@@ -1,6 +1,13 @@
 {
+  "footer": {
+    "source": "Source code (AGPL-3.0)",
+    "licenses": "Third-party licenses",
+    "privacy": "Privacy",
+    "imprint": "Imprint",
+    "whistleblowing": "Whistleblowing"
+  },
   "common": {
-    "selfHosted": "Self-hosted intranet · v0.1",
+    "selfHosted": "Self-hosted intranet",
     "loading": "Loading…",
     "noResults": "No results found.",
     "download": "Download",

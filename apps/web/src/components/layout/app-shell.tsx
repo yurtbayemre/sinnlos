@@ -2,6 +2,7 @@ import { getTranslations } from "next-intl/server";
 import { PageFade } from "../page-fade";
 import { ViewerMobileNav } from "./viewer-mobile-nav";
 import { Sidebar } from "./sidebar";
+import { SiteFooter } from "./site-footer";
 import { Topbar } from "./topbar";
 
 /** Target of the skip link; also a stable landmark id for tests and tools. */
@@ -33,6 +34,8 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
           <div className="mx-auto w-full max-w-6xl">
             <PageFade>{children}</PageFade>
           </div>
+          {/* Inside <main>, so it stays above the bottom nav's room. */}
+          <SiteFooter className="mx-auto mt-12 max-w-6xl" />
         </main>
       </div>
       <ViewerMobileNav />

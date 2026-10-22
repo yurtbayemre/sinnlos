@@ -166,6 +166,11 @@ export default {
     await ensureOidcIdentityIndex(strapi, { oidcEnabled: oidc.enabled });
     await reportOidcStatus(strapi.log, oidc);
     strapi.log.info(searchStatusLine(parseMeiliConfig(process.env)));
+    // v0.26 release identity: info.version is apps/cms/package.json (Strapi
+    // loads it as config `info`); the image sets SINNLOS_REVISION at build.
+    strapi.log.info(
+      `[sinnlos] version ${strapi.config.get("info.version")} (revision ${process.env.SINNLOS_REVISION || "unknown"})`,
+    );
     // Decision 02: give existing polls their `audience` flag ('departments'
     // when they link a department). A no-op once no row is NULL. One
     // transaction; on any error it rolls back and THROWS, so the cms does

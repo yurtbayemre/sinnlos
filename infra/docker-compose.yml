@@ -302,6 +302,13 @@ services:
       MEILISEARCH_ENABLED: ${MEILISEARCH_ENABLED:-0}
       MEILISEARCH_URL: ${MEILISEARCH_URL:-http://sinnlos-meili:7700}
       MEILISEARCH_SEARCH_KEY: ${MEILISEARCH_SEARCH_KEY:-}
+      # Footer links and analytics (v0.26, infra/.env.example), all optional.
+      SOURCE_URL: ${SOURCE_URL:-}
+      PRIVACY_URL: ${PRIVACY_URL:-}
+      IMPRINT_URL: ${IMPRINT_URL:-}
+      WHISTLEBLOWING_URL: ${WHISTLEBLOWING_URL:-}
+      PLAUSIBLE_SCRIPT_URL: ${PLAUSIBLE_SCRIPT_URL:-}
+      PLAUSIBLE_DOMAIN: ${PLAUSIBLE_DOMAIN:-}
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/ || exit 1"]
       interval: 15s

@@ -84,7 +84,10 @@ vi.mock("./digest/send-digests", () => ({ reportDigestConfig: step("reportDigest
 vi.mock("./seed-demo", () => ({ seedDemoData: step("seedDemoData") }));
 vi.mock("./utils/draft-twins", () => ({ ensureDraftTwins: step("ensureDraftTwins") }));
 
-const strapi = { log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } };
+const strapi = {
+  log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+  config: { get: vi.fn(() => "0.26.0") },
+};
 
 beforeEach(() => {
   calls.length = 0;

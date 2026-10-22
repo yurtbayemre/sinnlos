@@ -23,6 +23,11 @@ COPY apps/cms/package.json ./apps/cms/
 # The cms depends on the workspace package @sinnlos/domain (SH01).
 COPY packages/domain/package.json ./packages/domain/
 RUN pnpm install --filter @sinnlos/cms... --frozen-lockfile
+# Third-party notices (v0.26, M1) for the FULL tree the runner ships: the
+# workspace root (its packages are installed and copied too) and the cms.
+COPY scripts/third-party-notices.mjs ./scripts/
+RUN pnpm licenses list --json --filter sinnlos-intranet --filter @sinnlos/cms... > /tmp/licenses.json \
+  && node scripts/third-party-notices.mjs /app/THIRD_PARTY_NOTICES.txt < /tmp/licenses.json
 
 FROM base AS builder
 COPY apps/cms ./apps/cms
@@ -64,6 +69,17 @@ COPY --from=deps --chown=node:node /app/node_modules /app/node_modules
 COPY --from=deps --chown=node:node /app/apps/cms/node_modules /app/apps/cms/node_modules
 # Then the app itself (see the builder's /out above).
 COPY --from=builder --chown=node:node /out /app
+COPY --from=deps /app/THIRD_PARTY_NOTICES.txt /app/THIRD_PARTY_NOTICES.txt
+COPY LICENSE /app/LICENSE
+# v0.26 release identity, last so the layers above keep their cache:
+# infra/deploy.sh and the release workflow pass both build args.
+ARG SINNLOS_VERSION=unknown
+ARG SINNLOS_REVISION=unknown
+ENV SINNLOS_REVISION=$SINNLOS_REVISION
+LABEL org.opencontainers.image.version=$SINNLOS_VERSION
+LABEL org.opencontainers.image.revision=$SINNLOS_REVISION
+LABEL org.opencontainers.image.source="https://github.com/yurtbayemre/sinnlos"
+LABEL org.opencontainers.image.licenses="AGPL-3.0-only"
 WORKDIR /app/apps/cms
 USER node
 EXPOSE 1337
