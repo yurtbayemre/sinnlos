@@ -209,39 +209,43 @@ function run(
   return { status: res.status, stdout: res.stdout, stderr: res.stderr };
 }
 
-describe.skipIf(!HAS_BASH)("live-smoke.sh: an identity-provider-only instance", { timeout: 30_000 }, () => {
-  it("checks the datetime contract, then skips the sign-in steps with exit 0 (Entra or OIDC)", () => {
-    for (const env of [
-      ["ENTRA_ENABLED=1", "AUTH_LOCAL_ENABLED=0"],
-      ["OIDC_ENABLED=1", "AUTH_LOCAL_ENABLED=0"],
-      ["OIDC_ENABLED=1"],
-    ]) {
-      const res = run(env);
-      expect(res.status, res.stderr).toBe(0);
-      expect(res.stdout).toContain("live-smoke: datetime contract OK");
-      expect(res.stdout).toContain(
-        "live-smoke: SKIPPED the sign-in steps: identity-provider-only instance",
-      );
-      expect(res.stderr).not.toContain("curl-called");
-    }
-  });
+describe.skipIf(!HAS_BASH)(
+  "live-smoke.sh: an identity-provider-only instance",
+  { timeout: 30_000 },
+  () => {
+    it("checks the datetime contract, then skips the sign-in steps with exit 0 (Entra or OIDC)", () => {
+      for (const env of [
+        ["ENTRA_ENABLED=1", "AUTH_LOCAL_ENABLED=0"],
+        ["OIDC_ENABLED=1", "AUTH_LOCAL_ENABLED=0"],
+        ["OIDC_ENABLED=1"],
+      ]) {
+        const res = run(env);
+        expect(res.status, res.stderr).toBe(0);
+        expect(res.stdout).toContain("live-smoke: datetime contract OK");
+        expect(res.stdout).toContain(
+          "live-smoke: SKIPPED the sign-in steps: identity-provider-only instance",
+        );
+        expect(res.stderr).not.toContain("curl-called");
+      }
+    });
 
-  it("signs in as usual when local sign-in is on next to an identity provider, or none is on", () => {
-    for (const env of [
-      ["ENTRA_ENABLED=1", "AUTH_LOCAL_ENABLED=1"],
-      ["OIDC_ENABLED=1", "AUTH_LOCAL_ENABLED=1"],
-      ["ENTRA_ENABLED=0", "OIDC_ENABLED=0"],
-      ["OIDC_ENABLED=true"],
-      [],
-    ]) {
-      const res = run(env);
-      expect(res.stdout, env.join(" ")).not.toContain("SKIPPED");
-      // Without credentials it stops at the password check, before any request.
-      expect(res.status, env.join(" ")).toBe(1);
-      expect(res.stderr, env.join(" ")).toContain("live-smoke: FAIL — missing passwords");
-    }
-  });
-});
+    it("signs in as usual when local sign-in is on next to an identity provider, or none is on", () => {
+      for (const env of [
+        ["ENTRA_ENABLED=1", "AUTH_LOCAL_ENABLED=1"],
+        ["OIDC_ENABLED=1", "AUTH_LOCAL_ENABLED=1"],
+        ["ENTRA_ENABLED=0", "OIDC_ENABLED=0"],
+        ["OIDC_ENABLED=true"],
+        [],
+      ]) {
+        const res = run(env);
+        expect(res.stdout, env.join(" ")).not.toContain("SKIPPED");
+        // Without credentials it stops at the password check, before any request.
+        expect(res.status, env.join(" ")).toBe(1);
+        expect(res.stderr, env.join(" ")).toContain("live-smoke: FAIL — missing passwords");
+      }
+    });
+  },
+);
 
 describe.skipIf(!HAS_BASH)(
   "live-smoke.sh: the cms zone once its boot line has rotated out (B10-T1)",
