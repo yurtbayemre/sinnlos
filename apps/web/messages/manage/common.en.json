@@ -213,9 +213,9 @@
     "timeRepeated": "This time occurs twice on this day because of the clock change. Choose another time.",
     "timeSkipped": "This time does not exist on this day because of the clock change. Choose another time.",
     "selfChange": "Only another admin can change your own role or block.",
-    "entraManaged": "Microsoft Entra manages this field for this account.",
+    "entraManaged": "The identity provider (Microsoft Entra or single sign-on) manages this field for this account.",
     "managerCycle": "That person already reports to this user, directly or indirectly.",
-    "notEntraBound": "This account does not sign in with Microsoft Entra."
+    "notEntraBound": "This account does not sign in with an identity provider (Microsoft Entra or single sign-on)."
   },
   "fields": {
     "required": "required",

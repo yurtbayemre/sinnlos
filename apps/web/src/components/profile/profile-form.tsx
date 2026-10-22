@@ -25,7 +25,7 @@ export type ProfileInitial = {
 /** The digest checkboxes (the frequency is the fourth digest field). */
 const DIGEST_OPT_INS = ["digestAnnouncements", "digestMentions", "digestKudos"] as const;
 
-/** The free-text fields; the Microsoft Entra sign-in may own them (managedFields). */
+/** The free-text fields; an identity provider's sign-in may own them (managedFields). */
 const TEXT_INPUTS = [
   { name: "displayName", type: "text" },
   { name: "jobTitle", type: "text" },
@@ -37,16 +37,19 @@ export function ProfileForm({
   initial,
   viewerRole,
   managedFields = [],
+  managedBy = null,
 }: {
   initial: ProfileInitial;
   /** The viewer's role type from GET /api/me; decides whether the digest options show. */
   viewerRole?: string | null;
   /**
-   * GET /api/me `entraManagedFields` (D-ENTRA-01): the fields the Microsoft
-   * Entra sign-in keeps in sync. They render read-only; a disabled input is
-   * not submitted, and PUT /api/me ignores them for such a user anyway.
+   * GET /api/me `entraManagedFields` (D-ENTRA-01): the fields the identity
+   * provider's sign-in keeps in sync. They render read-only; a disabled
+   * input is not submitted, and PUT /api/me ignores them for such a user anyway.
    */
   managedFields?: readonly string[];
+  /** GET /api/me `managedBy`: which provider's hint the locked fields get. */
+  managedBy?: "entra" | "oidc" | null;
 }) {
   // The digest options only for the roles that get digests (lib/roles.ts
   // DIGEST_ROLES, the announcement readers, pinned to the cms matrix). The
@@ -70,7 +73,7 @@ export function ProfileForm({
     <form action={formAction} className="space-y-4">
       {TEXT_INPUTS.some(({ name }) => managed.has(name)) && (
         <p id="entra-managed-hint" className="text-xs text-muted-foreground">
-          {tProfile("entraManagedHint")}
+          {tProfile(managedBy === "oidc" ? "oidcManagedHint" : "entraManagedHint")}
         </p>
       )}
       {TEXT_INPUTS.map(({ name, type }) => {

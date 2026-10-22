@@ -21,7 +21,7 @@ const user: UserAdminDetail = {
   email: "casey@example.test",
   role: "member",
   roleSource: "manual",
-  entraBound: false,
+  idp: null,
   blocked: false,
   department: { documentId: DEPT, name: "Design" },
   manager: { id: 3, displayName: "Riley Kim" },

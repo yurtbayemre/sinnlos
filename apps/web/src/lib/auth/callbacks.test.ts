@@ -2,13 +2,14 @@ import type { Account, Profile } from "next-auth";
 import type { JWT } from "next-auth/jwt";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { EntraWebConfig } from "@/lib/auth-config";
-import type { EntraExchangeResult, exchangeEntraSignIn } from "@/lib/entra-exchange";
+import type { EntraWebConfig, OidcWebConfig } from "@/lib/auth-config";
+import type { ExchangeResult, exchangeEntraSignIn, exchangeOidcSignIn } from "@/lib/entra-exchange";
 import {
   applyStrapiJwtUpdate,
   authSecret,
   createAuthCallbacks,
   ENTRA_PROVIDER_ID,
+  OIDC_PROVIDER_ID,
   signInError,
   strapiJwtUpdate,
 } from "./callbacks";
@@ -55,7 +56,7 @@ const account = (overrides: Partial<Account> = {}): Account => ({
   ...overrides,
 });
 
-const exchangeOk = (exp = nowSec() + 3600): EntraExchangeResult => ({
+const exchangeOk = (exp = nowSec() + 3600): ExchangeResult => ({
   ok: true,
   data: {
     jwt: fakeStrapiJwt(exp),
@@ -64,10 +65,24 @@ const exchangeOk = (exp = nowSec() + 3600): EntraExchangeResult => ({
   },
 });
 
+const OIDC: OidcWebConfig = {
+  issuer: "https://auth.example.test/realms/sinnlos",
+  clientId: "sinnlos-web",
+  clientSecret: "oidc-client-secret",
+  exchangeSecret: "oidc-exchange-secret-0123456789abcdef",
+  scope: "openid profile email",
+  displayName: "Single Sign-On",
+};
+
 let exchange: ReturnType<typeof vi.fn<typeof exchangeEntraSignIn>>;
+let exchangeOidc: ReturnType<typeof vi.fn<typeof exchangeOidcSignIn>>;
 
 const callbacksWith = (entra: EntraWebConfig | null = ENTRA) =>
   createAuthCallbacks({ entra, strapiUrl: "http://strapi.test", exchange });
+const oidcCallbacksWith = (oidc: OidcWebConfig | null = OIDC) =>
+  createAuthCallbacks({ entra: null, oidc, strapiUrl: "http://strapi.test", exchangeOidc });
+const oidcAccount = (overrides: Partial<Account> = {}): Account =>
+  account({ provider: OIDC_PROVIDER_ID, access_token: undefined, ...overrides });
 
 type SignInArgs = Parameters<ReturnType<typeof createAuthCallbacks>["signIn"]>[0];
 type JwtArgs = Parameters<ReturnType<typeof createAuthCallbacks>["jwt"]>[0];
@@ -79,6 +94,7 @@ const jwtArgs = (token: JWT, extra: Partial<JwtArgs> = {}) => ({ token, ...extra
 
 beforeEach(() => {
   exchange = vi.fn<typeof exchangeEntraSignIn>(async () => exchangeOk());
+  exchangeOidc = vi.fn<typeof exchangeOidcSignIn>(async () => exchangeOk());
   vi.spyOn(console, "warn").mockImplementation(() => undefined);
   vi.spyOn(console, "error").mockImplementation(() => undefined);
 });
@@ -138,6 +154,29 @@ describe("signIn", () => {
       "/sign-in?error=entra_not_assigned",
     );
   });
+
+  it("exchanges an OIDC sign-in's ID token only, without a tenant check (v0.25.0)", async () => {
+    await expect(oidcCallbacksWith().signIn(signInArgs(oidcAccount(), {}))).resolves.toBe(true);
+    expect(exchangeOidc).toHaveBeenCalledWith(
+      { idToken: "id-token" },
+      { strapiUrl: "http://strapi.test", secret: OIDC.exchangeSecret },
+    );
+    expect(exchange).not.toHaveBeenCalled();
+  });
+
+  it("refuses an OIDC sign-in while OIDC is off or without an ID token, and maps refusals to oidc_*", async () => {
+    await expect(oidcCallbacksWith(null).signIn(signInArgs(oidcAccount()))).resolves.toBe(
+      signInError("oidc_unavailable"),
+    );
+    await expect(
+      oidcCallbacksWith().signIn(signInArgs(oidcAccount({ id_token: undefined }))),
+    ).resolves.toBe(signInError("oidc_unavailable"));
+    expect(exchangeOidc).not.toHaveBeenCalled();
+    exchangeOidc.mockResolvedValue({ ok: false, code: "email_unverified" });
+    await expect(oidcCallbacksWith().signIn(signInArgs(oidcAccount()))).resolves.toBe(
+      "/sign-in?error=oidc_email_unverified",
+    );
+  });
 });
 
 describe("jwt", () => {
@@ -158,6 +197,17 @@ describe("jwt", () => {
     // The entry is gone after the first read.
     await expect(callbacks.jwt(jwtArgs({ sub: "x" }, { account: acc }))).rejects.toThrow(
       /without an exchange result/,
+    );
+  });
+
+  it("takes an OIDC exchange result like Microsoft's, with provider oidc", async () => {
+    const callbacks = oidcCallbacksWith();
+    const acc = oidcAccount();
+    await callbacks.signIn(signInArgs(acc));
+    const token = await callbacks.jwt(jwtArgs({ sub: "x" }, { account: acc }));
+    expect(token).toMatchObject({ strapiUserId: 42, name: "Grace", provider: OIDC_PROVIDER_ID });
+    await expect(callbacks.jwt(jwtArgs({ sub: "x" }, { account: acc }))).rejects.toThrow(
+      /OIDC sign-in without an exchange result/,
     );
   });
 

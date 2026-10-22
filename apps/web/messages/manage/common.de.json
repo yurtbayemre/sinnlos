@@ -213,9 +213,9 @@
     "timeRepeated": "Diese Uhrzeit gibt es an diesem Tag wegen der Zeitumstellung zweimal. Wählen Sie eine andere Uhrzeit.",
     "timeSkipped": "Diese Uhrzeit gibt es an diesem Tag wegen der Zeitumstellung nicht. Wählen Sie eine andere Uhrzeit.",
     "selfChange": "Die eigene Rolle und Sperre kann nur ein anderer Admin ändern.",
-    "entraManaged": "Dieses Feld kommt für dieses Konto aus Microsoft Entra.",
+    "entraManaged": "Dieses Feld kommt für dieses Konto aus dem Anmeldedienst (Microsoft Entra oder Single Sign-On).",
     "managerCycle": "Diese Person berichtet schon (auch indirekt) an den Benutzer.",
-    "notEntraBound": "Dieses Konto meldet sich nicht über Microsoft Entra an."
+    "notEntraBound": "Dieses Konto meldet sich nicht über einen Anmeldedienst (Microsoft Entra oder Single Sign-On) an."
   },
   "fields": {
     "required": "Pflichtfeld",

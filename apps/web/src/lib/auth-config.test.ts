@@ -1,12 +1,14 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import en from "../../messages/en.json";
 import de from "../../messages/de.json";
-import { ENTRA_SIGN_IN_ERRORS } from "./entra-exchange";
+import { ENTRA_SIGN_IN_ERRORS, OIDC_SIGN_IN_ERRORS } from "./entra-exchange";
 import {
   EntraWebConfigError,
+  OidcWebConfigError,
   entraLogoutUrl,
   localSignInEnabled,
   parseEntraWebConfig,
+  parseOidcWebConfig,
 } from "./auth-config";
 
 /**
@@ -23,6 +25,93 @@ const VALID = {
   AUTH_MICROSOFT_ENTRA_ID_SECRET: "client-secret-value",
   ENTRA_EXCHANGE_SECRET: "0123456789abcdef0123456789abcdef",
 };
+
+const ISSUER = "https://auth.example.test/application/o/sinnlos/";
+const OIDC_VALID = {
+  OIDC_ENABLED: "1",
+  OIDC_ISSUER: ISSUER,
+  OIDC_CLIENT_ID: "sinnlos-web",
+  OIDC_CLIENT_SECRET: "oidc-client-secret",
+  OIDC_EXCHANGE_SECRET: "fedcba9876543210fedcba9876543210",
+};
+
+function oidcRefused(env: Record<string, string | undefined>): readonly string[] {
+  try {
+    parseOidcWebConfig(env);
+  } catch (err) {
+    expect(err).toBeInstanceOf(OidcWebConfigError);
+    expect((err as Error).message).not.toContain(OIDC_VALID.OIDC_EXCHANGE_SECRET);
+    return (err as OidcWebConfigError).variables;
+  }
+  throw new Error("expected an OidcWebConfigError");
+}
+
+describe("parseOidcWebConfig (v0.25.0)", () => {
+  it("is off unless OIDC_ENABLED is exactly '1'", () => {
+    for (const flag of [undefined, "", "0", "true", " 1"]) {
+      expect(parseOidcWebConfig({ ...OIDC_VALID, OIDC_ENABLED: flag })).toBeNull();
+    }
+  });
+
+  it("keeps the issuer as written (trailing slash) and applies the defaults", () => {
+    expect(parseOidcWebConfig(OIDC_VALID)).toEqual({
+      issuer: ISSUER,
+      clientId: "sinnlos-web",
+      clientSecret: "oidc-client-secret",
+      exchangeSecret: OIDC_VALID.OIDC_EXCHANGE_SECRET,
+      scope: "openid profile email",
+      displayName: "Single Sign-On",
+    });
+    expect(
+      parseOidcWebConfig({
+        ...OIDC_VALID,
+        OIDC_SCOPE: "openid email profile groups",
+        OIDC_DISPLAY_NAME: "Mit Keycloak anmelden",
+      }),
+    ).toMatchObject({ scope: "openid email profile groups", displayName: "Mit Keycloak anmelden" });
+  });
+
+  it("adds Zitadel's organisation scopes for OIDC_ZITADEL_ORG_ID", () => {
+    expect(
+      parseOidcWebConfig({ ...OIDC_VALID, OIDC_ZITADEL_ORG_ID: "396173383835910147" })?.scope,
+    ).toBe(
+      "openid profile email urn:zitadel:iam:org:id:396173383835910147 urn:zitadel:iam:user:resourceowner",
+    );
+    expect(oidcRefused({ ...OIDC_VALID, OIDC_ZITADEL_ORG_ID: "spike" })).toEqual([
+      "OIDC_ZITADEL_ORG_ID",
+    ]);
+  });
+
+  it("refuses http without OIDC_ALLOW_HTTP=1, a broken or overlong issuer and a scope without openid", () => {
+    const http = "http://localhost:18080/realms/sinnlos";
+    expect(oidcRefused({ ...OIDC_VALID, OIDC_ISSUER: http })).toEqual(["OIDC_ISSUER"]);
+    expect(
+      parseOidcWebConfig({ ...OIDC_VALID, OIDC_ISSUER: http, OIDC_ALLOW_HTTP: "1" })?.issuer,
+    ).toBe(http);
+    for (const issuer of ["", "not a url", `https://x.test/${"a".repeat(260)}`]) {
+      expect(oidcRefused({ ...OIDC_VALID, OIDC_ISSUER: issuer })).toEqual(["OIDC_ISSUER"]);
+    }
+    expect(oidcRefused({ ...OIDC_VALID, OIDC_SCOPE: "profile email" })).toEqual(["OIDC_SCOPE"]);
+  });
+
+  it("names every missing or bad value, and refuses Entra next to OIDC", () => {
+    expect(
+      oidcRefused({
+        OIDC_ENABLED: "1",
+        ENTRA_ENABLED: "1",
+        OIDC_EXCHANGE_SECRET: "short",
+        OIDC_DISPLAY_NAME: "x".repeat(41),
+      }),
+    ).toEqual([
+      "ENTRA_ENABLED",
+      "OIDC_ISSUER",
+      "OIDC_CLIENT_ID",
+      "OIDC_CLIENT_SECRET",
+      "OIDC_EXCHANGE_SECRET",
+      "OIDC_DISPLAY_NAME",
+    ]);
+  });
+});
 
 function refused(env: Record<string, string | undefined>): readonly string[] {
   try {
@@ -140,6 +229,7 @@ describe("module flags", () => {
       "LOCAL_REGISTRATION",
       "NEXT_PHASE",
       ...Object.keys(VALID),
+      ...Object.keys(OIDC_VALID),
     ]) {
       vi.stubEnv(key, env[key]);
     }
@@ -166,12 +256,20 @@ describe("module flags", () => {
     expect(noRegistration.REGISTRATION_ENABLED).toBe(false);
   });
 
-  it("refuses OIDC_ENABLED=1 on import until v0.25.0, but not during next build", async () => {
-    await expect(flags({ OIDC_ENABLED: "1" })).rejects.toThrow(/OIDC_ENABLED=1/);
+  it("OIDC: on with a valid config, local sign-in off unless AUTH_LOCAL_ENABLED=1; an invalid one throws outside next build", async () => {
+    const oidcOnly = await flags(OIDC_VALID);
+    expect([oidcOnly.OIDC?.issuer, oidcOnly.LOCAL_ENABLED, oidcOnly.ENTRA]).toEqual([
+      ISSUER,
+      false,
+      null,
+    ]);
+    expect((await flags({ ...OIDC_VALID, AUTH_LOCAL_ENABLED: "1" })).LOCAL_ENABLED).toBe(true);
+    await expect(flags({ OIDC_ENABLED: "1" })).rejects.toThrow(/OIDC_ISSUER/);
     const build = await flags({ OIDC_ENABLED: "1", NEXT_PHASE: "phase-production-build" });
-    expect(build.LOCAL_ENABLED).toBe(false);
+    expect([build.OIDC, build.LOCAL_ENABLED]).toEqual([null, false]);
     for (const flag of [undefined, "0", "true"]) {
-      expect((await flags({ OIDC_ENABLED: flag })).LOCAL_ENABLED).toBe(true);
+      const off = await flags({ ...OIDC_VALID, OIDC_ENABLED: flag });
+      expect([off.OIDC, off.LOCAL_ENABLED]).toEqual([null, true]);
     }
   });
 
@@ -201,8 +299,8 @@ describe("entraLogoutUrl", () => {
 });
 
 describe("sign-in error texts", () => {
-  it("exist in English and German for every entra_* code and the generic case", () => {
-    for (const key of [...ENTRA_SIGN_IN_ERRORS, "signInFailed"]) {
+  it("exist in English and German for every entra_* and oidc_* code and the generic case", () => {
+    for (const key of [...ENTRA_SIGN_IN_ERRORS, ...OIDC_SIGN_IN_ERRORS, "signInFailed"]) {
       expect((en.auth as Record<string, string>)[key], `en ${key}`).toBeTruthy();
       expect((de.auth as Record<string, string>)[key], `de ${key}`).toBeTruthy();
     }

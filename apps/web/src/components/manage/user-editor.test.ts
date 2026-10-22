@@ -13,7 +13,7 @@ const user: UserAdminDetail = {
   email: "casey@example.test",
   role: "member",
   roleSource: "manual",
-  entraBound: false,
+  idp: null,
   blocked: true,
   department: { documentId: "dept00000000000000000001", name: "Design" },
   manager: { id: 99, displayName: "Former Boss" },
@@ -60,7 +60,7 @@ describe("user form (v0.23)", () => {
   it("fields Entra owns are read-only with the hint", () => {
     const html = render(
       createElement(UserEditor, {
-        user: { ...user, entraBound: true, locked: { department: true, manager: true } },
+        user: { ...user, idp: "entra", locked: { department: true, manager: true } },
         options,
       }),
     );
@@ -72,19 +72,39 @@ describe("user form (v0.23)", () => {
     expect(html.split(en.lockedHint)).toHaveLength(3);
   });
   it("hand-back only for an Entra-bound user with a hand-set role, never for oneself", () => {
-    const manual = render(
-      createElement(UserEditor, { user: { ...user, entraBound: true }, options }),
-    );
+    const manual = render(createElement(UserEditor, { user: { ...user, idp: "entra" }, options }));
     expect(buttonLabels(manual)).toContain(en.handBack.button);
     expect(manual).toContain(en.roleSource.manual);
+    expect(manual).toContain(en.signInEntra);
     for (const other of [
-      { ...user, entraBound: true, roleSource: "entra" as const },
-      { ...user, entraBound: false },
-      { ...user, entraBound: true, self: true },
+      { ...user, idp: "entra" as const, roleSource: "entra" as const },
+      { ...user, idp: null },
+      { ...user, idp: "entra" as const, self: true },
     ])
       expect(
         buttonLabels(render(createElement(UserEditor, { user: other, options }))),
       ).not.toContain(en.handBack.button);
+  });
+  it("an OIDC account (v0.25): generic sign-in-provider texts and its own hand-back", () => {
+    const manual = render(createElement(UserEditor, { user: { ...user, idp: "oidc" }, options }));
+    expect(manual).toContain(en.oidc.signIn);
+    expect(manual).toContain(en.oidc.roleHint);
+    expect(buttonLabels(manual)).toContain(en.oidc.handBack.button);
+    expect(buttonLabels(manual)).not.toContain(en.handBack.button);
+    const synced = render(
+      createElement(UserEditor, {
+        user: {
+          ...user,
+          idp: "oidc",
+          roleSource: "oidc",
+          locked: { department: true, manager: false },
+        },
+        options,
+      }),
+    );
+    expect(synced).toContain(en.oidc.roleSource);
+    expect(synced).toContain(en.oidc.lockedHint);
+    expect(buttonLabels(synced)).not.toContain(en.oidc.handBack.button);
   });
   it("failed options say so", () => {
     const html = render(createElement(UserEditor, { user, options: { ...options, failed: true } }));

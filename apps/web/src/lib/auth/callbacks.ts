@@ -5,11 +5,13 @@
  * one with a stubbed exchange.
  *
  *  - signIn: local sign-ins pass; a Microsoft sign-in (D-ENTRA-01, batch 9)
- *    must be of the configured tenant and is exchanged at the cms. A string
- *    return is a redirect (@auth/core handleAuthorized), so every refusal
- *    lands on the sign-in page with an entra_* code.
+ *    must be of the configured tenant and is exchanged at the cms, an OIDC
+ *    sign-in (v0.25.0) is exchanged at the cms as it is (the cms checks
+ *    issuer, audience, e-mail and roles). A string return is a redirect
+ *    (@auth/core handleAuthorized), so every refusal lands on the sign-in
+ *    page with an entra_* or oidc_* code.
  *  - jwt: stores the Strapi JWT, its `exp` and the user id on the encrypted
- *    token. The Microsoft result arrives from signIn through a WeakMap keyed
+ *    token. The exchange result arrives from signIn through a WeakMap keyed
  *    by the `account` object Auth.js hands to both callbacks of one sign-in
  *    (@auth/core lib/actions/callback/index.js), so nothing else can read it
  *    and it is gone with the request. On every later session read the
@@ -25,20 +27,27 @@
  *    for a local session, only when the new JWT names the session's own
  *    user and has not expired (applyStrapiJwtUpdate), and never for a
  *    session that has already ended: the expiry check runs BEFORE the
- *    update. Nothing else of the update is ever read. A Microsoft session
- *    keeps its JWT: the one of the answer has the local 7-day lifetime, not
- *    ENTRA_SESSION_TTL (that session then ends with its next cms request
- *    and signs in again).
+ *    update. Nothing else of the update is ever read. A Microsoft or OIDC
+ *    session keeps its JWT: the one of the answer has the local 7-day
+ *    lifetime, not ENTRA_SESSION_TTL / OIDC_SESSION_TTL (that session then
+ *    ends with its next cms request and signs in again).
  *  - session: only id and provider reach the (public) Session object.
  */
 import { createHmac, timingSafeEqual } from "node:crypto";
 import type { NextAuthConfig, Session } from "next-auth";
-import type { EntraWebConfig } from "@/lib/auth-config";
-import { exchangeEntraSignIn, type EntraExchangeSuccess } from "@/lib/entra-exchange";
+import type { EntraWebConfig, OidcWebConfig } from "@/lib/auth-config";
+import {
+  exchangeEntraSignIn,
+  exchangeOidcSignIn,
+  type ExchangeSuccess,
+} from "@/lib/entra-exchange";
 import { strapiJwtExp, strapiJwtUserId, strapiSessionExpired } from "@/lib/strapi-jwt";
 
 /** The Auth.js provider id of the Microsoft sign-in. */
 export const ENTRA_PROVIDER_ID = "microsoft-entra-id";
+
+/** The Auth.js provider id of the OIDC sign-in (callback /api/auth/callback/oidc). */
+export const OIDC_PROVIDER_ID = "oidc";
 
 /** /sign-in with an error code the page explains (pages.error is /sign-in too). */
 export const signInError = (code: string) => `/sign-in?error=${encodeURIComponent(code)}`;
@@ -125,22 +134,39 @@ export function applyStrapiJwtUpdate(
 export interface AuthCallbackDeps {
   /** The Microsoft sign-in configuration, null while it is off. */
   entra: EntraWebConfig | null;
-  /** Where the cms's Entra exchange lives. */
+  /** The OIDC sign-in configuration, null (or left out) while it is off. */
+  oidc?: OidcWebConfig | null;
+  /** Where the cms's exchanges live. */
   strapiUrl: string;
-  /** The exchange (lib/entra-exchange.ts); injectable for tests. */
+  /** The exchanges (lib/entra-exchange.ts); injectable for tests. */
   exchange?: typeof exchangeEntraSignIn;
+  exchangeOidc?: typeof exchangeOidcSignIn;
 }
 
 export function createAuthCallbacks({
   entra,
+  oidc = null,
   strapiUrl,
   exchange = exchangeEntraSignIn,
+  exchangeOidc = exchangeOidcSignIn,
 }: AuthCallbackDeps) {
   /** The cms's exchange result, from signIn to jwt of the same sign-in. */
-  const entraResults = new WeakMap<object, EntraExchangeSuccess>();
+  const exchangeResults = new WeakMap<object, ExchangeSuccess>();
 
   return {
     async signIn({ account, profile }) {
+      if (account?.provider === OIDC_PROVIDER_ID) {
+        if (!oidc) return signInError("oidc_unavailable");
+        const { id_token: idToken } = account;
+        if (typeof idToken !== "string") {
+          console.error("[auth] OIDC sign-in without an ID token");
+          return signInError("oidc_unavailable");
+        }
+        const result = await exchangeOidc({ idToken }, { strapiUrl, secret: oidc.exchangeSecret });
+        if (result.ok === false) return signInError(`oidc_${result.code}`);
+        exchangeResults.set(account, result.data);
+        return true;
+      }
       if (account?.provider !== ENTRA_PROVIDER_ID) return true;
       if (!entra) return signInError("entra_unavailable");
       const tid = typeof profile?.tid === "string" ? profile.tid.toLowerCase() : "";
@@ -158,21 +184,24 @@ export function createAuthCallbacks({
         { strapiUrl, secret: entra.exchangeSecret },
       );
       if (result.ok === false) return signInError(`entra_${result.code}`);
-      entraResults.set(account, result.data);
+      exchangeResults.set(account, result.data);
       return true;
     },
     async jwt({ token, account, user, trigger, session }) {
-      if (account?.provider === ENTRA_PROVIDER_ID) {
+      if (account?.provider === ENTRA_PROVIDER_ID || account?.provider === OIDC_PROVIDER_ID) {
         // The signIn callback of this same sign-in stored the cms's answer.
-        const result = entraResults.get(account);
-        if (!result) throw new Error("[auth] Microsoft sign-in without an exchange result");
-        entraResults.delete(account);
+        const result = exchangeResults.get(account);
+        if (!result) {
+          const name = account.provider === ENTRA_PROVIDER_ID ? "Microsoft" : "OIDC";
+          throw new Error(`[auth] ${name} sign-in without an exchange result`);
+        }
+        exchangeResults.delete(account);
         token.strapiJwt = result.jwt;
         token.strapiUserId = result.user.id;
         token.strapiJwtExp = result.expiresAt;
         token.name = result.user.displayName;
         token.email = result.user.email;
-        token.provider = ENTRA_PROVIDER_ID;
+        token.provider = account.provider;
         delete token.picture;
       } else if (user && user.strapiJwt) {
         // Local credentials path: authorize() already returned the Strapi JWT.
