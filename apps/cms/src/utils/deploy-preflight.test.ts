@@ -1600,6 +1600,9 @@ function preflightRun(
     shellLine("PROBE_TIMEOUT=("),
     shellLine("REVISION_DP_RUNBOOK="),
     "INFRA_DIR=/srv/infra",
+    // The owner's host: a host Traefik (v0.26 made the edge a setting).
+    "DEPLOY_EDGE=traefik",
+    "PROJECT=infra",
     "compose_stub() {",
     "cat <<'COMPOSE_JSON'",
     traefikComposeJson(hosts, env),
@@ -1614,6 +1617,7 @@ function preflightRun(
     shellLine("TRAEFIK_HOST_PLACEHOLDER_RE="),
     shellFunction("url_host"),
     shellFunction("traefik_host_scan"),
+    shellFunction("caddy_host_scan"),
     DEPLOY.slice(from, to),
     "",
   ].join("\n");
@@ -1843,10 +1847,13 @@ describe("Traefik host preflight: DOMAIN fits the instance (5A-T1)", BASH_BUDGET
   it("takes the smoke URL from the checked host, not from the owner's host name", () => {
     const lines = DEPLOY.split("\n");
     const ok = lines.indexOf('log "Preflight OK"');
-    const smoke = lines.indexOf('SMOKE_URL="${SMOKE_URL:-https://${TRAEFIK_HOST}}"');
+    // Traefik: the host every router matches; Caddy (v0.26): WEB_PUBLIC_URL.
+    const smoke = lines.indexOf('  SMOKE_URL="${SMOKE_URL:-https://${EDGE_HOST}}"');
+    const caddySmoke = lines.indexOf('  SMOKE_URL="${SMOKE_URL:-${EDGE_ORIGIN}}"');
     expect(ok).toBeGreaterThan(0);
     // Right after the preflight (so --check prints it), before any smoke-check use.
     expect(smoke).toBeGreaterThan(ok);
+    expect(caddySmoke).toBeGreaterThan(smoke);
     expect(lines.slice(ok, smoke).join("\n")).not.toMatch(/\$\{SMOKE_URL\}/);
     expect(DEPLOY).toContain('SMOKE_URL="${SMOKE_URL:-}"');
     // No owner host name as a default in either script, comments aside.

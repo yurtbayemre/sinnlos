@@ -48,6 +48,11 @@ services:
     build:
       context: ..
       dockerfile: apps/cms/Dockerfile
+      # The release and commit the image is built from (its version and
+      # revision labels and boot line); infra/deploy.sh sets both.
+      args:
+        SINNLOS_VERSION: ${SINNLOS_VERSION:-unknown}
+        SINNLOS_REVISION: ${SINNLOS_REVISION:-unknown}
     restart: unless-stopped
     logging: *default-logging
     # docker-init as PID 1: it forwards SIGTERM to Strapi (which shuts down
@@ -226,6 +231,9 @@ services:
     build:
       context: ..
       dockerfile: apps/web/Dockerfile
+      args:
+        SINNLOS_VERSION: ${SINNLOS_VERSION:-unknown}
+        SINNLOS_REVISION: ${SINNLOS_REVISION:-unknown}
     restart: unless-stopped
     logging: *default-logging
     depends_on:

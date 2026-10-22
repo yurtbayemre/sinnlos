@@ -19,13 +19,21 @@
  *      a deploy before anything is touched;
  *   5. --dry-run changes nothing; --check stays the env preflight; SHA tags
  *      beyond DEPLOY_KEEP_TAGS go, images and history;
- *   6. the pre-deploy backup runs as `sudo -n /usr/local/sbin/backup-run
- *      --kind predeploy sinnlos` for project infra (BACKUP_RUN, given, runs
- *      without sudo) and stops the deploy when it fails; another project
- *      runs pg-backup.sh as SINNLOS_BACKUP_KIND=predeploy; and the
- *      compose project, smoke URL and checkout are parameters; the smoke
- *      URL defaults to https://<DOMAIN>, the host of the rendered router
- *      rules, and --check refuses the example DOMAIN (5A-T1);
+ *   6. the pre-deploy backup runs as `sudo -n "$BACKUP_RUN" --kind
+ *      predeploy sinnlos` for project infra when BACKUP_RUN names the
+ *      host's backup service (DEPLOY_BACKUP_NO_SUDO=1, the harness default,
+ *      runs it without sudo) and stops the deploy when it fails; without
+ *      it, and for another project, pg-backup.sh runs as
+ *      SINNLOS_BACKUP_KIND=predeploy; and the compose project, smoke URL and
+ *      checkout are parameters; with DEPLOY_EDGE=traefik (the harness
+ *      default: the owner's host) the smoke URL defaults to
+ *      https://<DOMAIN>, the host of the rendered router rules, and --check
+ *      refuses the example DOMAIN (5A-T1);
+ *  10. v0.26: the Caddy edge (the default): the base compose file only, the
+ *      smoke URL from WEB_PUBLIC_URL, and a refusal while containers of the
+ *      project carry Traefik labels; infra/deploy.env; registry images of
+ *      the checkout's release tag (DEPLOY_IMAGE_SOURCE=registry): both
+ *      pulled before any tag moves, their labels checked, no build.
  *   7. on the containerd image store (an image no tag references cannot be
  *      resolved), the running images keep a :pre-deploy tag through the
  *      build, so a re-run after a failed deploy records what runs, and a
@@ -53,6 +61,10 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { runBash, shellMode, skipReason, type ShellMode } from "./shell-runner.test.helper";
 
 const DEPLOY = readFileSync(new URL("./deploy.sh", import.meta.url), "utf8").replace(/\r\n/g, "\n");
+const DEPLOY_ENV = readFileSync(new URL("./deploy-env.sh", import.meta.url), "utf8").replace(
+  /\r\n/g,
+  "\n",
+);
 const HAS_BASH = spawnSync("bash", ["-c", "exit 0"]).status === 0;
 const HAS_GIT = spawnSync("git", ["--version"]).status === 0;
 const SLOW_SHELL = process.platform === "win32" && process.env.SINNLOS_SLOW_SHELL_TESTS !== "1";
@@ -109,6 +121,7 @@ const composeJson = (host: string) =>
           environment: { AUTH_URL: `https://${host}` },
           labels: { "traefik.http.routers.sinnlos-web.rule": `Host(\`${host}\`)` },
         },
+        caddy: { environment: { DOMAIN: host } },
       },
     },
     null,
@@ -141,6 +154,9 @@ function deploys(steps: readonly Step[], mode?: ShellMode): StepReport[] {
     "cat > \"$REPO/infra/deploy.sh\" <<'DEPLOY_SH_EOF'",
     DEPLOY.trimEnd(),
     "DEPLOY_SH_EOF",
+    "cat > \"$REPO/infra/deploy-env.sh\" <<'DEPLOY_ENV_SH_EOF'",
+    DEPLOY_ENV.trimEnd(),
+    "DEPLOY_ENV_SH_EOF",
     ': > "$REPO/infra/docker-compose.yml"',
     ': > "$REPO/infra/docker-compose.traefik.yml"',
     ': > "$REPO/infra/rollback/revoke-guest-poll-vote.sql"',
@@ -151,7 +167,7 @@ function deploys(steps: readonly Step[], mode?: ShellMode): StepReport[] {
     // With STUB_LIVE_NOFRAME: the line live-smoke prints when the stream user owns no announcement.
     `printf 'if [[ -n "\${STUB_LIVE_NOFRAME:-}" ]]; then echo "live-smoke: WARNING - the notification frame path was not checked: stub"; fi\\nexit "\${STUB_LIVE_RC:-0}"\\n' >> "$REPO/infra/live-smoke.sh"`,
     'chmod +x "$REPO/infra/deploy.sh" "$REPO/infra/backup/pg-backup.sh" "$REPO/infra/live-smoke.sh" "$T/backup-run"',
-    'export BACKUP_RUN="$T/backup-run"',
+    'export BACKUP_RUN="$T/backup-run" DEPLOY_BACKUP_NO_SUDO=1 DEPLOY_EDGE=traefik',
     "cat > \"$T/compose.json\" <<'COMPOSE_JSON'",
     COMPOSE_JSON,
     "COMPOSE_JSON",
@@ -171,12 +187,14 @@ function deploys(steps: readonly Step[], mode?: ShellMode): StepReport[] {
     // The demo credentials file deploy.sh checks before it runs live-smoke.
     'echo "casey.jones@sinnlos.local pw" > "$T/passwords"',
     'export PASSWORDS_FILE="$T/passwords"',
-    "export T STUB_SMOKE_CODE=200 STUB_LIVE_RC=0 STUB_LIVE_NOFRAME= STUB_BUILD_FAIL= STUB_UP_FAIL= STUB_TAG_FAIL= STUB_LOCK_HELD= STUB_CI= STUB_NO_VOLUMES= STUB_CONTAINERD= STUB_UP_KEEP= STUB_STATE_WRITE_FAIL= STUB_BOOTSTRAP_WRITE_FAIL= STUB_BACKUP_RC= STUB_REVISION_DRAFTS=0 STUB_REVISION_DP=1",
+    "export T STUB_TRAEFIK= STUB_PULL_FAIL= STUB_LABELS= STUB_SMOKE_CODE=200 STUB_LIVE_RC=0 STUB_LIVE_NOFRAME= STUB_BUILD_FAIL= STUB_UP_FAIL= STUB_TAG_FAIL= STUB_LOCK_HELD= STUB_CI= STUB_NO_VOLUMES= STUB_CONTAINERD= STUB_UP_KEEP= STUB_STATE_WRITE_FAIL= STUB_BOOTSTRAP_WRITE_FAIL= STUB_BACKUP_RC= STUB_REVISION_DRAFTS=0 STUB_REVISION_DP=1",
     // Whether an image id resolves: on containerd only while a tag names it.
     "resolvable() {",
     // (No pipe: under deploy.sh's pipefail, grep -q ending early could fail cat.)
     '  if [[ -n "$STUB_CONTAINERD" ]]; then grep -qxF "$1" "$T"/img/* 2> /dev/null; else grep -qxF "$1" "$T/ids" 2> /dev/null; fi',
     "}",
+    // The file of an image ref: $T/img/<name>__<tag>, slashes as %.
+    'imgf() { local r="${1//\\//%}"; printf "%s" "$T/img/${r//:/__}"; }',
     // docker keeps images in $T/img/<name>__<tag> and containers in $T/ctr.
     "docker() {",
     '  printf \'docker %s\\n\' "$*" >> "$T/calls"',
@@ -191,6 +209,7 @@ function deploys(steps: readonly Step[], mode?: ShellMode): StepReport[] {
     '        config) if [[ "$*" == *"--format json"* ]]; then cat "$T/compose.json"; fi ;;',
     "        build)",
     '          echo "build-env BUILDX_NO_DEFAULT_ATTESTATIONS=${BUILDX_NO_DEFAULT_ATTESTATIONS:-unset}" >> "$T/calls"',
+    '          echo "build-rev SINNLOS_VERSION=${SINNLOS_VERSION:-unset} SINNLOS_REVISION=${SINNLOS_REVISION:-unset}" >> "$T/calls"',
     '          [[ -z "$STUB_BUILD_FAIL" ]] || return 1',
     '          id=$(( $(cat "$T/n") + 1 )); echo "$id" > "$T/n"',
     '          echo "sha256:web$id" > "$T/img/$p-web__latest"; echo "sha256:cms$id" > "$T/img/$p-cms__latest"',
@@ -210,22 +229,27 @@ function deploys(steps: readonly Step[], mode?: ShellMode): StepReport[] {
     "        inspect)",
     '          ref="${*: -1}"',
     '          if [[ "$ref" == sha256:* ]]; then resolvable "$ref"; return; fi',
-    '          [[ -f "$T/img/${ref//:/__}" ]] || return 1',
-    '          if [[ "$*" == *"{{.Id}}"* ]]; then cat "$T/img/${ref//:/__}"; elif [[ "$*" == *org.sinnlos.datetime* ]]; then echo zone-explicit; elif [[ "$*" == *Config.Cmd* ]]; then echo \'["node_modules/.bin/strapi","start"]\'; fi ;;',
-    '        rm) shift 2; for ref in "$@"; do rm -f "$T/img/${ref//:/__}"; done ;;',
+    '          [[ -f "$(imgf "$ref")" ]] || return 1',
+    '          if [[ "$*" == *"{{.Id}}"* ]]; then cat "$(imgf "$ref")"; elif [[ "$*" == *org.sinnlos.datetime* ]]; then echo zone-explicit; elif [[ "$*" == *Config.Cmd* ]]; then echo \'["node_modules/.bin/strapi","start"]\'; elif [[ "$*" == *image.revision* ]]; then echo "$STUB_LABELS"; elif [[ "$*" == *RepoDigests* ]]; then echo "${ref%:*}@sha256:digest-${ref##*-}"; fi ;;',
+    '        rm) shift 2; for ref in "$@"; do rm -f "$(imgf "$ref")"; done ;;',
     "      esac ;;",
     "    tag)",
     '      [[ -z "$STUB_TAG_FAIL" ]] || return 1',
     '      if [[ "$2" == sha256:* ]]; then',
     '        resolvable "$2" || { echo "Error response from daemon: No such image: $2" >&2; return 1; }',
     '        id="$2"',
-    '      else [[ -f "$T/img/${2//:/__}" ]] || return 1; id="$(cat "$T/img/${2//:/__}")"; fi',
-    '      echo "$id" > "$T/img/${3//:/__}" ;;',
+    '      else [[ -f "$(imgf "$2")" ]] || return 1; id="$(cat "$(imgf "$2")")"; fi',
+    '      echo "$id" > "$(imgf "$3")" ;;',
+    // A pulled image is a new id; STUB_PULL_FAIL fails the pull of a ref that contains it.
+    '    pull) if [[ -n "$STUB_PULL_FAIL" && "$2" == *"$STUB_PULL_FAIL"* ]]; then return 1; fi',
+    '      id="sha256:pulled-${2##*/}"; echo "$id" > "$(imgf "$2")"; echo "$id" >> "$T/ids" ;;',
     // The revision probe's query (wiki_revisions) answers STUB_REVISION_DRAFTS, every other 0.
     '    exec) if [[ "$(cat)" == *wiki_revisions* ]]; then echo "$STUB_REVISION_DRAFTS"; else echo 0; fi ;;',
     '    volume) [[ -z "$STUB_NO_VOLUMES" ]] ;;',
-    // ps -aq --filter label=com.docker.compose.project=<p>: containers <p>-<svc>-1.
+    // ps -aq --filter label=com.docker.compose.project=<p>: containers <p>-<svc>-1;
+    // with --filter label=traefik.enable=true only while STUB_TRAEFIK says they carry it.
     "    ps)",
+    '      if [[ "$*" == *traefik.enable=true* && -z "$STUB_TRAEFIK" ]]; then return 0; fi',
     '      for ref in "$T"/ctr/*; do',
     '        ref="${ref##*/}"',
     '        if [[ -e "$T/ctr/$ref" && "$*" == *"com.docker.compose.project=${ref%-*-1}" ]]; then echo "$ref"; fi',
@@ -256,7 +280,7 @@ function deploys(steps: readonly Step[], mode?: ShellMode): StepReport[] {
     "  fi",
     '  command mv "$@"',
     "}",
-    "export -f docker curl flock timeout sleep resolvable mv sudo",
+    "export -f docker curl flock timeout sleep resolvable mv sudo imgf",
   ];
   steps.forEach((step, n) => {
     const env = Object.entries(step.env ?? {})
@@ -369,8 +393,10 @@ describe.skipIf(!RUN_SEQUENCES)(
         /* 12 */ { before: "commit; STUB_STATE_WRITE_FAIL=" },
         // The pre-deploy backup fails …
         /* 13 */ { before: "commit; STUB_BACKUP_RC=3" },
-        // … and without BACKUP_RUN, production's call goes through sudo -n.
-        /* 14 */ { before: "STUB_BACKUP_RC=; unset BACKUP_RUN" },
+        // … and production's backup service goes through sudo -n …
+        /* 14 */ { before: "STUB_BACKUP_RC=; unset DEPLOY_BACKUP_NO_SUDO" },
+        // … while without BACKUP_RUN project infra runs pg-backup.sh too (v0.26).
+        /* 15 */ { before: "unset BACKUP_RUN; export SINNLOS_BACKUP_DIR=/srv/infra-backups" },
       ]);
     }, SEQUENCE_BUDGET);
 
@@ -541,10 +567,20 @@ describe.skipIf(!RUN_SEQUENCES)(
       const run = r[14];
       expect(run.status, run.stderr).toBe(0);
       expect(called(run, /^sudo /)).toEqual([
-        "sudo -n /usr/local/sbin/backup-run --kind predeploy sinnlos",
+        expect.stringMatching(/^sudo -n \S+\/backup-run --kind predeploy sinnlos$/),
       ]);
       expect(run.stdout).not.toContain("backup-run stub:");
       expect(run.stdout).not.toContain("backup kind=");
+    });
+
+    it("backs project infra up with pg-backup.sh when no backup service is named (v0.26)", () => {
+      const run = r[15];
+      expect(run.status, run.stderr).toBe(0);
+      expect(run.stdout).toMatch(
+        /backup kind=predeploy db=infra-db-1 dir=\/srv\/infra-backups quick=default/,
+      );
+      expect(called(run, /^sudo /)).toEqual([]);
+      expect(run.stdout).not.toContain("backup-run stub:");
     });
 
     it("moves the state on the next good deploy, and prunes SHA tags beyond DEPLOY_KEEP_TAGS", () => {
@@ -1371,21 +1407,149 @@ describe.skipIf(!TWO_CLONE_MODE)(
   },
 );
 
+describe.skipIf(!RUN_SEQUENCES)(
+  "deploy.sh: the Caddy edge, the Traefik guard and registry images (v0.26)",
+  () => {
+    let r: StepReport[] = [];
+    const REGISTRY = { DEPLOY_IMAGE_SOURCE: "registry" };
+    const RELEASE = [
+      `printf '{\\n  "name": "sinnlos",\\n  "version": "0.26.0",\\n  "private": true\\n}\\n' > "$REPO/package.json"`,
+      '"${G[@]}" add package.json',
+      '"${G[@]}" commit -q -m release',
+      '"${G[@]}" tag v0.26.0',
+    ].join("; ");
+    beforeAll(() => {
+      r = deploys([
+        // The default edge: the bundled Caddy, the base compose file only.
+        /* 0 */ { before: "unset DEPLOY_EDGE; STUB_NO_VOLUMES=1", args: ["--check"] },
+        /* 1 */ {},
+        // Containers of the project carry Traefik labels: refused before the backup …
+        /* 2 */ { before: "STUB_NO_VOLUMES=; STUB_TRAEFIK=1; commit" },
+        /* 3 */ { env: { DEPLOY_EDGE: "caddy" } },
+        // … and deployed with DEPLOY_EDGE=traefik.
+        /* 4 */ { before: "export DEPLOY_EDGE=traefik" },
+        // Registry images need one release tag on the commit …
+        /* 5 */ { before: "STUB_TRAEFIK=", env: REGISTRY },
+        // … a failed second pull tags nothing …
+        /* 6 */ { before: `${RELEASE}; STUB_PULL_FAIL=sinnlos-cms`, env: REGISTRY },
+        // … images labelled for another commit are refused …
+        /* 7 */ {
+          before: `STUB_PULL_FAIL=; STUB_LABELS="${"0".repeat(40)} 0.26.0"`,
+          env: REGISTRY,
+        },
+        // … and the release's own images deploy without a build.
+        /* 8 */ { before: 'STUB_LABELS="$("${G[@]}" rev-parse HEAD) 0.26.0"', env: REGISTRY },
+      ]);
+    }, SEQUENCE_BUDGET);
+
+    it("serves through the bundled Caddy by default: base compose file, smoke URL from WEB_PUBLIC_URL", () => {
+      const [check, first] = r;
+      expect(check.status, check.stderr).toBe(0);
+      expect(check.stdout).toContain(`Caddy host: ${STUB_HOST}; smoke URL: https://${STUB_HOST}`);
+      expect(first.status, first.stderr).toBe(0);
+      expect(called(first, /docker-compose\.traefik\.yml/)).toEqual([]);
+      expect(
+        called(first, /^docker compose -p infra -f \S+\/docker-compose\.yml build$/),
+      ).toHaveLength(1);
+      // No package.json in this checkout: the version label says so.
+      expect(first.calls).toContain(
+        `build-rev SINNLOS_VERSION=unknown SINNLOS_REVISION=${tagOf(first)}`,
+      );
+      expect(called(first, /^curl /).filter((c) => !c.includes("api.github.com"))).toEqual([
+        `curl -sS -o /dev/null -w %{http_code} %{redirect_url} --max-time 15 https://${STUB_HOST}`,
+      ]);
+    });
+
+    it("refuses the Caddy edge while containers of the project carry Traefik labels, before the backup", () => {
+      for (const run of [r[2], r[3]]) {
+        expect(run.status).toBe(1);
+        expect(run.stderr).toContain(
+          "ERROR: containers of compose project infra carry Traefik labels, so this host runs a Traefik edge,",
+        );
+        expect(run.stderr).toContain("Set DEPLOY_EDGE=traefik in infra/deploy.env");
+        expect(run.stdout).not.toMatch(BACKED_UP);
+        expect(called(run, / build$| up -d/)).toEqual([]);
+        expect(run.state).toEqual(r[1].state);
+      }
+      expect(r[4].status, r[4].stderr).toBe(0);
+      expect(called(r[4], /docker-compose\.traefik\.yml build$/)).toHaveLength(1);
+    });
+
+    it("refuses registry images without one release tag on the commit, before the backup", () => {
+      const run = r[5];
+      expect(run.status).toBe(1);
+      expect(run.stderr).toContain(
+        "ERROR: DEPLOY_IMAGE_SOURCE=registry needs exactly one release tag v<version>",
+      );
+      expect(run.stdout).not.toMatch(BACKED_UP);
+      expect(called(run, /^docker pull /)).toEqual([]);
+    });
+
+    it("pulls both images before it tags any, and refuses images of another commit", () => {
+      const [pullFailed, foreign] = [r[6], r[7]];
+      for (const run of [pullFailed, foreign]) {
+        expect(run.status).toBe(1);
+        expect(run.stderr).toContain("The running containers are untouched.");
+        expect(called(run, /^docker tag \S*ghcr\.io/)).toEqual([]);
+        expect(called(run, / build$| up -d/)).toEqual([]);
+        expect(run.state).toEqual(r[4].state);
+      }
+      expect(called(pullFailed, /^docker pull /)).toEqual([
+        "docker pull ghcr.io/yurtbayemre/sinnlos-web:0.26.0",
+        "docker pull ghcr.io/yurtbayemre/sinnlos-cms:0.26.0",
+      ]);
+      expect(foreign.stderr).toContain(
+        `ghcr.io/yurtbayemre/sinnlos-web:0.26.0 is labelled revision/version '${"0".repeat(40)} 0.26.0'`,
+      );
+    });
+
+    it("deploys the release's own images without a build, and records what it pulled", () => {
+      const run = r[8];
+      expect(run.status, run.stderr).toBe(0);
+      expect(run.stdout).toContain(
+        "release: v0.26.0 (ghcr.io/yurtbayemre/sinnlos-{web,cms}:0.26.0)",
+      );
+      expect(called(run, / build$|^build-env /)).toEqual([]);
+      expect(run.calls).toEqual(
+        expect.arrayContaining([
+          "docker tag ghcr.io/yurtbayemre/sinnlos-web:0.26.0 infra-web:latest",
+          "docker tag ghcr.io/yurtbayemre/sinnlos-cms:0.26.0 infra-cms:latest",
+        ]),
+      );
+      expect(run.state.WEB_IMAGE).toBe("sha256:pulled-sinnlos-web:0.26.0");
+      expect(run.state.PULLED).toMatch(
+        /^ghcr\.io\/yurtbayemre\/sinnlos-web@sha256:\S+ ghcr\.io\/yurtbayemre\/sinnlos-cms@sha256:\S+$/,
+      );
+    });
+  },
+);
+
 describe("deploy.sh: parameters and state handling, statically (FX35)", () => {
   it("keeps today's defaults", () => {
     const lines = DEPLOY.split("\n");
     for (const line of [
       'PROJECT="${COMPOSE_PROJECT:-infra}"',
       'SMOKE_URL="${SMOKE_URL:-}"',
-      'SMOKE_URL="${SMOKE_URL:-https://${TRAEFIK_HOST}}"',
-      'PASSWORDS_FILE="${PASSWORDS_FILE:-/home/bigemo/.sinnlos-env-backup/demo-account-passwords.txt}"',
+      '  SMOKE_URL="${SMOKE_URL:-https://${EDGE_HOST}}"',
+      '  SMOKE_URL="${SMOKE_URL:-${EDGE_ORIGIN}}"',
+      'PASSWORDS_FILE="${PASSWORDS_FILE:-}"',
       'CHECKOUT="$(cd "${SINNLOS_CHECKOUT:-${SCRIPT_DIR}/..}" && pwd)"',
       'KEEP_TAGS="${DEPLOY_KEEP_TAGS:-5}"',
-      'BACKUP_RUN="${BACKUP_RUN:-/usr/local/sbin/backup-run}"',
+      'BACKUP_RUN="${BACKUP_RUN:-}"',
       '  BACKUP_RUN_CMD=(sudo -n "${BACKUP_RUN}" --kind predeploy sinnlos)',
+      'DEPLOY_EDGE="${DEPLOY_EDGE:-caddy}"',
+      'DEPLOY_IMAGE_SOURCE="${DEPLOY_IMAGE_SOURCE:-build}"',
+      'load_deploy_env "${INFRA_DIR}/deploy.env" "${CHECKOUT}"',
     ]) {
       expect(lines, line).toContain(line);
     }
+    // No owner-host default is left (v0.26).
+    expect(DEPLOY).not.toContain("/home/bigemo");
+    expect(DEPLOY).not.toContain("/usr/local/sbin/backup-run");
+    // infra/deploy.env is read before any default.
+    expect(DEPLOY.indexOf("load_deploy_env ")).toBeLessThan(
+      DEPLOY.indexOf('BACKUP_RUN="${BACKUP_RUN:-}"'),
+    );
   });
 
   it("never sources the state file", () => {

@@ -16,8 +16,12 @@
 #      no wiki revision draft rows while this release runs wiki revisions
 #      without draft & publish (batch 16: the new cms would refuse to
 #      start; infra/migrations/wiki-revision-dp/migrate.sql first),
-#      and a DOMAIN every Traefik router can match: a bare host name, no
-#      placeholder, the host of WEB_PUBLIC_URL and CMS_PUBLIC_URL.
+#      and a DOMAIN the edge serves: a bare host name (with Caddy optionally
+#      with http:// or https://), no placeholder, the host of WEB_PUBLIC_URL
+#      and CMS_PUBLIC_URL (with Traefik: the host every router matches).
+#      With the Caddy edge, no container of the project may carry Traefik
+#      labels (DEPLOY_EDGE=traefik is missing: Caddy would claim 80/443
+#      next to the host Traefik).
 #      Then the deploy checks (FX35): one deploy per compose project at a
 #      time (flock; each infra/restore-db.sh step holds the same lock), no
 #      database restore in progress (its reservation), a clean checkout (no
@@ -25,13 +29,12 @@
 #      untracked file where the images are built from), and the
 #      GitHub CI result of the commit (a warning, or a refusal with
 #      --require-green-ci). Fails before anything is touched.
-#   1. Pre-deploy backup. Project infra (production): the host's backup-run
-#      (srv-prod-01-ops), `sudo -n /usr/local/sbin/backup-run --kind
-#      predeploy sinnlos`, a generation of its own kind in /srv/backup/outbox
-#      that the NAS pulls (the sudoers drop-in backup-run-predeploy allows
-#      exactly that command). Another project: infra/backup/pg-backup.sh into
-#      its SINNLOS_BACKUP_DIR (artifacts named -predeploy). Skipped only on a
-#      first install (no db container and no database volume yet).
+#   1. Pre-deploy backup: infra/backup/pg-backup.sh into SINNLOS_BACKUP_DIR
+#      (artifacts named -predeploy; a partial one fails the deploy). Project
+#      infra on a host with its own backup service (BACKUP_RUN, the owner's
+#      srv-prod-01-ops): `sudo -n "$BACKUP_RUN" --kind predeploy sinnlos`,
+#      which a sudoers drop-in allows exactly. Skipped only on a first
+#      install (no db container and no database volume yet).
 #   2. The rollback target: the images of the last-known-good deploy,
 #      <project>-{web,cms}:<sha> from the state file (below). Without a usable
 #      state (the first run of this version of the script, or those images
@@ -41,8 +44,11 @@
 #      running images are also tagged :pre-deploy, on every run, so they
 #      stay resolvable through the build (keep_running_images).
 #   3. Build web and cms (without BuildKit's default attestations, so an
-#      unchanged rebuild keeps its image id), then restart the stack with
-#      the Traefik override.
+#      unchanged rebuild keeps its image id; SINNLOS_REVISION = the commit),
+#      or with DEPLOY_IMAGE_SOURCE=registry pull the published images of the
+#      checkout's release tag (both, checked against the commit and the
+#      version, before any local tag moves); then restart the stack (with the
+#      Traefik override when DEPLOY_EDGE=traefik).
 #   4. Curl smoke check of the live site, then infra/live-smoke.sh.
 #   5. Only after both passed: tag the images <project>-{web,cms}:<sha> (the
 #      first 12 characters of the commit), record them as last-known-good in
@@ -66,10 +72,17 @@
 #                                       # record it as last-known-good although
 #                                       # live-smoke lacked the demo credentials
 #
-# Parameters (environment; the defaults are the owner's production host):
-#   SMOKE_URL         https://<DOMAIN>, the host every Traefik router matches
-#                     (smoke check and live-smoke)
-#   PASSWORDS_FILE    /home/bigemo/.sinnlos-env-backup/demo-account-passwords.txt
+# Parameters (environment, or infra/deploy.env: infra/deploy.env.example;
+# the environment wins):
+#   DEPLOY_EDGE       caddy (the bundled Caddy, default) or traefik (a host
+#                     Traefik, docker-compose.traefik.yml)
+#   DEPLOY_IMAGE_SOURCE build (default) or registry (ghcr.io images of the
+#                     checkout's release tag)
+#   SMOKE_URL         WEB_PUBLIC_URL with Caddy, https://<DOMAIN> (the host
+#                     every router matches) with Traefik (smoke check and
+#                     live-smoke)
+#   PASSWORDS_FILE    "email password" lines for live-smoke (none by default:
+#                     live-smoke then does not run, see step 5)
 #   SINNLOS_CHECKOUT  the checkout this script lives in (compose files, git)
 #   COMPOSE_PROJECT   infra (containers <project>-web-1 …, images <project>-web …);
 #                     another project also needs SMOKE_URL, SINNLOS_BACKUP_DIR
@@ -81,8 +94,10 @@
 #                     or restoring the same project must point it at the same
 #                     directory)
 #   DEPLOY_KEEP_TAGS  5 (SHA tags kept per image)
-#   BACKUP_RUN        /usr/local/sbin/backup-run, run through `sudo -n`; when
-#                     set, the given command runs without sudo (tests)
+#   SINNLOS_BACKUP_DIR the pre-deploy backup's dir (pg-backup.sh)
+#   BACKUP_RUN        project infra only: the host's backup service, run
+#                     through `sudo -n` instead of pg-backup.sh
+#                     (DEPLOY_BACKUP_NO_SUDO=1 runs it without sudo: tests)
 #   GITHUB_TOKEN      optional, for the CI check (public repos need none)
 #
 set -Eeuo pipefail
@@ -110,6 +125,10 @@ if ((CHECK_ONLY && DRY_RUN)); then usage; fi
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CHECKOUT="$(cd "${SINNLOS_CHECKOUT:-${SCRIPT_DIR}/..}" && pwd)"
 INFRA_DIR="${CHECKOUT}/infra"
+# Host settings from infra/deploy.env, before any default below.
+# shellcheck disable=SC1091 # the library next to this script, checked on its own
+source "${INFRA_DIR}/deploy-env.sh"
+load_deploy_env "${INFRA_DIR}/deploy.env" "${CHECKOUT}"
 
 COMPOSE_BASE="${INFRA_DIR}/docker-compose.yml"
 COMPOSE_TRAEFIK="${INFRA_DIR}/docker-compose.traefik.yml"
@@ -119,12 +138,11 @@ COMPOSE_LEGACY_TZ="${INFRA_DIR}/docker-compose.cms-legacy-tz.yml"
 # (phase 2) in APP_TIME_ZONE again.
 COMPOSE_WEB_LEGACY_TZ="${INFRA_DIR}/docker-compose.web-legacy-tz.yml"
 BACKUP_SCRIPT="${INFRA_DIR}/backup/pg-backup.sh"
-# Project infra's pre-deploy backup: the host's backup-run, as root through
-# `sudo -n` (never a password prompt; the sudoers drop-in allows exactly
-# these arguments). A BACKUP_RUN given by the caller runs as is, without sudo.
-BACKUP_RUN_GIVEN="${BACKUP_RUN:+1}"
-BACKUP_RUN="${BACKUP_RUN:-/usr/local/sbin/backup-run}"
-if [[ -n "${BACKUP_RUN_GIVEN}" ]]; then
+# Project infra's pre-deploy backup on a host with its own backup service
+# (BACKUP_RUN): as root through `sudo -n` (never a password prompt; a sudoers
+# drop-in allows exactly these arguments). Without it, pg-backup.sh.
+BACKUP_RUN="${BACKUP_RUN:-}"
+if [[ "${DEPLOY_BACKUP_NO_SUDO:-}" == 1 ]]; then
   BACKUP_RUN_CMD=("${BACKUP_RUN}" --kind predeploy sinnlos)
 else
   BACKUP_RUN_CMD=(sudo -n "${BACKUP_RUN}" --kind predeploy sinnlos)
@@ -144,14 +162,29 @@ if ! [[ "${PROJECT}" =~ ^[a-z0-9][a-z0-9_-]*$ ]]; then
   echo "ERROR: COMPOSE_PROJECT must be a compose project name (lower case, digits, - and _): ${PROJECT}" >&2
   exit 2
 fi
-COMPOSE=(docker compose -p "${PROJECT}" -f "${COMPOSE_BASE}" -f "${COMPOSE_TRAEFIK}")
+DEPLOY_EDGE="${DEPLOY_EDGE:-caddy}"
+case "${DEPLOY_EDGE}" in
+  caddy) COMPOSE=(docker compose -p "${PROJECT}" -f "${COMPOSE_BASE}") ;;
+  traefik) COMPOSE=(docker compose -p "${PROJECT}" -f "${COMPOSE_BASE}" -f "${COMPOSE_TRAEFIK}") ;;
+  *)
+    echo "ERROR: DEPLOY_EDGE must be caddy or traefik: ${DEPLOY_EDGE}" >&2
+    exit 2
+    ;;
+esac
+DEPLOY_IMAGE_SOURCE="${DEPLOY_IMAGE_SOURCE:-build}"
+if [[ "${DEPLOY_IMAGE_SOURCE}" != build && "${DEPLOY_IMAGE_SOURCE}" != registry ]]; then
+  echo "ERROR: DEPLOY_IMAGE_SOURCE must be build or registry: ${DEPLOY_IMAGE_SOURCE}" >&2
+  exit 2
+fi
+# The published images (.github/workflows/release-images.yml).
+IMAGE_REPO="ghcr.io/yurtbayemre/sinnlos"
 
 # Whether the caller named the smoke URL (another project must). Without
-# it, the smoke URL is https://<DOMAIN>, set once the preflight has checked
-# the host the Traefik routers match (traefik_host_scan).
+# it, the smoke URL is set once the preflight has checked the host the edge
+# serves (caddy_host_scan / traefik_host_scan).
 SMOKE_URL_GIVEN="${SMOKE_URL:+1}"
 SMOKE_URL="${SMOKE_URL:-}"
-PASSWORDS_FILE="${PASSWORDS_FILE:-/home/bigemo/.sinnlos-env-backup/demo-account-passwords.txt}"
+PASSWORDS_FILE="${PASSWORDS_FILE:-}"
 KEEP_TAGS="${DEPLOY_KEEP_TAGS:-5}"
 if ! [[ "${KEEP_TAGS}" =~ ^[1-9][0-9]*$ ]]; then
   echo "ERROR: DEPLOY_KEEP_TAGS must be a whole number of at least 1: ${KEEP_TAGS}" >&2
@@ -438,6 +471,37 @@ traefik_host_scan() {
   fi
   if [[ "${cms}" != "${host,,}" ]]; then
     echo "problem DOMAIN=${host} is not the host of CMS_PUBLIC_URL (${cms:-no http(s) URL})"
+  fi
+}
+
+# Caddy edge: the same rules for DOMAIN, the bundled Caddy's site address
+# (a host name, optionally with http:// or https:// and a port; empty
+# renders as localhost). Prints "host <name>", "origin <WEB_PUBLIC_URL>"
+# (the smoke URL's default) and "problem <text>" lines like
+# traefik_host_scan.
+caddy_host_scan() {
+  local json domain host web cms
+  json="$(cat)"
+  domain="$(compose_env_value DOMAIN <<<"${json}")"
+  web="$(compose_env_value AUTH_URL <<<"${json}")"
+  host="${domain#*://}"
+  host="${host%%[:/]*}"
+  echo "host ${host,,}"
+  echo "origin ${web%/}"
+  if [[ -z "${host}" ]] || ((${#host} > 253)) || ! [[ "${host,,}" =~ ${TRAEFIK_HOST_RE} ]]; then
+    echo "problem DOMAIN=${domain} is not a host name (optionally with http:// or https://)"
+    return 0
+  fi
+  if [[ "${host,,}" =~ ${TRAEFIK_HOST_PLACEHOLDER_RE} ]]; then
+    echo "problem DOMAIN=${domain} is a placeholder (infra/.env.example), not this instance's host name"
+  fi
+  web="$(url_host "${web}")"
+  cms="$(url_host "$(compose_env_value PUBLIC_URL <<<"${json}")")"
+  if [[ "${web}" != "${host,,}" ]]; then
+    echo "problem DOMAIN=${domain} is not the host of WEB_PUBLIC_URL (${web:-no http(s) URL})"
+  fi
+  if [[ "${cms}" != "${host,,}" ]]; then
+    echo "problem DOMAIN=${domain} is not the host of CMS_PUBLIC_URL (${cms:-no http(s) URL})"
   fi
 }
 
@@ -1033,6 +1097,7 @@ record_last_known_good() {
         echo "DEPLOYED_AT=$(date -Is)"
         echo "WEB_IMAGE=${web_id}"
         echo "CMS_IMAGE=${cms_id}"
+        [[ -z "${PULLED_DIGESTS:-}" ]] || echo "PULLED=${PULLED_DIGESTS}"
         echo "LIVE_SMOKE=${LIVE_SMOKE_RESULT}"
       } > "${tmp}" && own_like_git_dir "${tmp}" && mv -f "${tmp}" "${STATE_FILE}"
   }; then
@@ -1045,6 +1110,33 @@ record_last_known_good() {
   echo "  recorded in ${STATE_FILE}"
   # From now on the state is the rollback target; :rollback is no longer kept.
   rm -f "${BOOTSTRAP_FILE}" 2>/dev/null || true
+}
+
+# DEPLOY_IMAGE_SOURCE=registry: pulls the release's web and cms images, both
+# before any local tag moves, refuses them unless their labels name this
+# commit and version (a moved or foreign tag), then tags them as the images
+# compose runs (<project>-web, <project>-cms). No fallback to a build.
+# PULLED_DIGESTS: what was pulled, for the state.
+pull_release_images() {
+  local app ref labels
+  PULLED_DIGESTS=""
+  for app in web cms; do
+    docker pull "${IMAGE_REPO}-${app}:${RELEASE_VERSION}"
+  done
+  for app in web cms; do
+    ref="${IMAGE_REPO}-${app}:${RELEASE_VERSION}"
+    labels="$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}} {{index .Config.Labels "org.opencontainers.image.version"}}' "${ref}")"
+    if [[ "${labels}" != "${HEAD_SHA} ${RELEASE_VERSION}" ]]; then
+      echo "ERROR: ${ref} is labelled revision/version '${labels}', not ${HEAD_SHA} ${RELEASE_VERSION}:" >&2
+      echo "       not the image of this checkout. Nothing was tagged." >&2
+      return 1
+    fi
+    PULLED_DIGESTS+="${PULLED_DIGESTS:+ }$(docker image inspect --format '{{index .RepoDigests 0}}' "${ref}")"
+  done
+  for app in web cms; do
+    docker tag "${IMAGE_REPO}-${app}:${RELEASE_VERSION}" "${PROJECT}-${app}:latest"
+  done
+  echo "  pulled: ${PULLED_DIGESTS}"
 }
 
 # SHA tags this script created (the history file), newest last, each once.
@@ -1331,17 +1423,37 @@ if [[ -n "${meili_invalid_keys}" ]]; then
   echo "       Or unset MEILISEARCH_ENABLED and COMPOSE_PROFILES." >&2
   preflight_failed=1
 fi
-# 5A-T1: the host the Traefik routers match, from the rendered labels.
-traefik_scan="$("${COMPOSE[@]}" config --format json 2>/dev/null | traefik_host_scan)"
-TRAEFIK_HOST="$(sed -n 's/^host //p' <<<"${traefik_scan}")"
-traefik_problems="$(sed -n 's/^problem //p' <<<"${traefik_scan}")"
-if [[ -n "${traefik_problems}" ]]; then
+# 5A-T1: the host the edge serves: with Traefik the host every router
+# matches (the rendered labels), with Caddy its site address DOMAIN.
+if [[ "${DEPLOY_EDGE}" == traefik ]]; then
+  edge_scan="$("${COMPOSE[@]}" config --format json 2>/dev/null | traefik_host_scan)"
+else
+  edge_scan="$("${COMPOSE[@]}" config --format json 2>/dev/null | caddy_host_scan)"
+fi
+EDGE_HOST="$(sed -n 's/^host //p' <<<"${edge_scan}")"
+EDGE_ORIGIN="$(sed -n 's/^origin //p' <<<"${edge_scan}")"
+edge_problems="$(sed -n 's/^problem //p' <<<"${edge_scan}")"
+if [[ -n "${edge_problems}" ]]; then
   echo "ERROR: DOMAIN in infra/.env does not fit this instance:" >&2
-  while IFS= read -r problem; do echo "       - ${problem}" >&2; done <<<"${traefik_problems}"
-  echo "       Every Traefik router matches Host(\`\$DOMAIN\`), and web and cms are served on that one host:" >&2
+  while IFS= read -r problem; do echo "       - ${problem}" >&2; done <<<"${edge_problems}"
+  if [[ "${DEPLOY_EDGE}" == traefik ]]; then
+    echo "       Every Traefik router matches Host(\`\$DOMAIN\`), and web and cms are served on that one host:" >&2
+  else
+    echo "       The bundled Caddy serves web and cms on DOMAIN, that one host:" >&2
+  fi
   echo "       with this value the site would answer 404 or break sign-in, and an image rollback would not" >&2
-  echo "       help. Set DOMAIN to the bare public host name, the host of WEB_PUBLIC_URL and CMS_PUBLIC_URL" >&2
+  echo "       help. Set DOMAIN to the public host name, the host of WEB_PUBLIC_URL and CMS_PUBLIC_URL" >&2
   echo "       (docs/DEPLOYMENT.md §3.6 B), and re-run." >&2
+  preflight_failed=1
+fi
+# The Caddy edge next to a host Traefik: the bundled Caddy would claim
+# 80/443, and the Traefik routers of the running containers would go. A
+# stopped container counts: its labels say which edge this host runs.
+if [[ "${DEPLOY_EDGE}" != traefik &&
+  -n "$(docker ps -aq --filter label=traefik.enable=true --filter "label=com.docker.compose.project=${PROJECT}" 2>/dev/null || true)" ]]; then
+  echo "ERROR: containers of compose project ${PROJECT} carry Traefik labels, so this host runs a Traefik edge," >&2
+  echo "       and DEPLOY_EDGE is ${DEPLOY_EDGE}: the bundled Caddy would claim ports 80/443 next to it." >&2
+  echo "       Set DEPLOY_EDGE=traefik in infra/deploy.env (infra/deploy.env.example) and re-run." >&2
   preflight_failed=1
 fi
 if jwt_rotation_missing; then
@@ -1385,9 +1497,14 @@ if ((preflight_failed)); then
   exit 1
 fi
 log "Preflight OK"
-# The smoke checks follow the host the routers match (checked above).
-SMOKE_URL="${SMOKE_URL:-https://${TRAEFIK_HOST}}"
-echo "  Traefik host: ${TRAEFIK_HOST}; smoke URL: ${SMOKE_URL}"
+# The smoke checks follow the host the edge serves (checked above).
+if [[ "${DEPLOY_EDGE}" == traefik ]]; then
+  SMOKE_URL="${SMOKE_URL:-https://${EDGE_HOST}}"
+  echo "  Traefik host: ${EDGE_HOST}; smoke URL: ${SMOKE_URL}"
+else
+  SMOKE_URL="${SMOKE_URL:-${EDGE_ORIGIN}}"
+  echo "  Caddy host: ${EDGE_HOST}; smoke URL: ${SMOKE_URL}"
+fi
 if ((CHECK_ONLY)); then
   echo "  --check: nothing deployed."
   exit 0
@@ -1413,10 +1530,12 @@ live_smoke_mode() {
     echo "skip: LIVE_EVENTS_DISABLED=1 (the apps run on the polling fallback)"
   elif [[ ("${entra}" == "1" || "${oidc}" == "1") && "${local_signin}" != "1" ]]; then
     echo "run (identity provider only: the datetime check, then it skips the sign-in steps)"
-  elif [[ -r "${PASSWORDS_FILE}" || (-n "${SMOKE_PASSWORD:-}" && -n "${SMOKE_AUTHOR_PASSWORD:-}") ]]; then
+  elif [[ (-n "${PASSWORDS_FILE}" && -r "${PASSWORDS_FILE}") || (-n "${SMOKE_PASSWORD:-}" && -n "${SMOKE_AUTHOR_PASSWORD:-}") ]]; then
     echo "run"
-  else
+  elif [[ -n "${PASSWORDS_FILE}" ]]; then
     echo "skip: demo credentials file ${PASSWORDS_FILE} not readable — run infra/live-smoke.sh manually"
+  else
+    echo "skip: demo credentials not configured (PASSWORDS_FILE, or SMOKE_PASSWORD and SMOKE_AUTHOR_PASSWORD) — run infra/live-smoke.sh manually"
   fi
 }
 
@@ -1572,9 +1691,25 @@ else
   echo "         The deploy goes ahead anyway (infra/deploy.sh --require-green-ci refuses it)." >&2
 fi
 
+# Registry images: the checkout's one release tag names them, and it must be
+# the version package.json carries (the images' labels are checked after the
+# pull, step 3).
+if [[ "${DEPLOY_IMAGE_SOURCE}" == registry ]]; then
+  RELEASE_TAGS="$("${GIT[@]}" tag --points-at HEAD --list 'v*')"
+  PACKAGE_VERSION="$(sed -n 's/^  "version": "\([^"]*\)",$/\1/p' "${CHECKOUT}/package.json" 2>/dev/null || true)"
+  if [[ -z "${RELEASE_TAGS}" || "${RELEASE_TAGS}" == *$'\n'* || "${RELEASE_TAGS#v}" != "${PACKAGE_VERSION}" ]]; then
+    echo "ERROR: DEPLOY_IMAGE_SOURCE=registry needs exactly one release tag v<version> on ${NEW_TAG}, the version of" >&2
+    echo "       package.json (${PACKAGE_VERSION:-none}); found: $(tr '\n' ' ' <<<"${RELEASE_TAGS:-none}")" >&2
+    echo "       Check out a release tag (git checkout v<version>), or build: DEPLOY_IMAGE_SOURCE=build. Nothing was changed." >&2
+    exit 1
+  fi
+  RELEASE_VERSION="${PACKAGE_VERSION}"
+  echo "  release: v${RELEASE_VERSION} (${IMAGE_REPO}-{web,cms}:${RELEASE_VERSION})"
+fi
+
 if ((DRY_RUN)); then
   log "Dry run: the plan (nothing is changed)"
-  if [[ "${PROJECT}" == "infra" ]]; then
+  if [[ "${PROJECT}" == "infra" && -n "${BACKUP_RUN}" ]]; then
     echo "  1. pre-deploy backup: ${BACKUP_RUN_CMD[*]} (none on a first install)"
   else
     echo "  1. pre-deploy backup: SINNLOS_BACKUP_KIND=predeploy ${BACKUP_SCRIPT} (none on a first install)"
@@ -1583,7 +1718,11 @@ if ((DRY_RUN)); then
   keep_running_images
   resolve_rollback_target
   echo "     -> ${ROLLBACK_ORIGIN:-none: nothing ran here before (first install)}"
-  echo "  3. BUILDX_NO_DEFAULT_ATTESTATIONS=1 ${COMPOSE[*]} build, then ${COMPOSE[*]} up -d --no-build"
+  if [[ "${DEPLOY_IMAGE_SOURCE}" == registry ]]; then
+    echo "  3. docker pull ${IMAGE_REPO}-{web,cms}:${RELEASE_VERSION}, check their labels, tag them ${PROJECT}-{web,cms}, then ${COMPOSE[*]} up -d --no-build"
+  else
+    echo "  3. SINNLOS_VERSION=<package.json> SINNLOS_REVISION=${NEW_TAG} BUILDX_NO_DEFAULT_ATTESTATIONS=1 ${COMPOSE[*]} build, then ${COMPOSE[*]} up -d --no-build"
+  fi
   LIVE_SMOKE_MODE="$(live_smoke_mode)"
   echo "  4. smoke check ${SMOKE_URL}; live-smoke: ${LIVE_SMOKE_MODE}"
   if unrecorded_live_smoke_skip; then
@@ -1621,12 +1760,13 @@ fi
 # still fails the backup (and the deploy), as it should.
 if ! docker inspect "${PROJECT}-db-1" >/dev/null 2>&1 && ! docker volume inspect "${PROJECT}_pgdata" >/dev/null 2>&1; then
   echo "  first install: neither ${PROJECT}-db-1 nor the volume ${PROJECT}_pgdata exists, nothing to back up"
-elif [[ "${PROJECT}" == "infra" ]]; then
-  # Production: backup-run's service sinnlos (infra-db-1, infra_cms_uploads,
-  # infra/.env; the SINNLOS_* overrides above do not apply). It waits for a
-  # running nightly backup (its lock). Any failure, a missing sudoers
-  # drop-in included (sudo -n then refuses), stops the deploy here through
-  # the ERR trap, before the containers are touched.
+elif [[ "${PROJECT}" == "infra" && -n "${BACKUP_RUN}" ]]; then
+  # The host's backup service (the owner's: backup-run's service sinnlos,
+  # infra-db-1, infra_cms_uploads, infra/.env; the SINNLOS_* overrides above
+  # do not apply). It waits for a running nightly backup (its lock). Any
+  # failure, a missing sudoers drop-in included (sudo -n then refuses),
+  # stops the deploy here through the ERR trap, before the containers are
+  # touched.
   echo "  ${BACKUP_RUN_CMD[*]}"
   "${BACKUP_RUN_CMD[@]}"
 elif [[ -x "${BACKUP_SCRIPT}" ]]; then
@@ -1651,11 +1791,19 @@ fi
 # --- 3. Build + restart -----------------------------------------------------
 PHASE="build"
 log "Building web and cms"
-# Without BuildKit's default provenance attestation every build is a new
-# image index, also for unchanged content: :latest would move although
-# nothing changed (and, on the containerd image store, leave the running
-# image without a name; keep_running_images covers that as well).
-BUILDX_NO_DEFAULT_ATTESTATIONS=1 "${COMPOSE[@]}" build
+if [[ "${DEPLOY_IMAGE_SOURCE}" == registry ]]; then
+  pull_release_images
+else
+  # Without BuildKit's default provenance attestation every build is a new
+  # image index, also for unchanged content: :latest would move although
+  # nothing changed (and, on the containerd image store, leave the running
+  # image without a name; keep_running_images covers that as well).
+  # The images' version and revision labels (compose build args): the
+  # checkout's package.json version and commit.
+  SINNLOS_VERSION="$(sed -n 's/^  "version": "\([^"]*\)",$/\1/p' "${CHECKOUT}/package.json" 2>/dev/null || true)"
+  export SINNLOS_VERSION="${SINNLOS_VERSION:-unknown}" SINNLOS_REVISION="${NEW_TAG}"
+  BUILDX_NO_DEFAULT_ATTESTATIONS=1 "${COMPOSE[@]}" build
+fi
 PHASE="start"
 log "Starting the stack"
 if ! "${COMPOSE[@]}" up -d --no-build; then
