@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getTranslations } from "next-intl/server";
+import { SiteFooter } from "@/components/layout/site-footer";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { RegisterForm } from "@/components/auth/register-form";
 import { REGISTRATION_ENABLED } from "@/lib/auth-config";
@@ -21,7 +22,7 @@ export default async function RegisterPage() {
   const t = await getTranslations("auth");
 
   return (
-    <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-linear-to-br from-background via-background to-primary/5 p-6">
+    <div className="relative flex min-h-screen flex-col items-center justify-center overflow-hidden bg-linear-to-br from-background via-background to-primary/5 p-6">
       {/* Decorative background glow */}
       <div
         aria-hidden="true"
@@ -50,6 +51,7 @@ export default async function RegisterPage() {
           </p>
         </CardContent>
       </Card>
+      <SiteFooter className="relative mt-6" />
     </div>
   );
 }

@@ -4,6 +4,7 @@ import type { Route } from "next";
 import { getTranslations } from "next-intl/server";
 import { getSession } from "@/lib/session";
 import { Button } from "@/components/ui/button";
+import { SiteFooter } from "@/components/layout/site-footer";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { LocalSignInForm } from "@/components/auth/local-sign-in-form";
 import { LOCAL_ENABLED, MICROSOFT_ENABLED, OIDC, REGISTRATION_ENABLED } from "@/lib/auth-config";
@@ -51,7 +52,7 @@ export default async function SignInPage({
       : t("signInDescLocal");
 
   return (
-    <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-linear-to-br from-background via-background to-primary/5 p-6">
+    <div className="relative flex min-h-screen flex-col items-center justify-center overflow-hidden bg-linear-to-br from-background via-background to-primary/5 p-6">
       {/* Decorative background glow */}
       <div
         aria-hidden="true"
@@ -126,6 +127,7 @@ export default async function SignInPage({
           <p className="text-center text-xs text-muted-foreground">{t("itPolicy")}</p>
         </CardContent>
       </Card>
+      <SiteFooter className="relative mt-6" />
     </div>
   );
 }

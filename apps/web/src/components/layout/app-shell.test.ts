@@ -15,6 +15,7 @@ const state = vi.hoisted(() => ({ locale: "en" as "en" | "de" }));
 vi.mock("./sidebar", () => ({ Sidebar: () => createElement("nav", { id: "sidebar" }) }));
 vi.mock("./topbar", () => ({ Topbar: () => createElement("header", { id: "topbar" }) }));
 vi.mock("./viewer-mobile-nav", () => ({ ViewerMobileNav: () => null }));
+vi.mock("./site-footer", () => ({ SiteFooter: () => createElement("footer", { id: "footer" }) }));
 vi.mock("next/navigation", () => ({ usePathname: () => "/" }));
 vi.mock("next-intl/server", () => ({
   getTranslations: async (namespace: "common") => {
@@ -36,6 +37,14 @@ describe("AppShell bottom room (#71)", () => {
     expect(main.split(" ")).toEqual(
       expect.arrayContaining(["pb-[calc(5rem+env(safe-area-inset-bottom))]", "md:pb-8"]),
     );
+  });
+});
+
+describe("AppShell footer (v0.26)", () => {
+  it("puts the footer inside <main>, above the bottom nav's room", async () => {
+    const html = await render();
+    expect(html.indexOf('id="footer"')).toBeGreaterThan(html.indexOf(`<main id="${MAIN_ID}"`));
+    expect(html.indexOf('id="footer"')).toBeLessThan(html.indexOf("</main>"));
   });
 });
 
