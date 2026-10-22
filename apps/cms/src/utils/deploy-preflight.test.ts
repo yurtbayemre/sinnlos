@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { digestsEnabled } from "../digest/send-digests";
 import { EntraConfigError, parseEntraConfig } from "../entra/config";
+import { OidcConfigError, parseOidcConfig } from "../oidc/config";
 import {
   GUARDED_SECRET_KEYS,
   PLACEHOLDER_MARKERS,
@@ -55,7 +56,8 @@ import {
  *  10. B05: the preflight reads DIGESTS_DISABLED like the cms
  *      (parseEnvFlag: 1/true/yes/on, trimmed, any case), and live-smoke's
  *      switches come from the env compose hands the apps
- *      (LIVE_EVENTS_DISABLED, the Entra-only case), not from the shell;
+ *      (LIVE_EVENTS_DISABLED, the identity-provider-only case), not from
+ *      the shell;
  *  11. FX40 (owner decision 2026-10-12): for a target cms from before the
  *      token version of batch 13, or one it cannot check, the hint prints
  *      the mandatory JWT_SECRET rotation before its start commands, and
@@ -554,6 +556,199 @@ describe("Entra preflight (D-ENTRA-01)", () => {
     // The same switch in the web (lib/auth-config.ts).
     expect(WEB_AUTH_CONFIG).toContain('env.ENTRA_ENABLED !== "1"');
     expect(WEB_AUTH_CONFIG).toContain("AUTH_MICROSOFT_ENTRA_ID_SECRET");
+  });
+});
+
+describe("OIDC preflight (v0.25.0)", () => {
+  const SECRET = "0123456789abcdef0123456789abcdef";
+
+  /** The cms and web env compose builds from one infra/.env (the OIDC keys, compose defaults). */
+  function composeEnv(env: Record<string, string>): Record<string, string> {
+    return {
+      ENTRA_ENABLED: env.ENTRA_ENABLED ?? "0",
+      OIDC_ENABLED: env.OIDC_ENABLED ?? "0",
+      OIDC_ISSUER: env.OIDC_ISSUER ?? "",
+      OIDC_CLIENT_ID: env.OIDC_CLIENT_ID ?? "",
+      OIDC_CLIENT_SECRET: env.OIDC_CLIENT_SECRET ?? "",
+      OIDC_EXCHANGE_SECRET: env.OIDC_EXCHANGE_SECRET ?? "",
+      OIDC_SCOPE: env.OIDC_SCOPE ?? "openid profile email",
+      OIDC_DISPLAY_NAME: env.OIDC_DISPLAY_NAME ?? "Single Sign-On",
+      OIDC_ROLES_CLAIM: env.OIDC_ROLES_CLAIM ?? "roles",
+      OIDC_DEPARTMENT_CLAIM: env.OIDC_DEPARTMENT_CLAIM ?? "",
+      OIDC_ZITADEL_ORG_ID: env.OIDC_ZITADEL_ORG_ID ?? "",
+      OIDC_DEFAULT_ROLE: env.OIDC_DEFAULT_ROLE ?? "deny",
+      OIDC_SESSION_TTL: env.OIDC_SESSION_TTL ?? "12h",
+      OIDC_ALLOW_HTTP: env.OIDC_ALLOW_HTTP ?? "0",
+    };
+  }
+
+  const valid = {
+    OIDC_ENABLED: "1",
+    OIDC_ISSUER: "https://sso.example.com/realms/sinnlos",
+    OIDC_CLIENT_ID: "sinnlos-web",
+    OIDC_CLIENT_SECRET: "client-secret-value",
+    OIDC_EXCHANGE_SECRET: SECRET,
+  };
+  const zitadel = {
+    ...valid,
+    OIDC_ISSUER: "https://sinnlos-abc123.zitadel.cloud",
+    OIDC_ROLES_CLAIM: "urn:zitadel:iam:org:project:roles",
+    OIDC_ZITADEL_ORG_ID: "396173383835910147",
+  };
+
+  // The contract's rules (deep-dive plan-oidc.md "v0.25.0 build contract"):
+  // env → the infra/.env keys the cms and the web refuse to start with.
+  const CASES: [Record<string, string>, string[]][] = [
+    [valid, []],
+    [{ ...valid, OIDC_ISSUER: "https://auth.example.com/application/o/sinnlos/" }, []],
+    [{ ...valid, OIDC_ISSUER: ` ${valid.OIDC_ISSUER} ` }, []],
+    [zitadel, []],
+    [{ ...zitadel, OIDC_DEPARTMENT_CLAIM: "urn:zitadel:iam:user:metadata.department" }, []],
+    [{ ...valid, OIDC_ISSUER: "http://localhost:18080/realms/sinnlos" }, ["OIDC_ISSUER"]],
+    [{ ...valid, OIDC_ISSUER: "http://localhost:18080/realms/sinnlos", OIDC_ALLOW_HTTP: "1" }, []],
+    [
+      { ...valid, OIDC_ISSUER: "http://localhost:18080/realms/sinnlos", OIDC_ALLOW_HTTP: "true" },
+      ["OIDC_ISSUER"],
+    ],
+    [{ ...valid, OIDC_ISSUER: "" }, ["OIDC_ISSUER"]],
+    [{ ...valid, OIDC_ISSUER: "sso.example.com/realms/sinnlos" }, ["OIDC_ISSUER"]],
+    [{ ...valid, OIDC_ISSUER: "https://" }, ["OIDC_ISSUER"]],
+    [{ ...valid, OIDC_ISSUER: "https://sso.example.com/realms/sin nlos" }, ["OIDC_ISSUER"]],
+    [{ ...valid, OIDC_ISSUER: `https://sso.example.com/${"a".repeat(231)}` }, []],
+    [{ ...valid, OIDC_ISSUER: `https://sso.example.com/${"a".repeat(232)}` }, ["OIDC_ISSUER"]],
+    [{ ...valid, OIDC_CLIENT_ID: "" }, ["OIDC_CLIENT_ID"]],
+    [{ ...valid, OIDC_CLIENT_ID: "   " }, ["OIDC_CLIENT_ID"]],
+    [{ ...valid, OIDC_CLIENT_ID: "c".repeat(256) }, ["OIDC_CLIENT_ID"]],
+    [{ ...valid, OIDC_CLIENT_SECRET: "" }, ["OIDC_CLIENT_SECRET"]],
+    [{ ...valid, OIDC_EXCHANGE_SECRET: "x".repeat(31) }, ["OIDC_EXCHANGE_SECRET"]],
+    [{ ...valid, OIDC_EXCHANGE_SECRET: ` ${"y".repeat(30)} ` }, ["OIDC_EXCHANGE_SECRET"]],
+    [{ ...valid, OIDC_EXCHANGE_SECRET: `change-me-${"z".repeat(30)}` }, ["OIDC_EXCHANGE_SECRET"]],
+    [{ ...valid, ENTRA_ENABLED: "1" }, ["ENTRA_ENABLED"]],
+    [{ ...valid, OIDC_DEFAULT_ROLE: "member" }, []],
+    [{ ...valid, OIDC_DEFAULT_ROLE: "guest" }, []],
+    [{ ...valid, OIDC_DEFAULT_ROLE: "" }, []],
+    [{ ...valid, OIDC_DEFAULT_ROLE: "editor" }, ["OIDC_DEFAULT_ROLE"]],
+    [{ ...valid, OIDC_SESSION_TTL: "7d" }, []],
+    [{ ...valid, OIDC_SESSION_TTL: "8d" }, ["OIDC_SESSION_TTL"]],
+    [{ ...valid, OIDC_SESSION_TTL: "12" }, ["OIDC_SESSION_TTL"]],
+    [{ ...zitadel, OIDC_ZITADEL_ORG_ID: "" }, ["OIDC_ZITADEL_ORG_ID"]],
+    [{ ...valid, OIDC_ZITADEL_ORG_ID: "acme" }, ["OIDC_ZITADEL_ORG_ID"]],
+    [{ ...valid, OIDC_ZITADEL_ORG_ID: "396173383835910147" }, []],
+    [{ ...valid, OIDC_SCOPE: "openid" }, []],
+    [{ ...valid, OIDC_SCOPE: "" }, []],
+    [{ ...valid, OIDC_SCOPE: "profile email" }, ["OIDC_SCOPE"]],
+    [{ ...valid, OIDC_SCOPE: "openidx profile" }, ["OIDC_SCOPE"]],
+    [{ ...valid, OIDC_DISPLAY_NAME: "d".repeat(40) }, []],
+    [{ ...valid, OIDC_DISPLAY_NAME: "d".repeat(41) }, ["OIDC_DISPLAY_NAME"]],
+    [{ ...valid, OIDC_ROLES_CLAIM: "resource_access.sinnlos-web.roles" }, []],
+    [{ ...valid, OIDC_ROLES_CLAIM: "roles..x" }, ["OIDC_ROLES_CLAIM"]],
+    [{ ...valid, OIDC_ROLES_CLAIM: "my roles" }, ["OIDC_ROLES_CLAIM"]],
+    [{ ...valid, OIDC_DEPARTMENT_CLAIM: "department" }, []],
+    [{ ...valid, OIDC_DEPARTMENT_CLAIM: ".department" }, ["OIDC_DEPARTMENT_CLAIM"]],
+    [
+      { OIDC_ENABLED: "1" },
+      ["OIDC_ISSUER", "OIDC_CLIENT_ID", "OIDC_CLIENT_SECRET", "OIDC_EXCHANGE_SECRET"],
+    ],
+  ];
+
+  /**
+   * What the cms (parseOidcConfig) and the web (its own half: client secret,
+   * scope, button label; lib/auth-config.ts parseOidcWebConfig, same rules)
+   * refuse, as infra/.env keys: the table above must be exactly that.
+   */
+  function refusedByTheApps(env: Record<string, string>): string[] {
+    const composed = composeEnv(env);
+    const keys: string[] = [];
+    try {
+      parseOidcConfig(composed);
+    } catch (err) {
+      if (!(err instanceof OidcConfigError)) throw err;
+      keys.push(...err.issues.map((issue) => issue.variable));
+    }
+    if (composed.OIDC_ENABLED === "1") {
+      if (composed.OIDC_CLIENT_SECRET.trim() === "") keys.push("OIDC_CLIENT_SECRET");
+      const scope = composed.OIDC_SCOPE.trim();
+      if (scope !== "" && !scope.split(/\s+/).includes("openid")) keys.push("OIDC_SCOPE");
+      if (composed.OIDC_DISPLAY_NAME.trim().length > 40) keys.push("OIDC_DISPLAY_NAME");
+    }
+    return [...new Set(keys)];
+  }
+
+  it("the table is what the cms and the web refuse to start with", () => {
+    for (const [env, keys] of CASES) {
+      expect(sorted(refusedByTheApps(env)), JSON.stringify(env)).toEqual(sorted(keys));
+    }
+  });
+
+  // The OIDC findings only (ENTRA_ENABLED=1 also brings the Entra block's own).
+  const scan = (env: Record<string, string>) =>
+    runAwk(PREFLIGHT_AWK, { fatal_keys: "", warn_keys: "" }, composeJson(composeEnv(env))).filter(
+      (finding) => finding.startsWith("oidc-"),
+    );
+
+  it.skipIf(!HAS_AWK)(
+    "refuses exactly the settings of the contract with OIDC_ENABLED=1",
+    () => {
+      for (const [env, keys] of CASES) {
+        expect(sorted(scan(env)), JSON.stringify(env)).toEqual(
+          sorted(keys.map((key) => `oidc-invalid ${key}`)),
+        );
+      }
+    },
+    30_000,
+  );
+
+  it.skipIf(!HAS_AWK)("ignores every OIDC_* value unless OIDC_ENABLED is exactly 1", () => {
+    const stale = { OIDC_ISSUER: "http://x", OIDC_EXCHANGE_SECRET: "short", ENTRA_ENABLED: "1" };
+    for (const flag of ["0", "", "true", "yes", " 1"]) {
+      expect(scan({ ...stale, OIDC_ENABLED: flag }), flag).toEqual([]);
+    }
+  });
+
+  it("makes an invalid OIDC configuration fatal, in the preflight", () => {
+    const gate = 'if [[ -n "${oidc_invalid_keys}" ]]; then';
+    const block = DEPLOY.slice(DEPLOY.indexOf(gate));
+    expect(DEPLOY.indexOf(gate)).toBeGreaterThan(-1);
+    expect(block.slice(0, block.indexOf("\nfi\n"))).toContain("preflight_failed=1");
+    expect(DEPLOY.indexOf(gate)).toBeLessThan(DEPLOY.indexOf('log "Preflight OK"'));
+  });
+
+  it("wires the env as the apps read it (compose)", () => {
+    const service = (name: string) => {
+      const start = COMPOSE.indexOf(`\n  ${name}:\n`);
+      const next = COMPOSE.slice(start + 1).search(/\n {2}[a-z]+:\n/);
+      return COMPOSE.slice(start, next < 0 ? undefined : start + 1 + next);
+    };
+    const cms = service("cms");
+    const web = service("web");
+    for (const line of [
+      "OIDC_ENABLED: ${OIDC_ENABLED:-0}",
+      "OIDC_ISSUER: ${OIDC_ISSUER:-}",
+      "OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:-}",
+      "OIDC_EXCHANGE_SECRET: ${OIDC_EXCHANGE_SECRET:-}",
+      "OIDC_ZITADEL_ORG_ID: ${OIDC_ZITADEL_ORG_ID:-}",
+      "OIDC_ALLOW_HTTP: ${OIDC_ALLOW_HTTP:-0}",
+    ]) {
+      expect(cms, line).toContain(line);
+      expect(web, line).toContain(line);
+    }
+    for (const line of [
+      "OIDC_ROLES_CLAIM: ${OIDC_ROLES_CLAIM:-roles}",
+      "OIDC_DEPARTMENT_CLAIM: ${OIDC_DEPARTMENT_CLAIM:-}",
+      "OIDC_DEFAULT_ROLE: ${OIDC_DEFAULT_ROLE:-deny}",
+      "OIDC_SESSION_TTL: ${OIDC_SESSION_TTL:-12h}",
+    ]) {
+      expect(cms, line).toContain(line);
+    }
+    for (const line of [
+      "OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:-}",
+      "OIDC_SCOPE: ${OIDC_SCOPE:-openid profile email}",
+      "OIDC_DISPLAY_NAME: ${OIDC_DISPLAY_NAME:-Single Sign-On}",
+    ]) {
+      expect(web, line).toContain(line);
+    }
+    // The cms verifies the token itself and never needs the client secret.
+    expect(cms).not.toContain("OIDC_CLIENT_SECRET");
   });
 });
 
@@ -1864,15 +2059,28 @@ describe(
       },
     );
 
-    it.skipIf(!HAS_BASH)("runs it on an Entra-only instance without the credentials file", () => {
-      expect(
-        liveSmokeMode({ LIVE_EVENTS_DISABLED: "0", ENTRA_ENABLED: "1", AUTH_LOCAL_ENABLED: "0" }),
-      ).toMatch(/^run \(Entra-only/);
-      // With local sign-in next to Entra the demo accounts sign in as usual.
-      expect(
-        liveSmokeMode({ LIVE_EVENTS_DISABLED: "0", ENTRA_ENABLED: "1", AUTH_LOCAL_ENABLED: "1" }),
-      ).toMatch(/^skip: demo credentials file .* not readable/);
-    });
+    it.skipIf(!HAS_BASH)(
+      "runs it on an identity-provider-only instance (Entra or OIDC) without the credentials file",
+      () => {
+        for (const idp of ["ENTRA_ENABLED", "OIDC_ENABLED"]) {
+          expect(
+            liveSmokeMode({ LIVE_EVENTS_DISABLED: "0", [idp]: "1", AUTH_LOCAL_ENABLED: "0" }),
+            idp,
+          ).toMatch(/^run \(identity provider only/);
+          // With local sign-in next to the provider the demo accounts sign in as usual.
+          expect(
+            liveSmokeMode({ LIVE_EVENTS_DISABLED: "0", [idp]: "1", AUTH_LOCAL_ENABLED: "1" }),
+            idp,
+          ).toMatch(/^skip: demo credentials file .* not readable/);
+        }
+        // Exactly "1", as the apps read it.
+        expect(liveSmokeMode({ LIVE_EVENTS_DISABLED: "0", OIDC_ENABLED: "true" })).toMatch(
+          /^skip: demo credentials file .* not readable/,
+        );
+        // The record step keys on that prefix.
+        expect(DEPLOY).toContain('"${LIVE_SMOKE_MODE}" == "run (identity provider only"*');
+      },
+    );
 
     it.skipIf(!HAS_BASH)("needs the credentials file, or both passwords in the environment", () => {
       expect(liveSmokeMode({ LIVE_EVENTS_DISABLED: "0" })).toMatch(/^skip: demo credentials file/);

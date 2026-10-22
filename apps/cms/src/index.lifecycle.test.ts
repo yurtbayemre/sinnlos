@@ -33,10 +33,6 @@ vi.mock("./database/ensure-timestamptz", () => ({
   assertTimestamptzContract: step("assertTimestamptzContract"),
 }));
 vi.mock("./utils/env-guard", () => ({ enforceSecretGuard: step("enforceSecretGuard") }));
-vi.mock("./utils/sign-in-policy", () => ({
-  localSignInEnabled: () => true,
-  refuseOidcBeforeAdapter: syncStep("refuseOidcBeforeAdapter"),
-}));
 vi.mock("./bootstrap/user-contact-sanitizer", () => ({
   registerUserContactSanitizer: step("registerUserContactSanitizer"),
 }));
@@ -64,11 +60,14 @@ vi.mock("./bootstrap/advanced-settings", () => ({
 }));
 vi.mock("./bootstrap/auth-providers", () => ({
   checkEntraConfig: syncStep("checkEntraConfig"),
+  checkOidcConfig: syncStep("checkOidcConfig"),
   syncAuthProviders: step("syncAuthProviders"),
   reportEntraStatus: syncStep("reportEntraStatus"),
+  reportOidcStatus: step("reportOidcStatus"),
 }));
 vi.mock("./bootstrap/entra-identity-index", () => ({
   ensureEntraIdentityIndex: step("ensureEntraIdentityIndex"),
+  ensureOidcIdentityIndex: step("ensureOidcIdentityIndex"),
 }));
 vi.mock("./utils/poll-audience-backfill", () => ({
   backfillPollAudience: step("backfillPollAudience"),
@@ -102,7 +101,7 @@ describe("src/index.ts lifecycle order (B01)", () => {
       "registerTimestamptzGuard",
       "enforceSecretGuard",
       "checkEntraConfig",
-      "refuseOidcBeforeAdapter",
+      "checkOidcConfig",
       "registerUserContactSanitizer",
       "registerRestrictedRelationGuard",
       "registerDocumentMiddlewares",
@@ -122,6 +121,8 @@ describe("src/index.ts lifecycle order (B01)", () => {
       "ensureEntraIdentityIndex",
       "syncAuthProviders",
       "reportEntraStatus",
+      "ensureOidcIdentityIndex",
+      "reportOidcStatus",
       "backfillPollAudience",
       "backfillDepartmentAudience",
       "backfillTargetingFlags",

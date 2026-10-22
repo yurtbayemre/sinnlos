@@ -64,6 +64,19 @@
     "body": "At the next sign-in the account takes its role from Entra. Until then it keeps the current role.",
     "confirm": "Hand back"
   },
+  "oidc": {
+    "signIn": "Single Sign-On",
+    "lockedHint": "Comes from the sign-in provider and is synced at every sign-in.",
+    "list": "from the sign-in provider",
+    "roleSource": "The role comes from the sign-in provider.",
+    "roleHint": "A role set by hand overrides the sign-in provider for this account. Without an intranet role in the sign-in provider the account still cannot sign in.",
+    "handBack": {
+      "button": "Hand the role back to the sign-in provider",
+      "title": "Hand the role back to the sign-in provider?",
+      "body": "At the next sign-in the account takes its role from the sign-in provider. Until then it keeps the current role.",
+      "confirm": "Hand back"
+    }
+  },
   "teams": {
     "label": "Teams",
     "none": "In no team.",

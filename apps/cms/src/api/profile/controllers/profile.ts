@@ -36,7 +36,9 @@
  * disable the inputs. The Entra columns themselves never leave /api/me.
  */
 import { GUEST, hasRole, type RoleType as IntranetRoleType } from "../../../bootstrap/roles";
-import { ENTRA_MANAGED_PROFILE_FIELDS, isEntraBound } from "../../../entra/profile";
+import { ENTRA_MANAGED_PROFILE_FIELDS } from "../../../entra/profile";
+import { idpOf } from "../../../idp/exchange-core";
+import { OIDC_MANAGED_PROFILE_FIELDS } from "../../../oidc/provision";
 import {
   SENSITIVE_USER_FIELDS,
   USER_UID,
@@ -216,9 +218,16 @@ export function toSelfProfile(row: Row): Row {
   return out;
 }
 
-/** The profile fields the caller cannot edit because Entra owns them. */
+/**
+ * The profile fields the caller cannot edit because their identity provider
+ * owns them: Entra the four, OIDC the name (v0.25.0). The name of the
+ * function and of the answer's key stay (the web reads entraManagedFields).
+ */
 export function entraManagedFields(row: Row): string[] {
-  return isEntraBound(row) ? [...ENTRA_MANAGED_PROFILE_FIELDS] : [];
+  const idp = idpOf(row);
+  if (idp === "entra") return [...ENTRA_MANAGED_PROFILE_FIELDS];
+  if (idp === "oidc") return [...OIDC_MANAGED_PROFILE_FIELDS];
+  return [];
 }
 
 /**
@@ -240,6 +249,7 @@ async function loadProfile(userId: number, callerRoleType: RoleType): Promise<Ro
     ...toSelfProfile(full),
     manager: toManagerSummary(full.manager, callerRoleType),
     entraManagedFields: entraManagedFields(full),
+    managedBy: idpOf(full),
   };
 }
 
@@ -296,10 +306,10 @@ export default {
     const raw = ctx.request.body;
     const body = isRow(raw) && isRow(raw.data) ? raw.data : isRow(raw) ? raw : {};
     const ignoresDigest = hasRole(user, DIGEST_IGNORED_ROLE_TYPES);
-    // Entra owns these four for a bound caller (read fresh, not from the JWT).
+    // The identity provider owns these for a bound caller (read fresh, not from the JWT).
     const own: unknown = await strapi.db.query(USER_UID).findOne({
       where: { id: user.id },
-      select: ["id", "entraTenantId"],
+      select: ["id", "entraTenantId", "oidcIssuer"],
     });
     const locked = new Set<string>(isRow(own) ? entraManagedFields(own) : []);
     const data: Record<string, unknown> = {};
@@ -315,7 +325,7 @@ export default {
     }
     if (Object.keys(data).length === 0) {
       if (!dropped) return ctx.badRequest("No editable fields provided");
-      // Only Entra-owned fields were sent: nothing to write, not an error.
+      // Only provider-owned fields were sent: nothing to write, not an error.
       const unchanged = await loadProfile(user.id, user.role?.type);
       if (!unchanged) return ctx.notFound();
       return ctx.send({ data: unchanged });

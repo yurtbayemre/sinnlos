@@ -6,8 +6,8 @@ import { getSession } from "@/lib/session";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { LocalSignInForm } from "@/components/auth/local-sign-in-form";
-import { LOCAL_ENABLED, MICROSOFT_ENABLED, REGISTRATION_ENABLED } from "@/lib/auth-config";
-import { signInWithMicrosoft } from "@/lib/auth-actions";
+import { LOCAL_ENABLED, MICROSOFT_ENABLED, OIDC, REGISTRATION_ENABLED } from "@/lib/auth-config";
+import { signInWithMicrosoft, signInWithOidc } from "@/lib/auth-actions";
 import { signInErrorKey } from "@/lib/entra-exchange";
 import { safeInternalPath } from "@/lib/utils";
 
@@ -44,7 +44,11 @@ export default async function SignInPage({
     ? LOCAL_ENABLED
       ? t("signInDescBoth")
       : t("signInDescMicrosoft")
-    : t("signInDescLocal");
+    : OIDC
+      ? LOCAL_ENABLED
+        ? t("signInDescSsoBoth")
+        : t("signInDescSso")
+      : t("signInDescLocal");
 
   return (
     <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-linear-to-br from-background via-background to-primary/5 p-6">
@@ -87,7 +91,20 @@ export default async function SignInPage({
             </form>
           )}
 
-          {MICROSOFT_ENABLED && LOCAL_ENABLED && (
+          {OIDC && (
+            <form action={signInWithOidc}>
+              <input type="hidden" name="from" value={from} />
+              <Button
+                type="submit"
+                size="lg"
+                className="w-full transition-transform active:scale-[0.99]"
+              >
+                {OIDC.displayName}
+              </Button>
+            </form>
+          )}
+
+          {(MICROSOFT_ENABLED || OIDC) && LOCAL_ENABLED && (
             <div className="flex items-center gap-3 text-xs text-muted-foreground">
               <div className="h-px flex-1 bg-border" />
               {tCommon("or")}

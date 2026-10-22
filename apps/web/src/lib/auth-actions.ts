@@ -38,6 +38,12 @@ export async function signInWithMicrosoft(formData: FormData) {
   });
 }
 
+export async function signInWithOidc(formData: FormData) {
+  // Same deep-link restore as Microsoft. Sign-out ends only the sinnlos
+  // session for OIDC (no end-session call; deep-dive plan-oidc.md).
+  await signIn("oidc", { redirectTo: safeInternalPath(formData.get("from")) });
+}
+
 /** What the sign-in form shows (auth.error_<code>). */
 export type SignInErrorCode = "invalidCredentials" | "rateLimited";
 

@@ -1,7 +1,8 @@
 /**
  * Auth.js (NextAuth v5) config.
  *
- * Two sign-in paths, toggled by env (see @/lib/auth-config):
+ * Three sign-in paths, toggled by env (see @/lib/auth-config); Entra and
+ * OIDC never together:
  *
  *  - Microsoft Entra ID (ENTRA_ENABLED=1, D-ENTRA-01): Auth.js runs the OIDC
  *    code flow against exactly one tenant (the issuer is computed from its
@@ -12,6 +13,11 @@
  *    Strapi JWT; the result reaches the jwt callback through a WeakMap
  *    keyed by the `account` object Auth.js hands to both. A refusal
  *    becomes a redirect to /sign-in?error=entra_<code>.
+ *  - OIDC (OIDC_ENABLED=1, v0.25.0: Keycloak, authentik, Zitadel): a
+ *    generic `type: "oidc"` provider against OIDC_ISSUER (Auth.js compares
+ *    it with the discovery document); the signIn callback POSTs the ID
+ *    token to the cms the same way (/api/auth/oidc/exchange), refusals land
+ *    on /sign-in?error=oidc_<code>.
  *  - Local credentials: email+password are verified directly against
  *    Strapi's /api/auth/local endpoint, which returns the Strapi JWT
  *    (lib/auth/credentials.ts, behind the login limiter).
@@ -39,14 +45,15 @@
  *    object reaches jwt() (lib/actions/callback/index.js);
  *  - a jwt callback returning null clears the cookie (lib/actions/session.js).
  */
-import NextAuth from "next-auth";
+import NextAuth, { customFetch } from "next-auth";
 import MicrosoftEntraID, {
   type MicrosoftEntraIDProfile,
 } from "next-auth/providers/microsoft-entra-id";
 import Credentials from "next-auth/providers/credentials";
 import { DEMO_MODE, STRAPI_URL } from "@/lib/config";
-import { ENTRA, LOCAL_ENABLED } from "@/lib/auth-config";
-import { createAuthCallbacks, ENTRA_PROVIDER_ID } from "@/lib/auth/callbacks";
+import { ENTRA, LOCAL_ENABLED, OIDC } from "@/lib/auth-config";
+import { createAuthCallbacks, ENTRA_PROVIDER_ID, OIDC_PROVIDER_ID } from "@/lib/auth/callbacks";
+import { oidcFetch } from "@/lib/auth/oidc-fetch";
 import { authorizeCredentials } from "@/lib/auth/credentials";
 import { clientIpFrom, loginRateLimiter } from "@/lib/login-rate-limit";
 
@@ -67,7 +74,23 @@ if (!IS_BUILD && DEMO_MODE && process.env.NODE_ENV === "production") {
 
 // Session / User / JWT augmentation lives in @/types/next-auth.d.ts.
 
-export { ENTRA_PROVIDER_ID };
+export { ENTRA_PROVIDER_ID, OIDC_PROVIDER_ID };
+
+/**
+ * The claims-only profile of an OIDC sign-in: the account id is the
+ * subject (the cms keys users on issuer and subject), no picture.
+ */
+export function oidcProfile(profile: Record<string, unknown>) {
+  const text = (key: string) =>
+    typeof profile[key] === "string" ? (profile[key] as string) : null;
+  const email = text("email");
+  return {
+    id: text("sub") ?? undefined,
+    name: text("name") ?? text("preferred_username"),
+    email: email ? email.toLowerCase() : null,
+    image: null,
+  };
+}
 
 /**
  * The claims-only profile of a Microsoft sign-in (spec C): no Graph photo
@@ -117,6 +140,21 @@ if (ENTRA) {
     }),
   );
 }
+if (OIDC) {
+  providers.push({
+    id: OIDC_PROVIDER_ID,
+    name: OIDC.displayName,
+    type: "oidc" as const,
+    issuer: OIDC.issuer,
+    clientId: OIDC.clientId,
+    clientSecret: OIDC.clientSecret,
+    // No offline_access: no refresh token is requested or stored.
+    authorization: { params: { scope: OIDC.scope } },
+    profile: oidcProfile,
+    // https only, also for the endpoints the discovery document names (lib/auth/oidc-fetch.ts).
+    [customFetch]: oidcFetch(OIDC.allowHttp),
+  });
+}
 if (LOCAL_ENABLED) {
   providers.push(
     Credentials({
@@ -154,7 +192,11 @@ if (LOCAL_ENABLED) {
  * auth.test.ts can drive them directly as well; NextAuth() below is the
  * runtime consumer.
  */
-export const callbacks = createAuthCallbacks({ entra: ENTRA, strapiUrl: STRAPI_URL });
+export const callbacks = createAuthCallbacks({
+  entra: ENTRA,
+  oidc: OIDC,
+  strapiUrl: STRAPI_URL,
+});
 
 // unstable_update: lib/profile-actions.ts hands the Strapi JWT of a password
 // change to the session (FX40; the jwt callback's update branch decides).

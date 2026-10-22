@@ -228,8 +228,9 @@ const RELATION_KEYS = ["role", "department", "avatar", "manager"];
 const ALLOWED_TOP_LEVEL = new Set<string>([
   ...SELF_PROFILE_FIELDS,
   ...RELATION_KEYS,
-  // Computed (D-ENTRA-01): which fields the form must not offer.
+  // Computed (D-ENTRA-01): which fields the form must not offer, and (v0.25.0) by whom.
   "entraManagedFields",
+  "managedBy",
 ]);
 
 describe("GET /api/me (FX02 allowlist)", () => {
@@ -661,11 +662,25 @@ describe("Entra-owned profile fields (D-ENTRA-01)", () => {
       [{}, []],
       [{ entraTenantId: null, microsoftOid: "legacy-oid" }, []],
       [{ entraTenantId: "" }, []],
+      // v0.25.0: OIDC owns the name only.
+      [
+        { oidcIssuer: "https://idp.example/realms/intranet", oidcSubject: "sub-1" },
+        ["displayName"],
+      ],
     ] as const) {
       vi.stubGlobal("strapi", stubStrapi({ self: { ...self } }).strapi);
       const { ctx, sent } = makeCtx(caller("member"));
       await profile.me(ctx);
       expect(sent()!.entraManagedFields).toEqual(expected);
+      expect(sent()!.managedBy).toBe(
+        "entraTenantId" in self && self.entraTenantId === TENANT
+          ? "entra"
+          : "oidcIssuer" in self
+            ? "oidc"
+            : null,
+      );
+      expect(sent()).not.toHaveProperty("oidcIssuer");
+      expect(sent()).not.toHaveProperty("oidcSubject");
       for (const key of ENTRA_COLUMNS) expect(sent()).not.toHaveProperty(key);
     }
   });

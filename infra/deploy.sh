@@ -50,7 +50,7 @@
 #      live-smoke that was skipped for want of the demo credentials file
 #      records nothing (--record-without-live-smoke records anyway); one
 #      skipped for LIVE_EVENTS_DISABLED=1, or the datetime check alone on an
-#      Entra-only instance, counts as passed.
+#      identity-provider-only instance (Entra or OIDC), counts as passed.
 # Any failure from step 3 on prints the rollback commands for the target of
 # step 2 (an ERR trap catches the unexpected ones, tagging included); before
 # step 3 the running containers are untouched.
@@ -187,7 +187,10 @@ PREFLIGHT_WARN_KEYS="DATABASE_PASSWORD"
 # (without ENTRA_ENABLED=1, a real app registration: a GUID client id and a
 # client secret, with which the running release may have offered Microsoft
 # sign-in) or "entra-inert MS_CLIENT_ID" (other MS_* values left in
-# infra/.env without ENTRA_ENABLED=1: ignored), "meili-invalid KEY" (v0.21:
+# infra/.env without ENTRA_ENABLED=1: ignored), "oidc-invalid KEY" (v0.25.0:
+# OIDC_ENABLED=1 and KEY fails the check the cms (apps/cms/src/oidc/config.ts)
+# or the web (apps/web/src/lib/auth-config.ts) runs at start; ENTRA_ENABLED
+# when both are on), "meili-invalid KEY" (v0.21:
 # MEILISEARCH_ENABLED=1 without the search profile or a key of the
 # optional Meilisearch, or the profile on with a master key the meili
 # container refuses to start with).
@@ -296,6 +299,31 @@ preflight_scan() {
         print "entra-was-on MS_CLIENT_ID"
       } else if (env["MS_CLIENT_ID"] != "" || env["AUTH_MICROSOFT_ENTRA_ID_SECRET"] != "") {
         print "entra-inert MS_CLIENT_ID"
+      }
+      # v0.25.0 OIDC: OIDC_ENABLED is the only switch (exactly "1"). With it,
+      # every value the cms and the web validate at start (the web alone
+      # reads OIDC_CLIENT_SECRET, OIDC_SCOPE and OIDC_DISPLAY_NAME).
+      if (env["OIDC_ENABLED"] == "1") {
+        if (env["ENTRA_ENABLED"] == "1") print "oidc-invalid ENTRA_ENABLED"
+        issuer = trim(env["OIDC_ISSUER"])
+        if (length(issuer) > 255 || issuer ~ /[ \t]/ || !(issuer ~ /^https:\/\/[^\/]/ || (env["OIDC_ALLOW_HTTP"] == "1" && issuer ~ /^http:\/\/[^\/]/))) print "oidc-invalid OIDC_ISSUER"
+        client = trim(env["OIDC_CLIENT_ID"])
+        if (client == "" || length(client) > 255) print "oidc-invalid OIDC_CLIENT_ID"
+        if (trim(env["OIDC_CLIENT_SECRET"]) == "") print "oidc-invalid OIDC_CLIENT_SECRET"
+        if (length(trim(env["OIDC_EXCHANGE_SECRET"])) < 32 || placeholder(env["OIDC_EXCHANGE_SECRET"])) print "oidc-invalid OIDC_EXCHANGE_SECRET"
+        role = trim(env["OIDC_DEFAULT_ROLE"])
+        if (role != "" && role != "member" && role != "guest" && role != "deny") print "oidc-invalid OIDC_DEFAULT_ROLE"
+        if (!ttl_ok(env["OIDC_SESSION_TTL"])) print "oidc-invalid OIDC_SESSION_TTL"
+        org = trim(env["OIDC_ZITADEL_ORG_ID"])
+        if ((org != "" && org !~ /^[0-9]+$/) || (org == "" && trim(env["OIDC_ROLES_CLAIM"]) ~ /^urn:zitadel:/)) print "oidc-invalid OIDC_ZITADEL_ORG_ID"
+        # Claim names or dot-separated paths (oidc/config.ts CLAIM_PATH).
+        roles_claim = trim(env["OIDC_ROLES_CLAIM"])
+        if (roles_claim != "" && roles_claim !~ /^[A-Za-z0-9_:\/-]+(\.[A-Za-z0-9_:\/-]+)*$/) print "oidc-invalid OIDC_ROLES_CLAIM"
+        dept_claim = trim(env["OIDC_DEPARTMENT_CLAIM"])
+        if (dept_claim != "" && dept_claim !~ /^[A-Za-z0-9_:\/-]+(\.[A-Za-z0-9_:\/-]+)*$/) print "oidc-invalid OIDC_DEPARTMENT_CLAIM"
+        scope = trim(env["OIDC_SCOPE"])
+        if (scope != "" && (" " scope " ") !~ /[ \t]openid[ \t]/) print "oidc-invalid OIDC_SCOPE"
+        if (length(trim(env["OIDC_DISPLAY_NAME"])) > 40) print "oidc-invalid OIDC_DISPLAY_NAME"
       }
       # v0.21 Meilisearch: compose renders MEILI_MASTER_KEY (the meili
       # service) only while the search profile is on (COMPOSE_PROFILES in
@@ -1220,6 +1248,7 @@ digest_keys="$(keys_of digest)"
 entra_invalid_keys="$(keys_of entra-invalid)"
 entra_inert_keys="$(keys_of entra-inert)"
 entra_was_on_keys="$(keys_of entra-was-on)"
+oidc_invalid_keys="$(keys_of oidc-invalid)"
 meili_invalid_keys="$(keys_of meili-invalid)"
 # Not fatal: the owner instance may keep an unused registration in
 # infra/.env. But an instance that still signs users in with the old
@@ -1273,6 +1302,20 @@ if [[ -n "${entra_invalid_keys}" ]]; then
   echo "       32+ characters (openssl rand -hex 32), ENTRA_SYNC_MODE on|dry-run, ENTRA_DEFAULT_ROLE" >&2
   echo "       member|guest|deny, ENTRA_SESSION_TTL <n>m|h|d up to 7d, ENTRA_GROUP_ROLES <role>:<guid>,..." >&2
   echo "       (docs/DEPLOYMENT.md, \"Microsoft Entra ID sign-in\"). Or unset ENTRA_ENABLED." >&2
+  preflight_failed=1
+fi
+# v0.25.0: the same for OIDC_ENABLED=1 (cms register(), web first request).
+if [[ -n "${oidc_invalid_keys}" ]]; then
+  echo "ERROR: OIDC_ENABLED=1, but these OIDC settings in infra/.env are invalid: ${oidc_invalid_keys}" >&2
+  echo "       The cms and the web refuse to start with them. OIDC_ISSUER must be the https URL exactly as" >&2
+  echo "       the identity provider's discovery document writes it, at most 255 characters (http only with" >&2
+  echo "       OIDC_ALLOW_HTTP=1, never in production), OIDC_CLIENT_ID and OIDC_CLIENT_SECRET set," >&2
+  echo "       OIDC_EXCHANGE_SECRET 32+ characters (openssl rand -hex 32), OIDC_DEFAULT_ROLE member|guest|deny," >&2
+  echo "       OIDC_SESSION_TTL <n>m|h|d up to 7d, OIDC_ZITADEL_ORG_ID digits (required with a urn:zitadel:" >&2
+  echo "       OIDC_ROLES_CLAIM), claim names or dotted paths in OIDC_ROLES_CLAIM and OIDC_DEPARTMENT_CLAIM," >&2
+  echo "       OIDC_SCOPE with openid, OIDC_DISPLAY_NAME up to 40 characters, and never" >&2
+  echo "       next to ENTRA_ENABLED=1 (docs/DEPLOYMENT.md, \"OIDC sign-in (Keycloak, authentik, Zitadel)\")." >&2
+  echo "       Or unset OIDC_ENABLED." >&2
   preflight_failed=1
 fi
 # v0.21: the optional Meilisearch. With the profile on and no usable master
@@ -1353,21 +1396,23 @@ fi
 # How step 4 runs infra/live-smoke.sh: "run …" or "skip: <reason>". The
 # switches come from the env compose hands the apps (compose_env_value),
 # read as the apps read them: LIVE_EVENTS_DISABLED exactly 1 (web
-# lib/live-bus.ts, cms utils/live-events.ts); Entra-only = ENTRA_ENABLED
-# exactly 1 without AUTH_LOCAL_ENABLED=1 (web lib/auth-config.ts), where
-# live-smoke needs no demo credentials (it skips the sign-in steps itself).
+# lib/live-bus.ts, cms utils/live-events.ts); identity provider only =
+# ENTRA_ENABLED or OIDC_ENABLED exactly 1 without AUTH_LOCAL_ENABLED=1 (web
+# lib/auth-config.ts localSignInEnabled), where live-smoke needs no demo
+# credentials (it skips the sign-in steps itself).
 live_smoke_mode() {
-  local json live_disabled entra local_signin
+  local json live_disabled entra oidc local_signin
   # One compose call; the JSON (secrets included) stays in this function
   # and reaches awk through a pipe, never a file or the terminal.
   json="$("${COMPOSE[@]}" config --format json 2>/dev/null || true)"
   live_disabled="$(printf '%s\n' "${json}" | compose_env_value LIVE_EVENTS_DISABLED)"
   entra="$(printf '%s\n' "${json}" | compose_env_value ENTRA_ENABLED)"
+  oidc="$(printf '%s\n' "${json}" | compose_env_value OIDC_ENABLED)"
   local_signin="$(printf '%s\n' "${json}" | compose_env_value AUTH_LOCAL_ENABLED)"
   if [[ "${live_disabled}" == "1" ]]; then
     echo "skip: LIVE_EVENTS_DISABLED=1 (the apps run on the polling fallback)"
-  elif [[ "${entra}" == "1" && "${local_signin}" != "1" ]]; then
-    echo "run (Entra-only: the datetime check, then it skips the sign-in steps)"
+  elif [[ ("${entra}" == "1" || "${oidc}" == "1") && "${local_signin}" != "1" ]]; then
+    echo "run (identity provider only: the datetime check, then it skips the sign-in steps)"
   elif [[ -r "${PASSWORDS_FILE}" || (-n "${SMOKE_PASSWORD:-}" && -n "${SMOKE_AUTHOR_PASSWORD:-}") ]]; then
     echo "run"
   else
@@ -1379,7 +1424,8 @@ live_smoke_mode() {
 # demo credentials (a typo in PASSWORDS_FILE, the wrong user) and
 # --record-without-live-smoke was not given: step 5 then records nothing,
 # as the SSE pipeline went unverified. LIVE_EVENTS_DISABLED=1 (SSE off on
-# purpose) and an Entra-only instance (the datetime check alone) record.
+# purpose) and an identity-provider-only instance (Entra or OIDC without
+# AUTH_LOCAL_ENABLED=1: the datetime check alone) record.
 unrecorded_live_smoke_skip() {
   [[ "${LIVE_SMOKE_MODE}" == "skip: demo credentials"* ]] && ! ((RECORD_WITHOUT_LIVE_SMOKE))
 }
@@ -1675,8 +1721,8 @@ if [[ "${LIVE_SMOKE_MODE}" == run* ]]; then
     print_rollback_hint
     exit 1
   fi
-  if [[ "${LIVE_SMOKE_MODE}" == "run (Entra-only"* ]]; then
-    LIVE_SMOKE_RESULT="passed: the datetime check only (Entra-only instance)"
+  if [[ "${LIVE_SMOKE_MODE}" == "run (identity provider only"* ]]; then
+    LIVE_SMOKE_RESULT="passed: the datetime check only (identity-provider-only instance)"
   elif grep -q 'the notification frame path was not checked' "${LIVE_SMOKE_OUT}"; then
     LIVE_SMOKE_RESULT="passed (notification frame not checked)"
     echo "WARNING: live-smoke did not check the notification frame path: the stream user has no announcement" >&2

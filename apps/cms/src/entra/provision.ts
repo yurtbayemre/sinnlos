@@ -59,6 +59,7 @@ import {
   issueSession,
   secretMatches,
   stringOf,
+  syncDepartment,
   USER_UID,
   type ExchangeError,
   type ExchangeHost,
@@ -85,12 +86,11 @@ import {
   departmentName,
   managerBackfillWhere,
   newIdentityEmail,
-  pickDepartment,
   syncedEmail,
 } from "./profile";
 import { decideRoleWrite, resolveEntraRole, type RoleResolution } from "./roles";
 
-export const DEPARTMENT_UID = "api::department.department";
+export { DEPARTMENT_UID } from "../idp/exchange-core";
 
 /** The header the web sends the shared secret in. */
 export const EXCHANGE_SECRET_HEADER = "x-entra-exchange-secret";
@@ -118,8 +118,6 @@ export function readTokens(body: unknown): { idToken: string; accessToken: strin
 
 const relationId = (value: unknown): number | null =>
   isRecord(value) && typeof value.id === "number" ? value.id : null;
-const relationDocumentId = (value: unknown): string | null =>
-  isRecord(value) && typeof value.documentId === "string" ? value.documentId : null;
 
 /** What the audit line of one exchange says. */
 interface Audit {
@@ -313,7 +311,9 @@ async function provision(
     if (mayWrite) await syncProfile(strapi, user, me);
   }
   if (settings.syncDepartment) {
-    audit.extra.push(`department=${await syncDepartment(strapi, user, me, mayWrite)}`);
+    audit.extra.push(
+      `department=${me ? await syncDepartment(strapi, user, departmentName(me), mayWrite, "[entra]", "Entra") : "unknown"}`,
+    );
   }
   if (settings.syncManager && graph.manager !== null) {
     // Like the profile and the department: nothing without a successful
@@ -364,46 +364,6 @@ async function syncProfile(strapi: ExchangeHost, user: Row, me: GraphMe): Promis
     await users.update({ where: { id: user.id }, data });
   } catch (err) {
     strapi.log.error(`[entra] user=${user.id}: profile sync failed (${errorLabel(err)})`);
-  }
-}
-
-/** ENTRA_SYNC_DEPARTMENT=1. Returns the audit value. */
-async function syncDepartment(
-  strapi: ExchangeHost,
-  user: Row,
-  me: GraphMe | null,
-  mayWrite: boolean,
-): Promise<string> {
-  if (!me) return "unknown";
-  try {
-    const name = departmentName(me);
-    const matches =
-      name === null
-        ? []
-        : await strapi.documents(DEPARTMENT_UID).findMany({
-            filters: { name: { $eqi: name } },
-            status: "published",
-            fields: ["documentId"],
-          });
-    const target = pickDepartment(name, matches);
-    if (target.kind === "clear" && target.reason !== "empty") {
-      strapi.log.warn(
-        `[entra] user=${user.id}: the Entra department matches ${target.reason === "no-match" ? "no" : "more than one"} published department; clearing it`,
-      );
-    }
-    const next = target.kind === "set" ? target.documentId : null;
-    const current = relationDocumentId(user.department);
-    if (next === current) return "unchanged";
-    const verb = next === null ? "clear" : "set";
-    if (!mayWrite) return `would ${verb}`;
-    const documentId = stringOf(user.documentId);
-    if (documentId === null) throw new Error("the user has no documentId");
-    // By documentId, like the admin panel: the link targets the document.
-    await strapi.documents(USER_UID).update({ documentId, data: { department: next } });
-    return verb === "set" ? "set" : "cleared";
-  } catch (err) {
-    strapi.log.error(`[entra] user=${user.id}: department sync failed (${errorLabel(err)})`);
-    return "failed";
   }
 }
 

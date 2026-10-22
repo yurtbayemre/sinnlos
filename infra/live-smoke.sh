@@ -42,8 +42,9 @@
 # that the deploy did not recreate, or a manual run weeks after its start),
 # by the zone node reports inside the running cms container.
 #
-# An Entra-only instance (the web runs with ENTRA_ENABLED=1 and without
-# AUTH_LOCAL_ENABLED=1) has no local sign-in for the demo accounts: after the
+# An identity-provider-only instance (the web runs with ENTRA_ENABLED=1 or
+# OIDC_ENABLED=1 and without AUTH_LOCAL_ENABLED=1) has no local sign-in for
+# the demo accounts: after the
 # datetime check the script says so, skips steps 1-4 and exits 0 (check the
 # live pings in a browser there).
 #
@@ -152,16 +153,17 @@ else
   echo "live-smoke: datetime contract OK (process time zone ${CMS_ZONE}), from the running cms container: its boot line has rotated out of docker logs ${CMS_CONTAINER}"
 fi
 
-# --- Entra-only instance: no local sign-in for the demo accounts ------------
-# The web offers local sign-in unless ENTRA_ENABLED is exactly 1 and
-# AUTH_LOCAL_ENABLED is not 1 (apps/web/src/lib/auth-config.ts); the cms
-# follows the same switches. Only these two variables leave the pipe.
-# When the web container cannot be inspected, the sign-in below says why.
+# --- Identity-provider-only instance: no local sign-in for the demo accounts --
+# The web offers local sign-in unless ENTRA_ENABLED or OIDC_ENABLED is
+# exactly 1 and AUTH_LOCAL_ENABLED is not 1 (apps/web/src/lib/auth-config.ts
+# localSignInEnabled); the cms follows the same switches. Only these three
+# variables leave the pipe. When the web container cannot be inspected, the
+# sign-in below says why.
 WEB_SWITCHES="$(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "${WEB_CONTAINER}" 2>/dev/null |
-  grep -E '^(ENTRA_ENABLED|AUTH_LOCAL_ENABLED)=' || true)"
-if grep -qx 'ENTRA_ENABLED=1' <<<"${WEB_SWITCHES}" && ! grep -qx 'AUTH_LOCAL_ENABLED=1' <<<"${WEB_SWITCHES}"; then
-  echo "live-smoke: SKIPPED the sign-in steps: Entra-only instance (${WEB_CONTAINER} runs with ENTRA_ENABLED=1"
-  echo "live-smoke: and without AUTH_LOCAL_ENABLED=1), so the demo accounts cannot sign in. Check the live pings"
+  grep -E '^(ENTRA_ENABLED|OIDC_ENABLED|AUTH_LOCAL_ENABLED)=' || true)"
+if grep -qxE '(ENTRA|OIDC)_ENABLED=1' <<<"${WEB_SWITCHES}" && ! grep -qx 'AUTH_LOCAL_ENABLED=1' <<<"${WEB_SWITCHES}"; then
+  echo "live-smoke: SKIPPED the sign-in steps: identity-provider-only instance (${WEB_CONTAINER} runs with"
+  echo "live-smoke: ENTRA_ENABLED=1 or OIDC_ENABLED=1 and without AUTH_LOCAL_ENABLED=1), so the demo accounts cannot sign in. Check the live pings"
   echo "live-smoke: in a browser: a comment from a second session refreshes the card in the first."
   exit 0
 fi

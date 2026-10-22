@@ -374,6 +374,8 @@ const GOLDEN: Record<string, PolicySpec[]> = {
   // D-ENTRA-01: auth:false, authenticated in the controller (shared secret +
   // ID-token verification), 404 while ENTRA_ENABLED is not '1'.
   "api::entra-auth.entra-auth.exchange": [],
+  // v0.25.0: the OIDC exchange, the same way (404 while OIDC_ENABLED is not '1').
+  "api::oidc-auth.oidc-auth.exchange": [],
 
   "api::document.document.find": ["global::document-visibility"],
   "api::document.document.findOne": ["global::document-visibility"],
@@ -777,10 +779,11 @@ describe("route → policy matrix (S01)", async () => {
     expect(actual).toEqual(GOLDEN);
   });
 
-  it("only the Entra exchange disables authentication (auth: false)", () => {
-    // The exchange authenticates its caller itself (shared secret + the
-    // cms's own ID-token verification, src/entra/provision.ts); a caller
-    // has no Strapi JWT before it. Any other auth:false route is a hole.
+  it("only the Entra and OIDC exchanges disable authentication (auth: false)", () => {
+    // An exchange authenticates its caller itself (shared secret + the
+    // cms's own ID-token verification, src/entra/provision.ts and
+    // src/oidc/provision.ts); a caller has no Strapi JWT before it. Any
+    // other auth:false route is a hole.
     const publicRoutes = [...routes.values()].filter((e) => e.config.auth === false);
     expect(publicRoutes.map((e) => ({ action: e.action, method: e.method, path: e.path }))).toEqual(
       [
@@ -788,6 +791,11 @@ describe("route → policy matrix (S01)", async () => {
           action: "api::entra-auth.entra-auth.exchange",
           method: "POST",
           path: "/auth/entra/exchange",
+        },
+        {
+          action: "api::oidc-auth.oidc-auth.exchange",
+          method: "POST",
+          path: "/auth/oidc/exchange",
         },
       ],
     );
@@ -839,7 +847,10 @@ describe("route → policy matrix (S01)", async () => {
     it("an auth:false route has no grant (users-permissions never checks one there)", () => {
       const granted = new Set(computeDesiredGrants().map((grant) => grant.action));
       expect(customActions.filter((a) => isPublicRoute(a) && granted.has(a))).toEqual([]);
-      expect(customActions.filter(isPublicRoute)).toEqual(["api::entra-auth.entra-auth.exchange"]);
+      expect(customActions.filter(isPublicRoute)).toEqual([
+        "api::entra-auth.entra-auth.exchange",
+        "api::oidc-auth.oidc-auth.exchange",
+      ]);
     });
 
     it("every api:: CUSTOM_ACTION_GRANTS key has a custom route (no dead grants)", () => {

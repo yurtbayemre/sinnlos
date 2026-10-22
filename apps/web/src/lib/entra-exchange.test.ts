@@ -4,7 +4,10 @@ import {
   EXCHANGE_PATH,
   EXCHANGE_RETRY_DELAY_MS,
   EXCHANGE_TIMEOUT_MS,
+  OIDC_EXCHANGE_PATH,
+  OIDC_SIGN_IN_ERRORS,
   exchangeEntraSignIn,
+  exchangeOidcSignIn,
   signInErrorKey,
   type ExchangeOptions,
 } from "./entra-exchange";
@@ -169,7 +172,57 @@ describe("exchangeEntraSignIn", () => {
   });
 });
 
+describe("exchangeOidcSignIn (v0.25.0)", () => {
+  it("POSTs the ID token only, with the OIDC secret header, to the OIDC path", async () => {
+    const { calls, options } = harness(() => json(OK));
+    expect(await exchangeOidcSignIn({ idToken: TOKENS.idToken }, options)).toEqual({
+      ok: true,
+      data: OK,
+    });
+    const [{ url, init }] = calls;
+    expect(url).toBe(`http://cms:1337${OIDC_EXCHANGE_PATH}`);
+    expect(init.headers).toEqual({
+      "content-type": "application/json",
+      "x-oidc-exchange-secret": "shared-exchange-secret-0123456789abcdef",
+    });
+    expect(JSON.parse(String(init.body))).toEqual({ idToken: TOKENS.idToken });
+  });
+
+  it("passes email_unverified through; Entra never does, and the operator hints name the OIDC variables", async () => {
+    const unverified = () => json({ error: "email_unverified" }, 403);
+    const oidc = harness(unverified);
+    expect(await exchangeOidcSignIn(TOKENS, oidc.options)).toEqual({
+      ok: false,
+      code: "email_unverified",
+    });
+    const entra = harness(unverified);
+    expect(await exchangeEntraSignIn(TOKENS, entra.options)).toEqual({
+      ok: false,
+      code: "unavailable",
+    });
+    const secret = harness(() => json({ error: "unauthorized" }, 401));
+    await exchangeOidcSignIn(TOKENS, secret.options);
+    expect(secret.log.error.mock.calls[0][0]).toMatch(/OIDC exchange failed.*OIDC_EXCHANGE_SECRET/);
+    const off = harness(() => json({}, 404));
+    await exchangeOidcSignIn(TOKENS, off.options);
+    expect(off.log.error.mock.calls[0][0]).toMatch(/OIDC_ENABLED=1/);
+  });
+});
+
 describe("signInErrorKey", () => {
+  it("explains every oidc_* code", () => {
+    expect(OIDC_SIGN_IN_ERRORS).toEqual([
+      "oidc_account_exists",
+      "oidc_not_assigned",
+      "oidc_blocked",
+      "oidc_invalid",
+      "oidc_unavailable",
+      "oidc_email_unverified",
+    ]);
+    for (const code of OIDC_SIGN_IN_ERRORS) expect(signInErrorKey(code)).toBe(code);
+    expect(signInErrorKey("oidc_tenant")).toBe("signInFailed");
+  });
+
   it("explains every entra_* code and nothing else by name", () => {
     expect(ENTRA_SIGN_IN_ERRORS).toEqual([
       "entra_tenant",

@@ -79,7 +79,7 @@
     },
     "roleSource": {
       "type": "enumeration",
-      "enum": ["entra", "manual"],
+      "enum": ["entra", "oidc", "manual"],
       "private": true,
       "searchable": false
     },
@@ -89,6 +89,16 @@
       "searchable": false
     },
     "entraManagerOid": {
+      "type": "string",
+      "private": true,
+      "searchable": false
+    },
+    "oidcIssuer": {
+      "type": "string",
+      "private": true,
+      "searchable": false
+    },
+    "oidcSubject": {
       "type": "string",
       "private": true,
       "searchable": false

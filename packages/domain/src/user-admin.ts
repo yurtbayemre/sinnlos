@@ -8,7 +8,8 @@
  * Refusals use the authoring vocabulary (authoring/codes.ts): 400 with
  * `details.keys`/`details.codes`, e.g. `{ role: "selfChange" }`,
  * `{ department: "entraManaged" }`,
- * `{ manager: "managerCycle" }`, `{ _form: "notEntraBound" }`.
+ * `{ manager: "managerCycle" }`, `{ _form: "notEntraBound" }` (v0.25: not bound to any
+ * identity provider; the code and the role-to-entra route keep their names).
  */
 import type { RoleType } from "./roles.js";
 
@@ -44,10 +45,10 @@ export interface UserAdminRow {
   email: string;
   /** The intranet role type, or null (no or an unknown role). */
   role: RoleType | null;
-  /** Who owns the role: Entra (synced at each sign-in) or the intranet. */
-  roleSource: "entra" | "manual";
-  /** Signs in with Microsoft Entra (tenant and object id bound). */
-  entraBound: boolean;
+  /** Who owns the role: the identity provider (synced at each sign-in) or the intranet. */
+  roleSource: "entra" | "oidc" | "manual";
+  /** The identity provider the account is bound to (Entra tenant + object id, or OIDC issuer + subject), null for a local account. */
+  idp: "entra" | "oidc" | null;
   blocked: boolean;
   department: UserAdminRef | null;
 }
@@ -60,7 +61,7 @@ export interface UserAdminDetail extends UserAdminRow {
   createdAt: string | null;
   /** The caller themself: role and blocked are not theirs to change. */
   self: boolean;
-  /** Fields Entra's sync owns for this user (refused on save). */
+  /** Fields the identity provider's sync owns for this user (refused on save). */
   locked: { department: boolean; manager: boolean };
 }
 
