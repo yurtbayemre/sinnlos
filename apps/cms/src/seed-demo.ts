@@ -193,7 +193,7 @@ export interface SeedDemoHost {
     create(params: { data: SeedData; status: "published" }): Promise<SeedRow>;
   };
   plugin(name: string): { service(name: string): { add(values: SeedData): Promise<SeedRow> } };
-  log: { info(message: string): void };
+  log: { info(message: string): void; error(message: string): void };
 }
 
 /** The same wall time n calendar days from now in APP_TIME_ZONE, as ISO-Z. */
@@ -216,6 +216,12 @@ function createPublished(strapi: SeedDemoHost, uid: string, data: SeedData): Pro
 
 export async function seedDemoData(strapi: SeedDemoHost) {
   if (process.env.SEED_DEMO_DATA !== "1") return;
+  // v0.26 (M8): every demo account shares the published password below, so
+  // a production cms never seeds them, before any demo query or write.
+  if (process.env.NODE_ENV === "production") {
+    strapi.log.error("[seed-demo] SEED_DEMO_DATA=1 is refused in production; nothing seeded");
+    return;
+  }
 
   const existingDepts = await strapi.db.query("api::department.department").count({});
   const existingUsers = await strapi.db.query("plugin::users-permissions.user").count({});
