@@ -23,7 +23,8 @@ and set up [backup & restore](#backup--restore) for any production environment.
 All methods share the same [prerequisites](#prerequisites); the optional
 [Microsoft Entra ID sign-in](#microsoft-entra-id-sign-in) is off by default
 (`ENTRA_ENABLED=1` switches it on) and set up the same way for each, and so
-is the optional [Meilisearch search ranking](#meilisearch-optional-search)
+are the optional [OIDC sign-in with Keycloak, authentik or Zitadel](#oidc-sign-in-keycloak-authentik-zitadel)
+(`OIDC_ENABLED=1`, never together with Entra) and the optional [Meilisearch search ranking](#meilisearch-optional-search)
 (`MEILISEARCH_ENABLED=1` with the `search` compose profile).
 
 > **Upgrading an existing instance?** On an instance that runs `main`
@@ -323,13 +324,14 @@ syncDepartment=<0|1> syncManager=<0|1> ttl=<ttl> local=<0|1>`.
    `SMOKE_URL`, [§3.6 B](#b-shared-traefik-live-production-layout)). The cms logs
    `[entra] enabled … mode=dry-run`.
    `infra/deploy.sh` ends with `infra/live-smoke.sh`, which signs in with
-   local demo accounts. On an Entra-only instance (`ENTRA_ENABLED=1`
-   without `AUTH_LOCAL_ENABLED=1`, as the web container runs) live-smoke
+   local demo accounts. On an identity-provider-only instance
+   (`ENTRA_ENABLED=1` or, since v0.25.0, `OIDC_ENABLED=1` without
+   `AUTH_LOCAL_ENABLED=1`, as the web container runs) live-smoke
    runs its datetime check, then prints `live-smoke: SKIPPED the sign-in
-   steps: Entra-only instance …` and passes; `deploy.sh` runs it there
+   steps: identity-provider-only instance …` and passes; `deploy.sh` runs it there
    even without the demo credentials file. Check the live pings in a
    browser instead: a comment from a second session refreshes the card in
-   the first. This holds for every deploy of an Entra-only instance, step 5
+   the first. This holds for every deploy of such an instance, step 5
    included. (Before batch 10 the sign-in failed and with it the deploy;
    the workaround was `PASSWORDS_FILE=/nonexistent infra/deploy.sh`, or
    keeping `AUTH_LOCAL_ENABLED=1` for the break-glass account, see
@@ -473,6 +475,290 @@ A failed database write shows in the cms log as `[entra] exchange failed (<code>
 `<code>` is a Postgres SQLSTATE such as `22001` (value too long), a SQLite or
 Node error code, or an error class name; the SQL and the profile values are
 never logged.
+
+---
+
+## OIDC sign-in (Keycloak, authentik, Zitadel)
+
+Since v0.25.0 Sinnlos can sign users in through any standard OpenID Connect
+identity provider; Keycloak, authentik and Zitadel are tested and have a
+recipe below. It is **off unless `OIDC_ENABLED=1`** is set, and it is
+**either Entra or OIDC**: with `ENTRA_ENABLED=1` and `OIDC_ENABLED=1` both
+apps refuse to start (and `infra/deploy.sh --check` refuses the deploy).
+
+How it works: the same pattern as Entra, without Graph. Auth.js runs the
+OIDC code flow (with PKCE) against `OIDC_ISSUER`; the web then POSTs the ID
+token to the cms (`POST /api/auth/oidc/exchange`, server to server,
+authenticated by `OIDC_EXCHANGE_SECRET`). The cms reads the identity
+provider's discovery document, verifies the ID token itself against its
+signing keys (asymmetric algorithms only: an HS256 token is refused even
+though Auth.js would accept it), finds the user by **issuer + subject**
+(`sub`, backed by a unique index, never by e-mail), creates new users on
+the spot with the role from the token, syncs the display name (and
+department, if configured), and answers with a Strapi JWT that lasts
+`OIDC_SESSION_TTL` (12 hours by default). The web session ends with that
+JWT. Both apps need outbound HTTPS to the identity provider (discovery,
+signing keys; the web also its token endpoint). Local sign-in is off while
+OIDC is on, unless `AUTH_LOCAL_ENABLED=1` keeps it as break-glass.
+
+### Configuration
+
+Set these in `infra/.env` (compose hands each app the keys it reads); for
+bare-metal development the cms keys go into `apps/cms/.env`, the web keys
+into `apps/web/.env.local`. The redirect URI to register at the identity
+provider is `${WEB_PUBLIC_URL}/api/auth/callback/oidc`.
+
+| Name | Default | Read by | Effect |
+|---|---|---|---|
+| `OIDC_ENABLED` | 0 | cms, web | Master switch, exactly `1`. With anything else every `OIDC_*` value is ignored. With `1` the config is validated and an invalid one refuses the start (cms at boot, web on its first request) and the deploy, naming the variable. |
+| `OIDC_ISSUER` | (unset) | cms, web | Exactly as the identity provider's discovery document (`<issuer>/.well-known/openid-configuration`) writes `issuer`, at most 255 characters, `https:`. A missing or extra trailing slash fails every sign-in (see the recipes). |
+| `OIDC_CLIENT_ID` | (unset) | cms, web | The client id; the cms checks the ID token's audience against it. |
+| `OIDC_CLIENT_SECRET` | (unset) | web | The client secret (confidential client). The cms never needs it. |
+| `OIDC_EXCHANGE_SECRET` | (unset) | cms, web | At least 32 characters, the same for web and cms (`openssl rand -hex 32`); distinct from every other secret. |
+| `OIDC_SCOPE` | `openid profile email` | web | Must contain `openid`. Zitadel's department metadata needs `urn:zitadel:iam:user:metadata` in addition. |
+| `OIDC_DISPLAY_NAME` | `Single Sign-On` | web | Label of the sign-in button, at most 40 characters. |
+| `OIDC_ROLES_CLAIM` | `roles` | cms | Dotted path of the claim with the `Intranet.*` roles: an array of strings, or an object whose keys are the roles (Zitadel). |
+| `OIDC_DEPARTMENT_CLAIM` | (empty) | cms | Optional dotted path of a claim with the department **name**. When set, every sign-in sets the department to the one published department with that name (case-insensitive); an empty value, no match or several matches clear it, and the department is read-only at `/manage/users`. Values under `urn:zitadel:iam:user:metadata` are base64url-decoded. |
+| `OIDC_ZITADEL_ORG_ID` | (empty) | cms, web | Zitadel only, digits: the organisation whose users may sign in (required with a `urn:zitadel:` roles claim; see the Zitadel recipe). |
+| `OIDC_DEFAULT_ROLE` | deny | cms | Role of a user whose token carries no recognised `Intranet.*` role: `deny` (refused, *oidc_not_assigned*), `member` or `guest`. Anything but `deny` lets **every** user of the identity provider in (self-registered ones included): an explicit admission exception. |
+| `OIDC_SESSION_TTL` | 12h | cms | Lifetime of an OIDC sign-in's session, `<n>m`, `<n>h` or `<n>d`, at most `7d`. Local sign-ins keep 7 days. |
+| `OIDC_ALLOW_HTTP` | 0 | cms, web | `1` allows an `http:` issuer and endpoints: local development and staging only, never in production (the signing keys would travel unprotected). |
+| `AUTH_LOCAL_ENABLED` | 0 | cms, web | `1` keeps local e-mail + password sign-in next to OIDC (break-glass admin account). |
+
+The cms logs one `[oidc]` status line at every boot and one `[oidc]` audit
+line per sign-in (the result and the role, never a token or the full
+subject).
+
+### Roles: who gets in, with which role
+
+- Each identity provider puts the user's roles into the **signed ID token**
+  under `OIDC_ROLES_CLAIM`, with the same names as for Entra:
+  `Intranet.Admin` → `admin_role`, `Intranet.Editor` → `editor`,
+  `Intranet.DepartmentHead` → `department_head`, `Intranet.TeamLead` →
+  `team_lead`, `Intranet.Member` → `member`, `Intranet.Guest` → `guest`.
+  Several roles: the highest wins. Other values are ignored.
+- **The identity provider is the admission gate.** Without a recognised
+  role (and with the default `OIDC_DEFAULT_ROLE=deny`) the sign-in is
+  refused (*oidc_not_assigned*), also for an account whose role an admin set
+  by hand in Sinnlos. Taking the role away in the identity provider
+  therefore always stops new sign-ins.
+- Users the sign-in created follow the identity provider at every sign-in,
+  also downwards. A role an admin sets at `/manage/users` makes the user
+  **manual**: while the identity provider still admits them, that role is
+  kept instead of the token's. The hand-back button on the user's page
+  returns the role to the identity provider for the next sign-in.
+- Claims that grant rights (the roles, and the department when
+  `OIDC_DEPARTMENT_CLAIM` is set: department heads' rights follow it) must
+  be controlled by the identity provider's admins only. Whoever can create
+  or rename the groups or attributes they come from, or change memberships,
+  can grant themselves the matching rights in Sinnlos.
+
+### What the identity provider owns
+
+- **Identity**: issuer + subject, in the private user fields `oidcIssuer`
+  (the issuer exactly as discovery writes it) and `oidcSubject` (the `sub`
+  claim, unchanged, case-sensitive). A new user gets the username
+  `oidc-<hash of issuer and subject>`, `provider` `oidc`, no password, and
+  the e-mail from the token. The token must carry `email` and
+  `email_verified: true`; otherwise the sign-in is refused
+  (*oidc_email_unverified*).
+- **Display name**: from the token's `name` at every sign-in (only
+  overwritten with a non-empty value) and read-only on `/profile`.
+  Accounts the sign-in created also get their e-mail from the token,
+  unless another account uses that address. Job title, office and phone
+  stay editable on `/profile`; no manager is synced.
+- **Department**: only with `OIDC_DEPARTMENT_CLAIM` (table above).
+- **Sessions and offboarding**: disabling a user (or removing their role)
+  in the identity provider stops their **next** sign-in; a running session
+  lasts until `OIDC_SESSION_TTL` ends it. To end it at once, block the
+  account at `/manage/users` (it raises the token version: the next request
+  is refused). Signing out of Sinnlos ends only the Sinnlos session: the
+  identity provider's own session stays, so the next sign-in may pass
+  without a password prompt there (no single logout).
+- **Replay model**: the exchange endpoint trusts the web through
+  `OIDC_EXCHANGE_SECRET`; an ID token alone cannot call it. Whoever holds
+  that secret could exchange a captured ID token again while it is young
+  (about 15 minutes, as with Entra), so keep the secret as private as
+  `AUTH_SECRET`.
+
+### Recipe: Keycloak
+
+Tested with Keycloak 26.8.1. Issuer: `https://<host>/realms/<realm>`
+(**no** trailing slash; Keycloak before 17 had an extra `/auth`).
+
+1. **Clients → Create client**: *OpenID Connect*, a client id such as
+   `sinnlos-web` (`OIDC_CLIENT_ID`). *Client authentication* **on**
+   (confidential), *Standard flow* on, *Direct access grants* off.
+   *Valid redirect URIs*: `${WEB_PUBLIC_URL}/api/auth/callback/oidc`.
+   *Advanced → Proof Key for Code Exchange Code Challenge Method*: `S256`.
+2. **Credentials** tab → *Client secret* → `OIDC_CLIENT_SECRET`.
+3. **Roles** tab of the client → create the six client roles
+   `Intranet.Admin` … `Intranet.Guest`.
+4. **Client scopes** tab → `<client>-dedicated` → *Add mapper* → *By
+   configuration* → **User Client Role**: *Client ID* = **this client**
+   (left empty, the roles of every client count, and a same-named
+   `Intranet.Admin` of another client would grant admin here),
+   *Multivalued* on, *Token Claim Name* `roles`, *Claim JSON Type* String,
+   *Add to ID token* **on** (by default Keycloak puts client roles only into
+   the access token). `OIDC_ROLES_CLAIM` stays `roles`.
+5. Assign the roles: *Users* → the user → *Role mapping* → *Assign role* →
+   *Filter by clients*, or to admin-managed groups.
+6. E-mail: users an admin creates need *Email verified* on (or the *Verify
+   Email* required action); `email_verified` comes from that flag. Turn
+   *Realm settings → Login → User registration* off unless self-registration
+   is wanted (with `OIDC_DEFAULT_ROLE=deny` a self-registered user without a
+   role is refused anyway).
+7. Optional department: *Realm settings → User profile → Create attribute*
+   `department`, editable by **admins only** (Keycloak 24+ drops attributes
+   the user profile does not declare); then a **User Attribute** mapper
+   (*User Attribute* `department`, *Token Claim Name* `department`, *Add to
+   ID token* on) and `OIDC_DEPARTMENT_CLAIM=department`.
+8. A new hostname or a renamed realm changes the issuer: see
+   [Identity changes](#identity-changes-issuer-or-subject) before you do it.
+
+### Recipe: authentik
+
+Tested with authentik 2026.8.5; run at least 2025.12.5 or 2026.2.3
+(CVE-2026-40166 let non-admin users read the client secrets of confidential
+providers). Issuer (issuer mode *per provider*):
+`https://<host>/application/o/<application slug>/` **with** the trailing
+slash.
+
+1. **Applications → Providers → Create → OAuth2/OpenID Provider**:
+   - *Authorization flow*: an authorization flow such as
+     `default-provider-authorization-implicit-consent`;
+   - *Client type* **Confidential**; copy *Client ID* and *Client Secret*;
+   - *Redirect URIs*: strict, `${WEB_PUBLIC_URL}/api/auth/callback/oidc`;
+   - *Signing key*: **select a certificate** (e.g. *authentik Self-signed
+     Certificate*). Without one authentik signs with HS256 and the client
+     secret, which the cms refuses (*oidc_invalid* on every sign-in);
+   - *Advanced protocol settings*: *Subject mode* **Based on the User's
+     hashed ID** (default) or *Based on the User's UUID*, never e-mail or
+     username (they change); *Include claims in id_token* on; *Issuer mode*
+     *Each provider has a different issuer*; *Grant types*: at least
+     **authorization_code** (on 2026.8.5 a provider created through the API
+     had none and every sign-in failed with `invalid_request`).
+2. **Applications → Create**: a name, a slug (e.g. `sinnlos`), the provider.
+3. **Roles**, recommended: a **Scope Mapping** (*Customization → Property
+   Mappings → Create → Scope Mapping*, *Scope name* `profile`) that maps
+   chosen group **UUIDs** to role names, added to the provider next to the
+   stock mappings:
+
+   ```python
+   roles = {
+       "<uuid of the admins group>": "Intranet.Admin",
+       "<uuid of the editors group>": "Intranet.Editor",
+       "<uuid of the members group>": "Intranet.Member",
+   }
+   return {"roles": [roles[str(group.pk)] for group in request.user.groups.all() if str(group.pk) in roles]}
+   ```
+
+   (direct memberships only). `OIDC_ROLES_CLAIM` stays `roles`. Shortcut
+   for installs where **only admins** create or rename groups and change
+   memberships: groups named `Intranet.*` and `OIDC_ROLES_CLAIM=groups`
+   (the stock *profile* mapping sends group **names**).
+4. **E-mail**: the stock *email* mapping always sends `email_verified:
+   False`, so with it **nobody** gets in (*oidc_email_unverified*). Remove
+   it from the provider and add your own Scope Mapping with *Scope name*
+   `email` that sends `email` and an `email_verified` that is true only for
+   a verified **current** address, following authentik's guide
+   [Verify email address](https://docs.goauthentik.io/add-secure-apps/providers/oauth2/verify-email-address/).
+   A constant `True` is only right where every address is set or verified
+   outside authentik and users cannot change it. Test it by changing a
+   user's address.
+5. Optional department: a user attribute `department` that only admins set
+   (the user settings flow must not write it), a Scope Mapping (*Scope
+   name* `profile`) returning `{"department": request.user.attributes.get("department")}`,
+   and `OIDC_DEPARTMENT_CLAIM=department`.
+6. An application without policy bindings is open to every authentik user;
+   with `OIDC_DEFAULT_ROLE=deny` users without a role are refused by the
+   cms anyway. Bind a group policy to the application to stop them at
+   authentik already.
+
+### Recipe: Zitadel
+
+Tested with Zitadel v4.19.5. Issuer: the instance URL (e.g.
+`https://<instance>.zitadel.cloud` or the custom domain), no path.
+
+1. **Projects → Create** (e.g. `sinnlos`); in the project's *General*
+   settings turn on **Assert Roles on Authentication** and **Check
+   authorization on Authentication** (a user without a grant then sees
+   "Login not possible").
+2. *Roles*: add the keys `Intranet.Admin` … `Intranet.Guest`.
+3. *Applications → New*: type **Web**, **Code** flow, authentication
+   method *Basic*; redirect URI `${WEB_PUBLIC_URL}/api/auth/callback/oidc`;
+   in the token settings turn on **User roles inside ID Token** and **User
+   Info inside ID Token**. Copy client id and secret.
+4. *Authorizations*: grant the roles to the users.
+5. **`OIDC_ZITADEL_ORG_ID`** (required): the *Resource ID* of the
+   organisation whose users may sign in. The web then asks for the scopes
+   `urn:zitadel:iam:org:id:<id>` (only that organisation's users can sign
+   in) and `urn:zitadel:iam:user:resourceowner`, and the cms refuses users
+   of other organisations and counts only roles granted for that
+   organisation. Without it, an organisation that received a project grant
+   including `Intranet.Admin` could make its own users admins here, and
+   Zitadel's project checks do not stop that.
+6. `OIDC_ROLES_CLAIM=urn:zitadel:iam:org:project:roles` (an object whose
+   keys are the roles; the cms refuses this claim without
+   `OIDC_ZITADEL_ORG_ID`).
+7. Optional department: user **metadata** `department`, set by admins;
+   add `urn:zitadel:iam:user:metadata` to `OIDC_SCOPE` and set
+   `OIDC_DEPARTMENT_CLAIM=urn:zitadel:iam:user:metadata.department` (Zitadel
+   sends metadata base64-encoded; the cms decodes it).
+8. *Login behavior*: turn **Register allowed** off unless self-registration
+   is wanted. Zitadel asked an imported user with an unverified address for
+   the e-mail code before issuing a token; the cms checks `email_verified`
+   in any case.
+
+### An e-mail address that already has an account (409)
+
+As for Entra, a new identity whose e-mail address an existing account uses
+is never linked automatically (*oidc_account_exists*, cms log
+`result=conflict`). An admin checks whose account it is first (exactly as
+in [the Entra 409 procedure](#an-e-mail-address-that-already-has-an-account-409),
+step 1: delete a self-registered account you cannot attribute), then opens
+the user in **Content Manager → User** and sets **oidcIssuer** to
+`OIDC_ISSUER` as discovery writes it and **oidcSubject** to the user's
+subject exactly as the ID token carries it (case-sensitive): Keycloak the
+user's *ID*, authentik the user's hashed *UID* (or the UUID, per the
+provider's subject mode), Zitadel the user's *Resource ID*. Then the user
+signs in again. User id, password and role stay; the role stays manual
+until it is handed back. As with Entra, a kept password still signs in
+while `AUTH_LOCAL_ENABLED=1` and older sessions stay valid until they
+expire, so set a new password when anyone else might know it.
+
+### Identity changes (issuer or subject)
+
+The identity is issuer + subject. A new hostname, a renamed Keycloak realm,
+another authentik slug or issuer mode, or a changed authentik subject mode
+makes **every** user a new identity: their next sign-in either creates a
+second account or answers *oidc_account_exists*. Do not "fix" that with a
+blind `UPDATE` of `oidc_issuer`: it is only safe when the new issuer keeps
+the same subjects for the same people. Before such a change:
+
+1. list the bound accounts (`oidc_issuer`, `oidc_subject`, e-mail) from a
+   backup or a read-only query;
+2. confirm, per person, the subject the new configuration will send (one
+   test sign-in per kind of account on staging, or the identity provider's
+   admin view);
+3. after a fresh backup, write the new issuer (and, only where it changed,
+   the new subject) on exactly those rows, keeping the user ids, and check
+   that no two rows end up with the same pair (the unique index refuses
+   it);
+4. treat any account you cannot match like the 409 procedure, and remember
+   that local passwords and running sessions are not touched by this.
+
+### Sign-in errors
+
+| The sign-in page reports | Cause |
+|---|---|
+| `error=Configuration` right after clicking the button | `OIDC_ISSUER` does not match the discovery document's `issuer` (a missing or extra trailing slash with Keycloak or authentik), or the issuer is unreachable from the web |
+| *could not be verified* (`oidc_invalid`) | The cms refused the ID token: HS256 (authentik without a signing key), another client's token, clock skew over 5 minutes, issued more than about 15 minutes before the exchange, or a missing `sub` or `exp` |
+| *e-mail not verified* (`oidc_email_unverified`) | No `email`, or `email_verified` is not `true` (authentik's stock mapping, Keycloak's *Email verified* off) |
+| *has no access* (`oidc_not_assigned`) | No recognised `Intranet.*` role with `OIDC_DEFAULT_ROLE=deny` (Keycloak mapper not in the ID token or without the client id), or a Zitadel user of another organisation |
+| *already exists* (`oidc_account_exists`) | The 409 procedure above |
+| *is blocked* (`oidc_blocked`) | The account is blocked at `/manage/users` or in the admin panel |
+| *unavailable right now* (`oidc_unavailable`) | The cms is unreachable or cannot reach the identity provider's discovery document or signing keys, the two `OIDC_EXCHANGE_SECRET` values differ, `OIDC_ENABLED` is not `1` for the cms, or the issuer the cms sees differs from `OIDC_ISSUER` |
 
 ---
 
@@ -1209,13 +1495,13 @@ the pre-deploy backup (step 1,
    `LIVE_SMOKE=passed (notification frame not checked)`. A failed live-smoke
    **fails the deploy**; it is skipped with `LIVE_EVENTS_DISABLED=1` (read
    from the env compose hands the apps) or when the demo credentials file
-   is not readable, and on an Entra-only instance it runs the datetime
-   check only.
+   is not readable, and on an identity-provider-only instance (Entra or
+   OIDC without `AUTH_LOCAL_ENABLED=1`) it runs the datetime check only.
 5. Only after both passed: tags the images web and cms now run as
    `infra-{web,cms}:<sha>`, records them in the state file as
    last-known-good, and removes the SHA tags beyond the newest five
    (`DEPLOY_KEEP_TAGS`). A skip for `LIVE_EVENTS_DISABLED=1` and the
-   datetime check alone on an Entra-only instance count as passed. A
+   datetime check alone on an identity-provider-only instance count as passed. A
    live-smoke skipped for want of the credentials file (a typo in
    `PASSWORDS_FILE`, the wrong user) records **nothing**: the deploy ends
    with `WARNING: live-smoke did not run; this deploy is NOT recorded as
@@ -8428,7 +8714,8 @@ rollback; merged in order (5A, then 5B), batch 10 ships both together.
 - **`infra/live-smoke.sh`** ([§6.1](#61-health-checks)): finds its target
   with GETs only, removes the comment notifications it causes, checks the
   stream is uncompressed, keeps passwords off the command line, and skips
-  its sign-in steps on an Entra-only instance. It checks the notification
+  its sign-in steps on an identity-provider-only instance (Entra or, since
+  v0.25.0, OIDC without local sign-in). It checks the notification
   frame by default: the stream user is the first of `alex.morgan` (who
   authors seeded announcements) and `casey.jones` with a line in the
   credentials file, and an unchecked frame is a warning that `deploy.sh`
@@ -14216,10 +14503,12 @@ curl -s <URL>/api/polls/<poll-id>/results \
 | Microsoft sign-out ends on Microsoft's "You signed out" page instead of `/sign-in` | `<WEB_PUBLIC_URL>/sign-in` is not a registered Web redirect URI of the app ([Microsoft Entra ID sign-in](#microsoft-entra-id-sign-in), step 2); the intranet session is already gone |
 | cms stops at boot with `[entra] ENTRA_ENABLED=1, but the Entra configuration is invalid: …`, or every web request answers 500 with `[auth] ENTRA_ENABLED=1, but …` in the web log | The named Entra setting is invalid (a tenant `common` or a non-GUID, a short `ENTRA_EXCHANGE_SECRET`, …). Fix it in `infra/.env` (`infra/deploy.sh --check` names the keys) or unset `ENTRA_ENABLED` |
 | `infra/deploy.sh` stops with `ERROR: ENTRA_ENABLED=1, but these Entra settings in infra/.env are invalid: …` | The same check before the deploy ([§3.6](#36-deploy)) |
+| `infra/deploy.sh` stops with `ERROR: OIDC_ENABLED=1, but these OIDC settings in infra/.env are invalid: …` (or the cms or web refuses to start with an `OIDC_*` message) | The named OIDC setting is invalid, or `ENTRA_ENABLED=1` is set as well ([OIDC sign-in](#oidc-sign-in-keycloak-authentik-zitadel), configuration table). Fix it in `infra/.env` or unset `OIDC_ENABLED` |
+| OIDC sign-in lands on `/sign-in` with an `oidc_*` error, or `error=Configuration` right after the button | See [the OIDC sign-in errors](#oidc-sign-in-keycloak-authentik-zitadel) (an issuer with a missing or extra trailing slash, authentik without a signing key or with its stock e-mail mapping, a Keycloak role mapper without the client id) |
 | Microsoft sign-in lands on `/sign-in` with *"Microsoft sign-in is unavailable right now"* | The web log says why: the cms is unreachable, the two `ENTRA_EXCHANGE_SECRET` values differ (401 unauthorized), or `ENTRA_ENABLED` is not `1` for the cms (404); or the cms could not reach Microsoft (its log: `[entra] exchange failed …`). See [the sign-in errors](#microsoft-entra-id-sign-in) |
 | Microsoft sign-in lands on `/sign-in` with *"already exists"* | A local account uses the e-mail address; check whose it is, then bind or delete it ([the 409 procedure](#an-e-mail-address-that-already-has-an-account-409)) |
 | Local sign-in answers "Invalid email or password" for an account created through Microsoft sign-in, although an admin set its password | The account still has `provider = microsoft`; Strapi's local login only matches `provider = local`. Change **Provider** to `local` in **Content Manager → User** ([upgrade step 2](#upgrading-to-the-strapi-5551-release-2026-09-25)) |
-| Local sign-in answers "This provider is disabled" | `ENTRA_ENABLED=1` without `AUTH_LOCAL_ENABLED=1`: the cms refuses password sign-ins (Entra only). Set `AUTH_LOCAL_ENABLED=1` for a break-glass account. After an image rollback to a cms from before batch 9 that alone does not help: restart this release's cms on it before the rollback, or re-enable the Email provider in the Strapi admin panel afterwards ([Rolling back after switching Microsoft sign-in on](#rolling-back-after-switching-microsoft-sign-in-on), step 2) |
+| Local sign-in answers "This provider is disabled" | `ENTRA_ENABLED=1` or `OIDC_ENABLED=1` without `AUTH_LOCAL_ENABLED=1`: the cms refuses password sign-ins (identity provider only). Set `AUTH_LOCAL_ENABLED=1` for a break-glass account. After an image rollback to a cms from before batch 9 that alone does not help: restart this release's cms on it before the rollback, or re-enable the Email provider in the Strapi admin panel afterwards ([Rolling back after switching Microsoft sign-in on](#rolling-back-after-switching-microsoft-sign-in-on), step 2) |
 | Dashboard shows "0 departments" even after creating one | Strapi permissions — confirm `public` role has `find` access to departments, OR you're signed in |
 | cms restarts in a loop, log says `[env-guard] placeholder value in … Refusing to start in production` | A secret in the env still holds a template placeholder — generate real values (`infra/deploy.sh --check` names the keys) |
 | cms log says `[draft-twins] <type> <documentId>: could not create the draft (…)` | The boot repair could not give that published entry its draft twin (the reason is in the parentheses; `the pending draft of … links another …` is a saved, unpublished move of a lesson or wiki page: publish or discard that draft, then restart the cms); the cms runs normally and retries on every boot. Fix the named entry before you edit or publish the entries linked to it (its course, lessons, space, pages, parent or child pages): until it has a draft, publishing one of them drops its link to the named entry. See [Upgrading to the draft-twin repair (FX38)](#upgrading-to-the-draft-twin-repair-fx38), step 8 |
@@ -14248,7 +14537,7 @@ curl -s <URL>/api/polls/<poll-id>/results \
 | `infra/deploy.sh` stops with `ERROR: docker compose up failed …` (compose: `dependency failed to start: container infra-cms-1 …`) | The new cms refused to start; `docker logs infra-cms-1` says why. Fix and re-run, or roll back with the commands it prints ([Rolling back this release](#rolling-back-this-release): before the repair only with the legacy-zone override) |
 | `live-smoke: FAIL — timestamp without time zone columns remain` | The guard did not run or failed: check `docker logs infra-cms-1 \| grep datetime` |
 | `live-smoke: FAIL — subscribe: … came back compressed (Content-Encoding: …)` | The edge compresses `text/event-stream`, so pings wait in the encoder's buffer: take the compression off the `/live` route |
-| `live-smoke: FAIL — sign-in as … produced no session cookie (HTTP 302, redirect …error=CredentialsSignin…)` | Wrong password in the demo credentials file, or the account is blocked or locked. On an Entra-only instance live-smoke skips its sign-in steps by itself |
+| `live-smoke: FAIL — sign-in as … produced no session cookie (HTTP 302, redirect …error=CredentialsSignin…)` | Wrong password in the demo credentials file, or the account is blocked or locked. On an identity-provider-only instance (Entra or OIDC without `AUTH_LOCAL_ENABLED=1`) live-smoke skips its sign-in steps by itself |
 | `infra/deploy.sh` stops with `ERROR: another infra/deploy.sh (or an infra/restore-db.sh step) is running for compose project infra` | A deploy or a restore step of the same project runs (the lock goes with its process); let it finish, then re-run |
 | `infra/restore-db.sh` prints `STOP: …` (exit 1) or, with exit 3, `STOP: another infra/restore-db.sh step or infra/deploy.sh holds the lock …` | The step changed only what the line says; `infra/restore-db.sh status` shows the attempt and its next step ([Restoring a database dump](#restoring-a-database-dump)) |
 | `infra/restore-db.sh start` stops with `STOP: removing the staged dump … failed; web and cms run on the restored database … its cleanup did not finish` (or was interrupted after starting them) | The apps run with the new secret; only the cleanup is left. Fix the cause (for example the permissions of `infra/backups/restore-<attempt>`), then run `infra/restore-db.sh start` again: it finishes the cleanup and ends the reservation, and deploys work again ([Restoring a database dump](#restoring-a-database-dump)) |

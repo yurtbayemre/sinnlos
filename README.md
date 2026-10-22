@@ -2,7 +2,9 @@
 
 A self-hosted company intranet, gated by user roles. Local e-mail and
 password sign-in works out of the box; **Microsoft Entra ID** single sign-on
-is optional and off unless `ENTRA_ENABLED=1`. The UI is English by default,
+is optional and off unless `ENTRA_ENABLED=1`, and so is sign-in through
+**Keycloak, authentik or Zitadel** (OIDC, `OIDC_ENABLED=1`; one of the two
+at a time). The UI is English by default,
 with German as the second language.
 
 - **Backend:** Strapi 5 (Postgres in production, SQLite for local
@@ -38,6 +40,7 @@ Further reading:
   - [Standalone mode (no Microsoft)](#standalone-mode-no-microsoft)
   - [Full stack with Docker Compose](#full-stack-with-docker-compose)
   - [Microsoft Entra ID sign-in (optional)](#microsoft-entra-id-sign-in-optional)
+  - [OIDC sign-in with Keycloak, authentik or Zitadel (optional)](#oidc-sign-in-with-keycloak-authentik-or-zitadel-optional)
 - [Environment reference](#environment-reference)
 - [Deployment](#deployment)
 - [Scripts](#scripts)
@@ -160,6 +163,7 @@ rules are in
 | `audit-event`     | Append-only activity trail, one row per change of a guarded document (keys, no values); kept 365 days, admin-only read |
 | _profile_         | Routes-only: `GET`/`PUT /api/me`, the self-service profile                                                             |
 | _entra-auth_      | Routes-only: `POST /api/auth/entra/exchange`, the server-to-server step of the Microsoft sign-in (404 when off)        |
+| _oidc-auth_       | Routes-only: `POST /api/auth/oidc/exchange`, the server-to-server step of the OIDC sign-in (404 when off)              |
 
 **Draft & publish.** `announcement`, `course`, `document`, `event`,
 `lesson`, `poll`, `quick-link`, `wiki-space` and `wiki-page` keep
@@ -181,7 +185,7 @@ Six intranet roles are created at every boot
 (`apps/cms/src/bootstrap/roles.ts`): `admin_role`, `editor`,
 `department_head`, `team_lead`, `member` and `guest`. `authenticated` is the
 users-permissions plugin's built-in role; nobody lands there by default (new
-local users get `member`, Entra users an intranet role), so it
+local users get `member`, Entra and OIDC users an intranet role), so it
 only applies to accounts an admin put there. The five roles other than
 `guest` are the **staff roles**.
 
@@ -458,7 +462,7 @@ Notes:
 
 ### Standalone mode (no Microsoft)
 
-Without `ENTRA_ENABLED=1` (the default) both apps offer local e-mail and
+Without `ENTRA_ENABLED=1` or `OIDC_ENABLED=1` (the default) both apps offer local e-mail and
 password sign-in against Strapi; leftover `MS_*` or
 `AUTH_MICROSOFT_ENTRA_ID_*` values are ignored. This is how the owner's
 instance runs.
@@ -499,8 +503,8 @@ instance runs.
   `DEMO_MODE=1` answers every page with a 500
   ([details](./docs/DEPLOYMENT.md#16-demo-mode-no-microsoft-account-needed)).
 
-To offer local sign-in **next to** Microsoft, set `AUTH_LOCAL_ENABLED=1` for
-both apps as well as `ENTRA_ENABLED=1`; the cms mirrors it into its own
+To offer local sign-in **next to** Microsoft or OIDC, set `AUTH_LOCAL_ENABLED=1` for
+both apps as well as `ENTRA_ENABLED=1` or `OIDC_ENABLED=1`; the cms mirrors it into its own
 e-mail provider switch.
 
 ### Full stack with Docker Compose
@@ -602,6 +606,34 @@ Switch to `on` once the log looks right
 Sign-in errors and the procedure for an e-mail address that already has an
 account are in the runbook.
 
+### OIDC sign-in with Keycloak, authentik or Zitadel (optional)
+
+Since v0.25.0 the same pattern works with any standard OpenID Connect
+identity provider: off unless `OIDC_ENABLED=1` is set for **both** apps,
+and never together with `ENTRA_ENABLED=1`. Auth.js runs the OIDC code flow
+against `OIDC_ISSUER`; the cms verifies the ID token itself (discovery and
+signing keys of the issuer, asymmetric algorithms only), finds or creates
+the user by issuer + subject, takes the role from the `Intranet.*` roles in
+the token (without one the sign-in is refused, `OIDC_DEFAULT_ROLE=deny`)
+and issues the intranet session. The token must carry a verified e-mail
+address. Register `<web URL>/api/auth/callback/oidc` as the redirect URI,
+then set in `infra/.env`:
+
+```dotenv
+OIDC_ENABLED=1
+OIDC_ISSUER=<exactly as the provider's discovery document writes it>
+OIDC_CLIENT_ID=<client id>
+OIDC_CLIENT_SECRET=<client secret>
+OIDC_EXCHANGE_SECRET=<openssl rand -hex 32>
+```
+
+The recipes for Keycloak (a client-role mapper into the ID token),
+authentik (signing key, trailing slash in the issuer, an own e-mail
+mapping) and Zitadel (`OIDC_ZITADEL_ORG_ID`, project role assertion), the
+role rules, identity changes and the sign-in errors are in
+[DEPLOYMENT.md, "OIDC sign-in"](./docs/DEPLOYMENT.md#oidc-sign-in-keycloak-authentik-zitadel);
+the remaining knobs in the [environment reference](#oidc-keycloak-authentik-zitadel).
+
 ## Environment reference
 
 Each app reads its own file in development (`apps/cms/.env`,
@@ -641,7 +673,7 @@ anything is deployed.
 | `LIVE_EVENTS_DISABLED`  | `0`             | `1` is the kill switch for live updates (SSE): the cms sends no pings, the web polls. Same value on both.                                                                                                                                                                                                          |
 | `APP_TIME_ZONE`         | `Europe/Berlin` | IANA zone of every business date: "today", ad expiry, birthdays, digest days, the cron times, all-day events, poll deadlines. A UTC offset (`+02:00`) or unknown name stops the cms and makes the web answer every request with an error. See the [datetime contract](./docs/DEPLOYMENT.md#310-datetime-contract). |
 | `LOCAL_REGISTRATION`    | off             | `1` in both apps shows a self-registration form on the sign-in page (only while local sign-in is on). New users get `member`.                                                                                                                                                                                      |
-| `AUTH_LOCAL_ENABLED`    | off             | `1` keeps local sign-in next to Microsoft (break-glass). Without `ENTRA_ENABLED=1` local sign-in is always on.                                                                                                                                                                                                     |
+| `AUTH_LOCAL_ENABLED`    | off             | `1` keeps local sign-in next to Microsoft or OIDC (break-glass). Without `ENTRA_ENABLED=1` or `OIDC_ENABLED=1` local sign-in is always on.                                                                                                                                                                         |
 
 ### cms (`apps/cms/.env`)
 
@@ -716,6 +748,28 @@ In `infra/.env` the `MS_*` names feed both apps; locally the web uses the
 | `ENTRA_SYNC_DEPARTMENT` | —                                   | `0`       | `1` sets the user's department to the one department whose name equals Entra's `department` (case-insensitive); an empty value, no match or several matches clear it.                                                                                                                                                                                                                                                               |
 | `ENTRA_SYNC_MANAGER`    | `ENTRA_SYNC_MANAGER`                | `0`       | `1` syncs the manager from Graph (`User.Read.All` with admin consent).                                                                                                                                                                                                                                                                                                                                                              |
 | `ENTRA_SESSION_TTL`     | —                                   | `12h`     | Lifetime of a Microsoft sign-in's session, `<n>m`, `<n>h` or `<n>d`, at most `7d`.                                                                                                                                                                                                                                                                                                                                                  |
+
+### OIDC (Keycloak, authentik, Zitadel)
+
+Read only with `OIDC_ENABLED=1`; then an invalid value stops the cms at
+boot and fails every web request (and `ENTRA_ENABLED=1` next to it is
+refused). The same names in `infra/.env` and both apps.
+
+| Variable                | Read by  | Default                | Meaning                                                                                                                                   |
+| ----------------------- | -------- | ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `OIDC_ENABLED`          | cms, web | `0`                    | The only switch. Anything but `1` turns OIDC sign-in off.                                                                                 |
+| `OIDC_ISSUER`           | cms, web | (none)                 | The issuer exactly as the provider's discovery document writes it (authentik: with the trailing slash), `https:`, at most 255 characters. |
+| `OIDC_CLIENT_ID`        | cms, web | (none)                 | Client id; the cms checks the ID token's audience against it.                                                                             |
+| `OIDC_CLIENT_SECRET`    | web      | (none)                 | Client secret, web only.                                                                                                                  |
+| `OIDC_EXCHANGE_SECRET`  | cms, web | (none)                 | 32+ characters, the same for both apps; authenticates the web's call to `POST /api/auth/oidc/exchange`.                                   |
+| `OIDC_SCOPE`            | web      | `openid profile email` | Must contain `openid`.                                                                                                                    |
+| `OIDC_DISPLAY_NAME`     | web      | `Single Sign-On`       | Sign-in button label, at most 40 characters.                                                                                              |
+| `OIDC_ROLES_CLAIM`      | cms      | `roles`                | Dotted claim path of the `Intranet.*` roles (array, or object keys).                                                                      |
+| `OIDC_DEPARTMENT_CLAIM` | cms      | (empty)                | Optional dotted claim path of the department name; set, the department is synced and read-only at `/manage/users`.                        |
+| `OIDC_ZITADEL_ORG_ID`   | cms, web | (empty)                | Zitadel: the organisation whose users may sign in (digits); required with a `urn:zitadel:` roles claim.                                   |
+| `OIDC_DEFAULT_ROLE`     | cms      | `deny`                 | Role of a user without a recognised role: `deny`, `member` or `guest` (anything but `deny` admits every user of the provider).            |
+| `OIDC_SESSION_TTL`      | cms      | `12h`                  | Lifetime of an OIDC sign-in's session, `<n>m`, `<n>h` or `<n>d`, at most `7d`.                                                            |
+| `OIDC_ALLOW_HTTP`       | cms, web | `0`                    | `1` allows an `http:` issuer: development and staging only.                                                                               |
 
 ### Docker Compose only (`infra/.env`)
 
