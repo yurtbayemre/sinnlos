@@ -207,7 +207,7 @@ describe.each(testEngines())("user administration (v0.23) on %s", (engine) => {
       { method: "POST" },
     );
     expect(handed.status, handed.text).toBe(200);
-    expect(handed.body.data).toMatchObject({ roleSource: "entra", entraBound: true });
+    expect(handed.body.data).toMatchObject({ roleSource: "entra", idp: "entra" });
     expect((await row(lead.id)).entraAppliedRole ?? null).toBeNull();
     const own = await t.api<Detail>(
       "admin_role",
