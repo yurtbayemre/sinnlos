@@ -382,6 +382,28 @@ describe("runEntraExchange: role writes are atomic (spec I)", () => {
     });
   });
 
+  it("creates the complete Entra row: the core's email, role, confirmed and blocked win (v0.24.0)", async () => {
+    const host = fakeHost();
+    expect((await run(host)).status).toBe(200);
+    const { id: _id, documentId: _documentId, ...created } = host.users[0];
+    expect(created).toEqual({
+      username: `entra-${OID}`,
+      provider: "microsoft",
+      roleSource: "entra",
+      entraAppliedRole: "member",
+      entraTenantId: TENANT,
+      microsoftOid: OID,
+      jobTitle: null,
+      officeLocation: null,
+      phone: null,
+      displayName: PERSON.name,
+      email: PERSON.mail,
+      confirmed: true,
+      blocked: false,
+      role: roleId("member"),
+    });
+  });
+
   it("decides on a fresh read inside the transaction, not on a half-written row", async () => {
     // A concurrent promotion committed entraAppliedRole but not yet the role
     // link when this exchange first read the row. Decided on that read, the
@@ -423,6 +445,31 @@ describe("runEntraExchange: role writes are atomic (spec I)", () => {
       expect(host.calls.locks, dialect).toEqual(dialect === "postgres" ? [7] : []);
       // The profile sync stays outside (no aborted-transaction trap).
       expect(host.calls.update.filter((call) => !call.inTransaction).length).toBeGreaterThan(0);
+    }
+  });
+
+  it("takes the directory lock before the row lock on Postgres (v0.24.0 core)", async () => {
+    const order: string[] = [];
+    lockDocument.mockImplementation(async () => {
+      order.push("directory");
+      return 1;
+    });
+    try {
+      const host = fakeHost([entraRow()], { dialect: "postgres" });
+      const queryBuilder = host.db.queryBuilder.bind(host.db);
+      host.db.queryBuilder = (uid: string) => {
+        const builder = queryBuilder(uid);
+        const execute = builder.execute;
+        builder.execute = async () => {
+          order.push("row");
+          return execute();
+        };
+        return builder;
+      };
+      expect((await run(host, { ...PERSON, roles: ["Intranet.Editor"] })).status).toBe(200);
+      expect(order).toEqual(["directory", "row"]);
+    } finally {
+      lockDocument.mockImplementation(async () => 1);
     }
   });
 
