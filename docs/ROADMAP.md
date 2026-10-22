@@ -14,8 +14,11 @@ Workvivo, Sociabble, Simpplr, MangoApps feature guides, June 2026).
 >
 > **Done beyond this roadmap (2026-10):** duty rosters (v0.18), department
 > KPIs (v0.19), recurring safety training with renewal, reminders and a
-> named report (v0.20), and admin management of departments, teams (v0.22)
-> and users (v0.23) in the web instead of the Strapi admin.
+> named report (v0.20), admin management of departments, teams (v0.22)
+> and users (v0.23) in the web instead of the Strapi admin, and sign-in
+> through your own identity provider: a shared sign-in core (v0.24) and
+> generic OIDC for Keycloak, authentik and Zitadel next to Microsoft Entra
+> (v0.25; off by default, one identity provider per install).
 >
 > **Done beyond this roadmap (2026-09):** a full **training platform**
 > (courses + ordered lessons + per-user completion tracking + admin
