@@ -1,7 +1,8 @@
 {
   "name": "@sinnlos/domain",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.26.0",
+  "license": "AGPL-3.0-only",
   "description": "Pure domain rules shared by the Sinnlos cms and web: no runtime dependencies, no I/O",
   "sideEffects": false,
   "main": "./dist/cjs/index.js",

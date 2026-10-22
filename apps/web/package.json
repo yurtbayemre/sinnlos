@@ -1,7 +1,8 @@
 {
   "name": "@sinnlos/web",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.26.0",
+  "license": "AGPL-3.0-only",
   "description": "Next.js 16 frontend for the Sinnlos intranet",
   "scripts": {
     "dev": "next dev -p 3000",
