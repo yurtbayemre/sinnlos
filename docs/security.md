@@ -18,6 +18,7 @@ behind most rules (its §5 conventions and §7 open issues).
 - [Sign-in and sessions](#sign-in-and-sessions)
   - [Local sign-in](#local-sign-in)
   - [Microsoft Entra ID](#microsoft-entra-id)
+  - [OIDC (Keycloak, authentik, Zitadel)](#oidc-keycloak-authentik-zitadel)
   - [Sessions and the role flow](#sessions-and-the-role-flow)
   - [Token versions](#token-versions)
 - [Roles](#roles)
@@ -186,6 +187,60 @@ role an admin changes in the Strapi admin, is `manual` and keeps its role.
 what `on` would do) and creates new users as `member` at most; refusals
 apply in both modes. More in
 [What Entra owns](./DEPLOYMENT.md#what-entra-owns).
+
+### OIDC (Keycloak, authentik, Zitadel)
+
+Optional and off unless `OIDC_ENABLED=1` (v0.25.0, `apps/cms/src/oidc/`,
+the shared steps in `apps/cms/src/idp/exchange-core.ts`); never together
+with Entra. Runbook and recipes:
+[DEPLOYMENT.md](./DEPLOYMENT.md#oidc-sign-in-keycloak-authentik-zitadel).
+The same exchange pattern as Entra, without Graph:
+
+1. Auth.js runs the OIDC code flow with PKCE against `OIDC_ISSUER`. It
+   checks the issuer of discovery and token but **not** the ID token's
+   signature (the oauth4webapi code-flow path), and takes the allowed
+   algorithms from discovery, so it would accept an HS256 token signed with
+   the client secret: the cms check is the gate.
+2. The web POSTs the ID token to `POST /api/auth/oidc/exchange` (`auth:
+false`, authenticated by `OIDC_EXCHANGE_SECRET`; 404 while
+   `OIDC_ENABLED` is not `1`). The cms reads the issuer's discovery
+   document (its `issuer` must equal `OIDC_ISSUER` after URL normalisation;
+   the token's `iss` must then equal the discovered issuer exactly),
+   verifies the signature against the published keys with **asymmetric
+   algorithms only** (RS*, PS*, ES*, EdDSA; never HS* or `none`), the
+   audience (and `azp` when present), `exp`, a non-empty `sub`, an issue
+   time at most 10 minutes ago plus 5 minutes of clock tolerance, and
+   requires `email` with `email_verified: true`. With `OIDC_ALLOW_HTTP` not
+   `1` the issuer and its endpoints must be HTTPS.
+3. The user is found by **issuer + subject** (`oidcIssuer`, `oidcSubject`),
+   never by e-mail, backed by a unique database index; a new user is
+   created on the spot (`oidc-<hash>`), and a local account with the same
+   e-mail is never taken over (the same 409 procedure as Entra).
+4. **Admission**: the `Intranet.*` roles under `OIDC_ROLES_CLAIM` decide
+   (the highest wins). Without one the sign-in is refused
+   (`OIDC_DEFAULT_ROLE=deny`, the default), **also for a manual account**:
+   unlike Entra, a hand-set role never admits by itself, so taking the role
+   away in the identity provider always stops new sign-ins. A hand-set role
+   only chooses which role an admitted user gets. A non-`deny` default
+   admits every user of the identity provider.
+5. **Zitadel**: with `OIDC_ZITADEL_ORG_ID` the web asks for that
+   organisation's scope, and the cms requires
+   `urn:zitadel:iam:user:resourceowner:id` to equal it and counts only role
+   entries granted for it; an organisation that received a project grant
+   cannot make its users admins. The cms refuses a `urn:zitadel:` roles
+   claim without it.
+6. The display name (and, for rows the sign-in created, the e-mail) is
+   synced at every sign-in, the department only with
+   `OIDC_DEPARTMENT_CLAIM`; claims that grant rights (roles, department)
+   must be admin-controlled in the identity provider. The JWT lasts
+   `OIDC_SESSION_TTL` (12 hours by default); disabling a user in the
+   identity provider stops new sign-ins, a running session ends with that
+   TTL or a block in Sinnlos.
+
+The exchange trusts the web through the shared secret: an ID token alone
+cannot call it, and whoever holds the secret could exchange a captured,
+still young token again (as with Entra); there is no replay ledger.
+Strapi's own `keycloak` provider (it links accounts by e-mail) stays off.
 
 ### Sessions and the role flow
 
@@ -1126,8 +1181,10 @@ to that caller (the birthday and the digest settings):
 - `microsoftOid` and `entraTenantId`: the identity of a Microsoft user (an
   admin sets both, lower case, to bind an existing account once its owner
   is confirmed; `/api/me` reads `entraTenantId` to mark the Entra-owned
-  profile fields); `roleSource` (`entra` | `manual`), `entraAppliedRole`
-  and `entraManagerOid`, read by the Entra exchange. These and
+  profile fields); `oidcIssuer` and `oidcSubject`, the identity of an OIDC
+  user (v0.25.0, bound the same way); `roleSource` (`entra` | `oidc` |
+  `manual`), `entraAppliedRole` (the role the identity provider's sign-in
+  last wrote, Entra or OIDC) and `entraManagerOid`, read by the exchanges. These and
   `digestFrequency` are also `searchable: false`, so no `_q` finds them.
 - `tokenVersion`: private, `searchable: false` and hidden in the admin
   panel; no write can set it ([Token versions](#token-versions)).

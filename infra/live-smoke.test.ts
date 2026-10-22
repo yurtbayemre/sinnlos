@@ -11,7 +11,8 @@
  *      text/event-stream without a Content-Encoding;
  *   4. the notification cleanup removes only this run's comment
  *      notifications of the smoke author;
- *   5. an Entra-only web (ENTRA_ENABLED=1 without AUTH_LOCAL_ENABLED=1)
+ *   5. an identity-provider-only web (ENTRA_ENABLED=1 or OIDC_ENABLED=1
+ *      without AUTH_LOCAL_ENABLED=1)
  *      ends after the datetime check with a SKIPPED note and exit 0 (run in
  *      bash with docker stubbed);
  *   6. the stream user defaults to an announcement author from the
@@ -208,17 +209,31 @@ function run(
   return { status: res.status, stdout: res.stdout, stderr: res.stderr };
 }
 
-describe.skipIf(!HAS_BASH)("live-smoke.sh: an Entra-only instance", { timeout: 30_000 }, () => {
-  it("checks the datetime contract, then skips the sign-in steps with exit 0", () => {
-    const res = run(["ENTRA_ENABLED=1", "AUTH_LOCAL_ENABLED=0"]);
-    expect(res.status, res.stderr).toBe(0);
-    expect(res.stdout).toContain("live-smoke: datetime contract OK");
-    expect(res.stdout).toContain("live-smoke: SKIPPED the sign-in steps: Entra-only instance");
-    expect(res.stderr).not.toContain("curl-called");
+describe.skipIf(!HAS_BASH)("live-smoke.sh: an identity-provider-only instance", { timeout: 30_000 }, () => {
+  it("checks the datetime contract, then skips the sign-in steps with exit 0 (Entra or OIDC)", () => {
+    for (const env of [
+      ["ENTRA_ENABLED=1", "AUTH_LOCAL_ENABLED=0"],
+      ["OIDC_ENABLED=1", "AUTH_LOCAL_ENABLED=0"],
+      ["OIDC_ENABLED=1"],
+    ]) {
+      const res = run(env);
+      expect(res.status, res.stderr).toBe(0);
+      expect(res.stdout).toContain("live-smoke: datetime contract OK");
+      expect(res.stdout).toContain(
+        "live-smoke: SKIPPED the sign-in steps: identity-provider-only instance",
+      );
+      expect(res.stderr).not.toContain("curl-called");
+    }
   });
 
-  it("signs in as usual when local sign-in is on next to Entra, or Entra is off", () => {
-    for (const env of [["ENTRA_ENABLED=1", "AUTH_LOCAL_ENABLED=1"], ["ENTRA_ENABLED=0"], []]) {
+  it("signs in as usual when local sign-in is on next to an identity provider, or none is on", () => {
+    for (const env of [
+      ["ENTRA_ENABLED=1", "AUTH_LOCAL_ENABLED=1"],
+      ["OIDC_ENABLED=1", "AUTH_LOCAL_ENABLED=1"],
+      ["ENTRA_ENABLED=0", "OIDC_ENABLED=0"],
+      ["OIDC_ENABLED=true"],
+      [],
+    ]) {
       const res = run(env);
       expect(res.stdout, env.join(" ")).not.toContain("SKIPPED");
       // Without credentials it stops at the password check, before any request.
@@ -232,7 +247,7 @@ describe.skipIf(!HAS_BASH)(
   "live-smoke.sh: the cms zone once its boot line has rotated out (B10-T1)",
   { timeout: 30_000 },
   () => {
-    // Entra-only, so a passing datetime check ends the run with exit 0.
+    // Identity provider only, so a passing datetime check ends the run with exit 0.
     const ENTRA_ONLY = ["ENTRA_ENABLED=1"];
     const NO_BOOT_LINE = "export STUB_BOOT_LINE=";
 
