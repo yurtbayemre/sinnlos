@@ -8,7 +8,13 @@ vi.mock("../utils/document-lock", async (original) => ({
 import { handleExchange, type ExchangeContext } from "../api/entra-auth/controllers/entra-auth";
 import { parseEntraConfig, type EntraConfig } from "./config";
 import type { EntraIdClaims } from "./id-token";
-import { ROLE_UID, USER_UID, type ExchangeHost, type ExchangeOutcome } from "../idp/exchange-core";
+import {
+  ROLE_UID,
+  USER_UID,
+  admitIdentity,
+  type ExchangeHost,
+  type ExchangeOutcome,
+} from "../idp/exchange-core";
 import { DEPARTMENT_UID, runEntraExchange, type ExchangeDeps } from "./provision";
 
 /**
@@ -446,6 +452,39 @@ describe("runEntraExchange: role writes are atomic (spec I)", () => {
       // The profile sync stays outside (no aborted-transaction trap).
       expect(host.calls.update.filter((call) => !call.inTransaction).length).toBeGreaterThan(0);
     }
+  });
+
+  it("lets the core's email, role, confirmed and blocked win over a provider's newRow (v0.24.0)", async () => {
+    const host = fakeHost();
+    const audit = { user: "new", result: "unavailable" as const, role: "-" };
+    const admitted = await admitIdentity(
+      host,
+      {
+        log: "[test]",
+        ref: "sub=test",
+        identity: { entraTenantId: TENANT, microsoftOid: OID },
+        select: ["id"],
+        populate: {},
+        email: "core@entra.unit.test",
+        decide: () => ({ kind: "create", role: "member", audit: "new->member" }),
+        newRow: () => ({
+          entraTenantId: TENANT,
+          microsoftOid: OID,
+          email: "provider@entra.unit.test",
+          role: roleId("admin_role"),
+          confirmed: false,
+          blocked: true,
+        }),
+      },
+      audit,
+    );
+    expect(admitted.kind).toBe("ok");
+    expect(host.users[0]).toMatchObject({
+      email: "core@entra.unit.test",
+      role: roleId("member"),
+      confirmed: true,
+      blocked: false,
+    });
   });
 
   it("takes the directory lock before the row lock on Postgres (v0.24.0 core)", async () => {
