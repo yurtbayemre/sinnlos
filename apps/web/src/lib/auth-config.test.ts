@@ -2,7 +2,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import en from "../../messages/en.json";
 import de from "../../messages/de.json";
 import { ENTRA_SIGN_IN_ERRORS } from "./entra-exchange";
-import { EntraWebConfigError, entraLogoutUrl, parseEntraWebConfig } from "./auth-config";
+import {
+  EntraWebConfigError,
+  entraLogoutUrl,
+  localSignInEnabled,
+  parseEntraWebConfig,
+} from "./auth-config";
 
 /**
  * The web's sign-in configuration (D-ENTRA-01 spec A): ENTRA_ENABLED is the
@@ -107,6 +112,20 @@ describe("parseEntraWebConfig", () => {
   });
 });
 
+describe("localSignInEnabled (plan-oidc.md C1, same rule as the cms)", () => {
+  it("is on with AUTH_LOCAL_ENABLED=1 or without any identity provider", () => {
+    const cases: [Record<string, string>, boolean][] = [
+      [{}, true],
+      [{ ENTRA_ENABLED: "1" }, false],
+      [{ OIDC_ENABLED: "1" }, false],
+      [{ ENTRA_ENABLED: "1", AUTH_LOCAL_ENABLED: "1" }, true],
+      [{ OIDC_ENABLED: "1", AUTH_LOCAL_ENABLED: "1" }, true],
+      [{ ENTRA_ENABLED: "true", OIDC_ENABLED: "0" }, true],
+    ];
+    for (const [env, expected] of cases) expect(localSignInEnabled(env)).toBe(expected);
+  });
+});
+
 describe("module flags", () => {
   afterEach(() => {
     vi.unstubAllEnvs();
@@ -116,6 +135,7 @@ describe("module flags", () => {
     vi.resetModules();
     for (const key of [
       "ENTRA_ENABLED",
+      "OIDC_ENABLED",
       "AUTH_LOCAL_ENABLED",
       "LOCAL_REGISTRATION",
       "NEXT_PHASE",
@@ -144,6 +164,15 @@ describe("module flags", () => {
     ]);
     const noRegistration = await flags({ ...VALID, LOCAL_REGISTRATION: "1" });
     expect(noRegistration.REGISTRATION_ENABLED).toBe(false);
+  });
+
+  it("refuses OIDC_ENABLED=1 on import until v0.25.0, but not during next build", async () => {
+    await expect(flags({ OIDC_ENABLED: "1" })).rejects.toThrow(/OIDC_ENABLED=1/);
+    const build = await flags({ OIDC_ENABLED: "1", NEXT_PHASE: "phase-production-build" });
+    expect(build.LOCAL_ENABLED).toBe(false);
+    for (const flag of [undefined, "0", "true"]) {
+      expect((await flags({ OIDC_ENABLED: flag })).LOCAL_ENABLED).toBe(true);
+    }
   });
 
   it("throws on import for an invalid enabled config, but not during next build", async () => {

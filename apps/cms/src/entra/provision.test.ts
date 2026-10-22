@@ -8,15 +8,8 @@ vi.mock("../utils/document-lock", async (original) => ({
 import { handleExchange, type ExchangeContext } from "../api/entra-auth/controllers/entra-auth";
 import { parseEntraConfig, type EntraConfig } from "./config";
 import type { EntraIdClaims } from "./id-token";
-import {
-  DEPARTMENT_UID,
-  ROLE_UID,
-  USER_UID,
-  runEntraExchange,
-  type ExchangeDeps,
-  type ExchangeHost,
-  type ExchangeOutcome,
-} from "./provision";
+import { ROLE_UID, USER_UID, type ExchangeHost, type ExchangeOutcome } from "../idp/exchange-core";
+import { DEPARTMENT_UID, runEntraExchange, type ExchangeDeps } from "./provision";
 
 /**
  * runEntraExchange against an in-memory host: the interleavings and error

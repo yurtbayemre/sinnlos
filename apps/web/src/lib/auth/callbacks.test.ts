@@ -273,6 +273,14 @@ describe("jwt: the session update after a password change (FX40)", () => {
     await expect(update({ ...entra }, signed(fresh))).resolves.toEqual(entra);
   });
 
+  it("gives only a local session the new JWT: any other or no provider keeps its token", async () => {
+    const fresh = fakeStrapiJwt(nowSec() + 7 * 24 * 3600, 7);
+    for (const provider of ["oidc", undefined]) {
+      const other: JWT = { ...localToken(), provider };
+      await expect(update({ ...other }, signed(fresh))).resolves.toEqual(other);
+    }
+  });
+
   it("never revives an ended session: the expiry check runs before the update", async () => {
     const ended: JWT = { ...localToken(), strapiJwtExp: nowSec() - 1 };
     const fresh = fakeStrapiJwt(nowSec() + 7 * 24 * 3600, 7);

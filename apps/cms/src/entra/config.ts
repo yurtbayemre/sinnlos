@@ -19,6 +19,7 @@
  */
 import { ROLE_PRIVILEGE_ORDER, isRoleType, type RoleType } from "../bootstrap/roles";
 import { isPlaceholderSecret } from "../utils/env-guard";
+import { localSignInEnabled } from "../utils/sign-in-policy";
 
 export type Env = Record<string, string | undefined>;
 
@@ -88,8 +89,8 @@ export interface EntraConfig {
 
 export interface EntraDisabled {
   enabled: false;
-  /** Local sign-in is always on while Entra is off. */
-  localEnabled: true;
+  /** Local sign-in while Entra is off: on unless another identity provider is (utils/sign-in-policy.ts). */
+  localEnabled: boolean;
 }
 
 export type EntraSettings = EntraConfig | EntraDisabled;
@@ -188,7 +189,7 @@ function oneOf<T extends string>(values: readonly T[], value: string, fallback: 
  * when ENTRA_ENABLED=1 and the configuration is invalid.
  */
 export function parseEntraConfig(env: Env = process.env): EntraSettings {
-  if (env.ENTRA_ENABLED !== "1") return { enabled: false, localEnabled: true };
+  if (env.ENTRA_ENABLED !== "1") return { enabled: false, localEnabled: localSignInEnabled(env) };
 
   const issues: EntraConfigIssue[] = [];
   const issue = (variable: string, message: string) => issues.push({ variable, message });
@@ -244,7 +245,7 @@ export function parseEntraConfig(env: Env = process.env): EntraSettings {
     syncManager: env.ENTRA_SYNC_MANAGER === "1",
     sessionTtl,
     sessionTtlSeconds: sessionTtlSeconds as number,
-    localEnabled: env.AUTH_LOCAL_ENABLED === "1",
+    localEnabled: localSignInEnabled(env),
     localRegistration: env.LOCAL_REGISTRATION === "1",
   };
 }

@@ -63,6 +63,8 @@ describe("parseEntraConfig: disabled", () => {
     for (const local of [undefined, "0", "1"]) {
       expect(parseEntraConfig({ AUTH_LOCAL_ENABLED: local }).localEnabled).toBe(true);
     }
+    // Another identity provider switches it off (utils/sign-in-policy.ts).
+    expect(parseEntraConfig({ OIDC_ENABLED: "1" }).localEnabled).toBe(false);
   });
 
   it("logs a single disabled status line and no warnings", () => {

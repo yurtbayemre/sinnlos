@@ -30,6 +30,7 @@ import {
   type EntraSyncMode,
 } from "./config";
 import type { GraphMe, GraphResult } from "./graph";
+import type { RoleWriteDecision, UserRoleState } from "../idp/exchange-core";
 
 export type RoleResolution =
   { kind: "role"; role: RoleType; via: string[] } | { kind: "deny" } | { kind: "unknown" };
@@ -90,31 +91,8 @@ export function resolveEntraRole(input: RoleResolutionInput): RoleResolution {
   return { kind: "role", role: input.defaultRole, via: ["default"] };
 }
 
-/** The role fields of an existing user row. */
-export interface UserRoleState {
-  /** The current role's type (null without a role). */
-  roleType: string | null;
-  roleSource: string | null;
-  entraAppliedRole: string | null;
-}
-
 /** The highest role dry-run creates a new user with. */
 export const DRY_RUN_ROLE_CAP: RoleType = "member";
-
-export type RoleWriteDecision =
-  /** Refuse the sign-in. */
-  | { kind: "reject"; status: 403; error: "not_assigned"; audit: string }
-  | { kind: "reject"; status: 503; error: "unavailable"; audit: string }
-  /** New user: create with this role (roleSource 'entra', entraAppliedRole = role). */
-  | { kind: "create"; role: RoleType; audit: string }
-  /** Existing user: write these fields (and the role when `role` is set). */
-  | {
-      kind: "update";
-      data: { role?: RoleType; entraAppliedRole?: RoleType | null; roleSource?: "manual" };
-      audit: string;
-    }
-  /** Existing user: no role field changes. */
-  | { kind: "keep"; audit: string };
 
 const capForDryRun = (role: RoleType): RoleType =>
   privilegeRank(role) < privilegeRank(DRY_RUN_ROLE_CAP) ? DRY_RUN_ROLE_CAP : role;

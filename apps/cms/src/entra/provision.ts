@@ -37,6 +37,10 @@
  * the step, the user id and the error's code (errorLabel), never its
  * message: knex puts the SQL and its bound values (the profile) there.
  *
+ * The steps every identity provider shares (secret check, identity, 409,
+ * create race, blocked, locked role write, JWT) live in
+ * idp/exchange-core.ts since v0.24.0; this module keeps the Entra parts.
+ *
  * No enclosing transaction, only two short ones: around the identity insert
  * (row and role link commit together) and around an existing user's role
  * decision and write (a fresh, on Postgres locked read of the row). Strapi's
@@ -47,7 +51,21 @@
  * any transaction, so no Postgres aborted-transaction trap can take them, or
  * the sign-in, down.
  */
-import { createHash, timingSafeEqual } from "node:crypto";
+import {
+  admitIdentity,
+  errorLabel,
+  fail,
+  isRecord,
+  issueSession,
+  secretMatches,
+  stringOf,
+  USER_UID,
+  type ExchangeError,
+  type ExchangeHost,
+  type ExchangeOutcome,
+  type ExchangeRequest,
+  type Row,
+} from "../idp/exchange-core";
 import type { EntraConfig } from "./config";
 import {
   checkMemberGroups,
@@ -71,11 +89,7 @@ import {
   syncedEmail,
 } from "./profile";
 import { decideRoleWrite, resolveEntraRole, type RoleResolution } from "./roles";
-import { lockDocument, type DocumentLockHost } from "../utils/document-lock";
-import { USER_DIRECTORY_LOCK_DOCUMENT_ID, USER_DIRECTORY_LOCK_UID } from "../utils/user-admin";
 
-export const USER_UID = "plugin::users-permissions.user";
-export const ROLE_UID = "plugin::users-permissions.role";
 export const DEPARTMENT_UID = "api::department.department";
 
 /** The header the web sends the shared secret in. */
@@ -84,94 +98,11 @@ export const EXCHANGE_SECRET_HEADER = "x-entra-exchange-secret";
 /** idToken and accessToken: at most this many bytes each. */
 export const MAX_TOKEN_BYTES = 16 * 1024;
 
-/** The error codes of the exchange; the web maps them to /sign-in?error=entra_<code>. */
-export type ExchangeError =
-  "unauthorized" | "invalid" | "account_exists" | "not_assigned" | "blocked" | "unavailable";
-
-export interface ExchangeSuccess {
-  jwt: string;
-  /** exp of the jwt, epoch seconds. */
-  expiresAt: number;
-  user: { id: number; displayName: string; email: string };
-}
-
-export type ExchangeOutcome =
-  | { status: 200; body: ExchangeSuccess }
-  | { status: 400 | 401 | 403 | 409 | 503; body: { error: ExchangeError } };
-
-type Row = Record<string, unknown> & { id: number };
-
-interface Query {
-  findOne(params: Record<string, unknown>): Promise<Row | null>;
-  findMany(params: Record<string, unknown>): Promise<Row[]>;
-  create(params: { data: Record<string, unknown> }): Promise<Row>;
-  update(params: {
-    where: Record<string, unknown>;
-    data: Record<string, unknown>;
-  }): Promise<Row | null>;
-}
-
-/** The query builder slice that locks a user row (Postgres). */
-interface LockQuery {
-  select(columns: string[]): LockQuery;
-  where(where: Record<string, unknown>): LockQuery;
-  forUpdate(): LockQuery;
-  execute(): Promise<unknown>;
-}
-
-/** The slice of the Strapi instance the exchange uses. */
-export interface ExchangeHost {
-  db: {
-    query(uid: string): Query;
-    /**
-     * One transaction around `callback`: every query inside joins it
-     * (@strapi/database keeps it in AsyncLocalStorage, and a nested
-     * transaction() reuses it), commit on return, rollback on a throw.
-     */
-    transaction<T>(callback: () => Promise<T>): Promise<T>;
-    queryBuilder(uid: string): LockQuery;
-    /** 'postgres' or 'sqlite'. */
-    dialect: { client: string };
-  };
-  documents(uid: string): {
-    findMany(params: Record<string, unknown>): Promise<{ documentId: string }[]>;
-    update(params: { documentId: string; data: Record<string, unknown> }): Promise<unknown>;
-  };
-  plugin(name: string): { service(name: string): unknown };
-  log: {
-    info(message: string): void;
-    warn(message: string): void;
-    error(message: string): void;
-  };
-}
-
 export interface ExchangeDeps {
   /** Test seam: the ID-token check (default: id-token.ts against the tenant's keys). */
   verify?: (idToken: string, config: EntraConfig) => Promise<IdTokenResult>;
   /** Test seam: Graph's fetch. */
   graph?: GraphOptions;
-}
-
-export interface ExchangeRequest {
-  /** The x-entra-exchange-secret header, as received. */
-  secret: unknown;
-  body: unknown;
-}
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
-
-const fail = (status: 400 | 401 | 403 | 409 | 503, error: ExchangeError): ExchangeOutcome => ({
-  status,
-  body: { error },
-});
-
-/** Constant-time comparison of the header with the configured secret. */
-export function secretMatches(header: unknown, secret: string): boolean {
-  if (typeof header !== "string" || header === "" || secret === "") return false;
-  const given = createHash("sha256").update(header, "utf8").digest();
-  const expected = createHash("sha256").update(secret, "utf8").digest();
-  return timingSafeEqual(given, expected);
 }
 
 /** The two tokens, when both are non-empty strings of at most 16 KB. */
@@ -185,49 +116,6 @@ export function readTokens(body: unknown): { idToken: string; accessToken: strin
   return ok(idToken) && ok(accessToken) ? { idToken, accessToken } : null;
 }
 
-/** exp of a JWT the cms just issued (payload decoded, not verified). */
-function jwtExp(jwt: string): number | null {
-  const payload = jwt.split(".")[1];
-  if (!payload) return null;
-  try {
-    const exp = (
-      JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as { exp?: unknown }
-    ).exp;
-    return typeof exp === "number" && Number.isFinite(exp) ? exp : null;
-  } catch {
-    return null;
-  }
-}
-
-const stringOf = (value: unknown): string | null => (typeof value === "string" ? value : null);
-
-const SAFE_LABEL = /^[A-Za-z0-9_.:-]{1,64}$/;
-
-/**
- * What a log line may say about an error: its code (a Postgres SQLSTATE, a
- * SQLite or Node code) or its class name, never its message. knex prefixes
- * the message of a failed query with the SQL and every bound value, i.e.
- * the e-mail, name, job title, phone, office, tenant and object id of the
- * Graph profile being written (spec N: no Graph payload in a log line).
- */
-export function errorLabel(err: unknown): string {
-  const code =
-    typeof err === "object" && err !== null ? (err as { code?: unknown }).code : undefined;
-  if (typeof code === "number" && Number.isFinite(code)) return String(code);
-  if (typeof code === "string" && SAFE_LABEL.test(code)) return code;
-  const name = err instanceof Error ? err.name : "";
-  return SAFE_LABEL.test(name) ? name : "unknown";
-}
-
-/** A broken invariant of the exchange; its code is what the log line shows. */
-export class ExchangeInvariantError extends Error {
-  readonly code: string;
-  constructor(code: string) {
-    super(code);
-    this.name = "ExchangeInvariantError";
-    this.code = code;
-  }
-}
 const relationId = (value: unknown): number | null =>
   isRecord(value) && typeof value.id === "number" ? value.id : null;
 const relationDocumentId = (value: unknown): string | null =>
@@ -321,11 +209,12 @@ export async function runEntraExchange(
   writeAudit();
   if (outcome.kind === "refused") return fail(outcome.status, outcome.error);
 
-  const jwtService = strapi.plugin("users-permissions").service("jwt") as {
-    issue(payload: { id: number }, options: { expiresIn: string }): string | Promise<string>;
-  };
-  const jwt = await jwtService.issue({ id: outcome.user.id }, { expiresIn: settings.sessionTtl });
-  const expiresAt = jwtExp(jwt) ?? Math.floor(Date.now() / 1000) + settings.sessionTtlSeconds;
+  const { jwt, expiresAt } = await issueSession(
+    strapi,
+    outcome.user.id,
+    settings.sessionTtl,
+    settings.sessionTtlSeconds,
+  );
   // Built field by field (spec D.12): never a database row.
   return {
     status: 200,
@@ -378,9 +267,6 @@ async function provision(
   audit: Audit,
 ): Promise<ProvisionOutcome> {
   const users = strapi.db.query(USER_UID);
-  const identity = { entraTenantId: claims.tid, microsoftOid: claims.oid };
-  const findIdentity = () =>
-    users.findOne({ where: identity, select: USER_SELECT, populate: USER_POPULATE });
   const resolution = resolveEntraRole({
     claimRoles: claims.roles,
     me: graph.me,
@@ -391,60 +277,36 @@ async function provision(
   audit.via = viaOf(resolution);
   const me = graph.me.ok === true ? graph.me.data : null;
 
-  let user = await findIdentity();
-  let created = false;
-  if (!user) {
-    const email = newIdentityEmail(me, claims);
-    if (email === null) {
-      strapi.log.warn(
-        `[entra] exchange refused: no e-mail address for a new identity (oid=${audit.oid})`,
-      );
-      audit.result = "unavailable";
-      return { kind: "refused", status: 503, error: "unavailable" };
-    }
-    // No automatic linking by e-mail (the nOAuth risk class): an admin binds
-    // the existing row by entering tenant and object id on it, after checking
-    // whose it is (a self-registered address is not verified).
-    const taken = await users.findOne({ where: { email: { $eqi: email } }, select: ["id"] });
-    if (taken) {
-      // The row with this address can be this very identity: a concurrent
-      // first sign-in of the same person created it between the lookup
-      // above and this check. Continue as that existing user (spec F); only
-      // an address of ANOTHER row is a conflict.
-      user = await findIdentity();
-      if (!user) {
-        audit.result = "conflict";
-        return { kind: "refused", status: 409, error: "account_exists" };
-      }
-      strapi.log.info(
-        `[entra] concurrent first sign-in (oid=${audit.oid}): continuing with the existing row`,
-      );
-    } else {
-      const outcome = await createIdentity(strapi, claims, me, email, resolution, settings, audit);
-      if (outcome.kind === "refused") return outcome;
-      created = outcome.created;
-      user = await findIdentity();
-      if (!user) throw new ExchangeInvariantError("readback_failed");
-    }
-  }
-
-  audit.user = String(user.id);
-  if (!created) {
-    if (user.blocked === true) {
-      audit.result = "blocked";
-      audit.role = "keep";
-      return { kind: "refused", status: 403, error: "blocked" };
-    }
-    const step = await writeRole(strapi, user.id, resolution, settings.syncMode);
-    audit.role = step.audit;
-    if (step.kind === "refused") {
-      audit.result = step.status === 403 ? "denied" : "unavailable";
-      return { kind: "refused", status: step.status, error: step.error };
-    }
-    audit.result = "existing";
-  } else {
-    audit.result = "created";
-  }
+  // The identity, the 409, the create race, blocked and the role write:
+  // idp/exchange-core.ts (spec F, I).
+  const admitted = await admitIdentity(
+    strapi,
+    {
+      log: "[entra]",
+      ref: `oid=${audit.oid}`,
+      identity: { entraTenantId: claims.tid, microsoftOid: claims.oid },
+      select: USER_SELECT,
+      populate: USER_POPULATE,
+      email: newIdentityEmail(me, claims),
+      decide: (user) => decideRoleWrite(user, resolution, settings.syncMode),
+      newRow: (role, email) => {
+        const scalars = me ? buildProfileUpdate(me) : null;
+        return {
+          username: `entra-${claims.oid}`,
+          provider: "microsoft",
+          roleSource: "entra",
+          entraAppliedRole: role,
+          entraTenantId: claims.tid,
+          microsoftOid: claims.oid,
+          ...(scalars ?? {}),
+          displayName: scalars?.displayName ?? capUserText(claims.name ?? email),
+        };
+      },
+    },
+    audit,
+  );
+  if (admitted.kind === "refused") return admitted;
+  const { user, created } = admitted;
 
   const mayWrite = settings.syncMode === "on";
   if (me && !created) {
@@ -474,162 +336,6 @@ async function provision(
       email: stringOf(final.email) ?? "",
     },
   };
-}
-
-type CreateOutcome =
-  | { kind: "refused"; status: 403 | 409 | 503; error: ExchangeError }
-  /** created false: a concurrent first sign-in of the same person won the unique index. */
-  | { kind: "row"; created: boolean };
-
-/** Spec F: the row of a new identity whose address no row uses. */
-async function createIdentity(
-  strapi: ExchangeHost,
-  claims: EntraIdClaims,
-  me: GraphMe | null,
-  email: string,
-  resolution: RoleResolution,
-  settings: EntraConfig,
-  audit: Audit,
-): Promise<CreateOutcome> {
-  const users = strapi.db.query(USER_UID);
-  const decision = decideRoleWrite(null, resolution, settings.syncMode);
-  audit.role = decision.audit;
-  if (decision.kind === "reject") {
-    audit.result = decision.status === 403 ? "denied" : "unavailable";
-    return { kind: "refused", status: decision.status, error: decision.error };
-  }
-  if (decision.kind !== "create")
-    throw new ExchangeInvariantError(`new_user_decision_${decision.kind}`);
-  const roleId = await roleIdOf(strapi, decision.role);
-  if (roleId === null) {
-    strapi.log.error(`[entra] role ${decision.role} does not exist; refusing the sign-in`);
-    audit.result = "unavailable";
-    return { kind: "refused", status: 503, error: "unavailable" };
-  }
-  const scalars = me ? buildProfileUpdate(me) : null;
-  try {
-    // One transaction: db.query create() inserts the row and links its role
-    // in two separate commits (@strapi/database entity-manager create), and a
-    // concurrent exchange reading between them would see roleSource 'entra'
-    // and entraAppliedRole without a role, i.e. an admin's change. The
-    // entity manager's own transaction() joins this one, so both commit
-    // together. The unique-violation handling below runs after the rollback.
-    await strapi.db.transaction(() =>
-      users.create({
-        data: {
-          username: `entra-${claims.oid}`,
-          email,
-          provider: "microsoft",
-          confirmed: true,
-          blocked: false,
-          role: roleId,
-          roleSource: "entra",
-          entraAppliedRole: decision.role,
-          entraTenantId: claims.tid,
-          microsoftOid: claims.oid,
-          ...(scalars ?? {}),
-          displayName: scalars?.displayName ?? capUserText(claims.name ?? email),
-        },
-      }),
-    );
-    return { kind: "row", created: true };
-  } catch (err) {
-    // A concurrent first sign-in of the same person won the unique index.
-    const winner = await users.findOne({
-      where: { entraTenantId: claims.tid, microsoftOid: claims.oid },
-      select: ["id"],
-    });
-    if (!winner) throw err;
-    strapi.log.info(
-      `[entra] concurrent first sign-in (oid=${audit.oid}): continuing with the existing row`,
-    );
-    return { kind: "row", created: false };
-  }
-}
-
-type RoleStep =
-  | { kind: "ok"; audit: string }
-  | { kind: "refused"; status: 403 | 503; error: ExchangeError; audit: string };
-
-/**
- * Spec I for an existing user: the role decision and its write in ONE short
- * transaction, decided on a fresh read of the row, which is locked on
- * Postgres (FOR UPDATE; SQLite runs every transaction on its single
- * connection, one at a time). db.query update() commits a row's columns and
- * its relations separately, and create() inserts before it links the role:
- * a decision on a read outside the lock could see a concurrent exchange's
- * new entraAppliedRole next to the old role (or none) and take that for an
- * admin's change, flipping the user to manual for good. Not optional: a
- * role Entra no longer grants must not survive a failed write, so a failure
- * here fails the sign-in (503 via the controller).
- */
-async function writeRole(
-  strapi: ExchangeHost,
-  userId: number,
-  resolution: RoleResolution,
-  mode: EntraConfig["syncMode"],
-): Promise<RoleStep> {
-  return strapi.db.transaction(async () => {
-    if (strapi.db.dialect.client === "postgres") {
-      // The user administration's directory lock first (utils/user-admin.ts, same order):
-      // a sign-in's demotion and a web demotion never both pass the last-admin check.
-      await lockDocument(
-        strapi as unknown as DocumentLockHost,
-        USER_DIRECTORY_LOCK_UID,
-        USER_DIRECTORY_LOCK_DOCUMENT_ID,
-      );
-      await strapi.db
-        .queryBuilder(USER_UID)
-        .select(["id"])
-        .where({ id: userId })
-        .forUpdate()
-        .execute();
-    }
-    const users = strapi.db.query(USER_UID);
-    const row = await users.findOne({
-      where: { id: userId },
-      select: ["id", "roleSource", "entraAppliedRole"],
-      populate: { role: { select: ["id", "type"] } },
-    });
-    if (!row) throw new ExchangeInvariantError("user_vanished");
-    const decision = decideRoleWrite(
-      {
-        roleType: isRecord(row.role) ? stringOf(row.role.type) : null,
-        roleSource: stringOf(row.roleSource),
-        entraAppliedRole: stringOf(row.entraAppliedRole),
-      },
-      resolution,
-      mode,
-    );
-    if (decision.kind === "reject") {
-      return {
-        kind: "refused",
-        status: decision.status,
-        error: decision.error,
-        audit: decision.audit,
-      };
-    }
-    if (decision.kind === "update") {
-      const data: Record<string, unknown> = { ...decision.data };
-      if (decision.data.role !== undefined) {
-        const roleId = await roleIdOf(strapi, decision.data.role);
-        if (roleId === null) {
-          strapi.log.error(
-            `[entra] role ${decision.data.role} does not exist; refusing the sign-in`,
-          );
-          return { kind: "refused", status: 503, error: "unavailable", audit: decision.audit };
-        }
-        data.role = roleId;
-      }
-      await users.update({ where: { id: userId }, data });
-    }
-    return { kind: "ok", audit: decision.audit };
-  });
-}
-
-async function roleIdOf(strapi: ExchangeHost, type: string): Promise<number | null> {
-  const role = await strapi.db.query(ROLE_UID).findOne({ where: { type }, select: ["id"] });
-  return role ? role.id : null;
 }
 
 /** The Entra-owned scalars and (provider microsoft) the e-mail of an existing user. */

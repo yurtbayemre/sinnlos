@@ -10,9 +10,13 @@
  *    Entra-only install. The cms validates its own half
  *    (apps/cms/src/entra/config.ts); infra/deploy.sh --check both.
  *  - Local (email+password against Strapi /api/auth/local): on with
- *    AUTH_LOCAL_ENABLED=1, and automatically whenever ENTRA_ENABLED is not
- *    '1', so a fresh clone signs in with zero auth config. The cms mirrors
- *    the same rule into users-permissions' grant.email.
+ *    AUTH_LOCAL_ENABLED=1, and automatically whenever no identity provider
+ *    is on (ENTRA_ENABLED and OIDC_ENABLED not '1'), so a fresh clone signs
+ *    in with zero auth config (localSignInEnabled, plan-oidc.md C1). The cms
+ *    mirrors the same rule (utils/sign-in-policy.ts) into users-permissions'
+ *    grant.email.
+ *  - OIDC_ENABLED=1 is refused on first import until v0.25.0 ships the OIDC
+ *    sign-in, like the cms refuses its boot.
  *  - Registration form: LOCAL_REGISTRATION=1 (must match the CMS env).
  */
 
@@ -136,7 +140,23 @@ export const ENTRA: EntraWebConfig | null = loadEntra(process.env);
 
 export const MICROSOFT_ENABLED = ENTRA !== null;
 
-export const LOCAL_ENABLED =
-  process.env.AUTH_LOCAL_ENABLED === "1" || process.env.ENTRA_ENABLED !== "1";
+/**
+ * Local sign-in: AUTH_LOCAL_ENABLED=1 next to an identity provider
+ * (break-glass), or no identity provider on at all. The cms's
+ * utils/sign-in-policy.ts has the same rule.
+ */
+export function localSignInEnabled(env: Env): boolean {
+  return env.AUTH_LOCAL_ENABLED === "1" || (env.ENTRA_ENABLED !== "1" && env.OIDC_ENABLED !== "1");
+}
+
+// shortcut: OIDC sign-in arrives with v0.25.0 (plan-oidc.md); until then
+// OIDC_ENABLED=1 would only switch local sign-in off. Remove with the adapter.
+if (process.env.OIDC_ENABLED === "1" && process.env.NEXT_PHASE !== "phase-production-build") {
+  throw new Error(
+    "[auth] OIDC_ENABLED=1, but OIDC sign-in arrives with v0.25.0. Unset OIDC_ENABLED.",
+  );
+}
+
+export const LOCAL_ENABLED = localSignInEnabled(process.env);
 
 export const REGISTRATION_ENABLED = LOCAL_ENABLED && process.env.LOCAL_REGISTRATION === "1";
