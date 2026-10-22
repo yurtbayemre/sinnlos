@@ -2226,3 +2226,79 @@ describe("preflight: wiki revision draft rows (batch 16, DA03)", BASH_BUDGET, ()
     );
   });
 });
+
+describe("Caddy host preflight: DOMAIN, ports and schemes (v0.26)", BASH_BUDGET, () => {
+  /** caddy_host_scan of deploy.sh: its "problem …" lines. */
+  function caddyScan(domain: string, webUrl: string, cmsUrl = webUrl): string[] {
+    const json = JSON.stringify(
+      {
+        services: {
+          caddy: { environment: { DOMAIN: domain } },
+          cms: { environment: { PUBLIC_URL: cmsUrl } },
+          web: { environment: { AUTH_URL: webUrl } },
+        },
+      },
+      null,
+      2,
+    );
+    const run = runBash(
+      [
+        "set -euo pipefail",
+        shellFunction("compose_env_value"),
+        shellLine("TRAEFIK_HOST_RE="),
+        shellLine("TRAEFIK_HOST_PLACEHOLDER_RE="),
+        shellLine("CADDY_PORT_RE="),
+        shellFunction("url_host"),
+        shellFunction("caddy_host_scan"),
+        "caddy_host_scan <<'COMPOSE_JSON'",
+        json,
+        "COMPOSE_JSON",
+        "",
+      ].join("\n"),
+    );
+    expect(run.status, run.stderr).toBe(0);
+    return run.stdout
+      .split("\n")
+      .filter((l) => l.startsWith("problem "))
+      .map((l) => l.slice(8));
+  }
+
+  it.skipIf(!HAS_BASH)("passes HTTPS on 443 and plain HTTP on localhost", () => {
+    expect(caddyScan("intranet.acme.test", "https://intranet.acme.test")).toEqual([]);
+    expect(caddyScan("https://intranet.acme.test:443", "https://intranet.acme.test:443/")).toEqual(
+      [],
+    );
+    expect(caddyScan("localhost", "https://localhost")).toEqual([]);
+    expect(caddyScan("http://localhost", "http://localhost")).toEqual([]);
+    expect(caddyScan("http://localhost:80", "http://localhost:80/")).toEqual([]);
+  });
+
+  it.skipIf(!HAS_BASH)("refuses another port: compose publishes only 80 and 443", () => {
+    expect(caddyScan("intranet.acme.test:8443", "https://intranet.acme.test")).toEqual([
+      "DOMAIN=intranet.acme.test:8443 names port 8443: the bundled Caddy serves https on port 443 only",
+    ]);
+    expect(caddyScan("intranet.acme.test", "https://intranet.acme.test:8443")).toEqual([
+      "WEB_PUBLIC_URL=https://intranet.acme.test:8443 names port 8443: the bundled Caddy serves https on port 443 only",
+      "CMS_PUBLIC_URL=https://intranet.acme.test:8443 names port 8443: the bundled Caddy serves https on port 443 only",
+    ]);
+    expect(caddyScan("http://localhost:8080", "http://localhost:8080")).toContain(
+      "DOMAIN=http://localhost:8080 names port 8080: the bundled Caddy serves http on port 80 only",
+    );
+  });
+
+  it.skipIf(!HAS_BASH)("refuses public URLs with the scheme Caddy does not serve", () => {
+    expect(
+      caddyScan(
+        "http://intranet.acme.test",
+        "https://intranet.acme.test",
+        "http://intranet.acme.test",
+      ),
+    ).toEqual([
+      "WEB_PUBLIC_URL=https://intranet.acme.test is not an http:// URL, and DOMAIN=http://intranet.acme.test makes Caddy serve http",
+    ]);
+    expect(caddyScan("intranet.acme.test", "http://intranet.acme.test")).toEqual([
+      "WEB_PUBLIC_URL=http://intranet.acme.test is not an https:// URL, and DOMAIN=intranet.acme.test makes Caddy serve https",
+      "CMS_PUBLIC_URL=http://intranet.acme.test is not an https:// URL, and DOMAIN=intranet.acme.test makes Caddy serve https",
+    ]);
+  });
+});

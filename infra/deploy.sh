@@ -475,19 +475,24 @@ traefik_host_scan() {
 }
 
 # Caddy edge: the same rules for DOMAIN, the bundled Caddy's site address
-# (a host name, optionally with http:// or https:// and a port; empty
-# renders as localhost). Prints "host <name>", "origin <WEB_PUBLIC_URL>"
-# (the smoke URL's default) and "problem <text>" lines like
-# traefik_host_scan.
+# (a host name, optionally with http:// or https://; empty renders as
+# localhost). Compose publishes only 80 and 443, and Caddy serves plain HTTP
+# only for an http:// DOMAIN: a DOMAIN or public URL with another port, or a
+# public URL with the other scheme, is refused (the site would be
+# unreachable or sign-in broken). Prints "host <name>", "origin
+# <WEB_PUBLIC_URL>" (the smoke URL's default) and "problem <text>" lines
+# like traefik_host_scan.
+CADDY_PORT_RE='^([A-Za-z]+://)?[^/]*:([0-9]+)(/|$)'
 caddy_host_scan() {
-  local json domain host web cms
+  local json domain host web cms web_url cms_url scheme port pair pair_value
   json="$(cat)"
   domain="$(compose_env_value DOMAIN <<<"${json}")"
-  web="$(compose_env_value AUTH_URL <<<"${json}")"
+  web_url="$(compose_env_value AUTH_URL <<<"${json}")"
+  cms_url="$(compose_env_value PUBLIC_URL <<<"${json}")"
   host="${domain#*://}"
   host="${host%%[:/]*}"
   echo "host ${host,,}"
-  echo "origin ${web%/}"
+  echo "origin ${web_url%/}"
   if [[ -z "${host}" ]] || ((${#host} > 253)) || ! [[ "${host,,}" =~ ${TRAEFIK_HOST_RE} ]]; then
     echo "problem DOMAIN=${domain} is not a host name (optionally with http:// or https://)"
     return 0
@@ -495,8 +500,25 @@ caddy_host_scan() {
   if [[ "${host,,}" =~ ${TRAEFIK_HOST_PLACEHOLDER_RE} ]]; then
     echo "problem DOMAIN=${domain} is a placeholder (infra/.env.example), not this instance's host name"
   fi
-  web="$(url_host "${web}")"
-  cms="$(url_host "$(compose_env_value PUBLIC_URL <<<"${json}")")"
+  scheme=https
+  port=443
+  if [[ "${domain,,}" == http://* ]]; then
+    scheme=http
+    port=80
+  fi
+  for pair in "DOMAIN=${domain}" "WEB_PUBLIC_URL=${web_url}" "CMS_PUBLIC_URL=${cms_url}"; do
+    if [[ "${pair#*=}" =~ ${CADDY_PORT_RE} && "${BASH_REMATCH[2]}" != "${port}" ]]; then
+      echo "problem ${pair} names port ${BASH_REMATCH[2]}: the bundled Caddy serves ${scheme} on port ${port} only"
+    fi
+  done
+  for pair in "WEB_PUBLIC_URL=${web_url}" "CMS_PUBLIC_URL=${cms_url}"; do
+    pair_value="${pair#*=}"
+    if [[ "${pair_value,,}" != "${scheme}://"* ]]; then
+      echo "problem ${pair} is not an ${scheme}:// URL, and DOMAIN=${domain} makes Caddy serve ${scheme}"
+    fi
+  done
+  web="$(url_host "${web_url}")"
+  cms="$(url_host "${cms_url}")"
   if [[ "${web}" != "${host,,}" ]]; then
     echo "problem DOMAIN=${domain} is not the host of WEB_PUBLIC_URL (${web:-no http(s) URL})"
   fi
@@ -1449,12 +1471,18 @@ fi
 # The Caddy edge next to a host Traefik: the bundled Caddy would claim
 # 80/443, and the Traefik routers of the running containers would go. A
 # stopped container counts: its labels say which edge this host runs.
-if [[ "${DEPLOY_EDGE}" != traefik &&
-  -n "$(docker ps -aq --filter label=traefik.enable=true --filter "label=com.docker.compose.project=${PROJECT}" 2>/dev/null || true)" ]]; then
-  echo "ERROR: containers of compose project ${PROJECT} carry Traefik labels, so this host runs a Traefik edge," >&2
-  echo "       and DEPLOY_EDGE is ${DEPLOY_EDGE}: the bundled Caddy would claim ports 80/443 next to it." >&2
-  echo "       Set DEPLOY_EDGE=traefik in infra/deploy.env (infra/deploy.env.example) and re-run." >&2
-  preflight_failed=1
+# A failed listing proves nothing: refused too.
+if [[ "${DEPLOY_EDGE}" != traefik ]]; then
+  if ! traefik_labelled="$(docker ps -aq --filter label=traefik.enable=true --filter "label=com.docker.compose.project=${PROJECT}")"; then
+    echo "ERROR: docker ps failed, so deploy.sh cannot tell whether this host runs a Traefik edge (DEPLOY_EDGE is" >&2
+    echo "       ${DEPLOY_EDGE}). Run it as a user with access to Docker, and re-run." >&2
+    preflight_failed=1
+  elif [[ -n "${traefik_labelled}" ]]; then
+    echo "ERROR: containers of compose project ${PROJECT} carry Traefik labels, so this host runs a Traefik edge," >&2
+    echo "       and DEPLOY_EDGE is ${DEPLOY_EDGE}: the bundled Caddy would claim ports 80/443 next to it." >&2
+    echo "       Set DEPLOY_EDGE=traefik in infra/deploy.env (infra/deploy.env.example) and re-run." >&2
+    preflight_failed=1
+  fi
 fi
 if jwt_rotation_missing; then
   echo "ERROR: JWT_SECRET must be rotated for this deploy (D-SESSION-01)." >&2

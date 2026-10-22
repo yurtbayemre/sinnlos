@@ -42,7 +42,7 @@ function load(
     'source "$T/lib.sh"',
     'load_deploy_env "$T/checkout/infra/deploy.env" "$T/checkout"',
     // Exported, so a child process sees them.
-    "bash -c 'for k in COMPOSE_PROJECT DEPLOY_EDGE SMOKE_URL SINNLOS_BACKUP_DIR; do if [[ -v $k ]]; then echo \"VAR $k=${!k}\"; fi; done'",
+    "bash -c 'for k in COMPOSE_PROJECT DEPLOY_EDGE SMOKE_EMAIL SMOKE_URL SINNLOS_BACKUP_DIR; do if [[ -v $k ]]; then echo \"VAR $k=${!k}\"; fi; done'",
     "",
   ].join("\n");
   const res = spawnSync("bash", ["-s"], { input: script, encoding: "utf8" });
@@ -65,12 +65,13 @@ describe.skipIf(!HAS_BASH)("load_deploy_env (infra/deploy-env.sh)", BASH_BUDGET,
 
   it("exports the keys literally, skips comments and blank lines, and reads a last line without a newline", () => {
     const run = load(
-      "# host settings\n\nCOMPOSE_PROJECT=infra\n  # indented comment\nSMOKE_URL=https://x.test/?a=b&c=$HOME\nDEPLOY_EDGE=traefik",
+      "# host settings\n\nCOMPOSE_PROJECT=infra\n  # indented comment\nSMOKE_EMAIL=reader@x.test\nSMOKE_URL=https://x.test/?a=b&c=$HOME\nDEPLOY_EDGE=traefik",
     );
     expect(run.status, run.stderr).toBe(0);
     expect(run.vars).toEqual([
       "COMPOSE_PROJECT=infra",
       "DEPLOY_EDGE=traefik",
+      "SMOKE_EMAIL=reader@x.test",
       // Split at the first `=`, nothing expanded.
       "SMOKE_URL=https://x.test/?a=b&c=$HOME",
     ]);

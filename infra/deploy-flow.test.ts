@@ -187,7 +187,7 @@ function deploys(steps: readonly Step[], mode?: ShellMode): StepReport[] {
     // The demo credentials file deploy.sh checks before it runs live-smoke.
     'echo "casey.jones@sinnlos.local pw" > "$T/passwords"',
     'export PASSWORDS_FILE="$T/passwords"',
-    "export T STUB_TRAEFIK= STUB_PULL_FAIL= STUB_LABELS= STUB_SMOKE_CODE=200 STUB_LIVE_RC=0 STUB_LIVE_NOFRAME= STUB_BUILD_FAIL= STUB_UP_FAIL= STUB_TAG_FAIL= STUB_LOCK_HELD= STUB_CI= STUB_NO_VOLUMES= STUB_CONTAINERD= STUB_UP_KEEP= STUB_STATE_WRITE_FAIL= STUB_BOOTSTRAP_WRITE_FAIL= STUB_BACKUP_RC= STUB_REVISION_DRAFTS=0 STUB_REVISION_DP=1",
+    "export T STUB_TRAEFIK= STUB_PS_FAIL= STUB_PULL_FAIL= STUB_LABELS= STUB_SMOKE_CODE=200 STUB_LIVE_RC=0 STUB_LIVE_NOFRAME= STUB_BUILD_FAIL= STUB_UP_FAIL= STUB_TAG_FAIL= STUB_LOCK_HELD= STUB_CI= STUB_NO_VOLUMES= STUB_CONTAINERD= STUB_UP_KEEP= STUB_STATE_WRITE_FAIL= STUB_BOOTSTRAP_WRITE_FAIL= STUB_BACKUP_RC= STUB_REVISION_DRAFTS=0 STUB_REVISION_DP=1",
     // Whether an image id resolves: on containerd only while a tag names it.
     "resolvable() {",
     // (No pipe: under deploy.sh's pipefail, grep -q ending early could fail cat.)
@@ -249,6 +249,7 @@ function deploys(steps: readonly Step[], mode?: ShellMode): StepReport[] {
     // ps -aq --filter label=com.docker.compose.project=<p>: containers <p>-<svc>-1;
     // with --filter label=traefik.enable=true only while STUB_TRAEFIK says they carry it.
     "    ps)",
+    '      if [[ "$*" == *traefik.enable=true* && -n "$STUB_PS_FAIL" ]]; then return 1; fi',
     '      if [[ "$*" == *traefik.enable=true* && -z "$STUB_TRAEFIK" ]]; then return 0; fi',
     '      for ref in "$T"/ctr/*; do',
     '        ref="${ref##*/}"',
@@ -1439,6 +1440,8 @@ describe.skipIf(!RUN_SEQUENCES)(
         },
         // … and the release's own images deploy without a build.
         /* 8 */ { before: 'STUB_LABELS="$("${G[@]}" rev-parse HEAD) 0.26.0"', env: REGISTRY },
+        // The Caddy edge, and the container listing fails: refused, not "no Traefik".
+        /* 9 */ { before: "STUB_PS_FAIL=1", env: { DEPLOY_EDGE: "caddy" } },
       ]);
     }, SEQUENCE_BUDGET);
 
@@ -1473,6 +1476,16 @@ describe.skipIf(!RUN_SEQUENCES)(
       }
       expect(r[4].status, r[4].stderr).toBe(0);
       expect(called(r[4], /docker-compose\.traefik\.yml build$/)).toHaveLength(1);
+    });
+
+    it("refuses the Caddy edge when the container listing fails, before the backup", () => {
+      const run = r[9];
+      expect(run.status).toBe(1);
+      expect(run.stderr).toContain(
+        "ERROR: docker ps failed, so deploy.sh cannot tell whether this host runs a Traefik edge",
+      );
+      expect(run.stdout).not.toMatch(BACKED_UP);
+      expect(called(run, / build$| up -d|^docker pull /)).toEqual([]);
     });
 
     it("refuses registry images without one release tag on the commit, before the backup", () => {

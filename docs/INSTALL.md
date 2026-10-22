@@ -135,12 +135,27 @@ Nothing changes in `infra/.env`, and the panel stays closed from outside the who
 3. Run `infra/deploy.sh --record-without-live-smoke`. It runs the preflight, the backup, the build, the start and the smoke check.
 4. If the deploy fails after the start, `deploy.sh` prints the rollback commands. They switch back to the previous images. Restore the database only when the release notes say a rollback needs it ([DEPLOYMENT.md](DEPLOYMENT.md), "Restoring a database dump").
 
-Optional live-smoke: put two `email password` lines into a file that is readable only by the deploy user, and name it in `PASSWORDS_FILE` in `infra/deploy.env`.
+Optional live-smoke, the end-to-end check of live updates. It signs in as two accounts of yours, so create two local accounts for it (section 6), and publish at least one announcement they can see.
 
-- **First line:** a member.
-- **Second line:** an editor who authors announcements (see the header of `infra/live-smoke.sh`).
+- **`SMOKE_EMAIL`** holds the live stream. Best the author of a published announcement (an editor): the check then covers the notification as well; otherwise it says so in a warning.
+- **`SMOKE_AUTHOR_EMAIL`** posts one `[live-smoke]` comment on that announcement, and the script deletes it again. A member is enough.
 
-Each deploy then runs the probe and no longer needs the flag.
+In `infra/deploy.env`:
+
+```
+SMOKE_EMAIL=smoke-reader@intranet.example.com
+SMOKE_AUTHOR_EMAIL=smoke-author@intranet.example.com
+PASSWORDS_FILE=/home/deploy/.sinnlos-smoke-accounts.txt
+```
+
+`/home/deploy/.sinnlos-smoke-accounts.txt` (mode 600) holds one line per account, the address and the password separated by a space or a tab:
+
+```
+smoke-reader@intranet.example.com <password>
+smoke-author@intranet.example.com <password>
+```
+
+Each deploy then runs the check and no longer needs `--record-without-live-smoke`.
 
 ### Published images (later)
 

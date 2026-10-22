@@ -54,8 +54,15 @@ if [[ -e "$SCRIPT_DIR/../deploy.env" || -L "$SCRIPT_DIR/../deploy.env" ]]; then
   load_deploy_env "$SCRIPT_DIR/../deploy.env" "$SCRIPT_DIR/../.."
 fi
 
-DB_C="${SINNLOS_DB_CONTAINER:-infra-db-1}"
-UPLOADS_VOL="${SINNLOS_UPLOADS_VOLUME:-infra_cms_uploads}"
+# The compose project's containers and volume (deploy.env's COMPOSE_PROJECT,
+# default infra); SINNLOS_DB_CONTAINER / SINNLOS_UPLOADS_VOLUME override.
+PROJECT="${COMPOSE_PROJECT:-infra}"
+if ! [[ "$PROJECT" =~ ^[a-z0-9][a-z0-9_-]*$ ]]; then
+  echo "pg-backup: COMPOSE_PROJECT must be a compose project name (lower case, digits, - and _): $PROJECT" >&2
+  exit 2
+fi
+DB_C="${SINNLOS_DB_CONTAINER:-$PROJECT-db-1}"
+UPLOADS_VOL="${SINNLOS_UPLOADS_VOLUME:-${PROJECT}_cms_uploads}"
 
 # Keyring + keyid live in $BK (parent); only $OFFSITE is exposed to the NAS pull.
 if [[ -z "${SINNLOS_BACKUP_DIR:-}" ]]; then
