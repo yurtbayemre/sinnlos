@@ -117,9 +117,24 @@ services:
       ENTRA_SYNC_DEPARTMENT: ${ENTRA_SYNC_DEPARTMENT:-0}
       ENTRA_SYNC_MANAGER: ${ENTRA_SYNC_MANAGER:-0}
       ENTRA_SESSION_TTL: ${ENTRA_SESSION_TTL:-12h}
-      # Local e-mail + password sign-in next to Entra (break-glass). The cms
-      # mirrors it into users-permissions' grant.email; with Entra off local
-      # sign-in is always on.
+      # OIDC sign-in with Keycloak, authentik or Zitadel (v0.25.0,
+      # docs/DEPLOYMENT.md "OIDC sign-in"): off unless OIDC_ENABLED=1, then
+      # validated at boot like Entra; never together with ENTRA_ENABLED=1.
+      # The cms verifies the ID token itself (discovery of OIDC_ISSUER,
+      # audience OIDC_CLIENT_ID) and never needs the client secret.
+      OIDC_ENABLED: ${OIDC_ENABLED:-0}
+      OIDC_ISSUER: ${OIDC_ISSUER:-}
+      OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:-}
+      OIDC_EXCHANGE_SECRET: ${OIDC_EXCHANGE_SECRET:-}
+      OIDC_ROLES_CLAIM: ${OIDC_ROLES_CLAIM:-roles}
+      OIDC_DEPARTMENT_CLAIM: ${OIDC_DEPARTMENT_CLAIM:-}
+      OIDC_ZITADEL_ORG_ID: ${OIDC_ZITADEL_ORG_ID:-}
+      OIDC_DEFAULT_ROLE: ${OIDC_DEFAULT_ROLE:-deny}
+      OIDC_SESSION_TTL: ${OIDC_SESSION_TTL:-12h}
+      OIDC_ALLOW_HTTP: ${OIDC_ALLOW_HTTP:-0}
+      # Local e-mail + password sign-in next to an identity provider
+      # (break-glass). The cms mirrors it into users-permissions'
+      # grant.email; with no identity provider on, local sign-in is always on.
       AUTH_LOCAL_ENABLED: ${AUTH_LOCAL_ENABLED:-0}
       LOCAL_REGISTRATION: ${LOCAL_REGISTRATION:-0}
       SEED_DEMO_DATA: ${SEED_DEMO_DATA:-0}
@@ -245,8 +260,8 @@ services:
       # not picked one with the language switch (which also stores the
       # choice on the profile for the digests).
       DEFAULT_LOCALE: ${DEFAULT_LOCALE:-en}
-      # Local credentials next to Microsoft (break-glass); with ENTRA_ENABLED
-      # not 1, local sign-in is always on.
+      # Local credentials next to an identity provider (break-glass); with
+      # neither ENTRA_ENABLED nor OIDC_ENABLED 1, local sign-in is always on.
       AUTH_LOCAL_ENABLED: ${AUTH_LOCAL_ENABLED:-0}
       # Standalone mode: enable the self-registration form (default off)
       LOCAL_REGISTRATION: ${LOCAL_REGISTRATION:-0}
@@ -260,6 +275,18 @@ services:
       AUTH_MICROSOFT_ENTRA_ID_SECRET: ${MS_CLIENT_SECRET:-}
       ENTRA_EXCHANGE_SECRET: ${ENTRA_EXCHANGE_SECRET:-}
       ENTRA_SYNC_MANAGER: ${ENTRA_SYNC_MANAGER:-0}
+      # OIDC sign-in (v0.25.0): off unless OIDC_ENABLED=1, then validated at
+      # start; OIDC_EXCHANGE_SECRET must equal the cms's. OIDC_ZITADEL_ORG_ID
+      # adds Zitadel's organisation scopes (the cms checks the organisation).
+      OIDC_ENABLED: ${OIDC_ENABLED:-0}
+      OIDC_ISSUER: ${OIDC_ISSUER:-}
+      OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:-}
+      OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:-}
+      OIDC_EXCHANGE_SECRET: ${OIDC_EXCHANGE_SECRET:-}
+      OIDC_SCOPE: ${OIDC_SCOPE:-openid profile email}
+      OIDC_DISPLAY_NAME: ${OIDC_DISPLAY_NAME:-Single Sign-On}
+      OIDC_ZITADEL_ORG_ID: ${OIDC_ZITADEL_ORG_ID:-}
+      OIDC_ALLOW_HTTP: ${OIDC_ALLOW_HTTP:-0}
       # Shared secret for the /api/live/emit live-event ingest called from
       # the CMS (its only use since D-DC01; the name is historical).
       REVALIDATE_SECRET: ${REVALIDATE_SECRET:?REVALIDATE_SECRET must be set - openssl rand -hex 32, same value for cms and web}
