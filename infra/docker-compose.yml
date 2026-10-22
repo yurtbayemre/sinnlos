@@ -101,6 +101,10 @@ services:
       DATABASE_PASSWORD: ${DATABASE_PASSWORD:?DATABASE_PASSWORD must be set}
       PUBLIC_URL: ${CMS_PUBLIC_URL}
       CORS_ORIGIN: ${WEB_PUBLIC_URL}
+      # The Strapi admin panel and its APIs only for these client networks
+      # (comma list of CIDRs; empty: loopback only, i.e. closed from outside;
+      # infra/admin-tunnel.sh opens it through SSH). docs/INSTALL.md.
+      ADMIN_ALLOW_CIDRS: ${ADMIN_ALLOW_CIDRS:-}
       # Microsoft Entra ID sign-in (D-ENTRA-01, docs/DEPLOYMENT.md "Microsoft
       # Entra ID sign-in"): off unless ENTRA_ENABLED=1, and then validated at
       # boot (an invalid value refuses the start; deploy.sh --check says which).

@@ -465,6 +465,9 @@ function hermeticEnv(): Record<string, string | undefined> {
     ENTRA_SYNC_MANAGER: undefined,
     ENTRA_SESSION_TTL: undefined,
     AUTH_LOCAL_ENABLED: undefined,
+    // Loopback only (the default), like a fresh install: every request of a
+    // suite comes from 127.0.0.1. A suite passes its own list.
+    ADMIN_ALLOW_CIDRS: undefined,
     STRAPI_ADMIN_EMAIL: undefined,
     STRAPI_ADMIN_PASSWORD: undefined,
     STRAPI_ADMIN_FIRSTNAME: undefined,
