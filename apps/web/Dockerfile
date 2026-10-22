@@ -18,6 +18,11 @@ COPY apps/web/package.json ./apps/web/
 # The web depends on the workspace package @sinnlos/domain (SH01).
 COPY packages/domain/package.json ./packages/domain/
 RUN pnpm install --filter @sinnlos/web... --frozen-lockfile
+# Third-party notices (v0.26, M1): the production dependencies, the ones the
+# standalone output bundles or traces.
+COPY scripts/third-party-notices.mjs ./scripts/
+RUN pnpm licenses list --json --prod --filter @sinnlos/web... > /tmp/licenses.json \
+  && node scripts/third-party-notices.mjs /app/THIRD_PARTY_NOTICES.txt < /tmp/licenses.json
 
 FROM base AS builder
 COPY apps/web ./apps/web
@@ -49,6 +54,19 @@ ENV TZ=UTC
 COPY --from=builder --chown=node:node /app/apps/web/.next/standalone /app
 COPY --from=builder --chown=node:node /app/apps/web/.next/static /app/apps/web/.next/static
 COPY --from=builder --chown=node:node /app/apps/web/public /app/apps/web/public
+# Served at /THIRD_PARTY_NOTICES.txt (proxy.ts PUBLIC_FILES) and kept at /app.
+COPY --from=deps /app/THIRD_PARTY_NOTICES.txt /app/apps/web/public/THIRD_PARTY_NOTICES.txt
+COPY --from=deps /app/THIRD_PARTY_NOTICES.txt /app/THIRD_PARTY_NOTICES.txt
+COPY LICENSE /app/LICENSE
+# v0.26 release identity, last so the layers above keep their cache:
+# infra/deploy.sh and the release workflow pass both build args.
+ARG SINNLOS_VERSION=unknown
+ARG SINNLOS_REVISION=unknown
+ENV SINNLOS_REVISION=$SINNLOS_REVISION
+LABEL org.opencontainers.image.version=$SINNLOS_VERSION
+LABEL org.opencontainers.image.revision=$SINNLOS_REVISION
+LABEL org.opencontainers.image.source="https://github.com/yurtbayemre/sinnlos"
+LABEL org.opencontainers.image.licenses="AGPL-3.0-only"
 USER node
 EXPOSE 3000
 CMD ["node", "apps/web/server.js"]

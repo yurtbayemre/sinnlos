@@ -59,8 +59,7 @@
 #   SMOKE_AUTHOR_EMAIL=sam.chen@sinnlos.local SMOKE_AUTHOR_PASSWORD=… \
 #   infra/live-smoke.sh
 #
-# Password file fallback: PASSWORDS_FILE (default
-# /home/bigemo/.sinnlos-env-backup/demo-account-passwords.txt, lines of
+# Password file fallback: PASSWORDS_FILE (no default; lines of
 # "email@host password"; anchor greps with ^email@ — the header comment
 # line matches un-anchored greps!).
 #
@@ -96,7 +95,7 @@ DB_CONTAINER="${DB_CONTAINER:-infra-db-1}"
 DB_SCHEMA="${DB_SCHEMA:-public}"
 ASSERT_SECONDS="${ASSERT_SECONDS:-5}"
 FRESH_SECONDS="${FRESH_SECONDS:-35}"
-PASSWORDS_FILE="${PASSWORDS_FILE:-/home/bigemo/.sinnlos-env-backup/demo-account-passwords.txt}"
+PASSWORDS_FILE="${PASSWORDS_FILE:-}"
 
 SMOKE_EMAIL="${SMOKE_EMAIL:-}"
 SMOKE_EMAIL_CANDIDATES="alex.morgan@sinnlos.local casey.jones@sinnlos.local"
@@ -194,7 +193,7 @@ if [[ -z "${SMOKE_AUTHOR_PASSWORD:-}" ]]; then
   SMOKE_AUTHOR_PASSWORD="$(lookup_password "${SMOKE_AUTHOR_EMAIL}")"
 fi
 if [[ -z "${SMOKE_PASSWORD}" || -z "${SMOKE_AUTHOR_PASSWORD}" ]]; then
-  fail "missing passwords (set SMOKE_PASSWORD/SMOKE_AUTHOR_PASSWORD or provide ${PASSWORDS_FILE})"
+  fail "missing passwords (set SMOKE_PASSWORD/SMOKE_AUTHOR_PASSWORD or provide PASSWORDS_FILE${PASSWORDS_FILE:+ ${PASSWORDS_FILE}})"
 fi
 
 # The value of KEY in a compose-style .env file: its last KEY= line, with

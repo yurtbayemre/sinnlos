@@ -16,6 +16,9 @@ with German as the second language.
 
 Further reading:
 
+- **[docs/INSTALL.md](./docs/INSTALL.md)**: a new installation on one host,
+  step by step (configuration, backups, the first admin, the admin panel
+  through an SSH tunnel, upgrades).
 - **[docs/DEPLOYMENT.md](./docs/DEPLOYMENT.md)**: every deployment method
   (bare metal, Docker, VPS with Caddy or Traefik, Azure VM, Azure Container
   Apps), upgrades, backup and restore, rollback.
@@ -791,7 +794,8 @@ The infra scripts take their own variables (`SMOKE_URL`, `COMPOSE_PROJECT`,
 
 ## Deployment
 
-All deployment paths, upgrades and operations are in
+A new installation: **[docs/INSTALL.md](./docs/INSTALL.md)**. All
+deployment paths, upgrades and operations are in
 **[docs/DEPLOYMENT.md](./docs/DEPLOYMENT.md)**:
 
 - **One box with the bundled Caddy** (any VPS or an Azure VM):
@@ -819,7 +823,9 @@ infra/deploy.sh`). It checks `infra/.env` against the env contract
 reports the commit's CI result (the runs of this repository's CI;
 Dependabot's own update jobs on the commit are left out;
 `--require-green-ci` refuses a red one), takes a pre-deploy backup, builds
-and restarts, smoke-checks the site, runs `infra/live-smoke.sh`, and only
+and restarts (behind the bundled Caddy, or a host Traefik with
+`DEPLOY_EDGE=traefik`; host settings in `infra/deploy.env`), smoke-checks
+the site, runs `infra/live-smoke.sh`, and only
 then tags the images with the commit and records them as the last known
 good; a failure prints the rollback commands, including the mandatory
 `JWT_SECRET` rotation when the target cms image predates batch 13. `--dry-run` prints the plan and changes nothing. The cms trusts

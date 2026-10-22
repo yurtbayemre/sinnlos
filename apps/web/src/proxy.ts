@@ -24,6 +24,8 @@ const PUBLIC_FILES = new Set([
   "/manifest.webmanifest",
   "/apple-touch-icon.png",
   "/apple-touch-icon-precomposed.png",
+  // The image's third-party notices (v0.26, M1), linked from the footer.
+  "/THIRD_PARTY_NOTICES.txt",
 ]);
 
 /**

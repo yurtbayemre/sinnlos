@@ -69,11 +69,13 @@ describe("cms runtime layers", () => {
   const runner = lines.slice(lines.indexOf("FROM node-base AS runner"));
   const copies = runner.filter((line) => line.startsWith("COPY "));
 
-  it("copies the full dependency tree from deps, then the app from the builder's /out", () => {
+  it("copies the full dependency tree from deps, then the app from the builder's /out, then the notices", () => {
     expect(copies).toEqual([
       "COPY --from=deps --chown=node:node /app/node_modules /app/node_modules",
       "COPY --from=deps --chown=node:node /app/apps/cms/node_modules /app/apps/cms/node_modules",
       "COPY --from=builder --chown=node:node /out /app",
+      "COPY --from=deps /app/THIRD_PARTY_NOTICES.txt /app/THIRD_PARTY_NOTICES.txt",
+      "COPY LICENSE /app/LICENSE",
     ]);
   });
 

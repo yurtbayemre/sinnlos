@@ -5,6 +5,7 @@ import { getLocale, getMessages } from "next-intl/server";
 import Script from "next/script";
 import "./globals.css";
 import { ThemeProvider } from "@/components/theme-provider";
+import { plausibleScript } from "@/lib/site-config";
 
 const inter = Inter({ subsets: ["latin"], variable: "--font-inter", display: "swap" });
 
@@ -33,17 +34,17 @@ export const viewport: Viewport = {
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   const locale = await getLocale();
   const messages = await getMessages();
+  const plausible = plausibleScript(process.env);
 
   return (
     <html lang={locale} suppressHydrationWarning className={inter.variable}>
       <body className="font-sans antialiased">
-        {/* Plausible Analytics — cookielos, selbst gehostet (DSGVO). script.js
-            trackt Next.js-Client-Navigationen automatisch via History API. */}
-        <Script
-          data-domain="sinnlos.yurtbay.dev"
-          src="https://plausible.yurtbay.dev/js/script.js"
-          strategy="afterInteractive"
-        />
+        {/* Plausible (cookieless) only when the operator configures it
+            (v0.26, M2); script.js follows Next.js client navigations via
+            the History API. */}
+        {plausible && (
+          <Script data-domain={plausible.domain} src={plausible.src} strategy="afterInteractive" />
+        )}
         <NextIntlClientProvider messages={messages}>
           {/* disableTransitionOnChange: without it every colour transition
               in the UI animates during a theme switch (FX31). */}

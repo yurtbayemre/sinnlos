@@ -56,3 +56,6 @@ apps/web/next-env.d.ts
 
 # Browser E2E reports, traces, private sessions and runtime data
 .e2e/
+
+# Host settings of infra/deploy.sh (infra/deploy.env.example)
+infra/deploy.env

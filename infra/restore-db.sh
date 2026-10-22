@@ -229,9 +229,13 @@ clear_state() { # <prefix> <keys...>
   for key in "$@"; do printf -v "${prefix}${key}" '%s' ""; done
 }
 
+# Mode 700, or 2700: under a setgid home (Alpine's adduser) the directory
+# inherits the setgid bit, which grants nobody access.
 state_dir_ok() {
+  local mode
+  mode="$(stat -c %a "${STATE_DIR}")"
   [[ ! -L "${STATE_DIR}" && -d "${STATE_DIR}" && "$(stat -c %u "${STATE_DIR}")" == "${MY_UID}" &&
-    "$(stat -c %a "${STATE_DIR}")" == 700 ]]
+    ("${mode}" == 700 || "${mode}" == 2700) ]]
 }
 
 # Fails with a reason on stdout unless <file> is a regular file (no symlink)

@@ -70,6 +70,7 @@ describe("isPublicPath — public entries", () => {
       "/manifest.webmanifest",
       "/apple-touch-icon.png",
       "/apple-touch-icon-precomposed.png",
+      "/THIRD_PARTY_NOTICES.txt",
     ]) {
       expect(isPublicPath(path)).toBe(true);
     }
