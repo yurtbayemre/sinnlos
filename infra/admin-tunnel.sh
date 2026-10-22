@@ -27,12 +27,24 @@
 # computer, only used in the printed lines).
 set -Eeuo pipefail
 
+# The project of infra/deploy.env, like deploy.sh and pg-backup.sh (the
+# caller's COMPOSE_PROJECT still wins).
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [[ -e "${SCRIPT_DIR}/deploy.env" || -L "${SCRIPT_DIR}/deploy.env" ]]; then
+  # shellcheck disable=SC1091 # the library next to this script, checked on its own
+  source "${SCRIPT_DIR}/deploy-env.sh"
+  load_deploy_env "${SCRIPT_DIR}/deploy.env" "${SCRIPT_DIR}/.."
+fi
+
 PROJECT="${COMPOSE_PROJECT:-infra}"
 CMS="${PROJECT}-cms-1"
 NETWORK="${PROJECT}_default"
 PORT="${ADMIN_TUNNEL_PORT:-1338}"
 MINUTES="${ADMIN_TUNNEL_MINUTES:-60}"
 LOCAL_PORT="${ADMIN_TUNNEL_LOCAL_PORT:-1337}"
+# The stop command to print: names the project when it is not the default.
+STOP_CMD="infra/admin-tunnel.sh stop"
+[[ "${PROJECT}" == infra ]] || STOP_CMD="COMPOSE_PROJECT=${PROJECT} ${STOP_CMD}"
 # In the forwarder's command line, so `stop` finds it (and nothing else).
 MARKER="sinnlos-admin-tunnel"
 
@@ -95,7 +107,7 @@ for _ in 1 2 3 4 5; do
     echo "admin-tunnel: open for ${MINUTES} minutes (${CMS} ${address}:${PORT}, from this host only)"
     echo "  On your computer:  ssh -N -L ${LOCAL_PORT}:${address}:${PORT} <user>@<this host>"
     echo "  Then open:         http://localhost:${LOCAL_PORT}/admin"
-    echo "  Close it:          infra/admin-tunnel.sh stop"
+    echo "  Close it:          ${STOP_CMD}"
     exit 0
   fi
   sleep 1
