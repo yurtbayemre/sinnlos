@@ -317,3 +317,56 @@ describe("decideRoleWrite (spec I): existing users", () => {
     });
   });
 });
+
+describe("decideRoleWrite for OIDC (v0.25.0: source oidc, the provider's role admits)", () => {
+  const oidc = { source: "oidc", admission: true } as const;
+  const oidcUser = (roleType: string, applied: string | null = roleType): UserRoleState => ({
+    roleType,
+    roleSource: "oidc",
+    entraAppliedRole: applied,
+  });
+
+  it("refuses a deny even for a manual or pre-existing role; a role keeps the manual one", () => {
+    for (const roleSource of [null, "manual", "entra"]) {
+      const user: UserRoleState = { roleType: "editor", roleSource, entraAppliedRole: null };
+      expect(decideRoleWrite(user, deny, "on", oidc)).toEqual({
+        kind: "reject",
+        status: 403,
+        error: "not_assigned",
+        audit: "manual",
+      });
+      expect(decideRoleWrite(user, role("member"), "on", oidc)).toEqual({
+        kind: "keep",
+        audit: "manual",
+      });
+    }
+  });
+
+  it("syncs an oidc-owned role, refuses a deny, and lets an admin's change win", () => {
+    expect(decideRoleWrite(oidcUser("member"), role("editor"), "on", oidc)).toEqual({
+      kind: "update",
+      data: { role: "editor", entraAppliedRole: "editor" },
+      audit: "member->editor",
+    });
+    expect(decideRoleWrite(oidcUser("member"), deny, "on", oidc)).toMatchObject({
+      kind: "reject",
+      status: 403,
+    });
+    expect(decideRoleWrite(oidcUser("guest", "member"), role("editor"), "on", oidc)).toEqual({
+      kind: "update",
+      data: { roleSource: "manual", entraAppliedRole: null },
+      audit: "manual-override",
+    });
+  });
+
+  it("leaves Entra's semantics alone: an entra-owned row is manual for OIDC and the other way round", () => {
+    expect(decideRoleWrite(entraUser("member"), role("editor"), "on", oidc)).toEqual({
+      kind: "keep",
+      audit: "manual",
+    });
+    expect(decideRoleWrite(oidcUser("member"), deny, "on")).toEqual({
+      kind: "keep",
+      audit: "manual",
+    });
+  });
+});

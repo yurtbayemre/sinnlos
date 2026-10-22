@@ -1,8 +1,17 @@
 import { syncAdvancedSettings } from "./bootstrap/advanced-settings";
-import { checkEntraConfig, reportEntraStatus, syncAuthProviders } from "./bootstrap/auth-providers";
+import {
+  checkEntraConfig,
+  checkOidcConfig,
+  reportEntraStatus,
+  reportOidcStatus,
+  syncAuthProviders,
+} from "./bootstrap/auth-providers";
 import { ensureDocumentIndexes } from "./bootstrap/document-indexes";
 import { registerDocumentMiddlewares } from "./bootstrap/document-middlewares";
-import { ensureEntraIdentityIndex } from "./bootstrap/entra-identity-index";
+import {
+  ensureEntraIdentityIndex,
+  ensureOidcIdentityIndex,
+} from "./bootstrap/entra-identity-index";
 import { removeHiddenTypeWritePermissions } from "./bootstrap/hidden-type-permissions";
 import { registerRestrictedRelationGuard } from "./bootstrap/restricted-relation-guard";
 import { ensureRoles, syncRolePermissions } from "./bootstrap/sync-permissions";
@@ -14,11 +23,11 @@ import {
 } from "./database/ensure-timestamptz";
 import { reportDigestConfig } from "./digest/send-digests";
 import { parseEntraConfig } from "./entra/config";
+import { parseOidcConfig } from "./oidc/config";
 import { seedAdminUser } from "./utils/admin-seed";
 import { backfillDepartmentAudience } from "./utils/department-audience-backfill";
 import { ensureDraftTwins } from "./utils/draft-twins";
 import { enforceSecretGuard } from "./utils/env-guard";
-import { refuseOidcBeforeAdapter } from "./utils/sign-in-policy";
 import { parseMeiliConfig, searchStatusLine } from "./search/meili-index";
 import { registerLiveEventSubscriber } from "./utils/live-events";
 import { registerMediaTombstoneGuard } from "./utils/media-tombstone-guard";
@@ -92,8 +101,8 @@ export default {
     // refuses the boot, naming every bad variable; with Entra off it only
     // parses (MS_* values are ignored then). bootstrap() re-reads it.
     checkEntraConfig(strapi.log);
-    // plan-oidc.md: OIDC_ENABLED=1 refuses the boot until v0.25.0 ships the adapter.
-    refuseOidcBeforeAdapter(process.env);
+    // v0.25.0, the same for OIDC sign-in (and ENTRA_ENABLED=1 next to it is refused).
+    checkOidcConfig(strapi.log);
     // v0.21: with MEILISEARCH_ENABLED=1 a missing URL or write key refuses
     // the boot (search/meili-index.ts); off, nothing is read.
     parseMeiliConfig(process.env);
@@ -151,6 +160,11 @@ export default {
     await ensureEntraIdentityIndex(strapi, { entraEnabled: entra.enabled });
     await syncAuthProviders(strapi, entra);
     reportEntraStatus(strapi.log, entra);
+    // v0.25.0: the OIDC identity's unique index (fatal only with OIDC on),
+    // one `[oidc] disabled|enabled …` line and, with OIDC on, a discovery check.
+    const oidc = parseOidcConfig(process.env);
+    await ensureOidcIdentityIndex(strapi, { oidcEnabled: oidc.enabled });
+    await reportOidcStatus(strapi.log, oidc);
     strapi.log.info(searchStatusLine(parseMeiliConfig(process.env)));
     // Decision 02: give existing polls their `audience` flag ('departments'
     // when they link a department). A no-op once no row is NULL. One

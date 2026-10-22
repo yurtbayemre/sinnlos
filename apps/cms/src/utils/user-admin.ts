@@ -47,7 +47,8 @@ import {
 import { errors } from "@strapi/utils";
 
 import { parseEntraConfig } from "../entra/config";
-import { isEntraBound } from "../entra/profile";
+import { idpOf } from "../idp/exchange-core";
+import { parseOidcConfig } from "../oidc/config";
 import {
   bumpTokenVersion,
   type TokenVersionStrapi,
@@ -99,6 +100,7 @@ const ROW_SELECT = [
   "blocked",
   "roleSource",
   "entraTenantId",
+  "oidcIssuer",
   "createdAt",
 ];
 const ROW_POPULATE = {
@@ -139,8 +141,8 @@ function toRow(row: Row): UserAdminRow {
     displayName: text(row.displayName) || text(row.username) || "",
     email: text(row.email) ?? "",
     role: isRoleType(role) ? role : null,
-    roleSource: row.roleSource === "entra" ? "entra" : "manual",
-    entraBound: isEntraBound(row),
+    roleSource: row.roleSource === "entra" || row.roleSource === "oidc" ? row.roleSource : "manual",
+    idp: idpOf(row),
     blocked: row.blocked === true,
     department:
       isRecord(department) && typeof department.documentId === "string"
@@ -197,20 +199,25 @@ async function loadUser(strapi: UserAdminHost, id: number): Promise<Row | null> 
   return isRecord(row) && typeof row.id === "number" ? row : null;
 }
 
-/** What Entra's sync owns for `row` right now. */
+/** What the identity provider's sync owns for `row` right now. */
 function lockedFields(row: Row): UserAdminDetail["locked"] {
-  let settings;
+  const idp = idpOf(row);
   try {
-    settings = parseEntraConfig(process.env);
+    if (idp === "entra") {
+      const settings = parseEntraConfig(process.env);
+      return {
+        department: settings.enabled && settings.syncDepartment,
+        manager: settings.enabled && settings.syncManager,
+      };
+    }
+    if (idp === "oidc") {
+      const settings = parseOidcConfig(process.env);
+      return { department: settings.enabled && settings.departmentClaim !== null, manager: false };
+    }
   } catch {
-    // The boot refuses an invalid Entra config; a changed env at runtime locks nothing.
-    return { department: false, manager: false };
+    // The boot refuses an invalid config; a changed env at runtime locks nothing.
   }
-  const bound = settings.enabled && isEntraBound(row);
-  return {
-    department: bound && settings.enabled && settings.syncDepartment,
-    manager: bound && settings.enabled && settings.syncManager,
-  };
+  return { department: false, manager: false };
 }
 
 function toDetail(row: Row, callerId: number): UserAdminDetail {
@@ -408,7 +415,10 @@ export async function updateUser(
   return userDetail(strapi, id, callerId);
 }
 
-/** POST /api/user-management/:id/role-to-entra: the next sign-in applies Entra's role. */
+/**
+ * POST /api/user-management/:id/role-to-entra: the next sign-in applies the
+ * identity provider's role (Entra or, since v0.25.0, OIDC; the route keeps its name).
+ */
 export async function handRoleToEntra(
   strapi: UserAdminHost,
   callerId: number,
@@ -419,12 +429,13 @@ export async function handRoleToEntra(
     await assertActiveAdmin(strapi, callerId);
     const user = await loadUser(strapi, id);
     if (!user) throw new errors.NotFoundError("Not Found");
-    // Entra may demote at the next sign-in: never one's own role (the last admin stays reachable).
+    // The provider may demote at the next sign-in: never one's own role (the last admin stays reachable).
     if (user.id === callerId) refuseKeys(["role"], { role: "selfChange" });
-    if (!isEntraBound(user)) refuseKeys([FORM_KEY], { [FORM_KEY]: "notEntraBound" });
+    const idp = idpOf(user);
+    if (idp === null) refuseKeys([FORM_KEY], { [FORM_KEY]: "notEntraBound" });
     await strapi.db
       .query(USER_UID)
-      .update({ where: { id }, data: { roleSource: "entra", entraAppliedRole: null } });
+      .update({ where: { id }, data: { roleSource: idp, entraAppliedRole: null } });
     await audit(strapi, user, callerId, ["roleSource"]);
   });
   return userDetail(strapi, id, callerId);

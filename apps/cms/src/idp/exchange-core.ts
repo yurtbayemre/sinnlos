@@ -18,6 +18,8 @@
  */
 import { createHash, timingSafeEqual } from "node:crypto";
 import type { RoleType } from "../bootstrap/roles";
+// The profile rules were written for Entra and are pure; every provider shares them.
+import { pickDepartment } from "../entra/profile";
 import { lockDocument, type DocumentLockHost } from "../utils/document-lock";
 import { USER_DIRECTORY_LOCK_DOCUMENT_ID, USER_DIRECTORY_LOCK_UID } from "../utils/user-admin";
 
@@ -26,7 +28,14 @@ export const ROLE_UID = "plugin::users-permissions.role";
 
 /** The error codes of an exchange; the web maps them to /sign-in?error=<provider>_<code>. */
 export type ExchangeError =
-  "unauthorized" | "invalid" | "account_exists" | "not_assigned" | "blocked" | "unavailable";
+  | "unauthorized"
+  | "invalid"
+  | "account_exists"
+  | "not_assigned"
+  | "blocked"
+  | "unavailable"
+  /** OIDC only: no e-mail address with email_verified true in the ID token. */
+  | "email_unverified";
 
 export interface ExchangeSuccess {
   jwt: string;
@@ -428,4 +437,69 @@ async function writeRole(
 async function roleIdOf(strapi: ExchangeHost, type: string): Promise<number | null> {
   const role = await strapi.db.query(ROLE_UID).findOne({ where: { type }, select: ["id"] });
   return role ? role.id : null;
+}
+
+export const DEPARTMENT_UID = "api::department.department";
+
+const relationDocumentId = (value: unknown): string | null =>
+  isRecord(value) && typeof value.documentId === "string" ? value.documentId : null;
+
+/**
+ * The department sync of a sign-in (ENTRA_SYNC_DEPARTMENT=1, or
+ * OIDC_DEPARTMENT_CLAIM): the one published department whose name equals
+ * `name` case-insensitively; none, several or no name clear it, so access
+ * does not survive a move (entra/profile.ts pickDepartment). Returns the
+ * audit value; a failure is logged, never fatal. `label` names the source
+ * in the warning ("Entra", "OIDC").
+ */
+export async function syncDepartment(
+  strapi: ExchangeHost,
+  user: Row,
+  name: string | null,
+  mayWrite: boolean,
+  log: string,
+  label: string,
+): Promise<string> {
+  try {
+    const matches =
+      name === null
+        ? []
+        : await strapi.documents(DEPARTMENT_UID).findMany({
+            filters: { name: { $eqi: name } },
+            status: "published",
+            fields: ["documentId"],
+          });
+    const target = pickDepartment(name, matches);
+    if (target.kind === "clear" && target.reason !== "empty") {
+      strapi.log.warn(
+        `${log} user=${user.id}: the ${label} department matches ${target.reason === "no-match" ? "no" : "more than one"} published department; clearing it`,
+      );
+    }
+    const next = target.kind === "set" ? target.documentId : null;
+    const current = relationDocumentId(user.department);
+    if (next === current) return "unchanged";
+    const verb = next === null ? "clear" : "set";
+    if (!mayWrite) return `would ${verb}`;
+    const documentId = stringOf(user.documentId);
+    if (documentId === null) throw new Error("the user has no documentId");
+    // By documentId, like the admin panel: the link targets the document.
+    await strapi.documents(USER_UID).update({ documentId, data: { department: next } });
+    return verb === "set" ? "set" : "cleared";
+  } catch (err) {
+    strapi.log.error(`${log} user=${user.id}: department sync failed (${errorLabel(err)})`);
+    return "failed";
+  }
+}
+
+/**
+ * The identity provider a user row is bound to: Entra (tenant + object id,
+ * by the exchange or an admin binding), OIDC (issuer + subject), or none.
+ */
+export function idpOf(
+  row: { entraTenantId?: unknown; oidcIssuer?: unknown } | null | undefined,
+): "entra" | "oidc" | null {
+  const set = (value: unknown) => typeof value === "string" && value.trim() !== "";
+  if (set(row?.entraTenantId)) return "entra";
+  if (set(row?.oidcIssuer)) return "oidc";
+  return null;
 }

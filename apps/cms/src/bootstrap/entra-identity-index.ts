@@ -25,6 +25,13 @@
 
 export const ENTRA_IDENTITY_INDEX = "up_users_entra_identity_uq";
 
+/**
+ * v0.25.0: the same constraint for OIDC identities, (oidc_issuer,
+ * oidc_subject) WHERE oidc_subject IS NOT NULL (oidc/provision.ts relies on
+ * it the same way).
+ */
+export const OIDC_IDENTITY_INDEX = "up_users_oidc_identity_uq";
+
 const USER_UID = "plugin::users-permissions.user";
 
 /** The slice of the Strapi instance the index needs. */
@@ -52,6 +59,8 @@ export interface IdentityIndexTarget {
   table: string;
   tenantColumn: string;
   oidColumn: string;
+  /** The index name; Entra's unless set (OIDC: issuer and subject columns). */
+  index?: string;
 }
 
 /** The DDL for one database; throws for a client other than Postgres or SQLite. */
@@ -59,10 +68,10 @@ export function identityIndexSql(target: IdentityIndexTarget): string {
   const columns = `(${quote(target.tenantColumn)}, ${quote(target.oidColumn)})`;
   const where = `WHERE ${quote(target.oidColumn)} IS NOT NULL`;
   if (target.client === "postgres") {
-    return `CREATE UNIQUE INDEX IF NOT EXISTS ${quote(ENTRA_IDENTITY_INDEX)} ON ${quote(target.schema)}.${quote(target.table)} ${columns} ${where}`;
+    return `CREATE UNIQUE INDEX IF NOT EXISTS ${quote(target.index ?? ENTRA_IDENTITY_INDEX)} ON ${quote(target.schema)}.${quote(target.table)} ${columns} ${where}`;
   }
   if (target.client === "sqlite") {
-    return `CREATE UNIQUE INDEX IF NOT EXISTS ${quote(ENTRA_IDENTITY_INDEX)} ON ${quote(target.table)} ${columns} ${where}`;
+    return `CREATE UNIQUE INDEX IF NOT EXISTS ${quote(target.index ?? ENTRA_IDENTITY_INDEX)} ON ${quote(target.table)} ${columns} ${where}`;
   }
   throw new Error(`database client ${target.client} is not supported (Postgres or SQLite)`);
 }
@@ -99,6 +108,38 @@ export async function ensureEntraIdentityIndex(
     if (entraEnabled) {
       throw new Error(`${message} Refusing to start with ENTRA_ENABLED=1.`);
     }
+    return false;
+  }
+}
+
+function oidcTargetOf(strapi: IdentityIndexHost): IdentityIndexTarget {
+  const meta = strapi.db.metadata.get(USER_UID);
+  const column = (attribute: string, fallback: string) =>
+    meta.attributes[attribute]?.columnName ?? fallback;
+  return {
+    client: strapi.db.dialect.client,
+    schema: strapi.db.getSchemaName() || "public",
+    table: meta.tableName,
+    tenantColumn: column("oidcIssuer", "oidc_issuer"),
+    oidColumn: column("oidcSubject", "oidc_subject"),
+    index: OIDC_IDENTITY_INDEX,
+  };
+}
+
+/** The OIDC index, like ensureEntraIdentityIndex: throws only when `oidcEnabled` and it could not be ensured. */
+export async function ensureOidcIdentityIndex(
+  strapi: IdentityIndexHost,
+  { oidcEnabled }: { oidcEnabled: boolean },
+): Promise<boolean> {
+  try {
+    await strapi.db.connection.raw(identityIndexSql(oidcTargetOf(strapi)));
+    return true;
+  } catch (err) {
+    const message =
+      `[oidc] could not ensure the unique index ${OIDC_IDENTITY_INDEX} on the users table: ` +
+      `${(err as Error).message}. Concurrent first sign-ins could create duplicate accounts.`;
+    strapi.log.error(message);
+    if (oidcEnabled) throw new Error(`${message} Refusing to start with OIDC_ENABLED=1.`);
     return false;
   }
 }

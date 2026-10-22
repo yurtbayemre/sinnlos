@@ -105,6 +105,19 @@ export function decideRoleWrite(
   user: UserRoleState | null,
   result: RoleResolution,
   mode: EntraSyncMode,
+  {
+    source = "entra",
+    admission = false,
+  }: {
+    /** The roleSource value of rows this provider keeps in sync. */
+    source?: "entra" | "oidc";
+    /**
+     * OIDC (owner decision 2026-10-22): the provider's role is the admission
+     * gate, so a deny refuses even a user whose role the intranet owns; a
+     * hand-set role still decides WHICH role. Entra keeps manual roles as they are.
+     */
+    admission?: boolean;
+  } = {},
 ): RoleWriteDecision {
   if (user === null) {
     if (result.kind === "unknown") {
@@ -123,7 +136,11 @@ export function decideRoleWrite(
   }
 
   // The intranet owns this role (every pre-existing account, every override).
-  if (user.roleSource !== "entra") return { kind: "keep", audit: "manual" };
+  if (user.roleSource !== source) {
+    if (admission && result.kind === "deny")
+      return { kind: "reject", status: 403, error: "not_assigned", audit: "manual" };
+    return { kind: "keep", audit: "manual" };
+  }
 
   const current = user.roleType ?? "none";
   // An admin changed the role since Entra last wrote it: the admin wins, and

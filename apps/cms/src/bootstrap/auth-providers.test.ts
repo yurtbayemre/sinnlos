@@ -76,6 +76,7 @@ describe("nextGrantConfig", () => {
       expect(nextGrantConfig(current, true)).toEqual({
         email: { enabled: true },
         microsoft: { enabled: false, key: "", secret: "" },
+        keycloak: { enabled: false },
       });
     }
   });
@@ -96,7 +97,7 @@ describe("syncAuthProviders", () => {
       microsoft: { enabled: false, key: "", secret: "" },
     });
     expect(host.log.info).toHaveBeenCalledWith(
-      "[bootstrap] users-permissions providers synced (email=on, microsoft=off)",
+      "[bootstrap] users-permissions providers synced (email=on, microsoft=off, keycloak=off)",
     );
     await syncAuthProviders(host, parseEntraConfig({}));
     expect(set).toHaveBeenCalledTimes(1);
