@@ -1,9 +1,10 @@
 /**
  * infra/backup/pg-backup.sh (FX36), run in bash with docker and gpg stubbed
  * as exported shell functions (no Docker, no keyring). Pinned:
- *   1. the defaults the host crontab relies on are unchanged (backup root,
- *      container and volume names, the .env paths), and the in-place `cat >`
- *      writes that keep inodes and owners;
+ *   1. the names and settings a cron line relies on (container and volume
+ *      names; SINNLOS_BACKUP_DIR required, the .env next to the script, the
+ *      quick-access copy only when configured; infra/deploy.env read), and
+ *      the in-place `cat >` writes that keep inodes and owners;
  *   2. the retention selection: an artifact goes only when it is older than
  *      7 days (by the timestamp in its name) AND not among the newest 7 of
  *      its series; nightly and -predeploy artifacts are separate series;
@@ -56,21 +57,27 @@ function runBash(script: string): { status: number | null; stdout: string; stder
   return { status: res.status, stdout: res.stdout, stderr: res.stderr };
 }
 
-describe("pg-backup.sh: what the host cron relies on", () => {
-  it("keeps the default paths and names", () => {
+describe("pg-backup.sh: what a cron line relies on", () => {
+  // v0.26: no owner-host defaults any more (the owner's host backs up through
+  // its own backup-run; no scheduler calls this script there). The backup
+  // root is required, the .env is the one next to the script, and the
+  // quick-access copy exists only when configured.
+  it("keeps the default names, and takes the paths from the settings", () => {
     for (const line of [
       'DB_C="${SINNLOS_DB_CONTAINER:-infra-db-1}"',
       'UPLOADS_VOL="${SINNLOS_UPLOADS_VOLUME:-infra_cms_uploads}"',
-      'BK="${SINNLOS_BACKUP_DIR:-/home/bigemo/backups/momsbest}"',
+      'BK="$SINNLOS_BACKUP_DIR"',
       'OFFSITE="$BK/offsite/sinnlos"',
       'export GNUPGHOME="${SINNLOS_GNUPGHOME:-$BK/.gnupg}"',
       'KEYID_FILE="${SINNLOS_BACKUP_KEYID:-$BK/.backup-keyid}"',
       'LOG="$OFFSITE/backup.log"',
-      'ENV_SRC="${SINNLOS_ENV_FILE:-/home/bigemo/git/sinnlos/infra/.env}"',
-      'LOCAL_ENV_BK="${SINNLOS_LOCAL_ENV_BACKUP:-/home/bigemo/.sinnlos-env-backup/.env}"',
+      'ENV_SRC="${SINNLOS_ENV_FILE:-$SCRIPT_DIR/../.env}"',
+      'LOCAL_ENV_BK="${SINNLOS_LOCAL_ENV_BACKUP:-}"',
+      '  load_deploy_env "$SCRIPT_DIR/../deploy.env" "$SCRIPT_DIR/../.."',
     ]) {
       expect(SCRIPT.split("\n"), line).toContain(line);
     }
+    expect(SCRIPT).not.toContain("/home/bigemo");
   });
 
   it("creates nothing readable by others, and cleans up on every exit", () => {
@@ -97,7 +104,7 @@ describe("pg-backup.sh: what the host cron relies on", () => {
 
   it("refreshes the quick-access .env copy and the log in place (cat >), never creating the copy", () => {
     expect(SCRIPT).toContain(
-      '  if [[ -f "$LOCAL_ENV_BK" ]]; then\n    cat "$ENV_SRC" > "$LOCAL_ENV_BK"',
+      '  elif [[ -f "$LOCAL_ENV_BK" ]]; then\n    cat "$ENV_SRC" > "$LOCAL_ENV_BK"',
     );
     expect(SCRIPT).toContain('cat "$TRIM_TMP" > "$LOG"');
     expect(SCRIPT).not.toMatch(/\bmv\b[^\n]*"\$LOG"/);
@@ -477,11 +484,14 @@ describe.skipIf(!HAS_BASH)("pg-backup.sh runs (docker and gpg stubbed)", BASH_BU
     expect(neither.log.at(-1)).toBe("done nightly partial (skipped: sinnlos-uploads sinnlos-env)");
     expect(neither.lastSuccess).toBe(nightly);
 
-    // A pre-deploy run alike: last-success-predeploy stays as it was (none here).
+    // A pre-deploy run alike, but it fails (v0.26): deploy.sh then stops
+    // before it changes anything. last-success-predeploy stays as it was.
     const predeploy = backupRun({ envFile: false, env: { SINNLOS_BACKUP_KIND: "predeploy" } });
-    expect(predeploy.status, predeploy.stderr).toBe(0);
-    expect(predeploy.log.at(-1)).toBe("done predeploy partial (skipped: sinnlos-env)");
+    expect(predeploy.status).toBe(1);
+    expect(predeploy.log).toContain("done predeploy partial (skipped: sinnlos-env)");
+    expect(predeploy.log.at(-1)).toBe("FAIL predeploy partial-predeploy (exit 1)");
     expect(predeploy.lastPredeploy).toBe("");
+    expect(predeploy.offsite.filter((n) => n.startsWith("sinnlos-db-"))).toHaveLength(1);
 
     // Without the quick-access copy (never created, only refreshed) the run is complete.
     const noQuick = backupRun({ quickAccess: false, setup });
@@ -534,6 +544,22 @@ describe.skipIf(!HAS_BASH)("pg-backup.sh runs (docker and gpg stubbed)", BASH_BU
     for (const call of root.gpgCalls) {
       expect(call).toContain(" --no-random-seed-file --no-permission-warning --encrypt ");
     }
+  });
+
+  it("refuses to run without SINNLOS_BACKUP_DIR, writing nothing", () => {
+    const run = backupRun({ env: { SINNLOS_BACKUP_DIR: "" } });
+    expect(run.status).toBe(2);
+    expect(run.stderr).toContain("pg-backup: SINNLOS_BACKUP_DIR is not set");
+    expect(run.offsite).toEqual([]);
+    expect(run.gpgCalls).toEqual([]);
+  });
+
+  it("keeps no quick-access copy unless SINNLOS_LOCAL_ENV_BACKUP names one", () => {
+    const run = backupRun({ env: { SINNLOS_LOCAL_ENV_BACKUP: "" } });
+    expect(run.status, run.stderr).toBe(0);
+    expect(run.quickAccess).toBe("old copy");
+    expect(run.log.some((l) => l.includes("quick-access"))).toBe(false);
+    expect(run.log.at(-1)).toBe("done nightly");
   });
 
   it("refuses a backup root that does not exist, creating nothing", () => {

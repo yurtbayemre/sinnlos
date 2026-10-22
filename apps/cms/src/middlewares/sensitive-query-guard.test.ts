@@ -619,12 +619,14 @@ describe("config/middlewares.ts: the global guards are registered", () => {
   const names = () =>
     middlewaresConfig({ env }).map((entry) => (typeof entry === "string" ? entry : entry.name));
 
-  it.each(["global::sensitive-query-guard", "global::uploads-auth", "global::auth-path-guard"])(
-    "lists %s exactly once",
-    (name) => {
-      expect(names().filter((entry) => entry === name)).toHaveLength(1);
-    },
-  );
+  it.each([
+    "global::sensitive-query-guard",
+    "global::uploads-auth",
+    "global::auth-path-guard",
+    "global::admin-allowlist",
+  ])("lists %s exactly once", (name) => {
+    expect(names().filter((entry) => entry === name)).toHaveLength(1);
+  });
 
   it("every global:: entry names a file in src/middlewares (Strapi resolves it by file name)", () => {
     const globals = names().filter((entry) => entry.startsWith("global::"));

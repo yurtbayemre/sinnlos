@@ -1,0 +1,129 @@
+name: Release images
+
+# The cms and web images of a release, with an SPDX SBOM each, published to
+# ghcr.io with signed build-provenance and SBOM attestations
+# (docs/v1-release-plan.md, M4 and S5; docs/INSTALL.md, registry mode).
+#
+# Publication is OFF until the owner's lawyer has checked the third-party
+# notices and the two Strapi Enterprise-licensed packages the cms image
+# carries (@strapi/review-workflows, @strapi/content-releases; owner
+# decision 2026-10-22). Until then this runs only by hand ("Run workflow")
+# and, with `push` left false, builds both images and their SBOMs as a check:
+# nothing leaves the runner except the SBOMs as workflow artifacts. Once
+# cleared, add the tag trigger below `workflow_dispatch:`
+#     push:
+#       tags: ["v*.*.*"]
+# and set both packages' visibility to public once (GitHub UI, Packages).
+on:
+  workflow_dispatch:
+    inputs:
+      push:
+        description: Publish to ghcr.io (only after the lawyer check, see the workflow header)
+        type: boolean
+        default: false
+
+# packages: push to ghcr.io; id-token + attestations: the signed
+# attestations; actions: read the CI runs of the commit (the gate below).
+permissions:
+  contents: read
+  actions: read
+  packages: write
+  id-token: write
+  attestations: write
+
+concurrency:
+  group: release-images-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  images:
+    name: release image · ${{ matrix.app }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: true
+      matrix:
+        app: [cms, web]
+    env:
+      IMAGE: ghcr.io/${{ github.repository_owner }}/sinnlos-${{ matrix.app }}
+      # A tag push (once enabled) always publishes; a manual run only when asked.
+      PUBLISH: ${{ github.event_name == 'push' || inputs.push == true }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Publishing: the ref is the release tag v<package.json version>.
+      # Always: our CI passed on exactly this commit.
+      - name: Release gate (tag = package.json version, CI green on the commit)
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REF_NAME: ${{ github.ref_name }}
+          REF_TYPE: ${{ github.ref_type }}
+          SHA: ${{ github.sha }}
+        run: |
+          version="$(jq -r .version package.json)"
+          if [[ "${PUBLISH}" == true && ("${REF_TYPE}" != tag || "${REF_NAME}" != "v${version}") ]]; then
+            echo "::error::publishing needs the release tag v${version} as the ref, not the ${REF_TYPE} ${REF_NAME}"
+            exit 1
+          fi
+          green="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?head_sha=${SHA}&status=success" --jq .total_count)"
+          if [[ "${green}" -lt 1 ]]; then
+            echo "::error::no successful CI run on ${SHA}"
+            exit 1
+          fi
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Log in to ghcr.io
+        if: env.PUBLISH == 'true'
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # The version and revision labels come from the Dockerfiles' build args
+      # (infra/deploy.sh's registry mode checks them against the checkout).
+      # BuildKit's own provenance is off: the attestation below covers it.
+      - name: Build apps/${{ matrix.app }}/Dockerfile
+        id: build
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: apps/${{ matrix.app }}/Dockerfile
+          build-args: |
+            SINNLOS_VERSION=${{ steps.release.outputs.version }}
+            SINNLOS_REVISION=${{ github.sha }}
+          tags: ${{ env.IMAGE }}:${{ steps.release.outputs.version }}
+          push: ${{ env.PUBLISH == 'true' }}
+          load: ${{ env.PUBLISH != 'true' }}
+          provenance: false
+          cache-from: type=gha,scope=image-${{ matrix.app }}
+
+      - name: SBOM (SPDX)
+        uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+        with:
+          image: ${{ env.PUBLISH == 'true' && format('{0}@{1}', env.IMAGE, steps.build.outputs.digest) || format('{0}:{1}', env.IMAGE, steps.release.outputs.version) }}
+          format: spdx-json
+          output-file: sbom-${{ matrix.app }}.spdx.json
+          artifact-name: sbom-${{ matrix.app }}.spdx.json
+
+      - name: Attest build provenance
+        if: env.PUBLISH == 'true'
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+
+      - name: Attest SBOM
+        if: env.PUBLISH == 'true'
+        uses: actions/attest-sbom@c604332985a26aa8cf1bdc465b92731239ec6b9e # v4.1.0
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          sbom-path: sbom-${{ matrix.app }}.spdx.json
+          push-to-registry: true

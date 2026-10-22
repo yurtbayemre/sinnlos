@@ -21,6 +21,11 @@ export default ({ env }: { env: Env }) => {
   return [
     "strapi::logger",
     "strapi::errors",
+    // The Strapi admin panel and its APIs only for the client networks in
+    // ADMIN_ALLOW_CIDRS (v0.26, M5; empty: loopback only). Early, so a
+    // refused client never reaches the body parser or a route. See
+    // src/middlewares/admin-allowlist.ts.
+    { name: "global::admin-allowlist", config: { allow: env("ADMIN_ALLOW_CIDRS", "") } },
     {
       name: "strapi::security",
       config: {
