@@ -316,6 +316,11 @@ preflight_scan() {
         if (!ttl_ok(env["OIDC_SESSION_TTL"])) print "oidc-invalid OIDC_SESSION_TTL"
         org = trim(env["OIDC_ZITADEL_ORG_ID"])
         if ((org != "" && org !~ /^[0-9]+$/) || (org == "" && trim(env["OIDC_ROLES_CLAIM"]) ~ /^urn:zitadel:/)) print "oidc-invalid OIDC_ZITADEL_ORG_ID"
+        # Claim names or dot-separated paths (oidc/config.ts CLAIM_PATH).
+        roles_claim = trim(env["OIDC_ROLES_CLAIM"])
+        if (roles_claim != "" && roles_claim !~ /^[A-Za-z0-9_:\/-]+(\.[A-Za-z0-9_:\/-]+)*$/) print "oidc-invalid OIDC_ROLES_CLAIM"
+        dept_claim = trim(env["OIDC_DEPARTMENT_CLAIM"])
+        if (dept_claim != "" && dept_claim !~ /^[A-Za-z0-9_:\/-]+(\.[A-Za-z0-9_:\/-]+)*$/) print "oidc-invalid OIDC_DEPARTMENT_CLAIM"
         scope = trim(env["OIDC_SCOPE"])
         if (scope != "" && (" " scope " ") !~ /[ \t]openid[ \t]/) print "oidc-invalid OIDC_SCOPE"
         if (length(trim(env["OIDC_DISPLAY_NAME"])) > 40) print "oidc-invalid OIDC_DISPLAY_NAME"
@@ -1307,7 +1312,8 @@ if [[ -n "${oidc_invalid_keys}" ]]; then
   echo "       OIDC_ALLOW_HTTP=1, never in production), OIDC_CLIENT_ID and OIDC_CLIENT_SECRET set," >&2
   echo "       OIDC_EXCHANGE_SECRET 32+ characters (openssl rand -hex 32), OIDC_DEFAULT_ROLE member|guest|deny," >&2
   echo "       OIDC_SESSION_TTL <n>m|h|d up to 7d, OIDC_ZITADEL_ORG_ID digits (required with a urn:zitadel:" >&2
-  echo "       OIDC_ROLES_CLAIM), OIDC_SCOPE with openid, OIDC_DISPLAY_NAME up to 40 characters, and never" >&2
+  echo "       OIDC_ROLES_CLAIM), claim names or dotted paths in OIDC_ROLES_CLAIM and OIDC_DEPARTMENT_CLAIM," >&2
+  echo "       OIDC_SCOPE with openid, OIDC_DISPLAY_NAME up to 40 characters, and never" >&2
   echo "       next to ENTRA_ENABLED=1 (docs/DEPLOYMENT.md, \"OIDC sign-in (Keycloak, authentik, Zitadel)\")." >&2
   echo "       Or unset OIDC_ENABLED." >&2
   preflight_failed=1

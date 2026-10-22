@@ -187,7 +187,11 @@ export function parseOidcWebConfig(env: Env): OidcWebConfig | null {
   const issuer = (env.OIDC_ISSUER ?? "").trim();
   const protocol = urlProtocol(issuer);
   const httpAllowed = env.OIDC_ALLOW_HTTP === "1";
-  if (issuer.length > 255 || !(protocol === "https:" || (protocol === "http:" && httpAllowed))) {
+  if (
+    issuer.length > 255 ||
+    /\s/.test(issuer) ||
+    !(protocol === "https:" || (protocol === "http:" && httpAllowed))
+  ) {
     problem(
       "OIDC_ISSUER",
       "must be the issuer URL exactly as the IdP's discovery document writes it, https (http only with OIDC_ALLOW_HTTP=1), at most 255 characters",

@@ -34,7 +34,7 @@ export const MAX_IDENTITY_LENGTH = 255;
 const CLAIM_PATH = /^[A-Za-z0-9_:/-]+(\.[A-Za-z0-9_:/-]+)*$/;
 
 /** Zitadel organisation ids are numeric strings. */
-const ZITADEL_ORG_ID = /^\d{1,32}$/;
+const ZITADEL_ORG_ID = /^\d+$/;
 
 /** Claims under this name carry base64url-encoded values (Zitadel user metadata). */
 export const ZITADEL_METADATA_CLAIM = "urn:zitadel:iam:user:metadata";
@@ -110,7 +110,7 @@ export function parseOidcConfig(env: Env = process.env): OidcSettings {
   }
   const allowHttp = env.OIDC_ALLOW_HTTP === "1";
   const issuer = trimmed(env.OIDC_ISSUER);
-  if (!isAllowedUrl(issuer, allowHttp) || issuer.length > MAX_IDENTITY_LENGTH) {
+  if (!isAllowedUrl(issuer, allowHttp) || /\s/.test(issuer) || issuer.length > MAX_IDENTITY_LENGTH) {
     issue(
       "OIDC_ISSUER",
       `must be the issuer URL exactly as the identity provider's discovery document writes it, https (http only with OIDC_ALLOW_HTTP=1), at most ${MAX_IDENTITY_LENGTH} characters`,

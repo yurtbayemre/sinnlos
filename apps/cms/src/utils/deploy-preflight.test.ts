@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { digestsEnabled } from "../digest/send-digests";
 import { EntraConfigError, parseEntraConfig } from "../entra/config";
+import { OidcConfigError, parseOidcConfig } from "../oidc/config";
 import {
   GUARDED_SECRET_KEYS,
   PLACEHOLDER_MARKERS,
@@ -639,11 +640,45 @@ describe("OIDC preflight (v0.25.0)", () => {
     [{ ...valid, OIDC_SCOPE: "openidx profile" }, ["OIDC_SCOPE"]],
     [{ ...valid, OIDC_DISPLAY_NAME: "d".repeat(40) }, []],
     [{ ...valid, OIDC_DISPLAY_NAME: "d".repeat(41) }, ["OIDC_DISPLAY_NAME"]],
+    [{ ...valid, OIDC_ROLES_CLAIM: "resource_access.sinnlos-web.roles" }, []],
+    [{ ...valid, OIDC_ROLES_CLAIM: "roles..x" }, ["OIDC_ROLES_CLAIM"]],
+    [{ ...valid, OIDC_ROLES_CLAIM: "my roles" }, ["OIDC_ROLES_CLAIM"]],
+    [{ ...valid, OIDC_DEPARTMENT_CLAIM: "department" }, []],
+    [{ ...valid, OIDC_DEPARTMENT_CLAIM: ".department" }, ["OIDC_DEPARTMENT_CLAIM"]],
     [
       { OIDC_ENABLED: "1" },
       ["OIDC_ISSUER", "OIDC_CLIENT_ID", "OIDC_CLIENT_SECRET", "OIDC_EXCHANGE_SECRET"],
     ],
   ];
+
+  /**
+   * What the cms (parseOidcConfig) and the web (its own half: client secret,
+   * scope, button label; lib/auth-config.ts parseOidcWebConfig, same rules)
+   * refuse, as infra/.env keys: the table above must be exactly that.
+   */
+  function refusedByTheApps(env: Record<string, string>): string[] {
+    const composed = composeEnv(env);
+    const keys: string[] = [];
+    try {
+      parseOidcConfig(composed);
+    } catch (err) {
+      if (!(err instanceof OidcConfigError)) throw err;
+      keys.push(...err.issues.map((issue) => issue.variable));
+    }
+    if (composed.OIDC_ENABLED === "1") {
+      if (composed.OIDC_CLIENT_SECRET.trim() === "") keys.push("OIDC_CLIENT_SECRET");
+      const scope = composed.OIDC_SCOPE.trim();
+      if (scope !== "" && !scope.split(/\s+/).includes("openid")) keys.push("OIDC_SCOPE");
+      if (composed.OIDC_DISPLAY_NAME.trim().length > 40) keys.push("OIDC_DISPLAY_NAME");
+    }
+    return [...new Set(keys)];
+  }
+
+  it("the table is what the cms and the web refuse to start with", () => {
+    for (const [env, keys] of CASES) {
+      expect(sorted(refusedByTheApps(env)), JSON.stringify(env)).toEqual(sorted(keys));
+    }
+  });
 
   // The OIDC findings only (ENTRA_ENABLED=1 also brings the Entra block's own).
   const scan = (env: Record<string, string>) =>
