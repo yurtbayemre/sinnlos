@@ -1649,6 +1649,31 @@ systemctl start docker
 
 ### 3.8 Updates
 
+> **Upgrading to v0.26 (deploy.sh for any host).** `infra/deploy.sh` no
+> longer assumes the owner's host:
+>
+> - **The edge** is a setting: `DEPLOY_EDGE=caddy` (the bundled Caddy, the
+>   default) or `traefik`. A host Traefik must set `DEPLOY_EDGE=traefik`
+>   **before** this deploy: the preflight refuses the Caddy default while
+>   containers of the project carry Traefik labels.
+> - **The pre-deploy backup** is `infra/backup/pg-backup.sh` into
+>   `SINNLOS_BACKUP_DIR`, which is now required (no default). A host with
+>   its own backup service names it in `BACKUP_RUN`; deploy.sh then runs
+>   `sudo -n "$BACKUP_RUN" --kind predeploy sinnlos` as before. A partial
+>   pre-deploy backup stops the deploy.
+> - **live-smoke** has no default credentials file: name it in
+>   `PASSWORDS_FILE`, or deploy with `--record-without-live-smoke`.
+> - These host settings go into `infra/deploy.env` (gitignored,
+>   [infra/deploy.env.example](../infra/deploy.env.example)). The owner's
+>   host: `COMPOSE_PROJECT=infra`, `DEPLOY_EDGE=traefik`,
+>   `BACKUP_RUN=/usr/local/sbin/backup-run`, `PASSWORDS_FILE=…`; check
+>   with `infra/deploy.sh --check` as the checkout's owner.
+> - **The Strapi admin panel** and its APIs answer only clients from
+>   `ADMIN_ALLOW_CIDRS` (infra/.env; empty: closed from outside).
+>   `infra/admin-tunnel.sh` opens it through an SSH tunnel
+>   ([INSTALL.md](INSTALL.md), section 8).
+> - New installations: [INSTALL.md](INSTALL.md).
+
 > **Reading the older runbooks below:** the ones written before batch 10
 > roll back to `infra-{web,cms}:rollback`. Since batch 10 `deploy.sh`
 > records the images of every good deploy as `infra-{web,cms}:<sha12>` in
