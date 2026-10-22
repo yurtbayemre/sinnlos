@@ -6,9 +6,13 @@
 # Each artifact is gzipped, then ASYMMETRICALLY encrypted to the VPS backup GPG
 # public key — a VPS/NAS compromise cannot decrypt (private key + passphrase are
 # off-box; infra/backup/restore-drill.sh decrypts and restores off-box). Artifacts
-# land in the box's single NAS-pulled offsite dir, under a sinnlos/ namespace, so
-# the existing rrsync pull replicates them automatically (see
-# /home/bigemo/backups/momsbest/backup for the keyring + NAS mechanics).
+# land in SINNLOS_BACKUP_DIR/offsite/sinnlos, the one directory an off-site pull
+# (NAS, rsync) needs to replicate; the keyring stays in SINNLOS_BACKUP_DIR.
+#
+# Settings: the environment, or infra/deploy.env (infra/deploy.env.example; the
+# environment wins). SINNLOS_BACKUP_DIR is required (it holds .gnupg and
+# .backup-keyid, docs/INSTALL.md). A cron line:
+#   0 3 * * * SINNLOS_BACKUP_DIR=/srv/sinnlos-backup /path/to/infra/backup/pg-backup.sh
 #
 # Plaintext never outlives the run: umask 077 for everything the run creates,
 # and an EXIT trap (errors, INT/TERM/HUP included; SIGKILL cannot be trapped)
@@ -37,19 +41,29 @@
 # last-success-predeploy instead, so a deploy never hides a dead cron. A run
 # that skipped the uploads or the .env artifact (volume or file not found)
 # is partial: it logs "done <kind> partial (skipped: ...)", warns on stderr
-# and leaves last-success alone, so the monitor alerts; it still exits 0.
+# and leaves last-success alone, so the monitor alerts; a nightly run still
+# exits 0, a pre-deploy run exits 1 (deploy.sh then stops before it changes
+# anything: an upgrade needs the secrets and the media backed up as well).
 set -Eeuo pipefail
 umask 077
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [[ -e "$SCRIPT_DIR/../deploy.env" || -L "$SCRIPT_DIR/../deploy.env" ]]; then
+  # shellcheck disable=SC1091 # the library next to this script, checked on its own
+  source "$SCRIPT_DIR/../deploy-env.sh"
+  load_deploy_env "$SCRIPT_DIR/../deploy.env" "$SCRIPT_DIR/../.."
+fi
 
 DB_C="${SINNLOS_DB_CONTAINER:-infra-db-1}"
 UPLOADS_VOL="${SINNLOS_UPLOADS_VOLUME:-infra_cms_uploads}"
 
 # Keyring + keyid live in $BK (parent); only $OFFSITE is exposed to the NAS pull.
-# NOTE: the default deliberately points at the momsbest backup root — that dir
-# already holds the shared GPG keyring and is the box's single NAS-pulled
-# offsite tree. The production cron runs with exactly this path; do NOT change
-# the default without migrating the keyring and the NAS rrsync config.
-BK="${SINNLOS_BACKUP_DIR:-/home/bigemo/backups/momsbest}"
+if [[ -z "${SINNLOS_BACKUP_DIR:-}" ]]; then
+  echo "pg-backup: SINNLOS_BACKUP_DIR is not set: the backup root with the GPG keyring (.gnupg) and .backup-keyid" >&2
+  echo "pg-backup: (environment or infra/deploy.env; docs/INSTALL.md, Backups)" >&2
+  exit 2
+fi
+BK="$SINNLOS_BACKUP_DIR"
 OFFSITE="$BK/offsite/sinnlos"
 export GNUPGHOME="${SINNLOS_GNUPGHOME:-$BK/.gnupg}"
 KEYID_FILE="${SINNLOS_BACKUP_KEYID:-$BK/.backup-keyid}"
@@ -239,19 +253,21 @@ fi
 # The compose env file is gitignored and holds every secret (Strapi keys,
 # INTERNAL_UPLOAD_TOKEN, ...) — the DB/uploads dumps above don't cover it,
 # and losing it would be unrecoverable. Encrypted copy goes offsite (same key
-# and retention as the dumps). The plaintext quick-access copy in
-# ~bigemo/.sinnlos-env-backup is refreshed with `cat >` so the existing inode
-# keeps its bigemo/600 ownership regardless of who runs the script (cron as
-# bigemo, deploy.sh as root); it is only refreshed, never created, so a root
+# and retention as the dumps). An optional plaintext quick-access copy
+# (SINNLOS_LOCAL_ENV_BACKUP) is refreshed with `cat >` so the existing inode
+# keeps its owner and 600 mode regardless of who runs the script (cron as the
+# owner, deploy.sh as root); it is only refreshed, never created, so a root
 # run can't leave a root-owned secret file behind.
 STEP="sinnlos-env"
-ENV_SRC="${SINNLOS_ENV_FILE:-/home/bigemo/git/sinnlos/infra/.env}"
-LOCAL_ENV_BK="${SINNLOS_LOCAL_ENV_BACKUP:-/home/bigemo/.sinnlos-env-backup/.env}"
+ENV_SRC="${SINNLOS_ENV_FILE:-$SCRIPT_DIR/../.env}"
+LOCAL_ENV_BK="${SINNLOS_LOCAL_ENV_BACKUP:-}"
 if [[ -f "$ENV_SRC" ]]; then
   EOUT="$BK/sinnlos-env-$TS$TAG.env"
   cat "$ENV_SRC" > "$EOUT"
   finalize "$EOUT" sinnlos-env env sinnlos-env
-  if [[ -f "$LOCAL_ENV_BK" ]]; then
+  if [[ -z "$LOCAL_ENV_BK" ]]; then
+    :
+  elif [[ -f "$LOCAL_ENV_BK" ]]; then
     cat "$ENV_SRC" > "$LOCAL_ENV_BK"
   else
     log_line "skip sinnlos-env quick-access copy $LOCAL_ENV_BK absent (only refreshed, never created)"
@@ -271,6 +287,7 @@ STEP="last-success"
 if ((${#SKIPPED[@]})); then
   log_line "done $KIND partial (skipped: ${SKIPPED[*]})"
   echo "pg-backup: WARNING: partial $KIND run, skipped ${SKIPPED[*]} (see $LOG); ${LAST_SUCCESS##*/} not refreshed" >&2
+  [[ "$KIND" != predeploy ]] || PARTIAL_PREDEPLOY=1
 else
   [[ -e "$LAST_SUCCESS" ]] || { : > "$LAST_SUCCESS"; own_like_offsite "$LAST_SUCCESS"; }
   iso_now
@@ -293,3 +310,9 @@ if [[ -f "$LOG" ]]; then
   TRIM_TMP=""
 fi
 STEP="done"
+# A partial pre-deploy backup fails the run (deploy.sh then stops before it
+# changes anything); the artifacts it did write stay.
+if [[ -n "${PARTIAL_PREDEPLOY:-}" ]]; then
+  STEP="partial-predeploy"
+  exit 1
+fi
