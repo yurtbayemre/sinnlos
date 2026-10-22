@@ -1449,12 +1449,18 @@ fi
 # The Caddy edge next to a host Traefik: the bundled Caddy would claim
 # 80/443, and the Traefik routers of the running containers would go. A
 # stopped container counts: its labels say which edge this host runs.
-if [[ "${DEPLOY_EDGE}" != traefik &&
-  -n "$(docker ps -aq --filter label=traefik.enable=true --filter "label=com.docker.compose.project=${PROJECT}" 2>/dev/null || true)" ]]; then
-  echo "ERROR: containers of compose project ${PROJECT} carry Traefik labels, so this host runs a Traefik edge," >&2
-  echo "       and DEPLOY_EDGE is ${DEPLOY_EDGE}: the bundled Caddy would claim ports 80/443 next to it." >&2
-  echo "       Set DEPLOY_EDGE=traefik in infra/deploy.env (infra/deploy.env.example) and re-run." >&2
-  preflight_failed=1
+# A failed listing proves nothing: refused too.
+if [[ "${DEPLOY_EDGE}" != traefik ]]; then
+  if ! traefik_labelled="$(docker ps -aq --filter label=traefik.enable=true --filter "label=com.docker.compose.project=${PROJECT}")"; then
+    echo "ERROR: docker ps failed, so deploy.sh cannot tell whether this host runs a Traefik edge (DEPLOY_EDGE is" >&2
+    echo "       ${DEPLOY_EDGE}). Run it as a user with access to Docker, and re-run." >&2
+    preflight_failed=1
+  elif [[ -n "${traefik_labelled}" ]]; then
+    echo "ERROR: containers of compose project ${PROJECT} carry Traefik labels, so this host runs a Traefik edge," >&2
+    echo "       and DEPLOY_EDGE is ${DEPLOY_EDGE}: the bundled Caddy would claim ports 80/443 next to it." >&2
+    echo "       Set DEPLOY_EDGE=traefik in infra/deploy.env (infra/deploy.env.example) and re-run." >&2
+    preflight_failed=1
+  fi
 fi
 if jwt_rotation_missing; then
   echo "ERROR: JWT_SECRET must be rotated for this deploy (D-SESSION-01)." >&2
