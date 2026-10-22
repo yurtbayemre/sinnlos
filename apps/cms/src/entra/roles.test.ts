@@ -359,6 +359,15 @@ describe("decideRoleWrite for OIDC (v0.25.0: source oidc, the provider's role ad
     });
   });
 
+  it("refuses a deny before an admin's panel change is recorded (no extra session)", () => {
+    expect(decideRoleWrite(oidcUser("editor", "member"), deny, "on", oidc)).toEqual({
+      kind: "reject",
+      status: 403,
+      error: "not_assigned",
+      audit: "keep",
+    });
+  });
+
   it("leaves Entra's semantics alone: an entra-owned row is manual for OIDC and the other way round", () => {
     expect(decideRoleWrite(entraUser("member"), role("editor"), "on", oidc)).toEqual({
       kind: "keep",

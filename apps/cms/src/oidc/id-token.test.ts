@@ -141,6 +141,9 @@ describe("verifyOidcIdToken", () => {
       { email_verified: undefined },
       { email: undefined },
       { email: "  " },
+      { email: "not-an-address" },
+      { email: "a@b@c.example" },
+      { email: "two words@example.test" },
     ]) {
       expect(await verify(await token(claims as JWTPayload))).toEqual({
         ok: false,
@@ -266,6 +269,7 @@ describe("discover", () => {
     );
     expect(mismatch).toEqual({
       ok: false,
+      reason: "mismatch",
       detail:
         "the discovery document's issuer https://keycloak-b.example/realms/x is not OIDC_ISSUER https://keycloak-b.example/realms/x/",
     });
@@ -277,15 +281,29 @@ describe("discover", () => {
           jwks_uri: "http://keycloak-c.example/certs",
         }),
       ),
-    ).toMatchObject({ ok: false, detail: expect.stringContaining("jwks_uri") });
+    ).toMatchObject({ ok: false, reason: "mismatch", detail: expect.stringContaining("jwks_uri") });
+    for (const field of ["authorization_endpoint", "token_endpoint", "userinfo_endpoint"]) {
+      expect(
+        await discover(
+          { issuer: `https://${field.replace(/_/g, "-")}.example/realms/x`, allowHttp: false },
+          answer({
+            issuer: `https://${field.replace(/_/g, "-")}.example/realms/x`,
+            jwks_uri: `https://${field.replace(/_/g, "-")}.example/certs`,
+            [field]: `http://${field.replace(/_/g, "-")}.example/${field}`,
+          }),
+        ),
+        field,
+      ).toMatchObject({ ok: false, reason: "mismatch", detail: expect.stringContaining(field) });
+    }
     expect(
       await discover({ issuer: "https://down.example", allowHttp: false }, answer({}, 503)),
-    ).toEqual({ ok: false, detail: "discovery HTTP 503" });
+    ).toEqual({ ok: false, reason: "unreachable", detail: "discovery HTTP 503" });
     const throwing = (async () => {
       throw new TypeError("fetch failed");
     }) as unknown as typeof fetch;
     expect(await discover({ issuer: "https://gone.example", allowHttp: false }, throwing)).toEqual({
       ok: false,
+      reason: "unreachable",
       detail: "discovery TypeError",
     });
   });

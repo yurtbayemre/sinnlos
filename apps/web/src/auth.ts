@@ -45,7 +45,7 @@
  *    object reaches jwt() (lib/actions/callback/index.js);
  *  - a jwt callback returning null clears the cookie (lib/actions/session.js).
  */
-import NextAuth from "next-auth";
+import NextAuth, { customFetch } from "next-auth";
 import MicrosoftEntraID, {
   type MicrosoftEntraIDProfile,
 } from "next-auth/providers/microsoft-entra-id";
@@ -53,6 +53,7 @@ import Credentials from "next-auth/providers/credentials";
 import { DEMO_MODE, STRAPI_URL } from "@/lib/config";
 import { ENTRA, LOCAL_ENABLED, OIDC } from "@/lib/auth-config";
 import { createAuthCallbacks, ENTRA_PROVIDER_ID, OIDC_PROVIDER_ID } from "@/lib/auth/callbacks";
+import { oidcFetch } from "@/lib/auth/oidc-fetch";
 import { authorizeCredentials } from "@/lib/auth/credentials";
 import { clientIpFrom, loginRateLimiter } from "@/lib/login-rate-limit";
 
@@ -150,6 +151,8 @@ if (OIDC) {
     // No offline_access: no refresh token is requested or stored.
     authorization: { params: { scope: OIDC.scope } },
     profile: oidcProfile,
+    // https only, also for the endpoints the discovery document names (lib/auth/oidc-fetch.ts).
+    [customFetch]: oidcFetch(OIDC.allowHttp),
   });
 }
 if (LOCAL_ENABLED) {

@@ -72,6 +72,7 @@ const OIDC: OidcWebConfig = {
   exchangeSecret: "oidc-exchange-secret-0123456789abcdef",
   scope: "openid profile email",
   displayName: "Single Sign-On",
+  allowHttp: false,
 };
 
 let exchange: ReturnType<typeof vi.fn<typeof exchangeEntraSignIn>>;

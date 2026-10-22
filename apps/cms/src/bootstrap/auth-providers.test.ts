@@ -1,10 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 import pluginsConfig from "../../config/plugins";
 import { EntraConfigError, parseEntraConfig } from "../entra/config";
+import { parseOidcConfig } from "../oidc/config";
 import {
   checkEntraConfig,
   nextGrantConfig,
   reportEntraStatus,
+  reportOidcStatus,
   syncAuthProviders,
   type AuthProvidersHost,
   type GrantConfig,
@@ -164,5 +166,57 @@ describe("config/plugins.ts users-permissions (FX14, FX44)", () => {
   it("has no providers block (grant.microsoft is forced off at boot instead)", () => {
     expect(config).not.toHaveProperty("providers");
     expect(config.jwt).toEqual({ expiresIn: "7d" });
+  });
+});
+
+describe("reportOidcStatus (v0.25.0)", () => {
+  const log = () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() });
+  const settings = parseOidcConfig({
+    OIDC_ENABLED: "1",
+    OIDC_ISSUER: "https://idp.example/realms/intranet",
+    OIDC_CLIENT_ID: "sinnlos-web",
+    OIDC_EXCHANGE_SECRET: "0123456789abcdef0123456789abcdef",
+  });
+
+  it("logs the status line and a good discovery document", async () => {
+    const l = log();
+    await reportOidcStatus(l, settings, async () => ({
+      ok: true,
+      discovery: {
+        issuer: "https://idp.example/realms/intranet",
+        jwksUri: "https://idp.example/k",
+      },
+    }));
+    expect(l.info.mock.calls.map(([m]) => m)).toEqual([
+      expect.stringMatching(/^\[oidc\] enabled /),
+      "[oidc] discovery OK (issuer https://idp.example/realms/intranet)",
+    ]);
+  });
+
+  it("refuses the boot on a mismatch, only logs an unreachable identity provider", async () => {
+    await expect(
+      reportOidcStatus(log(), settings, async () => ({
+        ok: false,
+        reason: "mismatch",
+        detail: "the discovery document's token_endpoint is not https",
+      })),
+    ).rejects.toThrow(/token_endpoint is not https.*refusing to start/);
+    const l = log();
+    await reportOidcStatus(l, settings, async () => ({
+      ok: false,
+      reason: "unreachable",
+      detail: "discovery HTTP 503",
+    }));
+    expect(l.error).toHaveBeenCalledWith(
+      expect.stringMatching(/^\[oidc\] discovery failed: discovery HTTP 503/),
+    );
+  });
+
+  it("does nothing more while OIDC is off", async () => {
+    const l = log();
+    const discover = vi.fn();
+    await reportOidcStatus(l, parseOidcConfig({}), discover);
+    expect(l.info).toHaveBeenCalledWith("[oidc] disabled");
+    expect(discover).not.toHaveBeenCalled();
   });
 });

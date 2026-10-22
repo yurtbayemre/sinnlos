@@ -511,7 +511,7 @@ provider is `${WEB_PUBLIC_URL}/api/auth/callback/oidc`.
 | Name | Default | Read by | Effect |
 |---|---|---|---|
 | `OIDC_ENABLED` | 0 | cms, web | Master switch, exactly `1`. With anything else every `OIDC_*` value is ignored. With `1` the config is validated and an invalid one refuses the start (cms at boot, web on its first request) and the deploy, naming the variable. |
-| `OIDC_ISSUER` | (unset) | cms, web | Exactly as the identity provider's discovery document (`<issuer>/.well-known/openid-configuration`) writes `issuer`, at most 255 characters, `https:`. A missing or extra trailing slash fails every sign-in (see the recipes). |
+| `OIDC_ISSUER` | (unset) | cms, web | Exactly as the identity provider's discovery document (`<issuer>/.well-known/openid-configuration`) writes `issuer`, at most 255 characters, `https:`. For an issuer with a path (Keycloak, authentik) a missing or extra trailing slash fails every sign-in; an issuer without a path (Zitadel) works either way (see the recipes). The cms refuses to start when the discovery document names another issuer or an `http:` endpoint. |
 | `OIDC_CLIENT_ID` | (unset) | cms, web | The client id; the cms checks the ID token's audience against it. |
 | `OIDC_CLIENT_SECRET` | (unset) | web | The client secret (confidential client). The cms never needs it. |
 | `OIDC_EXCHANGE_SECRET` | (unset) | cms, web | At least 32 characters, the same for web and cms (`openssl rand -hex 32`); distinct from every other secret. |

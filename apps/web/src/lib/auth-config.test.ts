@@ -61,6 +61,7 @@ describe("parseOidcWebConfig (v0.25.0)", () => {
       exchangeSecret: OIDC_VALID.OIDC_EXCHANGE_SECRET,
       scope: "openid profile email",
       displayName: "Single Sign-On",
+      allowHttp: false,
     });
     expect(
       parseOidcWebConfig({

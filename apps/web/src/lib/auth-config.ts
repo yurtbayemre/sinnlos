@@ -140,6 +140,8 @@ export interface OidcWebConfig {
   scope: string;
   /** The sign-in button's label. */
   displayName: string;
+  /** OIDC_ALLOW_HTTP=1: http issuer and endpoints (development and staging only). */
+  allowHttp: boolean;
 }
 
 export const OIDC_DEFAULT_SCOPE = "openid profile email";
@@ -224,7 +226,15 @@ export function parseOidcWebConfig(env: Env): OidcWebConfig | null {
     }
   }
   if (problems.length > 0) throw new OidcWebConfigError(problems);
-  return { issuer, clientId, clientSecret, exchangeSecret, scope, displayName };
+  return {
+    issuer,
+    clientId,
+    clientSecret,
+    exchangeSecret,
+    scope,
+    displayName,
+    allowHttp: httpAllowed,
+  };
 }
 
 function loadOrNullDuringBuild<T>(parse: (env: Env) => T | null, env: Env): T | null {

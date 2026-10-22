@@ -40,6 +40,11 @@ const OID = "0f0f0f0f-1e1e-4d2d-8c3c-4b4b4b4b4b4b";
 const EXCHANGE_SECRET = "web-exchange-secret-0123456789abcdef";
 const LOGIN = "https://login.microsoftonline.com";
 const EXCHANGE_URL = `${STRAPI}/api/auth/entra/exchange`;
+/** v0.25.0: a generic OIDC identity provider (Keycloak-shaped) and the cms's OIDC exchange. */
+const IDP = "https://idp.test/realms/sinnlos";
+const OIDC_CLIENT = "sinnlos-web";
+const OIDC_EXCHANGE_SECRET = "web-oidc-exchange-secret-0123456789abcdef";
+const OIDC_EXCHANGE_URL = `${STRAPI}/api/auth/oidc/exchange`;
 
 /** A Strapi-shaped JWT (unsigned for the web: only `exp` is ever decoded). */
 function fakeStrapiJwt(exp: number, id = 7): string {
@@ -70,6 +75,8 @@ const stub = vi.hoisted(() => ({
   /** Answers of POST /api/auth/entra/exchange, in order (the last one repeats). */
   exchangeAnswers: [] as ({ status: number; body: unknown } | "network-error")[],
   exchangeCalls: [] as { headers: Headers; body: string }[],
+  /** Overrides of the OIDC discovery document (an http endpoint, for the refusal). */
+  oidcDiscovery: {} as Record<string, unknown>,
 }));
 
 // cookies() holds the request's cookies, like Next's cookie jar outside a
@@ -149,7 +156,40 @@ const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit): Pr
       id_token: stub.idToken,
     });
   }
-  if (url === EXCHANGE_URL && request.method === "POST") {
+  if (url === `${IDP}/.well-known/openid-configuration`) {
+    return json({
+      issuer: IDP,
+      authorization_endpoint: `${IDP}/protocol/openid-connect/auth`,
+      token_endpoint: `${IDP}/protocol/openid-connect/token`,
+      userinfo_endpoint: `${IDP}/protocol/openid-connect/userinfo`,
+      jwks_uri: `${IDP}/protocol/openid-connect/certs`,
+      response_types_supported: ["code"],
+      subject_types_supported: ["public"],
+      id_token_signing_alg_values_supported: ["RS256"],
+      ...stub.oidcDiscovery,
+    });
+  }
+  if (url === `${IDP}/protocol/openid-connect/token` && request.method === "POST") {
+    const iat = nowSec() - 5;
+    stub.idToken = fakeIdToken({
+      iss: IDP,
+      aud: OIDC_CLIENT,
+      sub: "kc-subject-of-grace",
+      iat,
+      exp: iat + 300,
+      name: "Grace OIDC",
+      email: "Grace@Example.test",
+      email_verified: true,
+      ...(stub.nonce ? { nonce: stub.nonce } : {}),
+    });
+    return json({
+      token_type: "Bearer",
+      expires_in: 300,
+      access_token: stub.accessToken,
+      id_token: stub.idToken,
+    });
+  }
+  if ((url === EXCHANGE_URL || url === OIDC_EXCHANGE_URL) && request.method === "POST") {
     stub.exchangeCalls.push({ headers: request.headers, body: await request.text() });
     const answer =
       stub.exchangeAnswers.length > 1 ? stub.exchangeAnswers.shift()! : stub.exchangeAnswers[0];
@@ -175,6 +215,15 @@ const BASE_ENV: Env = {
   AUTH_MICROSOFT_ENTRA_ID_SECRET: undefined,
   AUTH_MICROSOFT_ENTRA_ID_TENANT_ID: undefined,
   AUTH_MICROSOFT_ENTRA_ID_ISSUER: undefined,
+  OIDC_ENABLED: undefined,
+  OIDC_ISSUER: undefined,
+  OIDC_CLIENT_ID: undefined,
+  OIDC_CLIENT_SECRET: undefined,
+  OIDC_EXCHANGE_SECRET: undefined,
+  OIDC_SCOPE: undefined,
+  OIDC_DISPLAY_NAME: undefined,
+  OIDC_ZITADEL_ORG_ID: undefined,
+  OIDC_ALLOW_HTTP: undefined,
   NEXT_PHASE: undefined,
   DEMO_MODE: undefined,
   NODE_ENV: "test",
@@ -187,6 +236,15 @@ const ENTRA_ENV: Env = {
   AUTH_MICROSOFT_ENTRA_ID_ID: CLIENT,
   AUTH_MICROSOFT_ENTRA_ID_SECRET: "web-client-secret-value",
   ENTRA_EXCHANGE_SECRET: EXCHANGE_SECRET,
+};
+
+/** OIDC sign-in switched on (next to local sign-in). */
+const OIDC_ENV: Env = {
+  OIDC_ENABLED: "1",
+  OIDC_ISSUER: IDP,
+  OIDC_CLIENT_ID: OIDC_CLIENT,
+  OIDC_CLIENT_SECRET: "web-oidc-client-secret",
+  OIDC_EXCHANGE_SECRET,
 };
 
 /** Fresh auth.ts (+ session/token modules) under the given env. */
@@ -245,13 +303,17 @@ async function signInLocal(mod: Loaded, base: string) {
  * with a code → GET callback (Auth.js redeems the code at the mock token
  * endpoint and runs the callbacks).
  */
-async function signInMicrosoft(mod: Loaded, base = "http://localhost:3000") {
+async function signInMicrosoft(
+  mod: Loaded,
+  base = "http://localhost:3000",
+  provider = "microsoft-entra-id",
+) {
   const jar = cookieJar();
   const csrfRes = await mod.handlers.GET(new NextRequest(`${base}/api/auth/csrf`));
   jar.absorb(csrfRes);
   const { csrfToken } = (await csrfRes.json()) as { csrfToken: string };
   const start = await mod.handlers.POST(
-    new NextRequest(`${base}/api/auth/signin/microsoft-entra-id`, {
+    new NextRequest(`${base}/api/auth/signin/${provider}`, {
       method: "POST",
       headers: { "content-type": "application/x-www-form-urlencoded", cookie: jar.header() },
       body: new URLSearchParams({ csrfToken, callbackUrl: `${base}/wiki` }),
@@ -264,7 +326,7 @@ async function signInMicrosoft(mod: Loaded, base = "http://localhost:3000") {
   const state = authorize.searchParams.get("state");
   if (state) params.set("state", state);
   const callback = await mod.handlers.GET(
-    new NextRequest(`${base}/api/auth/callback/microsoft-entra-id?${params}`, {
+    new NextRequest(`${base}/api/auth/callback/${provider}?${params}`, {
       headers: { cookie: jar.header() },
     }),
   );
@@ -331,6 +393,7 @@ beforeEach(() => {
   exchangeJwt = fakeStrapiJwt(exchangeExp, 42);
   stub.exchangeAnswers = [exchangeOk()];
   stub.exchangeCalls = [];
+  stub.oidcDiscovery = {};
   fetchMock.mockClear();
 });
 
@@ -642,6 +705,110 @@ describe("Microsoft sign-in (D-ENTRA-01) through @auth/core", () => {
       NEXT_PHASE: "phase-production-build",
     });
     expect(build.handlers).toBeDefined();
+  });
+});
+
+describe("OIDC sign-in (v0.25.0) through @auth/core", () => {
+  const signInOidc = (mod: Loaded) => signInMicrosoft(mod, undefined, "oidc");
+  const fetched = () =>
+    fetchMock.mock.calls.map(([input]) => String(input instanceof Request ? input.url : input));
+
+  it("asks the issuer's authorize endpoint, exchanges the ID token only, and keeps the JWT off the session", async () => {
+    const mod = await load(OIDC_ENV);
+    const { jar, authorize, callback } = await signInOidc(mod);
+    expect(`${authorize.origin}${authorize.pathname}`).toBe(`${IDP}/protocol/openid-connect/auth`);
+    expect(authorize.searchParams.get("scope")).toBe("openid profile email");
+    expect(authorize.searchParams.get("code_challenge_method")).toBe("S256");
+    expect(callback.headers.get("location")).toBe("http://localhost:3000/wiki");
+    expect(stub.exchangeCalls).toHaveLength(1);
+    const [call] = stub.exchangeCalls;
+    expect(call.headers.get("x-oidc-exchange-secret")).toBe(OIDC_EXCHANGE_SECRET);
+    expect(JSON.parse(call.body)).toEqual({ idToken: stub.idToken });
+    expect(fetched().filter((url) => url.startsWith(`${STRAPI}/`))).toEqual([OIDC_EXCHANGE_URL]);
+    expect(fetched()).not.toContain(`${IDP}/protocol/openid-connect/userinfo`);
+
+    const cookie = jar.header().match(/authjs\.session-token=([^;]+)/)?.[1];
+    const token = await decode({ token: cookie, secret: SECRET, salt: "authjs.session-token" });
+    expect(token).toMatchObject({
+      strapiJwt: exchangeJwt,
+      strapiUserId: 42,
+      strapiJwtExp: exchangeExp,
+      provider: "oidc",
+    });
+    const session = await getSessionJson(mod, "http://localhost:3000", jar.header());
+    const body = await session.json();
+    expect(body).toMatchObject({ provider: "oidc", user: { id: 42 } });
+    expectNoStrapiSecrets(body, exchangeJwt);
+  });
+
+  it.each([
+    [
+      "409 account_exists",
+      "oidc_account_exists",
+      { status: 409, body: { error: "account_exists" } },
+    ],
+    ["403 not_assigned", "oidc_not_assigned", { status: 403, body: { error: "not_assigned" } }],
+    [
+      "403 email_unverified",
+      "oidc_email_unverified",
+      { status: 403, body: { error: "email_unverified" } },
+    ],
+    ["403 blocked", "oidc_blocked", { status: 403, body: { error: "blocked" } }],
+    [
+      "401 unauthorized (secret mismatch)",
+      "oidc_unavailable",
+      { status: 401, body: { error: "unauthorized" } },
+    ],
+  ])("maps %s to /sign-in?error=%s without a session", async (_name, code, answer) => {
+    const mod = await load(OIDC_ENV);
+    stub.exchangeAnswers = [answer];
+    const quiet = [vi.spyOn(console, "error"), vi.spyOn(console, "warn")].map((spy) =>
+      spy.mockImplementation(() => {}),
+    );
+    try {
+      const { jar, callback } = await signInOidc(mod);
+      expect(callback.headers.get("location")).toBe(`http://localhost:3000/sign-in?error=${code}`);
+      expect(jar.names()).not.toContain("authjs.session-token");
+      const logged = JSON.stringify(quiet.map((spy) => spy.mock.calls));
+      expect(logged).not.toContain(stub.idToken.split(".")[1]!);
+    } finally {
+      for (const spy of quiet) spy.mockRestore();
+    }
+  });
+
+  it("an exchange answer that has already expired gives no session", async () => {
+    const mod = await load(OIDC_ENV);
+    const past = nowSec() - 60;
+    stub.exchangeAnswers = [
+      {
+        status: 200,
+        body: {
+          jwt: fakeStrapiJwt(past, 42),
+          expiresAt: past,
+          user: { id: 42, displayName: "Grace", email: "grace@example.test" },
+        },
+      },
+    ];
+    const { jar } = await signInOidc(mod);
+    expect(jar.names()).not.toContain("authjs.session-token");
+  });
+
+  it("refuses an issuer whose discovery document names an http token endpoint, before any code is sent", async () => {
+    const mod = await load(OIDC_ENV);
+    stub.oidcDiscovery = {
+      token_endpoint: "http://idp.test/realms/sinnlos/protocol/openid-connect/token",
+    };
+    const quiet = [vi.spyOn(console, "error"), vi.spyOn(console, "warn")].map((spy) =>
+      spy.mockImplementation(() => {}),
+    );
+    try {
+      const { start } = await signInOidc(mod);
+      expect(start.headers.get("location")).toMatch(/\/sign-in\?error=Configuration$/);
+    } finally {
+      for (const spy of quiet) spy.mockRestore();
+    }
+    expect(fetched().some((url) => url.startsWith("http://idp.test"))).toBe(false);
+    expect(stub.exchangeCalls).toHaveLength(0);
   });
 });
 

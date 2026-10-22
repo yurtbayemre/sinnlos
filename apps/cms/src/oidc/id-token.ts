@@ -61,7 +61,18 @@ export interface Discovery {
   jwksUri: string;
 }
 
-export type DiscoveryResult = { ok: true; discovery: Discovery } | { ok: false; detail: string };
+export type DiscoveryResult =
+  | { ok: true; discovery: Discovery }
+  /** mismatch: the document does not fit the configuration (refuses the boot); unreachable: try again later. */
+  | { ok: false; reason: "mismatch" | "unreachable"; detail: string };
+
+/** The discovery fields that name an endpoint someone fetches or opens (Codex v0.25 round 1). */
+const ENDPOINT_FIELDS = [
+  "jwks_uri",
+  "authorization_endpoint",
+  "token_endpoint",
+  "userinfo_endpoint",
+];
 
 /** The verified claims the exchange uses. */
 export interface OidcClaims {
@@ -138,22 +149,41 @@ export async function discover(
       signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
       headers: { accept: "application/json" },
     });
-    if (!response.ok) return { ok: false, detail: `discovery HTTP ${response.status}` };
+    if (!response.ok)
+      return { ok: false, reason: "unreachable", detail: `discovery HTTP ${response.status}` };
     body = await response.json();
   } catch (err) {
-    return { ok: false, detail: `discovery ${err instanceof Error ? err.name : "error"}` };
+    const detail = `discovery ${err instanceof Error ? err.name : "error"}`;
+    return { ok: false, reason: "unreachable", detail };
   }
   if (!isRecord(body) || typeof body.issuer !== "string" || typeof body.jwks_uri !== "string") {
-    return { ok: false, detail: "discovery document without issuer or jwks_uri" };
+    return {
+      ok: false,
+      reason: "mismatch",
+      detail: "discovery document without issuer or jwks_uri",
+    };
   }
   if (!sameIssuer(body.issuer, config.issuer)) {
     return {
       ok: false,
+      reason: "mismatch",
       detail: `the discovery document's issuer ${body.issuer} is not OIDC_ISSUER ${config.issuer}`,
     };
   }
-  if (!isAllowedUrl(body.jwks_uri, config.allowHttp)) {
-    return { ok: false, detail: "jwks_uri is not https (OIDC_ALLOW_HTTP=1 allows http)" };
+  // Every endpoint, not only the keys: Auth.js sends the client secret to the
+  // token endpoint and the browser types the password at the authorization one.
+  for (const field of ENDPOINT_FIELDS) {
+    const value = body[field];
+    if (
+      value !== undefined &&
+      (typeof value !== "string" || !isAllowedUrl(value, config.allowHttp))
+    ) {
+      return {
+        ok: false,
+        reason: "mismatch",
+        detail: `the discovery document's ${field} is not https (OIDC_ALLOW_HTTP=1 allows http)`,
+      };
+    }
   }
   const discovery = { issuer: body.issuer, jwksUri: body.jwks_uri };
   discoveries.set(config.issuer, { at: now, discovery });
@@ -286,7 +316,13 @@ export async function verifyOidcIdToken(
     return { ok: false, reason: "invalid", detail: "azp" };
   }
   const email = stringClaim(payload, "email")?.toLowerCase() ?? null;
-  if (email === null || email.length > MAX_IDENTITY_LENGTH || payload.email_verified !== true) {
+  // One address (it reaches the digest mails): local@domain, no spaces, no second @.
+  if (
+    email === null ||
+    email.length > MAX_IDENTITY_LENGTH ||
+    !/^[^\s@]+@[^\s@]+$/.test(email) ||
+    payload.email_verified !== true
+  ) {
     return { ok: false, reason: "email_unverified", detail: "email_verified" };
   }
   const claims = payload as Record<string, unknown>;

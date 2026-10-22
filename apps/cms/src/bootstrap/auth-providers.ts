@@ -123,9 +123,11 @@ export function checkOidcConfig(
 /**
  * bootstrap(): `[oidc] disabled` or `[oidc] enabled …`, and with OIDC on one
  * look at the discovery document, so a wrong OIDC_ISSUER shows right after a
- * deploy (plan-oidc.md finding 5). Logged only, never fatal: an identity
- * provider that is down must not keep the cms (and local break-glass) from
- * starting; sign-ins answer 503 until it works.
+ * deploy (plan-oidc.md finding 5). A document that does not fit the
+ * configuration (another issuer, an http endpoint) refuses the boot like an
+ * invalid env; an identity provider that cannot be reached is only logged:
+ * it must not keep the cms (and local break-glass) from starting, and
+ * sign-ins answer 503 until it works.
  */
 export async function reportOidcStatus(
   log: BootLog & { error(message: string): void },
@@ -136,6 +138,11 @@ export async function reportOidcStatus(
   if (!settings.enabled) return;
   const found = await discoverImpl(settings);
   if (found.ok === false) {
+    if (found.reason === "mismatch") {
+      throw new Error(
+        `[oidc] ${found.detail}. Fix OIDC_ISSUER or the identity provider (docs/DEPLOYMENT.md, "OIDC sign-in"); refusing to start with OIDC_ENABLED=1.`,
+      );
+    }
     log.error(
       `[oidc] discovery failed: ${found.detail}. Sign-ins answer 503 until it works (docs/DEPLOYMENT.md, "OIDC sign-in").`,
     );

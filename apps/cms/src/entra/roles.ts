@@ -135,12 +135,13 @@ export function decideRoleWrite(
     };
   }
 
+  const owned = user.roleSource === source;
+  // OIDC: no provider role, no sign-in, before any other branch (Codex v0.25
+  // round 1: an admin's panel change used to win one more session).
+  if (admission && result.kind === "deny")
+    return { kind: "reject", status: 403, error: "not_assigned", audit: owned ? "keep" : "manual" };
   // The intranet owns this role (every pre-existing account, every override).
-  if (user.roleSource !== source) {
-    if (admission && result.kind === "deny")
-      return { kind: "reject", status: 403, error: "not_assigned", audit: "manual" };
-    return { kind: "keep", audit: "manual" };
-  }
+  if (!owned) return { kind: "keep", audit: "manual" };
 
   const current = user.roleType ?? "none";
   // An admin changed the role since Entra last wrote it: the admin wins, and
