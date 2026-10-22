@@ -1,5 +1,10 @@
 # Sinnlos Feature Roadmap
 
+> **Road to v1.0.0 (2026-10-22):** the remaining work before v1.0.0
+> (license, portability, accounts, data protection, docs) is tracked in
+> [v1-release-plan.md](v1-release-plan.md). This file is the history of the
+> feature phases.
+
 Implementation plan for the 10 most-requested intranet features that Sinnlos
 did not have yet at the time of writing, based on market research (Staffbase,
 Workvivo, Sociabble, Simpplr, MangoApps feature guides, June 2026).

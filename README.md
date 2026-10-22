@@ -25,6 +25,8 @@ Further reading:
 - **[docs/architecture.md](./docs/architecture.md)** (German): topology,
   data model, request flow, the conventions to know before changing code,
   and the known open issues.
+- **[docs/v1-release-plan.md](./docs/v1-release-plan.md)**: everything that
+  still has to be done before v1.0.0, with the owner's decisions.
 
 ## Contents
 
