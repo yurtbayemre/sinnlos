@@ -33,6 +33,23 @@ describe("buildNotices", () => {
       },
       { name: "bare", versions: ["0.0.1"], paths: [pkg("bare", {})], license: "Unknown" },
     ],
+    // Next vendors its own dependencies under dist/compiled (busboy, …).
+    "MIT AND vendored": [
+      {
+        name: "nextish",
+        versions: ["16.0.0"],
+        paths: [
+          (() => {
+            const dir = pkg("nextish", { "license.md": "Next MIT" });
+            pkg("nextish/dist/compiled/busboy", { LICENSE: "busboy MIT" });
+            pkg("nextish/dist/compiled/@scope/thing", { "LICENSE.txt": "thing MIT" });
+            pkg("nextish/dist/compiled/nolicense", { "index.js": "x" });
+            return dir;
+          })(),
+        ],
+        license: "MIT",
+      },
+    ],
   };
 
   const { text, missing } = buildNotices(report);
@@ -49,7 +66,13 @@ describe("buildNotices", () => {
 
   it("marks and reports a version without a license file", () => {
     expect(text).toContain("=== bare@0.0.1 (Unknown)\n(no license file found)");
-    expect(missing).toEqual(["bare@0.0.1"]);
+    expect(missing).toEqual(["bare@0.0.1", "nextish@16.0.0 (vendored nolicense)"]);
+  });
+
+  it("adds the notices of vendored packages (Next's dist/compiled)", () => {
+    expect(text).toContain("--- vendored busboy\n--- LICENSE\nbusboy MIT");
+    expect(text).toContain("--- vendored @scope/thing\n--- LICENSE.txt\nthing MIT");
+    expect(text).toContain("--- vendored nolicense\n(no license file found)");
   });
 
   it("starts with the project's own license and sorts the packages", () => {

@@ -23,9 +23,10 @@ COPY apps/cms/package.json ./apps/cms/
 # The cms depends on the workspace package @sinnlos/domain (SH01).
 COPY packages/domain/package.json ./packages/domain/
 RUN pnpm install --filter @sinnlos/cms... --frozen-lockfile
-# Third-party notices (v0.26, M1) for the FULL tree the runner ships.
+# Third-party notices (v0.26, M1) for the FULL tree the runner ships: the
+# workspace root (its packages are installed and copied too) and the cms.
 COPY scripts/third-party-notices.mjs ./scripts/
-RUN pnpm licenses list --json --filter @sinnlos/cms... > /tmp/licenses.json \
+RUN pnpm licenses list --json --filter sinnlos-intranet --filter @sinnlos/cms... > /tmp/licenses.json \
   && node scripts/third-party-notices.mjs /app/THIRD_PARTY_NOTICES.txt < /tmp/licenses.json
 
 FROM base AS builder

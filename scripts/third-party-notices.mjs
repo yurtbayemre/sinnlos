@@ -27,6 +27,32 @@ function noticeTexts(dir) {
 }
 
 /**
+ * Packages a dependency vendors into its own build (Next's dist/compiled/*,
+ * which the standalone output traces without their LICENSE): [name, dir].
+ */
+function vendoredDirs(dir) {
+  const out = [];
+  for (const base of ["dist/compiled", "compiled"]) {
+    let names;
+    try {
+      names = readdirSync(join(dir, base), { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const entry of names.filter((e) => e.isDirectory())) {
+      const sub = join(dir, base, entry.name);
+      if (!entry.name.startsWith("@")) out.push([entry.name, sub]);
+      else
+        for (const scoped of readdirSync(sub, { withFileTypes: true }).filter((e) =>
+          e.isDirectory(),
+        ))
+          out.push([`${entry.name}/${scoped.name}`, join(sub, scoped.name)]);
+    }
+  }
+  return out;
+}
+
+/**
  * pnpm 10's shape: { "<license>": [{ name, versions[], paths[], license }] },
  * versions[i] lives at paths[i]. Returns the notices text and the
  * "name@version" entries without a notice file.
@@ -42,10 +68,16 @@ export function buildNotices(report) {
     const id = `${entry.name}@${entry.version}`;
     const texts = noticeTexts(entry.path);
     if (texts.length === 0) missing.push(id);
+    const vendored = vendoredDirs(entry.path).flatMap(([name, dir]) => {
+      const found = noticeTexts(dir);
+      if (found.length === 0) missing.push(`${id} (vendored ${name})`);
+      return [`--- vendored ${name}`, ...(found.length ? found : ["(no license file found)"])];
+    });
     blocks.push(
       [
         `=== ${id} (${entry.license})`,
         ...(texts.length ? texts : ["(no license file found)"]),
+        ...vendored,
       ].join("\n"),
     );
   }
