@@ -210,8 +210,14 @@ false`, authenticated by `OIDC_EXCHANGE_SECRET`; 404 while
    algorithms only** (RS*, PS*, ES*, EdDSA; never HS* or `none`), the
    audience (and `azp` when present), `exp`, a non-empty `sub`, an issue
    time at most 10 minutes ago plus 5 minutes of clock tolerance, and
-   requires `email` with `email_verified: true`. With `OIDC_ALLOW_HTTP` not
-   `1` the issuer and its endpoints must be HTTPS.
+   requires one `email` address with `email_verified: true`. With
+   `OIDC_ALLOW_HTTP` not `1` the issuer and every endpoint the discovery
+   document names must be HTTPS, in the cms and in the web: the web's
+   provider fetch (`lib/auth/oidc-fetch.ts`) refuses an http request and a
+   discovery document naming an http endpoint before Auth.js redirects to
+   it or posts the code and the client secret. A discovery document that
+   does not fit the configuration refuses the cms boot; an unreachable
+   identity provider is only logged (sign-ins answer 503).
 3. The user is found by **issuer + subject** (`oidcIssuer`, `oidcSubject`),
    never by e-mail, backed by a unique database index; a new user is
    created on the spot (`oidc-<hash>`), and a local account with the same

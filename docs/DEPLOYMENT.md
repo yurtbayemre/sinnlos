@@ -752,7 +752,7 @@ the same subjects for the same people. Before such a change:
 
 | The sign-in page reports | Cause |
 |---|---|
-| `error=Configuration` right after clicking the button | `OIDC_ISSUER` does not match the discovery document's `issuer` (a missing or extra trailing slash with Keycloak or authentik), or the issuer is unreachable from the web |
+| `error=Configuration` right after clicking the button | `OIDC_ISSUER` does not match the discovery document's `issuer` (a missing or extra trailing slash with Keycloak or authentik), the discovery document names an `http:` endpoint while `OIDC_ALLOW_HTTP` is not `1`, or the issuer is unreachable from the web |
 | *could not be verified* (`oidc_invalid`) | The cms refused the ID token: HS256 (authentik without a signing key), another client's token, clock skew over 5 minutes, issued more than about 15 minutes before the exchange, or a missing `sub` or `exp` |
 | *e-mail not verified* (`oidc_email_unverified`) | No `email`, or `email_verified` is not `true` (authentik's stock mapping, Keycloak's *Email verified* off) |
 | *has no access* (`oidc_not_assigned`) | No recognised `Intranet.*` role with `OIDC_DEFAULT_ROLE=deny` (Keycloak mapper not in the ID token or without the client id), or a Zitadel user of another organisation |
