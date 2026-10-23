@@ -1649,6 +1649,57 @@ systemctl start docker
 
 ### 3.8 Updates
 
+> **Upgrading to v0.28 (data protection).** No required env, no edge
+> change. [data-protection.md](data-protection.md) (German) describes the
+> result for the data-protection officer and the works council.
+>
+> - **Blocked people** leave the directory, the org chart, the people
+>   search and the duty roster (a shift of theirs shows "Former person");
+>   content they wrote shows only their name. `/manage/users` still lists
+>   them.
+> - **Export and anonymisation** at `/manage/users` (admins): block the
+>   person first; the anonymisation is final (no unblock, no edit, in the
+>   Strapi panel neither). Keep each one in your register of data-subject
+>   requests: after restoring an older backup it must be repeated
+>   ([data-protection.md](data-protection.md), section 5).
+> - **Training:** cms and web deploy together. A completion now carries the
+>   published version the learner saw; a lesson page opened before the
+>   deploy answers "please reload" once. Receipts keep a snapshot; the
+>   03:25 job fills it for the older receipts over the next nights (at most
+>   10 000 a night), marked "Stand unbekannt (vor v0.28)". Courses get a
+>   contact field.
+> - **New nightly jobs** after the 03:00 backup: 03:20 erasure sweep,
+>   03:25 training evidence, 03:52 read confirmations, 03:54 RSVPs, 03:56
+>   poll voter links; the 03:40 notification janitor now also deletes
+>   unread notifications after 180 days. The first nights work off the
+>   backlog (unread notifications older than 180 days, RSVPs of events
+>   that ended more than 180 days ago, voter links of polls closed more
+>   than 30 days ago, confirmations of deleted documents); each night's
+>   backup still holds what the next run deletes.
+> - **Optional env:** `FEATURES_OFF` (cms and web, the same value),
+>   `TRAINING_EVIDENCE_RETENTION_YEARS` (3), `SEARCH_LOG_RETENTION_DAYS`
+>   (90). An invalid value refuses the cms boot. The boot logs
+>   `[switches] everything on` or `[switches] off: <list>`.
+> - **Grants:** admins lose the acknowledgement update and delete routes
+>   (revoked at boot) and read only their own notifications
+>   (`/manage/analytics` reads a total instead); four admin actions are
+>   new (export, anonymisation preview and run, training evidence). The
+>   boot logs `permission drift: none (report-only check of 218 managed
+>   actions)`.
+> - **Rollback** to v0.27 is a plain retag **as long as nobody was
+>   anonymised**. The new attributes (`anonymisedAt`, the receipt
+>   `snapshot`, `votersRemovedAt`, the course `contact`) stay
+>   (`DATABASE_FORCE_MIGRATION=false`) and v0.27 ignores them. Rows the
+>   new jobs deleted come back only from a backup, and on v0.27 a poll
+>   whose voter links were removed can be reopened, so its earlier voters
+>   could vote again.
+> - **After the first anonymisation**, rolling back below v0.28 is the
+>   owner's decision: v0.27 does not know anonymised accounts. While it
+>   runs, never unblock a "Former person" / "Ehemalige Person" account
+>   (`/manage/users` and the Strapi panel would allow it): an SSO identity
+>   the identity provider still admits could then sign in and sync its
+>   profile back. Roll forward to v0.28 as soon as possible.
+
 > **Upgrading to v0.27 (accounts and second factor).**
 >
 > - **Second factor.** After the deploy every password account of the
@@ -7043,7 +7094,8 @@ psql_db() { "${COMPOSE[@]}" exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTG
      janitor deletes at most 100 000 a night; a larger backlog continues
      the next nights. `old_read_anchors_kept` are old but stay (they keep
      a re-published announcement from notifying again). Unread
-     notifications never expire.
+     notifications never expired before v0.28 (since then: 180 days,
+     [data-protection.md](data-protection.md)).
    - `ads_to_purge`: ads whose last day lies more than 90 days back (at
      most 1000 a night), and at most `their_images_at_most` images with
      them (images uploaded in the admin panel are kept).
@@ -7652,7 +7704,9 @@ compose, grant, route or edge change.
   `pg-backup.sh` at 03:00; [§7.3](#73-automated-daily-backups-cron)):
   - `notification-janitor`, 03:40 `APP_TIME_ZONE`: deletes **read**
     notifications 90 days after they were read. Unread notifications never
-    expire. Fan-out anchor rows (announcement and event notifications that
+    expire (until v0.28: since then they go after 180 days, and anchors
+    once their source is gone in every state;
+    [data-protection.md](data-protection.md)). Fan-out anchor rows (announcement and event notifications that
     carry `sourceType`/`sourceDocumentId`) are never deleted, read or not:
     they are what keeps a re-published announcement from notifying its
     audience again. At most 100 000 rows a night; a backlog continues the
@@ -13713,13 +13767,15 @@ the cms and the database, phase 2 the web):
 - **Admin panel.** Strapi's admin panel shows and takes times in the
   admin's **browser** zone; the stored instant is right either way. Admins
   outside `APP_TIME_ZONE` see their own local times there.
-- **Cron and backups.** The janitors run at 03:30 / 03:35 (since batch 12
-  also 03:40 / 03:45, since batch 15 the audit janitor at 03:50), the
-  scheduled publisher every minute (batch 15) and the digest at 07:30
-  `APP_TIME_ZONE`. The nightly backup may run before or after the
-  janitors: they delete only orphaned uploads older than 24 hours, audit
-  rows older than `AUDIT_RETENTION_DAYS` and other rows 90 days past their
-  date, which every earlier nightly backup holds (production's
+- **Cron and backups.** The janitors run from 03:20 to 03:56 (03:30 /
+  03:35 since the start, 03:40 / 03:45 since batch 12, the audit janitor
+  at 03:50 since batch 15, 03:20 / 03:25 / 03:52 / 03:54 / 03:56 since
+  v0.28), the scheduled publisher every minute (batch 15), the training
+  reminders at 06:45 and the digest at 07:30 `APP_TIME_ZONE`. The nightly
+  backup may run before or after the janitors: they delete only rows and
+  files past their retention or of documents deleted for good
+  ([data-protection.md](data-protection.md)), which every earlier nightly
+  backup holds (production's
   `backup-run` runs at 04:00). The scheduled publisher changes current
   content like a manual publish in the same minute; `pg_dump` takes a
   consistent snapshot.
@@ -14064,7 +14120,7 @@ az containerapp env storage set \
 ### 5.6 Deploy the CMS container
 
 > **One cms replica.** Every cms process runs the cron tasks (the
-> janitors from 03:30, the digest at 07:30, `apps/cms/src/cron/registry.ts`);
+> janitors from 03:20, the digest at 07:30, `apps/cms/src/cron/registry.ts`);
 > their overlap guard works per process, it is not a cluster lock. A second
 > replica would mail every digest twice and run each janitor twice at
 > once. A second cms on the same database (a copy, a drill) needs
