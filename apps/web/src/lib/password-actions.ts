@@ -48,8 +48,8 @@ export type ForgotPasswordState = { done?: true; error?: "tooManyRequests" };
 /**
  * Asks the cms for a reset link. Always the same answer (`done`), whether
  * or not an account exists; the cms answers 202 before it looks anything
- * up. Only a flood from one IP or for one address is refused: every request
- * the cms accepted counts; one it never got (an outage) does not.
+ * up. Only a flood from one IP or for one address is refused; every request
+ * counts, also one the cms answered with an error or not in time.
  */
 export async function requestPasswordReset(
   _prev: ForgotPasswordState,
@@ -59,18 +59,19 @@ export async function requestPasswordReset(
   if (!LOCAL_ENABLED || !email.includes("@")) return { done: true };
   const ticket = passwordLinkRateLimiter.tryAcquire(clientIpFrom(await headers()), email);
   if (ticket === "blocked") return { error: "tooManyRequests" };
-  let accepted = false;
+  // Every request that got this far counts, whatever the cms answers: a
+  // slow or failing cms may still send the mail, so an outage must not
+  // lift the per-address and per-IP budget of reset mails.
+  passwordLinkRateLimiter.settle(ticket, "failure");
   try {
     const res = await internalPost("/api/auth/password/forgot", {
       email,
       locale: await getUserLocale(),
     });
-    accepted = res.ok;
-    if (!accepted) console.error(`[password] reset request refused by the cms: ${res.status}`);
+    if (!res.ok) console.error(`[password] reset request refused by the cms: ${res.status}`);
   } catch (err) {
     console.error("[password] reset request did not reach the cms", err);
   }
-  passwordLinkRateLimiter.settle(ticket, accepted ? "failure" : "neutral");
   return { done: true };
 }
 

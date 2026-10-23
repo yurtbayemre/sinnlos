@@ -107,17 +107,39 @@ describe("requestPasswordReset", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("does not count requests the cms never accepted (an outage)", async () => {
+  // A timed-out call may still have sent the mail: a slowed cms must not
+  // lift either budget (security review of ec60008a).
+  const timeout = async (): Promise<Response> => {
+    throw new DOMException("timed out", "TimeoutError");
+  };
+
+  it("counts a request whose cms call times out toward the per-address budget", async () => {
     const { requestPasswordReset } = await load();
-    fetchMock.mockImplementation(async () => new Response("down", { status: 503 }));
-    for (let i = 0; i < 15; i++)
-      await requestPasswordReset({}, form({ email: "ada@example.test" }));
-    fetchMock.mockReset();
-    fetchMock.mockResolvedValue(new Response(null, { status: 202 }));
+    fetchMock.mockImplementation(timeout);
+    for (let ip = 1; ip <= 10; ip++) {
+      clientIp = `198.51.100.${ip}`;
+      await expect(requestPasswordReset({}, form({ email: "ada@example.test" }))).resolves.toEqual({
+        done: true,
+      });
+    }
+    fetchMock.mockClear();
+    clientIp = "192.0.2.50";
     await expect(requestPasswordReset({}, form({ email: "ada@example.test" }))).resolves.toEqual({
-      done: true,
+      error: "tooManyRequests",
     });
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("counts a request whose cms call times out toward the per-IP budget", async () => {
+    const { requestPasswordReset } = await load();
+    fetchMock.mockImplementation(timeout);
+    for (let i = 0; i < 10; i++)
+      await requestPasswordReset({}, form({ email: `user${i}@example.test` }));
+    fetchMock.mockClear();
+    await expect(requestPasswordReset({}, form({ email: "ada@example.test" }))).resolves.toEqual({
+      error: "tooManyRequests",
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
 
