@@ -102,7 +102,7 @@ Everyone else gets an invitation: **/manage/users → Invite people** (German: _
 
 ### Passwords and the second factor
 
-- **Passwords** need at least 12 characters and must not be a common one. A forgotten password: **/forgot-password** on the sign-in page mails a reset link, valid for 1 hour; an admin can also send one with **Send a password reset link** (_Passwort-Link senden_; for an invitation without a password: **Send the invitation again**) on the user's page at /manage/users.
+- **Passwords** need at least 12 characters and must not be a common one. A forgotten password: **/forgot-password** on the sign-in page mails a reset link, valid for 1 hour; an admin can also send one with **Send a password reset link** (_Link zum Zurücksetzen senden_; for an invitation without a password: **Send the invitation again**) on the user's page at /manage/users.
 - **Second factor:** admins and editors (`MFA_REQUIRED_ROLES`) set it up at their first sign-in; everyone else can turn it on at **/profile**. Each sign-in then asks for a code from the app, or for one of the recovery codes (each works once).
 - **A lost phone:** an admin opens the user at /manage/users and chooses **Reset two-factor sign-in** (_Zwei-Faktor-Anmeldung zurücksetzen_); the user sets it up again at the next sign-in.
 - **The only admin is locked out** (phone and recovery codes gone): on the host, as the deploy user, run `infra/mfa-reset.sh <email>`. It clears the second factor of exactly that account and signs it out everywhere.
