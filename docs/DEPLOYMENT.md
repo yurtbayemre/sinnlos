@@ -263,7 +263,7 @@ bare-metal development put the cms keys into `apps/cms/.env` and the web keys
 | `ENTRA_SYNC_MANAGER` | 0 | cms and web. `1` requests `User.Read.All` (admin consent) and syncs the manager from `/me/manager`; a manager who has not signed in yet is linked on their first sign-in. |
 | `ENTRA_SESSION_TTL` | 12h | cms. Lifetime of an Entra sign-in's session, `<n>m`, `<n>h` or `<n>d`, at most `7d`. Local sign-ins keep 7 days. |
 | `AUTH_LOCAL_ENABLED` | 0 | Web and cms. `1` keeps local e-mail + password sign-in next to Microsoft (break-glass admin account). Without Entra, local sign-in is always on. |
-| `LOCAL_REGISTRATION` | 0 | Unchanged: local self-registration only; it does not affect Entra users. Next to Entra it logs one warning at boot: a registered address is not verified, so check such an account before binding it ([the 409 procedure](#an-e-mail-address-that-already-has-an-account-409)). |
+| `LOCAL_REGISTRATION` | — | Removed in v0.27: there is no self-registration any more (admins invite people at `/manage/users`). A leftover `1` only logs a warning at boot. |
 
 The cms logs one line at every boot: `[entra] disabled`, or
 `[entra] enabled tenant=<guid> mode=<on|dry-run> default=<role> groupRules=<n>
@@ -431,9 +431,9 @@ it holds, to the Microsoft user. An admin:
 
 1. **checks whose account it is.** Bind only an account you know belongs
    to this person: one an admin created for them, or one they have used
-   themselves. The cms never verifies the address of a self-registered
-   account: with `LOCAL_REGISTRATION=1`, now or at any earlier time,
-   anyone could have registered the address first. Do not bind such an
+   themselves. Before v0.27 the cms offered self-registration
+   (`LOCAL_REGISTRATION=1`) and never verified such an address: if it was
+   ever on, anyone could have registered the address first. Do not bind such an
    account while you cannot confirm its owner; **delete it** instead
    (**Content Manager → User** → the user → *Delete*). The cms refuses
    the sessions of a deleted user at their next request, and the next
@@ -1648,6 +1648,35 @@ systemctl start docker
 ```
 
 ### 3.8 Updates
+
+> **Upgrading to v0.27 (accounts and second factor).**
+>
+> - **Second factor.** After the deploy every password account of the
+>   roles in `MFA_REQUIRED_ROLES` (unset or empty: `admin_role`, `editor`)
+>   is sent to `/mfa/setup` at its next sign-in and enrolls an
+>   authenticator app (Aegis, 2FAS, Google or Microsoft Authenticator);
+>   sessions from before the deploy of those users end (401, sign in
+>   again). Have an app ready for your own admin account. A locked-out
+>   sole admin: `infra/mfa-reset.sh <email>` on the host
+>   ([INSTALL.md](INSTALL.md)). Keep `ENCRYPTION_KEY` in the `.env` backup:
+>   the second-factor secrets are encrypted with it.
+> - **live-smoke accounts** must be outside `MFA_REQUIRED_ROLES`: set
+>   `SMOKE_EMAIL` (best a member who authored a published announcement)
+>   and `SMOKE_AUTHOR_EMAIL` (a member) in `infra/deploy.env`, and their
+>   passwords in `PASSWORDS_FILE`. The defaults (`alex.morgan`, an admin,
+>   and `sam.chen`, an editor) would stop at the second factor.
+> - **Passwords:** new and changed passwords need 12 characters and must
+>   not be common; existing ones keep working. The demo seed password is
+>   now `Demo-Passwort-2026!` (fresh databases only).
+> - **Accounts:** self-registration is gone (`LOCAL_REGISTRATION` is
+>   ignored); admins invite people at `/manage/users`, and
+>   `/forgot-password` mails reset links. Both need SMTP and
+>   `INTERNAL_UPLOAD_TOKEN`, which is now the cms-web internal secret for
+>   uploads and password links.
+> - **Rollback** to v0.26 is a plain retag. It keeps the new `totp_*`
+>   columns (`DATABASE_FORCE_MIGRATION=false`), which v0.26 ignores: a
+>   roll-forward finds the enrollments again. Invited accounts that have
+>   not set a password yet stay without one under v0.26.
 
 > **Upgrading to v0.26 (deploy.sh for any host).** `infra/deploy.sh` no
 > longer assumes the owner's host:
@@ -14228,7 +14257,7 @@ ingress only, so the Strapi admin panel has no browser route here, and the
 `/api/live/emit` is public on its FQDN, guarded only by
 `REVALIDATE_SECRET` (under compose the edge sends `/api/*` to the cms).
 Compose also passes, among others, the cms `TZ=UTC`, `PUBLIC_URL`,
-`CORS_ORIGIN`, `DATETIME_LEGACY_*`, `LOCAL_REGISTRATION`, `CRON_ENABLED`,
+`CORS_ORIGIN`, `DATETIME_LEGACY_*`, `MFA_REQUIRED_ROLES`, `CRON_ENABLED`,
 `STRAPI_TELEMETRY_DISABLED=true`, `DIGEST_REPLY_TO`, `DIGESTS_DISABLED`,
 `DIGEST_DEFAULT_LOCALE` and the other `ENTRA_*` keys, and the web
 `HOSTNAME=0.0.0.0`, `STRAPI_PUBLIC_URL` and `DEFAULT_LOCALE`

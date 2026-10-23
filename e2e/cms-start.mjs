@@ -17,6 +17,7 @@ import { setTimeout as delay } from "node:timers/promises";
  * connection?: {client?: {pool?: {numUsed(): number, numPendingAcquires(): number}}}},
  * plugin(name: string): {service(name: string): {add(data: Record<string, unknown>): Promise<Row>}},
  * log: {level: string}, cron: {stop(): void}, load(): Promise<unknown>, destroy(): Promise<void>,
+ * config: {set(key: string, value: unknown): void},
  * server: {httpServer: import("node:http").Server, listen(port: number, host: string, callback: () => void): unknown}
  * }} Cms
  */
@@ -94,6 +95,18 @@ async function start() {
       editor: {
         email: "editor@e2e.test",
         password: fixturePassword("E2E_EDITOR_PASSWORD"),
+        documentId: "",
+      },
+      // v0.27: admins, whose role needs a second factor in this run
+      // (MFA_REQUIRED_ROLES=admin_role): mfa.spec.ts and invite.spec.ts.
+      admin: {
+        email: "admin@e2e.test",
+        password: fixturePassword("E2E_ADMIN_PASSWORD"),
+        documentId: "",
+      },
+      inviter: {
+        email: "inviter@e2e.test",
+        password: fixturePassword("E2E_INVITER_PASSWORD"),
         documentId: "",
       },
     },
@@ -181,6 +194,10 @@ async function start() {
   cms.log.level = "error";
   await cms.load();
   cms.cron.stop();
+  // The specs sign in more often than the users-permissions throttle allows
+  // (per IP). Off in this disposable container only, like the integration
+  // harness; the plugin reads it per request.
+  cms.config.set("plugin::users-permissions.ratelimit", { enabled: false });
   if (stopping) return;
 
   phase = "fixture creation";
@@ -191,8 +208,11 @@ async function start() {
     data: { name: "E2E Department", slug: "e2e-department" },
   });
   const userService = cms.plugin("users-permissions").service("user");
+  /** @param {string} key */
+  const roleTypeOf = (key) =>
+    key === "lead" ? "team_lead" : key === "admin" || key === "inviter" ? "admin_role" : key;
   for (const [key, fixture] of Object.entries(fixtures.users)) {
-    const roleType = key === "lead" ? "team_lead" : key;
+    const roleType = roleTypeOf(key);
     const role = await cms.db
       .query("plugin::users-permissions.role")
       .findOne({ where: { type: roleType } });
@@ -262,7 +282,7 @@ async function start() {
 
   phase = "fixture relationship assertions";
   assert.equal(await cms.db.query(departmentUid).count(), 1, "Expected one department");
-  assert.equal(await cms.db.query(userUid).count(), 3, "Expected three local users");
+  assert.equal(await cms.db.query(userUid).count(), 5, "Expected five local users");
   assert.equal(await cms.db.query(teamUid).count(), 2, "Expected two teams");
   for (const [key, fixture] of Object.entries(fixtures.users)) {
     const user = await cms.db.query(userUid).findOne({
@@ -279,7 +299,7 @@ async function start() {
     assert.equal(user.provider, "local", "Fixture user must use local login");
     assert.equal(user.confirmed, true, "Fixture user must be confirmed");
     assert.equal(user.blocked, false, "Fixture user must not be blocked");
-    assert.equal(user.role?.type, key === "lead" ? "team_lead" : key, "Fixture user role differs");
+    assert.equal(user.role?.type, roleTypeOf(key), "Fixture user role differs");
     assert.equal(
       user.department?.documentId,
       department.documentId,
@@ -389,7 +409,7 @@ async function start() {
     });
   });
   console.log(
-    "[e2e-cms] Ready: normal bootstrap and fixture assertions passed (1 department, 3 users, 2 teams, 3 published quiz courses and lessons).",
+    "[e2e-cms] Ready: normal bootstrap and fixture assertions passed (1 department, 5 users, 2 teams, 3 published quiz courses and lessons).",
   );
 }
 

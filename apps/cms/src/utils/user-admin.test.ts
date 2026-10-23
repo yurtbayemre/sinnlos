@@ -30,6 +30,8 @@ function world(users: Array<{ id: number } & Record<string, unknown>>) {
       "api::department.department": [],
     },
   });
+  // No row locks on SQLite (utils/mfa-core.ts lockUserRow).
+  Object.assign(strapi.db, { dialect: { client: "sqlite" } });
   return { strapi, host: strapi as unknown as UserAdminHost };
 }
 
@@ -55,17 +57,30 @@ describe("user administration rules (v0.23)", () => {
       { id: 3, role: { id: 1 }, blocked: true },
     ]);
     for (const callerId of [2, 3])
-      await expect(updateUser(host, callerId, 1, { role: "editor" })).rejects.toMatchObject({
+      await expect(updateUser(host, callerId, 0, 1, { role: "editor" })).rejects.toMatchObject({
         name: "ForbiddenError",
       });
     expect(strapi.tables[USER][0]).toMatchObject({ role: { id: 1 } });
+  });
+  it("refuses a caller whose session version is out of date under the lock, before any write", async () => {
+    const { host, strapi } = world([
+      { id: 1, role: { id: 1 }, blocked: false, tokenVersion: 4 },
+      { id: 2, role: { id: 2 }, blocked: false },
+    ]);
+    for (const tv of [3, undefined])
+      await expect(updateUser(host, 1, tv, 2, { role: "admin_role" })).rejects.toMatchObject({
+        status: 401,
+        details: { code: "session_outdated" },
+      });
+    expect(strapi.tables[USER][1]).toMatchObject({ role: { id: 2 } });
+    expect((await updateUser(host, 1, 4, 2, { blocked: true })).blocked).toBe(true);
   });
   it("lets an admin demote another admin while one stays", async () => {
     const { host, strapi } = world([
       { id: 1, role: { id: 1 }, blocked: false },
       { id: 2, role: { id: 1 }, blocked: false },
     ]);
-    const detail = await updateUser(host, 1, 2, { role: "editor" });
+    const detail = await updateUser(host, 1, 0, 2, { role: "editor" });
     expect(detail.role).toBe("editor");
     expect(strapi.tables[USER][1]).toMatchObject({ roleSource: "manual", entraAppliedRole: null });
   });
@@ -74,9 +89,9 @@ describe("user administration rules (v0.23)", () => {
       { id: 1, role: { id: 1 }, blocked: false },
       { id: 3, role: { id: 2 }, blocked: false },
     ]);
-    await updateUser(host, 1, 3, { blocked: true });
+    await updateUser(host, 1, 0, 3, { blocked: true });
     expect(bump).toHaveBeenCalledOnce();
-    await updateUser(host, 1, 3, { blocked: true });
+    await updateUser(host, 1, 0, 3, { blocked: true });
     expect(bump).toHaveBeenCalledOnce();
   });
   it("refuses department and manager of an Entra-bound user while the sync owns them", async () => {
@@ -86,11 +101,11 @@ describe("user administration rules (v0.23)", () => {
       { id: 2, role: { id: 2 }, entraTenantId: ENTRA_ENV.MS_TENANT_ID },
       { id: 3, role: { id: 2 } },
     ]);
-    await expect(updateUser(host, 1, 2, { department: null, manager: null })).rejects.toMatchObject(
-      {
-        details: { codes: { department: "entraManaged", manager: "entraManaged" } },
-      },
-    );
+    await expect(
+      updateUser(host, 1, 0, 2, { department: null, manager: null }),
+    ).rejects.toMatchObject({
+      details: { codes: { department: "entraManaged", manager: "entraManaged" } },
+    });
     expect((await userDetail(host, 2, 1)).locked).toEqual({ department: true, manager: true });
     // Not bound: nothing locked.
     expect((await userDetail(host, 3, 1)).locked).toEqual({ department: false, manager: false });

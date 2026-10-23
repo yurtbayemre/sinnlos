@@ -112,10 +112,50 @@
  */
 import { AsyncLocalStorage } from "node:async_hooks";
 
+import { errors } from "@strapi/utils";
+
+import {
+  consumeSecondFactor,
+  isEnrolled,
+  mfaRequiredRoles,
+  recordMfaGate,
+  requiredMfa,
+  type MfaHost,
+} from "../../utils/mfa-core";
+import { passwordProblem } from "../../utils/password-rule";
+
 export const USER_UID = "plugin::users-permissions.user";
 
 /** The JWT claim that carries the user's token version. */
 export const TOKEN_VERSION_CLAIM = "tv";
+
+/**
+ * v0.27 (plan-v027-rev2.md): how the session was authenticated, stamped by
+ * issue() from the ISSUING request's context only (withIssueClaims), never
+ * from the row: `am` "pw" (local password) or "idp" (Entra/OIDC exchange),
+ * `mfa` 1 after a verified second factor. A JWT issued outside such a
+ * context carries neither, and the per-request gate treats it as issued
+ * before v0.27.
+ */
+export const AUTH_METHOD_CLAIM = "am";
+export const MFA_CLAIM = "mfa";
+
+export interface IssueClaims {
+  /** The user the claims belong to; another user's issue() gets none. */
+  userId?: number;
+  am: "pw" | "idp";
+  mfa?: 1;
+}
+
+/** What the verified JWT of this request said (the strategy decorator reads it). */
+export interface RequestAssurance {
+  am: "pw" | "idp" | null;
+  mfa: boolean;
+  /** The token version the request's JWT carries (rev3: stale-assurance checks). */
+  tv: number;
+  /** A required second factor is not enrolled yet: only enrollment routes answer. */
+  restricted: boolean;
+}
 
 /** Marks a wrapped factory, so a second load of the same plugin module does not wrap twice. */
 const WRAPPED = Symbol.for("sinnlos.users-permissions.token-version");
@@ -181,10 +221,12 @@ type Factory = (deps: { strapi: TokenVersionStrapi }) => unknown;
 
 type JwtIssue = (this: unknown, payload: unknown, options?: unknown) => unknown;
 type JwtVerify = (this: unknown, token: string) => Promise<unknown>;
+type JwtGetToken = (this: unknown, ctx: object) => Promise<unknown>;
 
 export interface JwtService extends Record<string, unknown> {
   issue: JwtIssue;
   verify: JwtVerify;
+  getToken?: JwtGetToken;
 }
 
 type UserEdit = (this: unknown, userId: unknown, params?: unknown, ...rest: unknown[]) => unknown;
@@ -197,7 +239,7 @@ export interface UserService extends Record<string, unknown> {
 /** The slice of the Koa context the controller wrappers read and write. */
 export interface AuthContext {
   body?: unknown;
-  state?: { user?: { id?: unknown } | null };
+  state?: { user?: { id?: unknown } | null; assurance?: RequestAssurance };
   params?: { provider?: unknown };
   request?: { body?: unknown };
 }
@@ -207,10 +249,19 @@ type Action = (this: unknown, ctx: AuthContext, ...rest: unknown[]) => unknown;
 export interface UsersPermissionsPlugin {
   services: Record<string, unknown>;
   controllers: Record<string, unknown>;
+  register?: unknown;
 }
 
 /** The auth actions the wrapper changes beyond settling the JWT. */
-export const PASSWORD_ACTIONS = ["changePassword", "resetPassword"] as const;
+export const PASSWORD_ACTIONS = ["changePassword"] as const;
+
+/**
+ * The plugin's own e-mail reset flow and provider connect, answered with
+ * 404 whatever the grants say (v0.27): the reset would hand any account a
+ * password without the provider, version and expiry checks of POST
+ * /api/auth/password/set, and no provider but local signs anyone in.
+ */
+export const DISABLED_AUTH_ACTIONS = ["forgotPassword", "resetPassword", "connect"] as const;
 
 /** The sign-in action, whose version is read before its password check. */
 export const SIGN_IN_ACTION = "callback";
@@ -236,6 +287,46 @@ interface PasswordChange {
 
 /** Set around a password action (patchAuthController), filled by the user service's edit(). */
 const passwordChange = sharedStorage<PasswordChange>("password-change");
+
+/** The claims issue() stamps in this context (withIssueClaims). */
+const issueClaims = sharedStorage<IssueClaims>("issue-claims");
+
+/**
+ * The payload getToken() verified for a request (keyed by its Koa
+ * context), for the strategy decorator; private to this module.
+ */
+const verifiedPayloads = sharedSlot("verified-payloads", () => new WeakMap<object, unknown>());
+
+/**
+ * A password action's expectation (rev3 #1): its bump must raise exactly
+ * the version the request's JWT was verified at, else another change came
+ * in between and the session is out of date.
+ */
+const expectedBump = sharedStorage<{ userId: number; tv: number }>("expected-bump");
+
+/** Runs `fn` so that the JWTs it issues for `claims.userId` carry `am`/`mfa`. */
+export function withIssueClaims<T>(claims: IssueClaims, fn: () => T): T {
+  return issueClaims.run(claims, fn);
+}
+
+/**
+ * A JWT for `userId` at the token version a write of this request committed
+ * (`version`, never a later read), with `claims` (utils/mfa.ts: activation
+ * and disable).
+ */
+export async function issueJwtWithClaims(
+  strapi: TokenVersionStrapi,
+  userId: number,
+  version: number,
+  claims: Omit<IssueClaims, "userId">,
+): Promise<string> {
+  const jwt = strapi.plugin("users-permissions").service("jwt") as JwtService;
+  const issued = await knownVersion.run({ userId, version }, () =>
+    issueClaims.run({ ...claims, userId }, () => jwt.issue({ id: userId })),
+  );
+  if (typeof issued !== "string") throw new Error("[auth] the jwt service issued no token");
+  return issued;
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -484,6 +575,11 @@ export function patchJwtService(service: JwtService, strapi: TokenVersionStrapi)
     // Read now, in the caller's context: the request's known version (a
     // sign-in's, or the bump of the password action this issue() answers).
     const snapshot = knownVersion.getStore() ?? passwordChange.getStore()?.committed ?? undefined;
+    const claims = issueClaims.getStore();
+    const assurance =
+      claims && userId !== null && (claims.userId === undefined || claims.userId === userId)
+        ? { [AUTH_METHOD_CLAIM]: claims.am, ...(claims.mfa === 1 ? { [MFA_CLAIM]: 1 } : {}) }
+        : {};
     const pending = (async () => {
       const version =
         userId === null
@@ -492,7 +588,9 @@ export function patchJwtService(service: JwtService, strapi: TokenVersionStrapi)
             ? snapshot.version
             : await currentTokenVersion(strapi, userId);
       const stamped =
-        version === null || !isRecord(plain) ? plain : { ...plain, [TOKEN_VERSION_CLAIM]: version };
+        version === null || !isRecord(plain)
+          ? plain
+          : { ...plain, ...assurance, [TOKEN_VERSION_CLAIM]: version };
       return originalIssue.call(this, stamped, options);
     })();
     // Awaited by the caller (the settled ctx.body.jwt, the Entra exchange);
@@ -514,6 +612,18 @@ export function patchJwtService(service: JwtService, strapi: TokenVersionStrapi)
     }
     return payload;
   };
+
+  // v0.27: keep what the users-permissions strategy verified, for its
+  // decorator. Without getToken (an upgraded plugin) the gate sees no
+  // claims and asks every user who needs a second factor to sign in again.
+  const originalGetToken = service.getToken;
+  if (typeof originalGetToken === "function") {
+    service.getToken = async function getToken(this: unknown, ctx: object) {
+      const payload = await originalGetToken.call(this, ctx);
+      if (ctx && typeof ctx === "object" && payload) verifiedPayloads.set(ctx, payload);
+      return payload;
+    };
+  }
 
   return service;
 }
@@ -577,6 +687,10 @@ async function saveAfterBump<T>(
       running.add(id);
       try {
         const version = await bumpTokenVersion(strapi, id);
+        const expected = expectedBump.getStore();
+        if (expected?.userId === id && version !== expected.tv + 1) {
+          throw new errors.UnauthorizedError("The session is out of date; sign in again");
+        }
         const result = await passwordSave.run({ userId: id }, save);
         return { version, result };
       } finally {
@@ -631,6 +745,30 @@ export function patchUserService(service: UserService, strapi: TokenVersionStrap
 /** The attribute the guard keeps out of every write: only the bump sets it. */
 export const TOKEN_VERSION_ATTRIBUTE = "tokenVersion";
 
+/**
+ * The second factor's state (v0.27): written only by utils/mfa.ts through
+ * the query engine, never by a Document Service write (the Content Manager,
+ * PUT /api/users/:id, user.add/edit, seeds).
+ */
+export const MFA_ATTRIBUTES = ["totpSecret", "totpEnabledAt", "totpLastStep", "totpRecoveryCodes"];
+
+/** What the guard drops from every user write. */
+const GUARDED_ATTRIBUTES = [TOKEN_VERSION_ATTRIBUTE, ...MFA_ATTRIBUTES];
+
+/**
+ * The password baseline (v0.27, utils/password-rule.ts) for every Document
+ * Service write that sets a password: the Content Manager's create and
+ * update, users-permissions' add() and edit(), seeds. Throws a 400 whose
+ * message is `password_<problem>`.
+ */
+export function assertPasswordAllowed(password: unknown): void {
+  if (typeof password !== "string") return;
+  const problem = passwordProblem(password);
+  if (problem) {
+    throw new errors.ValidationError(`password_${problem}`, { code: `password_${problem}` });
+  }
+}
+
 /** Document Service actions that write a user's attributes from `params.data`. */
 const USER_WRITE_ACTIONS: readonly string[] = ["create", "update", "clone"];
 
@@ -672,16 +810,19 @@ export function createUserWriteGuard(strapi: TokenVersionStrapi): DocumentMiddle
     }
     const params = isRecord(context.params) ? context.params : {};
     let data = isRecord(params.data) ? params.data : undefined;
-    if (data && Object.prototype.hasOwnProperty.call(data, TOKEN_VERSION_ATTRIBUTE)) {
-      data = Object.fromEntries(
-        Object.entries(data).filter(([key]) => key !== TOKEN_VERSION_ATTRIBUTE),
-      );
+    const guarded = data
+      ? GUARDED_ATTRIBUTES.filter((key) => Object.prototype.hasOwnProperty.call(data, key))
+      : [];
+    if (data && guarded.length > 0) {
+      data = Object.fromEntries(Object.entries(data).filter(([key]) => !guarded.includes(key)));
       context.params = { ...params, data };
       strapi.log?.warn?.(
-        `[auth] tokenVersion dropped from a Document Service ${context.action} of a user: ` +
-          "only a password change raises it (FX40)",
+        `[auth] ${guarded.join(", ")} dropped from a Document Service ${context.action} of a user: ` +
+          "only the password change and the second-factor flows write them (FX40, v0.27)",
       );
     }
+    // Before the update-only return below: creates must meet the baseline too.
+    assertPasswordAllowed(data?.password);
     if (context.action !== "update" || !setsPassword(data) || refreshMode(strapi)) return next();
     const documentId = params.documentId;
     const row =
@@ -722,6 +863,174 @@ export function registerUserWriteGuard(strapi: UserWriteGuardHost): void {
   documents.use(createUserWriteGuard(strapi));
 }
 
+/**
+ * The routes a restricted session (a required second factor not enrolled
+ * yet) may call: its own profile (which says so) and the enrollment.
+ * Matched on the resolved route: `<METHOD> <handler>`.
+ */
+export const RESTRICTED_ROUTES: ReadonlySet<string> = new Set([
+  "GET api::profile.profile.me",
+  "POST api::profile.profile.mfaSetup",
+  "POST api::profile.profile.mfaActivate",
+]);
+
+/**
+ * The per-request decision (plan-v027-rev2.md, gate table) for an
+ * authenticated user: `pass`, `reauth` (401, sign in again) or
+ * `restricted` (only RESTRICTED_ROUTES).
+ */
+export function mfaDecision(
+  payload: unknown,
+  user: unknown,
+  roles: readonly string[],
+): "pass" | "reauth" | "restricted" {
+  const claims = isRecord(payload) ? payload : {};
+  const am = claims[AUTH_METHOD_CLAIM];
+  const mfa = claims[MFA_CLAIM];
+  // Only what issue() writes: an unknown method or a non-canonical mfa is refused.
+  if ((am !== undefined && am !== "pw" && am !== "idp") || (mfa !== undefined && mfa !== 1)) {
+    return "reauth";
+  }
+  if (am === "idp") return "pass";
+  const required = requiredMfa(user, roles);
+  if (!required) return "pass";
+  if (am === "pw") {
+    if (mfa === 1) return "pass";
+    return isEnrolled(user) ? "reauth" : "restricted";
+  }
+  // No claim: a JWT from before v0.27 (or issued outside any context).
+  return "reauth";
+}
+
+/** The users-permissions auth strategy as Strapi's auth service holds it. */
+export interface AuthStrategy {
+  name?: string;
+  authenticate(ctx: StrategyContext): Promise<unknown>;
+  verify?(...args: unknown[]): unknown;
+}
+
+export interface StrategyContext {
+  state: Record<string, unknown> & { route?: { method?: unknown; handler?: unknown } };
+}
+
+/**
+ * The strategy with the per-request second-factor gate around its
+ * successful authentication (after the plugin's user and blocked checks):
+ * the verified claims of the request's JWT (verifiedPayload) and the user
+ * row the plugin loaded decide (mfaDecision). The outcome is on
+ * `ctx.state.assurance` for the routes that need it (/api/me,
+ * change-password). A restricted session gets a 403 named MfaSetupRequired
+ * with details.code `mfa_setup_required` (a PolicyError, thrown outside the
+ * plugin's own catch-all so it is not turned into a generic authentication
+ * failure, and passed through by Strapi's authorize step).
+ */
+export function decorateStrategy(
+  strategy: AuthStrategy,
+  roles: () => readonly string[] = mfaRequiredRoles,
+): AuthStrategy {
+  const authenticate = strategy.authenticate.bind(strategy);
+  return {
+    ...strategy,
+    async authenticate(ctx: StrategyContext) {
+      const result = await authenticate(ctx);
+      if (!isRecord(result) || result.authenticated !== true || !isRecord(result.credentials)) {
+        return result;
+      }
+      const verified = verifiedPayloads.get(ctx);
+      const decision = mfaDecision(verified, result.credentials, roles());
+      const payload = isRecord(verified) ? verified : {};
+      const am = payload[AUTH_METHOD_CLAIM];
+      const assurance: RequestAssurance = {
+        am: am === "pw" || am === "idp" ? am : null,
+        mfa: payload[MFA_CLAIM] === 1,
+        tv: claimedVersion(payload),
+        restricted: decision === "restricted",
+      };
+      ctx.state.assurance = assurance;
+      if (decision === "pass") return result;
+      if (decision === "reauth") return { error: "Invalid credentials" };
+      const route = ctx.state.route;
+      const key = `${String(route?.method ?? "").toUpperCase()} ${String(route?.handler ?? "")}`;
+      if (RESTRICTED_ROUTES.has(key)) return result;
+      // A PolicyError (a ForbiddenError: 403): Strapi's authorize step turns
+      // any other ForbiddenError into a bare "Forbidden" and drops the code.
+      const refused = new errors.PolicyError("A second factor must be set up first", {
+        code: "mfa_setup_required",
+      });
+      (refused as { name: string }).name = "MfaSetupRequired";
+      throw refused;
+    },
+  };
+}
+
+/** Marks the decorated strategy, so the boot can assert it is in place. */
+const DECORATED = Symbol.for("sinnlos.users-permissions.mfa-gate");
+
+/**
+ * Wraps the plugin's register(): while it runs, the auth service's
+ * register() swaps the users-permissions content-api strategy for the
+ * decorated one. Throws when the plugin registered none (an upgrade moved
+ * it): the cms must not run without the gate.
+ */
+export function wrapPluginRegister(
+  register: unknown,
+): (deps: { strapi: { get(name: string): unknown } }) => Promise<void> {
+  if (typeof register !== "function") {
+    throw new Error(
+      "[users-permissions-extension] the plugin has no register(); the MFA gate cannot be applied (v0.27 tripwire).",
+    );
+  }
+  if ((register as { [WRAPPED]?: boolean })[WRAPPED]) {
+    return register as (deps: { strapi: { get(name: string): unknown } }) => Promise<void>;
+  }
+  const original = register as (deps: unknown) => unknown;
+  const wrapped = async (deps: { strapi: { get(name: string): unknown } }) => {
+    const auth = deps.strapi.get("auth") as { register(type: string, strategy: unknown): unknown };
+    const registerStrategy = auth.register;
+    let decorated = 0;
+    auth.register = function (this: unknown, type: string, strategy: unknown) {
+      if (type === "content-api" && isRecord(strategy) && strategy.name === "users-permissions") {
+        const replacement = decorateStrategy(strategy as unknown as AuthStrategy);
+        (replacement as unknown as Record<symbol, boolean>)[DECORATED] = true;
+        decorated++;
+        return registerStrategy.call(this, type, replacement);
+      }
+      return registerStrategy.call(this, type, strategy);
+    };
+    try {
+      await original(deps);
+    } finally {
+      auth.register = registerStrategy;
+    }
+    recordMfaGate(decorated);
+    if (decorated !== 1) {
+      throw new Error(
+        "[users-permissions-extension] the users-permissions content-api strategy was not registered " +
+          "through strapi.get('auth').register(); refusing to boot without the second-factor gate (v0.27 tripwire).",
+      );
+    }
+  };
+  (wrapped as { [WRAPPED]?: boolean })[WRAPPED] = true;
+  return wrapped;
+}
+
+/** The error answer of a refused second factor (POST /api/auth/local). */
+function secondFactorRefusal(
+  ctx: AuthContext & { status?: number },
+  code: "mfa_required" | "mfa_invalid",
+): void {
+  ctx.status = 401;
+  ctx.body = {
+    data: null,
+    error: {
+      status: 401,
+      name: "UnauthorizedError",
+      message: code === "mfa_required" ? "Second factor required" : "Invalid second factor",
+      details: { code },
+    },
+  };
+}
+
 /** Replaces a pending `ctx.body.jwt` (issue() in legacy mode) by the JWT it resolves to. */
 export async function settleIssuedJwt(ctx: AuthContext): Promise<void> {
   const body = ctx.body;
@@ -757,7 +1066,22 @@ export function patchAuthController(
     controller[name] = async function (this: unknown, ctx: AuthContext, ...rest: unknown[]) {
       if (refreshMode(strapi)) return original.call(this, ctx, ...rest);
       const change: PasswordChange = { committed: null };
-      const result = await passwordChange.run(change, () => original.call(this, ctx, ...rest));
+      // v0.27: the new JWT keeps the assurance of the request's verified JWT
+      // (never more: the row does not raise it).
+      const assurance = ctx.state?.assurance;
+      const caller = actionUserId(ctx);
+      const claims: IssueClaims | undefined =
+        assurance?.am && caller !== null
+          ? { userId: caller, am: assurance.am, ...(assurance.mfa ? { mfa: 1 as const } : {}) }
+          : undefined;
+      const withClaims = <T>(fn: () => T): T => (claims ? issueClaims.run(claims, fn) : fn());
+      // rev3 #1: the bump must raise exactly the version this session was
+      // verified at (saveAfterBump refuses with 401 otherwise).
+      const expectation =
+        assurance && caller !== null ? { userId: caller, tv: assurance.tv } : null;
+      const run = () =>
+        withClaims(() => passwordChange.run(change, () => original.call(this, ctx, ...rest)));
+      const result = await (expectation ? expectedBump.run(expectation, run) : run());
       const body = ctx.body;
       // A refused change threw before; no JWT in the answer means no success.
       if (change.committed || !isRecord(body) || typeof body.jwt !== "string") return result;
@@ -775,7 +1099,13 @@ export function patchAuthController(
         userId,
         version: await bumpTokenVersion(strapi, userId),
       };
-      body.jwt = await knownVersion.run(committed, () => jwtService().issue({ id: userId }));
+      // The assurance travels only when nothing else changed the version meanwhile.
+      const current = !expectation || committed.version === expectation.tv + 1;
+      body.jwt = await knownVersion.run(committed, () =>
+        current
+          ? withClaims(() => jwtService().issue({ id: userId }))
+          : jwtService().issue({ id: userId }),
+      );
       strapi.log?.info?.(
         `[auth] password changed: user=${userId} tokenVersion=${committed.version}`,
       );
@@ -795,21 +1125,68 @@ export function patchAuthController(
   }
 
   const signIn = controller[SIGN_IN_ACTION] as Action;
+  /**
+   * A local sign-in (v0.27): the second factor is checked only after the
+   * plugin accepted the password. `otp` (a TOTP or recovery code) leaves the
+   * body before the plugin sees it. An enrolled user without a valid,
+   * unused code gets 401 `mfa_required`/`mfa_invalid`, and the JWT the
+   * plugin issued never leaves the server; with one, the answer carries a
+   * new JWT with `mfa: 1`. A user who has not enrolled gets the plugin's JWT
+   * with `am: "pw"`; the gate restricts it when a second factor is required.
+   */
   controller[SIGN_IN_ACTION] = async function (
     this: unknown,
     ctx: AuthContext,
     ...rest: unknown[]
   ) {
+    // rev3 #13: only local sign-in; every plugin provider callback is gone.
+    const provider: unknown = ctx.params?.provider || "local";
+    if (provider !== "local") throw new errors.NotFoundError("Not Found");
+    const body = ctx.request?.body;
+    let otp: string | undefined;
+    if (isRecord(body) && Object.prototype.hasOwnProperty.call(body, "otp")) {
+      otp = typeof body.otp === "string" && body.otp.length <= 64 ? body.otp : "";
+      delete body.otp;
+    }
     const snapshot = refreshMode(strapi) ? null : await signInTokenVersion(strapi, ctx);
     if (!snapshot) return signIn.call(this, ctx, ...rest);
-    return knownVersion.run(snapshot, () => signIn.call(this, ctx, ...rest));
+    const claims: IssueClaims = { userId: snapshot.userId, am: "pw" };
+    const result = await knownVersion.run(snapshot, () =>
+      issueClaims.run(claims, () => signIn.call(this, ctx, ...rest)),
+    );
+    const answer = ctx.body;
+    if (!isRecord(answer) || typeof answer.jwt !== "string") return result;
+    const row = await strapi.db
+      .query(USER_UID)
+      .findOne({ where: { id: snapshot.userId }, select: ["id", "totpEnabledAt"] });
+    if (!isEnrolled(row)) return result;
+    if (!otp) {
+      secondFactorRefusal(ctx, "mfa_required");
+      return result;
+    }
+    const consumed = await consumeSecondFactor(
+      strapi as unknown as MfaHost,
+      snapshot.userId,
+      snapshot.version,
+      otp,
+    );
+    if (!consumed.ok) {
+      secondFactorRefusal(ctx, "mfa_invalid");
+      return result;
+    }
+    answer.jwt = await knownVersion.run(snapshot, () =>
+      issueClaims.run({ ...claims, mfa: 1 }, () => jwtService().issue({ id: snapshot.userId })),
+    );
+    return result;
   };
 
   passwordAction("changePassword", (ctx) => userIdOf(ctx.state?.user?.id));
-  passwordAction("resetPassword", (ctx) => {
-    const body = ctx.body;
-    return userIdOf(isRecord(body) && isRecord(body.user) ? body.user.id : undefined);
-  });
+
+  for (const name of DISABLED_AUTH_ACTIONS) {
+    controller[name] = async function () {
+      throw new errors.NotFoundError("Not Found");
+    };
+  }
 
   return controller;
 }
@@ -858,6 +1235,7 @@ export function createUsersPermissionsExtension() {
         return patchAuthController(controller, strapi);
       },
     );
+    plugin.register = wrapPluginRegister(plugin.register);
     return plugin;
   };
 }

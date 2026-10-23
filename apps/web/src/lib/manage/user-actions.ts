@@ -1,8 +1,20 @@
 "use server";
 
 import { refresh } from "next/cache";
+import {
+  isDocumentId,
+  ROLE_PRIVILEGE_ORDER,
+  type RoleType,
+  type UserAdminInvite,
+} from "@sinnlos/domain";
 import { actionFailure, runCmsAction, type ActionResult } from "@/lib/action-result";
-import { sendRoleToEntra, sendUserAdminUpdate } from "@/lib/api/manage/users";
+import {
+  sendRoleToEntra,
+  sendUserAdminUpdate,
+  sendUserInvite,
+  sendUserLink,
+  sendUserMfaReset,
+} from "@/lib/api/manage/users";
 import { capabilitiesFor } from "@/lib/roles";
 import { getViewer } from "@/lib/viewer";
 import { buildUserPayload, coerceUserValues } from "./user-values";
@@ -46,6 +58,107 @@ export async function handRoleToEntra(id: unknown): Promise<UserActionResult> {
   if (refused) return refused;
   return runCmsAction(() => sendRoleToEntra(id as number), {
     label: "[manage-users] role-to-entra",
+    after: () => refresh(),
+    data: () => null,
+  });
+}
+
+/**
+ * How one invitation ended (v0.27): sent, or the account exists but its
+ * mail failed (send the link again from its page), or why the cms refused
+ * it. The cms checks the caller and every field again.
+ */
+export type InviteOutcome =
+  | "sent"
+  | "mailFailed"
+  | "taken"
+  | "invalid"
+  | "localSignInOff"
+  | "mailNotConfigured"
+  | "emailDuplicates"
+  | "failed";
+
+const EMAIL = /^[^\s@]{1,64}@[^\s@]{1,190}$/;
+
+/** The invite body from untrusted input, or null. */
+function coerceInvite(raw: unknown): UserAdminInvite | null {
+  if (typeof raw !== "object" || raw === null) return null;
+  const { email, displayName, role, department } = raw as Record<string, unknown>;
+  if (typeof email !== "string" || !EMAIL.test(email.trim())) return null;
+  if (displayName !== undefined && (typeof displayName !== "string" || displayName.length > 255)) {
+    return null;
+  }
+  if (typeof role !== "string" || !ROLE_PRIVILEGE_ORDER.includes(role as RoleType)) return null;
+  if (department !== null && !isDocumentId(department)) {
+    return null;
+  }
+  return {
+    email: email.trim(),
+    ...(displayName?.trim() ? { displayName: displayName.trim() } : {}),
+    role: role as RoleType,
+    department,
+  };
+}
+
+/** admin_role only (v0.27): one invitation; the bulk form calls it per line. */
+export async function inviteUser(raw: unknown): Promise<InviteOutcome> {
+  const refused = await adminGate(1);
+  if (refused) return "failed";
+  const data = coerceInvite(raw);
+  if (!data) return "invalid";
+  const result = await runCmsAction<"emailDuplicates", { data?: { mail?: unknown } }, unknown>(
+    () => sendUserInvite(data),
+    {
+      label: "[manage-users] invite",
+      mapError: (cms) =>
+        cms.details?.code === "email_duplicates_exist" ? "emailDuplicates" : undefined,
+      data: (answer) => answer.data?.mail,
+    },
+  );
+  if (result.ok) return result.data === "sent" ? "sent" : "mailFailed";
+  if (result.code === "emailDuplicates") return "emailDuplicates";
+  if (result.code === "invalid") {
+    if (result.fields?.email === "taken") return "taken";
+    const form = result.fields?._form;
+    if (form === "localSignInOff" || form === "mailNotConfigured") return form;
+    return "invalid";
+  }
+  return "failed";
+}
+
+export type LinkResult = ActionResult<
+  "notLocal" | "blocked" | "localSignInOff" | "mailNotConfigured" | "mailFailed",
+  null
+>;
+
+/** admin_role only (v0.27): a new invitation or reset link by mail. */
+export async function sendLink(id: unknown): Promise<LinkResult> {
+  const refused = await adminGate(id);
+  if (refused) return refused;
+  const result = await runCmsAction<never, { data?: { mail?: unknown } }, unknown>(
+    () => sendUserLink(id as number),
+    { label: "[manage-users] send-link", data: (answer) => answer.data?.mail },
+  );
+  if (result.ok)
+    return result.data === "sent" ? { ok: true, data: null } : actionFailure("mailFailed");
+  const form = result.code === "invalid" ? result.fields?._form : undefined;
+  if (
+    form === "notLocal" ||
+    form === "blocked" ||
+    form === "localSignInOff" ||
+    form === "mailNotConfigured"
+  ) {
+    return actionFailure(form);
+  }
+  return result;
+}
+
+/** admin_role only (v0.27): clears the user's second factor (their sessions end). */
+export async function resetUserMfa(id: unknown): Promise<UserActionResult> {
+  const refused = await adminGate(id);
+  if (refused) return refused;
+  return runCmsAction(() => sendUserMfaReset(id as number), {
+    label: "[manage-users] reset-mfa",
     after: () => refresh(),
     data: () => null,
   });

@@ -9,6 +9,7 @@ import {
 import { ensureDocumentIndexes } from "./bootstrap/document-indexes";
 import { registerDocumentMiddlewares } from "./bootstrap/document-middlewares";
 import {
+  ensureEmailIndex,
   ensureEntraIdentityIndex,
   ensureOidcIdentityIndex,
 } from "./bootstrap/entra-identity-index";
@@ -24,6 +25,7 @@ import {
 import { reportDigestConfig } from "./digest/send-digests";
 import { parseEntraConfig } from "./entra/config";
 import { parseOidcConfig } from "./oidc/config";
+import { assertMfaGate, parseMfaRequiredRoles, sealService } from "./utils/mfa-core";
 import { seedAdminUser } from "./utils/admin-seed";
 import { backfillDepartmentAudience } from "./utils/department-audience-backfill";
 import { ensureDraftTwins } from "./utils/draft-twins";
@@ -106,6 +108,18 @@ export default {
     // v0.21: with MEILISEARCH_ENABLED=1 a missing URL or write key refuses
     // the boot (search/meili-index.ts); off, nothing is read.
     parseMeiliConfig(process.env);
+    // v0.27: an unknown role in MFA_REQUIRED_ROLES refuses the boot, and so
+    // does any users-permissions JWT mode but legacy-support (refresh mode
+    // would bypass the token version and the second-factor claims).
+    parseMfaRequiredRoles(process.env.MFA_REQUIRED_ROLES);
+    const jwtMode =
+      strapi.config?.get?.("plugin::users-permissions.jwtManagement", "legacy-support") ??
+      "legacy-support";
+    if (jwtMode !== "legacy-support") {
+      throw new Error(
+        `[auth] users-permissions jwtManagement=${String(jwtMode)} is not supported: only legacy-support keeps the token version and the second factor (v0.27)`,
+      );
+    }
     registerUserContactSanitizer(strapi);
     registerRestrictedRelationGuard(strapi);
     // Every Document Service middleware, in its slot order
@@ -151,6 +165,12 @@ export default {
     // Throws when the admin permission service is gone.
     await removeHiddenTypeWritePermissions(strapi);
     await syncAdvancedSettings(strapi);
+    // v0.27: the second factor seals its secrets with this service; refuse
+    // to start without it rather than at the first enrollment.
+    sealService(strapi);
+    // v0.27: the per-request second-factor gate is in place (exactly one
+    // decorated strategy in this boot), or no start; logs `[mfa] gate installed`.
+    assertMfaGate(strapi.log);
     // D-ENTRA-01 spec L, on every boot and whether Entra is on or off: the
     // (tenant, object id) unique index (a failure is logged, and fatal only
     // with Entra on), grant.email = local sign-in on, grant.microsoft off,
@@ -164,6 +184,8 @@ export default {
     // one `[oidc] disabled|enabled …` line and, with OIDC on, a discovery check.
     const oidc = parseOidcConfig(process.env);
     await ensureOidcIdentityIndex(strapi, { oidcEnabled: oidc.enabled });
+    // v0.27: one account per e-mail address, case-insensitive (invitations rely on it).
+    await ensureEmailIndex(strapi);
     await reportOidcStatus(strapi.log, oidc);
     strapi.log.info(searchStatusLine(parseMeiliConfig(process.env)));
     // v0.26 release identity: info.version is apps/cms/package.json (Strapi

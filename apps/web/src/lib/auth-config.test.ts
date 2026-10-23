@@ -227,7 +227,6 @@ describe("module flags", () => {
       "ENTRA_ENABLED",
       "OIDC_ENABLED",
       "AUTH_LOCAL_ENABLED",
-      "LOCAL_REGISTRATION",
       "NEXT_PHASE",
       ...Object.keys(VALID),
       ...Object.keys(OIDC_VALID),
@@ -247,14 +246,8 @@ describe("module flags", () => {
   it("turns local sign-in off next to Entra unless AUTH_LOCAL_ENABLED=1", async () => {
     const entraOnly = await flags(VALID);
     expect([entraOnly.MICROSOFT_ENABLED, entraOnly.LOCAL_ENABLED]).toEqual([true, false]);
-    const both = await flags({ ...VALID, AUTH_LOCAL_ENABLED: "1", LOCAL_REGISTRATION: "1" });
-    expect([both.MICROSOFT_ENABLED, both.LOCAL_ENABLED, both.REGISTRATION_ENABLED]).toEqual([
-      true,
-      true,
-      true,
-    ]);
-    const noRegistration = await flags({ ...VALID, LOCAL_REGISTRATION: "1" });
-    expect(noRegistration.REGISTRATION_ENABLED).toBe(false);
+    const both = await flags({ ...VALID, AUTH_LOCAL_ENABLED: "1" });
+    expect([both.MICROSOFT_ENABLED, both.LOCAL_ENABLED]).toEqual([true, true]);
   });
 
   it("OIDC: on with a valid config, local sign-in off unless AUTH_LOCAL_ENABLED=1; an invalid one throws outside next build", async () => {

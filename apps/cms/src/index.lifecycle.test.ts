@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import lifecycle from "./index";
+import { recordMfaGate } from "./utils/mfa-core";
 
 /**
  * The call order of register() and bootstrap() in src/index.ts (roadmap
@@ -68,6 +69,7 @@ vi.mock("./bootstrap/auth-providers", () => ({
 vi.mock("./bootstrap/entra-identity-index", () => ({
   ensureEntraIdentityIndex: step("ensureEntraIdentityIndex"),
   ensureOidcIdentityIndex: step("ensureOidcIdentityIndex"),
+  ensureEmailIndex: step("ensureEmailIndex"),
 }));
 vi.mock("./utils/poll-audience-backfill", () => ({
   backfillPollAudience: step("backfillPollAudience"),
@@ -86,12 +88,16 @@ vi.mock("./utils/draft-twins", () => ({ ensureDraftTwins: step("ensureDraftTwins
 
 const strapi = {
   log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
-  config: { get: vi.fn(() => "0.26.0") },
+  config: { get: vi.fn((key: string) => (key === "info.version" ? "0.26.0" : undefined)) },
+  // v0.27: bootstrap() checks the admin encryption service once.
+  service: vi.fn(() => ({ encrypt: vi.fn(), decrypt: vi.fn() })),
 };
 
 beforeEach(() => {
   calls.length = 0;
   failing.clear();
+  // What the users-permissions register() wrapper records in a real boot.
+  recordMfaGate(1);
 });
 
 describe("src/index.ts lifecycle order (B01)", () => {
@@ -125,6 +131,7 @@ describe("src/index.ts lifecycle order (B01)", () => {
       "syncAuthProviders",
       "reportEntraStatus",
       "ensureOidcIdentityIndex",
+      "ensureEmailIndex",
       "reportOidcStatus",
       "backfillPollAudience",
       "backfillDepartmentAudience",

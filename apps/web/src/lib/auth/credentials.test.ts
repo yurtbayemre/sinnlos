@@ -3,6 +3,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   isRateLimitedSignIn,
   LoginBlockedSignIn,
+  MfaInvalidSignIn,
+  MfaRequiredSignIn,
   StrapiRateLimitedSignIn,
 } from "@/lib/auth-errors";
 import {
@@ -21,9 +23,8 @@ import {
 /**
  * The local sign-in core (WD09) with injected fetch, limiter and clock:
  *   - the request (identifier, password, the client IP forwarded, no-store,
- *     a timeout) and the user it resolves (email from the /auth/local
- *     payload, name and id from /users/me, the payload's user when that
- *     read fails);
+ *     a timeout) and the user it resolves (id, name and email from
+ *     /api/me, the payload's user when that read fails);
  *   - the counting rule: a 400 counts, 5xx, 429 and network errors do not;
  *     Strapi's 429 throws StrapiRateLimitedSignIn;
  *   - the block transition is logged once; a blocked attempt never reaches
@@ -43,7 +44,10 @@ function harness() {
       status: 200,
       body: { jwt: "strapi.jwt.value", user: { id: 7, email: EMAIL, username: "ada" } },
     },
-    me: { status: 200, body: { id: 7, username: "ada", displayName: "Ada" } },
+    me: {
+      status: 200,
+      body: { data: { id: 7, username: "ada", displayName: "Ada", email: EMAIL } },
+    },
   };
   const calls: { url: string; init: RequestInit }[] = [];
   const respond = (answer: Answer) => {
@@ -57,7 +61,7 @@ function harness() {
     const url = String(input);
     calls.push({ url, init: init ?? {} });
     if (url === `${STRAPI}/api/auth/local`) return respond(answers.local);
-    if (url === `${STRAPI}/api/users/me`) return respond(answers.me);
+    if (url === `${STRAPI}/api/me`) return respond(answers.me);
     throw new Error(`unexpected fetch ${url}`);
   });
   let clock = T0;
@@ -70,8 +74,12 @@ function harness() {
     now: () => clock,
     warn,
   };
-  const signIn = (identifier: unknown = EMAIL, password: unknown = "pw", clientIp = IP) =>
-    authorizeCredentials({ identifier, password, clientIp }, deps);
+  const signIn = (
+    identifier: unknown = EMAIL,
+    password: unknown = "pw",
+    clientIp = IP,
+    otp?: unknown,
+  ) => authorizeCredentials({ identifier, password, clientIp, otp }, deps);
   return {
     answers,
     calls,
@@ -104,8 +112,7 @@ describe("authorizeCredentials: the request and the user", () => {
     expect(LOCAL_SIGN_IN_TIMEOUT_MS).toBe(5_000);
   });
 
-  it("resolves the user: name and id from /users/me, email from the /auth/local payload", async () => {
-    // /users/me runs through the content-api sanitizer and lacks the email.
+  it("resolves the user: id, name and email from /api/me", async () => {
     await expect(h.signIn()).resolves.toEqual({
       id: "7",
       name: "Ada",
@@ -114,14 +121,23 @@ describe("authorizeCredentials: the request and the user", () => {
       strapiUserId: 7,
     });
     const me = h.calls[1]!;
-    expect(me.url).toBe(`${STRAPI}/api/users/me`);
+    expect(me.url).toBe(`${STRAPI}/api/me`);
     expect(new Headers(me.init.headers).get("authorization")).toBe("Bearer strapi.jwt.value");
+  });
+
+  it("keeps the email of a restricted session (v0.27): the payload has none, /api/me has it", async () => {
+    // The real /auth/local payload is sanitized without a caller: no email.
+    h.answers.local = {
+      status: 200,
+      body: { jwt: "strapi.jwt.value", user: { id: 7, username: "ada" } },
+    };
+    await expect(h.signIn()).resolves.toMatchObject({ name: "Ada", email: EMAIL });
   });
 
   it.each([
     ["answers an error", { status: 500 }],
     ["is unreachable", "network-error"],
-  ] as const)("falls back to the payload's user when /users/me %s", async (_label, me) => {
+  ] as const)("falls back to the payload's user when /api/me %s", async (_label, me) => {
     h.answers.me = me;
     await expect(h.signIn()).resolves.toMatchObject({ id: "7", name: "ada", email: EMAIL });
   });
@@ -142,6 +158,52 @@ describe("authorizeCredentials: the request and the user", () => {
     ["no JSON", undefined],
   ])("answers null for a 200 with %s", async (_label, body) => {
     h.answers.local = { status: 200, body };
+    await expect(h.signIn()).resolves.toBeNull();
+  });
+});
+
+describe("authorizeCredentials: the second factor (v0.27)", () => {
+  /** The cms's 401 for a verified password whose account has a second factor. */
+  const mfaAnswer = (code: string): Answer => ({
+    status: 401,
+    body: { data: null, error: { status: 401, name: "UnauthorizedError", details: { code } } },
+  });
+
+  it("sends the code along only when there is one", async () => {
+    await h.signIn(EMAIL, "pw", IP, " 123456 ");
+    expect(JSON.parse(String(h.calls[0]!.init.body))).toEqual({
+      identifier: EMAIL,
+      password: "pw",
+      otp: "123456",
+    });
+    h.calls.length = 0;
+    await h.signIn(EMAIL, "pw", IP, "");
+    expect(JSON.parse(String(h.calls[0]!.init.body))).toEqual({
+      identifier: EMAIL,
+      password: "pw",
+    });
+  });
+
+  it("asks for the code (mfa_required) without counting a failure", async () => {
+    h.answers.local = mfaAnswer("mfa_required");
+    for (let i = 0; i < IDENTIFIER_MAX_FAILURES + 2; i++) {
+      await expect(h.signIn()).rejects.toBeInstanceOf(MfaRequiredSignIn);
+    }
+    expect(h.limiter.isBlocked(IP, EMAIL, T0)).toBe(false);
+  });
+
+  it("counts a wrong code (mfa_invalid) like a wrong password", async () => {
+    h.answers.local = mfaAnswer("mfa_invalid");
+    for (let i = 0; i < IDENTIFIER_MAX_FAILURES; i++) {
+      await expect(h.signIn(EMAIL, "pw", `10.0.9.${i}`, "000000")).rejects.toBeInstanceOf(
+        MfaInvalidSignIn,
+      );
+    }
+    expect(h.limiter.isBlocked("192.0.2.9", EMAIL, T0)).toBe(true);
+  });
+
+  it("answers any other 401 like wrong credentials", async () => {
+    h.answers.local = { status: 401, body: { error: { name: "UnauthorizedError" } } };
     await expect(h.signIn()).resolves.toBeNull();
   });
 });

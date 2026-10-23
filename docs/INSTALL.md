@@ -20,7 +20,7 @@ Every command below runs on the host as the **deploy user**, the user that owns 
 ## 2. The code
 
 ```sh
-git clone --branch v0.26.0 https://github.com/yurtbayemre/sinnlos.git
+git clone --branch v0.27.0 https://github.com/yurtbayemre/sinnlos.git
 cd sinnlos
 ```
 
@@ -42,7 +42,8 @@ Then edit `infra/.env`. The comments in the file explain every key.
 - **Domain:** `DOMAIN` (your host name), `WEB_PUBLIC_URL` and `CMS_PUBLIC_URL` (both `https://<DOMAIN>`).
 - **`ADMIN_ALLOW_CIDRS`:** the networks allowed to reach the Strapi admin panel, for example your office or VPN range (`203.0.113.0/24`). Set it **before** you open `/admin`. Empty keeps the panel closed from outside; you then reach it through the SSH tunnel in section 8.
 - **First Strapi super-admin:** `STRAPI_ADMIN_EMAIL` and `STRAPI_ADMIN_PASSWORD` create it on the first boot. Remove both values afterwards.
-- **E-mail:** `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, and `DIGEST_FROM` as a sender address your mail server accepts.
+- **E-mail:** `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, and `DIGEST_FROM` as a sender address your mail server accepts. Invitations and password-reset links need it. The server needs a certificate the cms trusts (a publicly signed one); with a self-signed STARTTLS certificate every mail fails (`ESOCKET` in the cms log).
+- **Second factor:** `MFA_REQUIRED_ROLES` stays empty for the default: admins and editors sign in with an authenticator app as well (section 6). `ENCRYPTION_KEY` encrypts those app secrets, so it belongs in your `.env` backup.
 - **Language and time:** `DEFAULT_LOCALE` (`de` or `en`) and `APP_TIME_ZONE`.
 - **Your links:** `PRIVACY_URL`, `IMPRINT_URL` and, optionally, `WHISTLEBLOWING_URL`. If you change the code, also set `SOURCE_URL` to the source of the version you run (AGPL-3.0, §13).
 
@@ -89,19 +90,27 @@ The Strapi super-admin from section 3 can use the admin panel, but it is not an 
 
 1. Open `https://<DOMAIN>/admin`, from an allowed network or through the tunnel (section 8), and sign in as the super-admin.
 2. Go to **Content Manager → User** (users-permissions) → **Create new entry**:
-   - fill in username, e-mail and a password;
+   - fill in username, e-mail and a password of at least 12 characters (common passwords are refused);
    - set **confirmed** on and **blocked** off;
    - set **role** to **Admin** (`admin_role`).
 
    Save.
 
-3. Sign in to `https://<DOMAIN>` with that e-mail address. Departments, teams and users are managed at **/manage**.
+3. Sign in to `https://<DOMAIN>` with that e-mail address. As an admin you set up the second factor right away: scan the QR code with an authenticator app (Aegis, 2FAS, Google or Microsoft Authenticator), enter the current password and a code, and keep the ten recovery codes somewhere safe. Departments, teams and users are managed at **/manage**.
 
-Do not grant the content-API roles the generic user permissions. Further accounts come from the panel, from self-registration (`LOCAL_REGISTRATION=1`), or from your identity provider (Microsoft Entra ID or OIDC, see [DEPLOYMENT.md](DEPLOYMENT.md)).
+Everyone else gets an invitation: **/manage/users → Invite people** (German: _Personen einladen_), for one person or several at once. The e-mail carries a link to set a password, valid for 7 days. Accounts can also come from your identity provider (Microsoft Entra ID or OIDC, see [DEPLOYMENT.md](DEPLOYMENT.md)). Do not grant the content-API roles the generic user permissions.
+
+### Passwords and the second factor
+
+- **Passwords** need at least 12 characters and must not be a common one. A forgotten password: **/forgot-password** on the sign-in page mails a reset link, valid for 1 hour; an admin can also send one with **Send a password reset link** (_Link zum Zurücksetzen senden_; for an invitation without a password: **Send the invitation again**) on the user's page at /manage/users.
+- **Second factor:** admins and editors (`MFA_REQUIRED_ROLES`) set it up at their first sign-in; everyone else can turn it on at **/profile**. Each sign-in then asks for a code from the app, or for one of the recovery codes (each works once).
+- **A lost phone:** an admin opens the user at /manage/users and chooses **Reset two-factor sign-in** (_Zwei-Faktor-Anmeldung zurücksetzen_); the user sets it up again at the next sign-in.
+- **The only admin is locked out** (phone and recovery codes gone): on the host, as the deploy user, run `infra/mfa-reset.sh <email>`. It clears the second factor of exactly that account and signs it out everywhere.
+- **`ENCRYPTION_KEY`:** the app secrets are encrypted with it. With a different key no code works (recovery codes still do); after a deliberate change, run `infra/mfa-reset.sh` for every account that had a second factor.
 
 ## 7. E-mail check
 
-In the admin panel, go to **Settings → Email → Send test email**. The daily or weekly digests and the reminders use the same SMTP settings.
+In the admin panel, go to **Settings → Email → Send test email**. The daily or weekly digests, the reminders, the invitations and the password links use the same SMTP settings.
 
 ## 8. Strapi admin panel through an SSH tunnel
 
@@ -135,9 +144,9 @@ Nothing changes in `infra/.env`, and the panel stays closed from outside the who
 3. Run `infra/deploy.sh --record-without-live-smoke`. It runs the preflight, the backup, the build, the start and the smoke check.
 4. If the deploy fails after the start, `deploy.sh` prints the rollback commands. They switch back to the previous images. Restore the database only when the release notes say a rollback needs it ([DEPLOYMENT.md](DEPLOYMENT.md), "Restoring a database dump").
 
-Optional live-smoke, the end-to-end check of live updates. It signs in as two accounts of yours, so create two local accounts for it (section 6), and publish at least one announcement they can see.
+Optional live-smoke, the end-to-end check of live updates. It signs in as two accounts of yours, so invite two local accounts for it (section 6), and publish at least one announcement they can see. **Both must be outside `MFA_REQUIRED_ROLES`** (not admins or editors): the script cannot type a second-factor code.
 
-- **`SMOKE_EMAIL`** holds the live stream. Best the author of a published announcement (an editor): the check then covers the notification as well; otherwise it says so in a warning.
+- **`SMOKE_EMAIL`** holds the live stream. Best the author of a published announcement (a department head, for example): the check then covers the notification as well; otherwise it says so in a warning.
 - **`SMOKE_AUTHOR_EMAIL`** posts one `[live-smoke]` comment on that announcement, and the script deletes it again. A member is enough.
 
 In `infra/deploy.env`:

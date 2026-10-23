@@ -25,16 +25,33 @@
  * although the sign-in action's read-only pre-check passed: parallel
  * attempts in flight hold places too and may take the last ones in between.
  *
- * The email of the session comes from the /api/auth/local payload, never
- * from /api/users/me: the latter runs through the content-api sanitizer
- * (issue #10), which strips email for non-privileged roles. Display name
- * and id come from /api/users/me; when that read fails, the payload's user
- * stands in (the password was right, the read is only for the display
- * name). Role and department are NOT taken here (D-SESSION-01): getViewer()
- * reads them per request.
+ * v0.27 second factor: `otp` (a TOTP or recovery code) goes along with the
+ * password. The cms answers a verified password of an enrolled account
+ * without a code with 401 details.code mfa_required (neutral: the form asks
+ * for the code) and a wrong one with mfa_invalid (a counted failure);
+ * authorize() throws MfaRequiredSignIn / MfaInvalidSignIn for them. A
+ * restricted session (role needs a second factor, none enrolled yet) is a
+ * normal success here; the app layout sends that session to /mfa/setup.
+ *
+ * Id, display name and email come from GET /api/me, the caller's own
+ * record: it is open to a restricted session too, where /api/users/me
+ * answers 403 MfaSetupRequired, and the /api/auth/local payload has no
+ * email (Strapi sanitizes it without a caller, so the contact sanitizer of
+ * issue #10 strips it). When that read fails, the payload's user stands in
+ * (the password was right, the read is only for the session's labels).
+ * Role and department are NOT taken here (D-SESSION-01): getViewer() reads
+ * them per request.
  */
 import type { User } from "next-auth";
-import { LoginBlockedSignIn, StrapiRateLimitedSignIn } from "@/lib/auth-errors";
+import {
+  LoginBlockedSignIn,
+  MFA_INVALID_SIGN_IN_CODE,
+  MFA_REQUIRED_SIGN_IN_CODE,
+  MfaInvalidSignIn,
+  MfaRequiredSignIn,
+  StrapiRateLimitedSignIn,
+} from "@/lib/auth-errors";
+import { parseStrapiError } from "@/lib/strapi-error";
 import {
   maskIdentifier,
   type LoginAttemptOutcome,
@@ -60,6 +77,8 @@ export interface CredentialsInput {
   /** The form fields as Auth.js hands them over (untrusted). */
   identifier: unknown;
   password: unknown;
+  /** The second-factor code (v0.27), when the form sent one. */
+  otp?: unknown;
   /** The client IP (lib/login-rate-limit.ts clientIpFrom). */
   clientIp: string;
 }
@@ -97,12 +116,18 @@ export function countsAsFailure(status: number): boolean {
 /** What Strapi's /api/auth/local said, as the limiter settles it. */
 type Verdict =
   | { outcome: "success"; jwt: string; user: StrapiUserFields }
-  | { outcome: Exclude<LoginAttemptOutcome, "success">; rateLimited?: boolean };
+  | {
+      outcome: Exclude<LoginAttemptOutcome, "success">;
+      rateLimited?: boolean;
+      /** The cms's second-factor answer (v0.27). */
+      mfa?: typeof MFA_REQUIRED_SIGN_IN_CODE | typeof MFA_INVALID_SIGN_IN_CODE;
+    };
 
 /** One POST /api/auth/local; never throws. */
 async function checkPassword(
   identifier: string,
   password: string,
+  otp: string,
   clientIp: string,
   deps: CredentialsDeps,
 ): Promise<Verdict> {
@@ -119,13 +144,18 @@ async function checkPassword(
         // everyone out.
         "X-Forwarded-For": clientIp,
       },
-      body: JSON.stringify({ identifier, password }),
+      body: JSON.stringify(otp ? { identifier, password, otp } : { identifier, password }),
       cache: "no-store",
       signal: AbortSignal.timeout(deps.timeoutMs ?? LOCAL_SIGN_IN_TIMEOUT_MS),
     });
   } catch {
     // Network error or timeout: no verdict, nothing counted.
     return { outcome: "neutral" };
+  }
+  if (res.status === 401) {
+    const code = parseStrapiError(await res.text().catch(() => "")).details?.code;
+    if (code === MFA_REQUIRED_SIGN_IN_CODE) return { outcome: "neutral", mfa: code };
+    if (code === MFA_INVALID_SIGN_IN_CODE) return { outcome: "failure", mfa: code };
   }
   if (!res.ok) {
     return countsAsFailure(res.status)
@@ -155,6 +185,8 @@ export async function authorizeCredentials(
 ): Promise<User | null> {
   const identifier = typeof input.identifier === "string" ? input.identifier : "";
   const password = typeof input.password === "string" ? input.password : "";
+  // A code is at most a recovery code (xxxxx-xxxxx); anything longer is not one.
+  const otp = typeof input.otp === "string" ? input.otp.trim().slice(0, 32) : "";
   if (!identifier || !password) return null;
   const { clientIp } = input;
 
@@ -168,7 +200,7 @@ export async function authorizeCredentials(
 
   let verdict: Verdict = { outcome: "neutral" };
   try {
-    verdict = await checkPassword(identifier, password, clientIp, deps);
+    verdict = await checkPassword(identifier, password, otp, clientIp, deps);
   } finally {
     // Settled exactly once, whatever happened in between.
     const justBlocked = deps.limiter.settle(ticket, verdict.outcome, deps.now());
@@ -184,20 +216,25 @@ export async function authorizeCredentials(
   }
   if (verdict.outcome !== "success") {
     if (verdict.rateLimited) throw new StrapiRateLimitedSignIn();
+    if (verdict.mfa === MFA_REQUIRED_SIGN_IN_CODE) throw new MfaRequiredSignIn();
+    if (verdict.mfa === MFA_INVALID_SIGN_IN_CODE) throw new MfaInvalidSignIn();
     return null;
   }
   const { jwt, user: signedIn } = verdict;
 
-  // Display name and id of the fresh user; the payload's user stands in
-  // when this read fails.
+  // Id, display name and email of the fresh user; the payload's user
+  // stands in when this read fails.
   let me: StrapiUserFields | null = null;
   try {
-    const meRes = await deps.fetch(`${deps.strapiUrl}/api/users/me`, {
+    const meRes = await deps.fetch(`${deps.strapiUrl}/api/me`, {
       headers: { Authorization: `Bearer ${jwt}` },
       cache: "no-store",
       signal: AbortSignal.timeout(deps.timeoutMs ?? LOCAL_SIGN_IN_TIMEOUT_MS),
     });
-    if (meRes.ok) me = userFields(await meRes.json());
+    if (meRes.ok) {
+      const body: unknown = await meRes.json();
+      me = userFields(isRecord(body) ? body.data : null);
+    }
   } catch {
     me = null;
   }
@@ -205,9 +242,8 @@ export async function authorizeCredentials(
   return {
     id: String(profile.id),
     name: text(profile.displayName) ?? text(profile.username) ?? null,
-    // From the /api/auth/local payload (not sanitized), see the header.
     // Session identity is the id/JWT, never the email (F4).
-    email: text(signedIn.email) ?? text(me?.email) ?? null,
+    email: text(me?.email) ?? text(signedIn.email) ?? null,
     strapiJwt: jwt,
     strapiUserId: profile.id,
   };

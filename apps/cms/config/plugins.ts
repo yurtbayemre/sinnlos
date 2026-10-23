@@ -17,6 +17,8 @@
  * JWTs, and the web keeps one Strapi JWT per session (D-SESSION-01, no
  * refresh flow). "refresh" would change both; it is a decision of its own.
  */
+import { assertPasswordAllowed } from "../src/extensions/users-permissions/strapi-server";
+
 type Env = ((key: string, def?: unknown) => any) & {
   int: (key: string, def?: number) => number;
   bool: (key: string, def?: boolean) => boolean;
@@ -52,6 +54,14 @@ export default ({ env }: { env: Env }) => ({
       jwtSecret: env("JWT_SECRET"),
       register: {
         allowedFields: ["displayName"],
+      },
+      // The password baseline (v0.27) for change-password: the plugin
+      // answers 400 with this message (password_<problem>).
+      validationRules: {
+        validatePassword(password: string): boolean {
+          assertPasswordAllowed(password);
+          return true;
+        },
       },
     },
   },

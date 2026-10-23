@@ -51,6 +51,10 @@ export interface UserAdminRow {
   idp: "entra" | "oidc" | null;
   blocked: boolean;
   department: UserAdminRef | null;
+  /** v0.27: a local account invited but without a password yet. */
+  invited: boolean;
+  /** v0.27: the account has a second factor (TOTP) enabled. */
+  mfa: boolean;
 }
 
 /** One user with everything the edit form shows. */
@@ -72,6 +76,26 @@ export interface UserAdminListResponse {
 
 export interface UserAdminDetailResponse {
   data: UserAdminDetail;
+}
+
+/**
+ * POST /api/user-management/invite body `data` (v0.27): a new local
+ * account without a password, invited by mail to set one. `role` defaults
+ * to member.
+ */
+export const USER_ADMIN_INVITE_FIELDS = ["email", "displayName", "role", "department"] as const;
+
+export interface UserAdminInvite {
+  email: string;
+  displayName?: string | null;
+  role?: RoleType;
+  /** A department's documentId, or null. */
+  department?: string | null;
+}
+
+/** Whether the mail with the set-password link went out. */
+export interface UserAdminMailResponse {
+  data: { id: number; mail: "sent" | "failed" };
 }
 
 /** PUT body `data`: only the changed fields. */

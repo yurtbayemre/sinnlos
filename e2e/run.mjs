@@ -88,12 +88,14 @@ export async function main(args) {
   await writeFile(join(runtime, "owner"), runId, { mode: 0o600, flag: "wx" });
   await mkdir(logs, { recursive: true });
   const secret = () => randomBytes(32).toString("hex");
-  const secrets = Array.from({ length: 14 }, secret);
+  const secrets = Array.from({ length: 16 }, secret);
   const [
     dbPassword,
     leadPassword,
     memberPassword,
     editorPassword,
+    adminPassword,
+    inviterPassword,
     appKey1,
     appKey2,
     apiSalt,
@@ -189,7 +191,6 @@ export async function main(args) {
       DEMO_MODE: "0",
       ENTRA_ENABLED: "0",
       AUTH_LOCAL_ENABLED: "1",
-      LOCAL_REGISTRATION: "0",
       LIVE_EVENTS_DISABLED: "1",
       REVALIDATE_SECRET: revalidate,
       INTERNAL_UPLOAD_TOKEN: upload,
@@ -209,6 +210,20 @@ export async function main(args) {
       E2E_LEAD_PASSWORD: leadPassword,
       E2E_MEMBER_PASSWORD: memberPassword,
       E2E_EDITOR_PASSWORD: editorPassword,
+      E2E_ADMIN_PASSWORD: adminPassword,
+      E2E_INVITER_PASSWORD: inviterPassword,
+      // v0.27: only the admins need a second factor here, so the older specs
+      // (editor, lead, member) sign in as before while mfa.spec.ts and
+      // invite.spec.ts go through the mandatory enrollment.
+      MFA_REQUIRED_ROLES: "admin_role",
+      // Invitation mail into the run's mailpit (STARTTLS with mailpit's own
+      // self-signed certificate, trusted only inside this disposable stack).
+      SMTP_HOST: "mailpit",
+      SMTP_PORT: "587",
+      SMTP_USER: "e2e",
+      SMTP_PASS: "e2e",
+      DIGEST_FROM: "sinnlos-e2e@e2e.test",
+      NODE_TLS_REJECT_UNAUTHORIZED: "0",
       DATABASE_CLIENT: "postgres",
       DATABASE_HOST: "db",
       DATABASE_PORT: "5432",
@@ -286,7 +301,15 @@ export async function main(args) {
     assert.deepEqual(Object.keys(providers), ["local"], "Expected real local sign-in only");
     const cmsAddress = await docker([...compose, "port", "cms", "1337"], "cms-port");
     assert.match(cmsAddress, /^127\.0\.0\.1:\d+$/);
-    assert.deepEqual(Object.keys(fixtures.users).sort(), ["editor", "lead", "member"]);
+    assert.deepEqual(Object.keys(fixtures.users).sort(), [
+      "admin",
+      "editor",
+      "inviter",
+      "lead",
+      "member",
+    ]);
+    const mailpitAddress = await docker([...compose, "port", "mailpit", "8025"], "mailpit-port");
+    assert.match(mailpitAddress, /^127\.0\.0\.1:\d+$/);
     // Two preflight logins leave room for the real UI logins within Strapi's auth limit.
     for (const key of ["lead", "member"]) {
       const user = fixtures.users[key];
@@ -306,6 +329,29 @@ export async function main(args) {
       assert.equal(profile.status, 200, "Fixture profile unavailable");
       assert.equal((await profile.json()).data.role.type, key === "lead" ? "team_lead" : "member");
     }
+    // v0.27: the second-factor gate of the built cms image. The admin's role
+    // needs a second factor in this run and it has none yet, so its password
+    // session reaches its own profile (restricted) and nothing else.
+    {
+      const admin = fixtures.users.admin;
+      const signal = () => AbortSignal.any([controller.signal, AbortSignal.timeout(10_000)]);
+      const login = await fetch(`http://${cmsAddress}/api/auth/local`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ identifier: admin.email, password: admin.password }),
+        signal: signal(),
+      });
+      assert.equal(login.status, 200, "Fixture login failed for admin");
+      const headers = { authorization: `Bearer ${(await login.json()).jwt}` };
+      const refused = await fetch(`http://${cmsAddress}/api/users/me`, {
+        headers,
+        signal: signal(),
+      });
+      assert.equal(refused.status, 403, "The second-factor gate let a restricted session through");
+      assert.equal((await refused.json()).error?.name, "MfaSetupRequired");
+      const own = await fetch(`http://${cmsAddress}/api/me`, { headers, signal: signal() });
+      assert.equal((await own.json()).data?.mfa?.restricted, true, "Admin session not restricted");
+    }
 
     console.log("[e2e] Fresh fixtures and local sign-in are ready");
     if (!checkOnly) {
@@ -321,6 +367,7 @@ export async function main(args) {
               CI: process.env.CI,
               SINNLOS_E2E_BASE_URL: baseURL,
               SINNLOS_E2E_FIXTURES: join(runtime, "fixtures.json"),
+              SINNLOS_E2E_MAILPIT: `http://${mailpitAddress}`,
             },
             timeout: 6 * 60_000,
             signal: controller.signal,

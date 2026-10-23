@@ -14,6 +14,8 @@ const user: UserAdminDetail = {
   role: "member",
   roleSource: "manual",
   idp: null,
+  invited: false,
+  mfa: false,
   blocked: true,
   department: { documentId: "dept00000000000000000001", name: "Design" },
   manager: { id: 99, displayName: "Former Boss" },

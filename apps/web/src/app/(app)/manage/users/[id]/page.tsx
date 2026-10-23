@@ -2,7 +2,9 @@ import { notFound, redirect } from "next/navigation";
 import { getTranslations } from "next-intl/server";
 import { FetchErrorBanner } from "@/components/fetch-error";
 import { ManagePageHeader } from "@/components/manage/page-parts";
+import { UserAccountActions } from "@/components/manage/user-account-actions";
 import { UserEditor } from "@/components/manage/user-editor";
+import { LOCAL_ENABLED } from "@/lib/auth-config";
 import { loadOrgOptions } from "@/lib/loaders/manage/org";
 import { loadUserDetail } from "@/lib/loaders/manage/users";
 import { manageGate } from "@/lib/manage/page-gate";
@@ -36,7 +38,10 @@ export default async function EditUserPage({ params }: Props) {
       {load.state === "failed" ? (
         <FetchErrorBanner />
       ) : (
-        <UserEditor key={load.user.id} user={load.user} options={options} />
+        <>
+          <UserAccountActions user={load.user} localSignIn={LOCAL_ENABLED} />
+          <UserEditor key={load.user.id} user={load.user} options={options} />
+        </>
       )}
     </div>
   );

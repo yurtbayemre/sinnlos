@@ -1,13 +1,12 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 /**
- * The sign-in and register actions answer machine codes (AC02); the forms
- * translate them (lib/auth/form-messages.ts). No Strapi message reaches the
- * UI. `@/auth` signIn is mocked to reject the way Auth.js' raw signIn()
- * does (it rethrows CredentialsSignin subclasses, @auth/core index.js; the
- * real authorize() → 429 path is pinned in auth.test.ts). The register
- * action's request is answered by a stubbed global fetch; the login limiter
- * is the real one (FX39: reserved before the request, settled after it).
+ * The sign-in action answers machine codes (AC02); the form translates
+ * them (lib/auth/form-messages.ts). No Strapi message reaches the UI.
+ * `@/auth` signIn is mocked to reject the way Auth.js' raw signIn() does
+ * (it rethrows CredentialsSignin subclasses, @auth/core index.js; the real
+ * authorize() → 429 path is pinned in auth.test.ts). The login limiter is
+ * the real one (FX39: reserved before the request, settled after it).
  * next/navigation is the real module, so the success redirect is a genuine
  * NEXT_REDIRECT.
  */
@@ -31,7 +30,6 @@ async function load(env: Record<string, string | undefined> = {}) {
   for (const [key, value] of Object.entries({
     ENTRA_ENABLED: undefined,
     AUTH_LOCAL_ENABLED: undefined,
-    LOCAL_REGISTRATION: "1",
     STRAPI_URL: "http://strapi.test",
     ...env,
   })) {
@@ -42,12 +40,15 @@ async function load(env: Record<string, string | undefined> = {}) {
   // The error classes of THIS module graph (resetModules re-evaluates
   // next-auth, and instanceof checks need the same class).
   const { CredentialsSignin } = await import("next-auth");
-  const { LoginBlockedSignIn, StrapiRateLimitedSignIn } = await import("./auth-errors");
+  const { LoginBlockedSignIn, MfaInvalidSignIn, MfaRequiredSignIn, StrapiRateLimitedSignIn } =
+    await import("./auth-errors");
   return {
     ...actions,
     loginRateLimiter,
     CredentialsSignin,
     LoginBlockedSignIn,
+    MfaInvalidSignIn,
+    MfaRequiredSignIn,
     StrapiRateLimitedSignIn,
   };
 }
@@ -70,20 +71,6 @@ const signInForm = (identifier = "ada@example.test") => {
   data.set("from", "/");
   return data;
 };
-
-const registerForm = (fields: Record<string, string> = {}) => {
-  const data = new FormData();
-  const values = { username: "Ada", email: "ada@example.test", password: "secret-pw", ...fields };
-  for (const [key, value] of Object.entries(values)) data.set(key, value);
-  return data;
-};
-
-/** Strapi's register refusal: `{ data: null, error: { status, name, message } }`. */
-const strapiRefusal = (status: number, message: string) =>
-  new Response(
-    JSON.stringify({ data: null, error: { status, name: "ApplicationError", message } }),
-    { status, headers: { "content-type": "application/json" } },
-  );
 
 // The first import transforms next-auth and @auth/core (inlined, see
 // vitest.config.ts); under a full parallel run that cold import can eat a
@@ -135,6 +122,28 @@ describe("signInWithCredentials", () => {
     expect(console.error).not.toHaveBeenCalled();
   });
 
+  it("asks for the second factor, and maps a wrong code to mfaInvalid (v0.27)", async () => {
+    const { signInWithCredentials, MfaRequiredSignIn, MfaInvalidSignIn } = await load();
+    signInMock.mockRejectedValueOnce(new MfaRequiredSignIn());
+    await expect(signInWithCredentials({}, signInForm())).resolves.toEqual({
+      mfa: true,
+      values: { identifier: "ada@example.test" },
+    });
+    signInMock.mockRejectedValueOnce(new MfaInvalidSignIn());
+    const form = signInForm();
+    form.set("otp", "123456");
+    await expect(signInWithCredentials({}, form)).resolves.toEqual({
+      error: "mfaInvalid",
+      mfa: true,
+      values: { identifier: "ada@example.test" },
+    });
+    expect(signInMock).toHaveBeenLastCalledWith(
+      "local",
+      expect.objectContaining({ otp: "123456" }),
+    );
+    expect(console.error).not.toHaveBeenCalled();
+  });
+
   it("maps wrong credentials to invalidCredentials", async () => {
     const { signInWithCredentials, CredentialsSignin } = await load();
     signInMock.mockRejectedValue(new CredentialsSignin());
@@ -171,100 +180,5 @@ describe("signInWithCredentials", () => {
     const redirect = await successRedirect();
     signInMock.mockRejectedValue(redirect);
     await expect(signInWithCredentials({}, signInForm())).rejects.toBe(redirect);
-  });
-});
-
-describe("registerLocalAccount", () => {
-  it("creates the account (client IP forwarded), then signs in", async () => {
-    const { registerLocalAccount } = await load();
-    const redirect = await successRedirect();
-    signInMock.mockRejectedValue(redirect);
-    await expect(registerLocalAccount({}, registerForm())).rejects.toBe(redirect);
-    const [url, init] = fetchMock.mock.calls[0]!;
-    expect(String(url)).toBe("http://strapi.test/api/auth/local/register");
-    expect(new Headers(init?.headers).get("x-forwarded-for")).toBe("203.0.113.7");
-    expect(JSON.parse(String(init?.body))).toEqual({
-      username: "Ada",
-      email: "ada@example.test",
-      password: "secret-pw",
-      displayName: "Ada",
-    });
-    expect(signInMock).toHaveBeenCalledWith("local", {
-      identifier: "ada@example.test",
-      password: "secret-pw",
-      redirectTo: "/",
-    });
-  });
-
-  it("answers registrationDisabled without a request while registration is off", async () => {
-    const { registerLocalAccount } = await load({ LOCAL_REGISTRATION: undefined });
-    await expect(registerLocalAccount({}, registerForm())).resolves.toEqual({
-      error: "registrationDisabled",
-    });
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
-
-  it.each([
-    ["no name", { username: "  " }, "missingFields"],
-    ["no email", { email: "" }, "missingFields"],
-    ["no password", { password: "" }, "missingFields"],
-    ["a short password", { password: "12345" }, "passwordTooShort"],
-  ])("answers %s locally, echoing the values but never the password", async (_l, fields, code) => {
-    const { registerLocalAccount } = await load();
-    const result = await registerLocalAccount({}, registerForm(fields));
-    expect(result.error).toBe(code);
-    expect(JSON.stringify(result)).not.toContain("secret-pw");
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
-
-  it.each([
-    ["a taken email", "emailTaken", strapiRefusal(400, "Email or Username are already taken")],
-    [
-      "registration off in the cms",
-      "registrationDisabled",
-      strapiRefusal(400, "Register action is currently disabled"),
-    ],
-    ["Strapi's throttle", "rateLimited", strapiRefusal(429, "Too many requests, please try later")],
-    ["another refusal", "registrationFailed", strapiRefusal(400, "Invalid parameters: role")],
-    ["an outage", "registrationFailed", new Response("<html>502</html>", { status: 502 })],
-  ])("maps %s to %s and never passes Strapi's message through", async (_l, code, answer) => {
-    const { registerLocalAccount } = await load();
-    fetchMock.mockResolvedValue(answer);
-    const result = await registerLocalAccount({}, registerForm());
-    expect(result).toEqual({ error: code, values: { username: "Ada", email: "ada@example.test" } });
-    expect(signInMock).not.toHaveBeenCalled();
-  });
-
-  it("answers registrationFailed for a network error", async () => {
-    const { registerLocalAccount } = await load();
-    fetchMock.mockRejectedValue(new TypeError("fetch failed"));
-    await expect(registerLocalAccount({}, registerForm())).resolves.toMatchObject({
-      error: "registrationFailed",
-    });
-  });
-
-  it("answers accountCreatedSignInManually when the sign-in after it fails", async () => {
-    const { registerLocalAccount, CredentialsSignin } = await load();
-    signInMock.mockRejectedValue(new CredentialsSignin());
-    await expect(registerLocalAccount({}, registerForm())).resolves.toMatchObject({
-      error: "accountCreatedSignInManually",
-    });
-  });
-
-  it("counts a refused registration against the limiter, an outage not (FX39)", async () => {
-    const { registerLocalAccount, loginRateLimiter } = await load();
-    fetchMock.mockImplementation(async () => new Response("", { status: 503 }));
-    for (let i = 0; i < 12; i++) await registerLocalAccount({}, registerForm());
-    expect(loginRateLimiter.size()).toBe(0);
-    fetchMock.mockImplementation(async () =>
-      strapiRefusal(400, "Email or Username are already taken"),
-    );
-    for (let i = 0; i < 10; i++) await registerLocalAccount({}, registerForm());
-    expect(console.warn).toHaveBeenCalledTimes(1);
-    fetchMock.mockClear();
-    await expect(registerLocalAccount({}, registerForm())).resolves.toMatchObject({
-      error: "rateLimited",
-    });
-    expect(fetchMock).not.toHaveBeenCalled();
   });
 });

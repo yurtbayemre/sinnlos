@@ -73,6 +73,15 @@ describe("nextGrantConfig", () => {
     expect(nextGrantConfig(storedGrant(), false).github).toEqual(storedGrant().github);
   });
 
+  it("turns every other provider off too, keeping its settings (v0.27)", () => {
+    const stored = { ...storedGrant(), github: { enabled: true, icon: "github", key: "k" } };
+    expect(nextGrantConfig(stored, true).github).toEqual({
+      enabled: false,
+      icon: "github",
+      key: "k",
+    });
+  });
+
   it("copes with an empty or foreign store", () => {
     for (const current of [null, undefined, {}]) {
       expect(nextGrantConfig(current, true)).toEqual({
@@ -99,7 +108,7 @@ describe("syncAuthProviders", () => {
       microsoft: { enabled: false, key: "", secret: "" },
     });
     expect(host.log.info).toHaveBeenCalledWith(
-      "[bootstrap] users-permissions providers synced (email=on, microsoft=off, keycloak=off)",
+      "[bootstrap] users-permissions providers synced (email=on, every other provider off)",
     );
     await syncAuthProviders(host, parseEntraConfig({}));
     expect(set).toHaveBeenCalledTimes(1);

@@ -64,7 +64,12 @@ type ProviderGrant = Record<string, unknown>;
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
-/** The grant store after the sync. Pure. */
+/**
+ * The grant store after the sync. Pure. v0.27: EVERY provider but `email`
+ * is off (each stored entry keeps its other keys), not just Microsoft and
+ * Keycloak: no plugin provider callback may issue a JWT around the second
+ * factor of a local account.
+ */
 export function nextGrantConfig(
   current: GrantConfig | null | undefined,
   localEnabled: boolean,
@@ -73,8 +78,14 @@ export function nextGrantConfig(
   const email: ProviderGrant = isRecord(grant.email) ? grant.email : {};
   const microsoft: ProviderGrant = isRecord(grant.microsoft) ? grant.microsoft : {};
   const keycloak: ProviderGrant = isRecord(grant.keycloak) ? grant.keycloak : {};
+  const others = Object.fromEntries(
+    Object.entries(grant)
+      .filter(([name, value]) => name !== "email" && isRecord(value))
+      .map(([name, value]) => [name, { ...(value as ProviderGrant), enabled: false }]),
+  );
   return {
     ...grant,
+    ...others,
     email: { ...email, enabled: localEnabled },
     microsoft: { ...microsoft, enabled: false, key: "", secret: "" },
     keycloak: { ...keycloak, enabled: false },
@@ -101,7 +112,7 @@ export async function syncAuthProviders(
   if (JSON.stringify(next) !== JSON.stringify(current)) {
     await store.set({ value: next });
     strapi.log.info(
-      `[bootstrap] users-permissions providers synced (email=${settings.localEnabled ? "on" : "off"}, microsoft=off, keycloak=off)`,
+      `[bootstrap] users-permissions providers synced (email=${settings.localEnabled ? "on" : "off"}, every other provider off)`,
     );
   }
 }

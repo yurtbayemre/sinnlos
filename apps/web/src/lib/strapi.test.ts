@@ -167,6 +167,31 @@ describe("strapi() — responses", () => {
     expect(redirectMock).toHaveBeenCalledWith("/sign-in?expired=1");
   });
 
+  it("sends a session that must set up its second factor to /mfa/setup (v0.27)", async () => {
+    const body = JSON.stringify({
+      data: null,
+      error: {
+        status: 403,
+        name: "MfaSetupRequired",
+        message: "x",
+        details: { code: "mfa_setup_required" },
+      },
+    });
+    fetchMock.mockImplementation(async () => new Response(body, { status: 403 }));
+    await expect(strapi("/api/announcements")).rejects.toThrow("NEXT_REDIRECT");
+    expect(redirectMock).toHaveBeenCalledWith("/mfa/setup");
+    // Any other 403 stays an error of the caller.
+    redirectMock.mockClear();
+    fetchMock.mockImplementation(
+      async () =>
+        new Response(JSON.stringify({ error: { status: 403, name: "ForbiddenError" } }), {
+          status: 403,
+        }),
+    );
+    await expect(strapi("/api/announcements")).rejects.toThrow("Strapi 403");
+    expect(redirectMock).not.toHaveBeenCalled();
+  });
+
   it("throws (no redirect) on a 401 without a token", async () => {
     getStrapiTokenMock.mockResolvedValue(null);
     fetchMock.mockImplementation(async () => new Response("no auth", { status: 401 }));

@@ -1,7 +1,7 @@
 {
   "name": "@sinnlos/web",
   "private": true,
-  "version": "0.26.0",
+  "version": "0.27.0",
   "license": "AGPL-3.0-only",
   "description": "Next.js 16 frontend for the Sinnlos intranet",
   "scripts": {
@@ -27,6 +27,7 @@
     "next-auth": "5.0.0-beta.32",
     "next-intl": "^4.14.9",
     "next-themes": "0.4.6",
+    "qrcode": "1.5.4",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
     "react-markdown": "10.1.0",
@@ -39,6 +40,7 @@
   },
   "devDependencies": {
     "@types/node": "24.19.2",
+    "@types/qrcode": "1.5.6",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.1.0",
     "eslint": "^10.12.0",

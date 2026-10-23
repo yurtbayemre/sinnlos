@@ -20,7 +20,7 @@
  *    an invalid one throws on first import outside `next build`). Never
  *    together with ENTRA_ENABLED=1: one identity provider per install. The
  *    cms validates its own half (apps/cms/src/oidc/config.ts).
- *  - Registration form: LOCAL_REGISTRATION=1 (must match the CMS env).
+ *  - No self-registration (removed in v0.27): admins invite at /manage/users.
  */
 
 type Env = Record<string, string | undefined>;
@@ -265,5 +265,3 @@ export function localSignInEnabled(env: Env): boolean {
 }
 
 export const LOCAL_ENABLED = localSignInEnabled(process.env);
-
-export const REGISTRATION_ENABLED = LOCAL_ENABLED && process.env.LOCAL_REGISTRATION === "1";

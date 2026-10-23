@@ -39,9 +39,10 @@ const PUBLIC_FILES = new Set([
 export function isPublicPath(pathname: string): boolean {
   return (
     pathname === "/sign-in" ||
-    // The register page gates itself on REGISTRATION_ENABLED and redirects
-    // to /sign-in when registration is off.
-    pathname === "/register" ||
+    // v0.27: the password-reset request and the set-password page of an
+    // invitation or reset link; both gate themselves on local sign-in.
+    pathname === "/forgot-password" ||
+    pathname === "/set-password" ||
     pathname.startsWith("/api/auth") ||
     // Internal CMS→web live-event ingest: session-less by design (secret-
     // gated in the route, externally swallowed by Traefik's /api rule).

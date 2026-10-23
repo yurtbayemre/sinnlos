@@ -1,14 +1,13 @@
 /**
- * Sync the users-permissions "advanced" settings from env so standalone
+ * Sync the users-permissions "advanced" settings so standalone
  * (no-Microsoft) deployments work out of the box:
- *   - default_role: new local registrations land on `member` (a real
- *     intranet role) instead of the bare `authenticated` fallback.
- *   - allow_register: controlled by LOCAL_REGISTRATION=1 (default off —
- *     admins create accounts in the Strapi panel). It only gates local
- *     self-registration: Entra users are provisioned by the exchange
- *     (src/entra/provision.ts) regardless of it (FX14), and Strapi's own
- *     OAuth providers, which it would gate too, stay disabled
- *     (bootstrap/auth-providers.ts).
+ *   - default_role: `member` (a real intranet role) instead of the bare
+ *     `authenticated` fallback.
+ *   - allow_register: always off (v0.27: admins invite people at
+ *     /manage/users; LOCAL_REGISTRATION is gone, and the boot warns when it
+ *     is still 1). Entra and OIDC users are provisioned by their exchange
+ *     regardless of it (FX14), and Strapi's own OAuth providers stay
+ *     disabled (bootstrap/auth-providers.ts).
  *   - email_confirmation: off; self-hosted installs rarely have SMTP.
  *   - unique_email: on.
  * These four keys are OVERWRITTEN on every boot (an admin-panel change to
@@ -25,12 +24,11 @@ const DEFAULT_ROLE: RoleType = "member";
 /** The managed keys applied over the stored settings. Pure. */
 export function nextAdvancedSettings(
   current: AdvancedSettings | null | undefined,
-  env: Record<string, string | undefined> = process.env,
 ): AdvancedSettings {
   return {
     ...(current ?? {}),
     unique_email: true,
-    allow_register: env.LOCAL_REGISTRATION === "1",
+    allow_register: false,
     email_confirmation: false,
     default_role: DEFAULT_ROLE,
   };
@@ -48,7 +46,15 @@ export interface AdvancedSettingsHost {
 const isSettings = (value: unknown): value is AdvancedSettings =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
-export async function syncAdvancedSettings(strapi: AdvancedSettingsHost): Promise<void> {
+export async function syncAdvancedSettings(
+  strapi: AdvancedSettingsHost & { log: { warn(message: string): void } },
+  env: Record<string, string | undefined> = process.env,
+): Promise<void> {
+  if (env.LOCAL_REGISTRATION === "1") {
+    strapi.log.warn(
+      "[bootstrap] LOCAL_REGISTRATION is set but self-registration is gone since v0.27: invite people at /manage/users; remove the variable",
+    );
+  }
   const store = strapi.store({ type: "plugin", name: "users-permissions", key: "advanced" });
   const stored = await store.get();
   const current = isSettings(stored) ? stored : {};

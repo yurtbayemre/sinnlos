@@ -121,7 +121,7 @@ describe.each(testEngines())("demo seed on %s (FX38)", (engine) => {
   });
 
   it("the seeded accounts sign in and read the seeded content over HTTP", async () => {
-    const jwt = await t.login("casey.jones", "demo1234");
+    const jwt = await t.login("casey.jones", "Demo-Passwort-2026!");
     const pages = await t.api<{ data: { title: string }[] }>(
       { jwt },
       "/api/wiki-pages?pagination[pageSize]=50",

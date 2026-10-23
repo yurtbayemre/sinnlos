@@ -109,6 +109,11 @@ const OTHER_RAW_WRITERS: Readonly<Record<string, string>> = {
   "api/notification/controllers/notification.ts": "notifications (read state)",
   "api/poll-vote/controllers/poll-vote.ts": "poll votes (the poll row itself is never written)",
   "api/profile/controllers/profile.ts": "users",
+  "utils/mfa-core.ts":
+    "users (v0.27: the second factor's last time step and recovery codes, row locked)",
+  "utils/mfa.ts": "users (v0.27: the caller's own second factor, row locked; admin reset)",
+  "utils/password-link.ts":
+    "users (v0.27: set-password links and their redemption in one conditional UPDATE, row locked)",
   "utils/user-admin.ts":
     "users (admin_role's user administration: role, department, manager, blocked) under the directory lock",
   "api/reaction/controllers/reaction.ts": "reactions",

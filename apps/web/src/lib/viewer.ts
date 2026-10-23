@@ -33,6 +33,12 @@ export type Viewer = {
   /** Role type (e.g. "editor"); null = least privilege for every gate. */
   role: string | null;
   department: ViewerDepartment | null;
+  /**
+   * v0.27: this session must turn on its second factor first (its role
+   * requires one, none is enrolled); the app layout sends it to
+   * /mfa/setup. Always set by toViewer(); optional for hand-made viewers.
+   */
+  mfaRestricted?: boolean;
 };
 
 /** No session, or the identity could not be read: every gate denies. */
@@ -41,6 +47,7 @@ export const ANONYMOUS_VIEWER: Viewer = Object.freeze({
   displayName: null,
   role: null,
   department: null,
+  mfaRestricted: false,
 });
 
 /**
@@ -59,6 +66,7 @@ export const DEMO_VIEWER: Viewer = Object.freeze({
     name: "Engineering",
     slug: "engineering",
   }),
+  mfaRestricted: false,
 });
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -83,6 +91,7 @@ export function toViewer(data: unknown): Viewer {
     displayName: typeof data.displayName === "string" ? data.displayName : null,
     role: role === "" ? null : role,
     department,
+    mfaRestricted: isRecord(data.mfa) && data.mfa.restricted === true,
   };
 }
 

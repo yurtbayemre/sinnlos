@@ -42,7 +42,7 @@
  * their own content through `strapi.documents(uid)`.
  * `env: { SEED_DEMO_DATA: "1" }` also runs the demo seed of the real
  * bootstrap. It runs inside bootstrap, before the fixtures exist, so both
- * coexist; the demo accounts sign in with `login(username, "demo1234")`.
+ * coexist; the demo accounts sign in with `login(username, "Demo-Passwort-2026!")`.
  *
  * HERMETIC:
  *   - the env of a boot is a fixed base (random secrets, no SMTP, no
@@ -468,6 +468,9 @@ function hermeticEnv(): Record<string, string | undefined> {
     // Loopback only (the default), like a fresh install: every request of a
     // suite comes from 127.0.0.1. A suite passes its own list.
     ADMIN_ALLOW_CIDRS: undefined,
+    // v0.27: nobody must use a second factor, so every suite signs in with a
+    // password as before; the MFA suites pass their own list.
+    MFA_REQUIRED_ROLES: "none",
     STRAPI_ADMIN_EMAIL: undefined,
     STRAPI_ADMIN_PASSWORD: undefined,
     STRAPI_ADMIN_FIRSTNAME: undefined,

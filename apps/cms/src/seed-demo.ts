@@ -157,7 +157,7 @@ const USERS = [
   },
 ];
 
-const PASSWORD = "demo1234";
+const PASSWORD = "Demo-Passwort-2026!";
 
 const ANNOUNCEMENT_UID = "api::announcement.announcement";
 const EVENT_UID = "api::event.event";
