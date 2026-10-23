@@ -602,6 +602,8 @@
     "quizSomeWrong": "{count, plural, one {# Antwort stimmt noch nicht} other {# Antworten stimmen noch nicht}} — korrigiere und prüfe erneut.",
     "completeLocked": "Der Abschluss wird nach bestandenen Verständnisfragen freigeschaltet.",
     "quizContentInvalid": "Der Inhalt dieses Quiz ist fehlerhaft. Bitte informieren Sie die Kursverantwortlichen.",
+    "versionChanged": "Die Unterweisung wurde aktualisiert. Bitte neu laden.",
+    "contact": "Fragen an: {contact}",
     "quizNotPassed": "Nicht alle Antworten sind richtig (vielleicht haben sich die Fragen geändert). Beantworte sie erneut.",
     "statusDueSoon": "Läuft am {date} ab",
     "statusExpired": "Abgelaufen am {date}, bitte wiederholen",

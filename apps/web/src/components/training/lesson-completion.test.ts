@@ -34,6 +34,7 @@ const lesson = (
       quiz,
       completionMode,
       lessonDocumentId: "k3m9x0000000000000000000",
+      version: { course: "2026-10-01T08:00:00.000Z", lesson: "2026-10-02T09:30:00.000Z" },
       completedAtLabel,
       nextHref: null,
     }),

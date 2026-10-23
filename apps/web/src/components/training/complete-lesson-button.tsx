@@ -4,7 +4,11 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { CheckCircle2 } from "lucide-react";
-import { QUIZ_CONTENT_INVALID } from "@sinnlos/domain";
+import {
+  QUIZ_CONTENT_INVALID,
+  TRAINING_VERSION_CHANGED,
+  type TrainingVersion,
+} from "@sinnlos/domain";
 import { Button } from "@/components/ui/button";
 import { isSharedErrorCode, startCmsAction, type CommonCode } from "@/lib/action-result";
 import { completeLesson, type TrainingActionError } from "@/lib/training-actions";
@@ -19,6 +23,7 @@ import { completeLesson, type TrainingActionError } from "@/lib/training-actions
  */
 export function CompleteLessonButton({
   lessonDocumentId,
+  version,
   completedAtLabel,
   answers = null,
   disabled = false,
@@ -26,6 +31,8 @@ export function CompleteLessonButton({
 }: {
   /** Strapi documentId of the lesson (stable across re-publishes). */
   lessonDocumentId: string;
+  /** The player's published versions (v0.28), sent back with the completion. */
+  version: TrainingVersion;
   /** Pre-formatted date of the caller's own completion, or null. */
   completedAtLabel: string | null;
   /** The passing answers of the lesson's quiz, or null for a lesson without one. */
@@ -48,7 +55,7 @@ export function CompleteLessonButton({
     if (completed || isPending || disabled) return;
     setError(null);
     startCmsAction(startTransition, {
-      action: () => completeLesson(lessonDocumentId, answers),
+      action: () => completeLesson(lessonDocumentId, answers, version),
       onSuccess: () => setJustCompleted(true),
       onFailure: (code) => {
         // Refused (already completed elsewhere, course unpublished, the
@@ -79,9 +86,11 @@ export function CompleteLessonButton({
             ? t("quizNotPassed")
             : error === QUIZ_CONTENT_INVALID
               ? t("quizContentInvalid")
-              : isSharedErrorCode(error)
-                ? tErrors(error)
-                : t("completeFailed")}
+              : error === TRAINING_VERSION_CHANGED
+                ? t("versionChanged")
+                : isSharedErrorCode(error)
+                  ? tErrors(error)
+                  : t("completeFailed")}
         </span>
       )}
     </div>
