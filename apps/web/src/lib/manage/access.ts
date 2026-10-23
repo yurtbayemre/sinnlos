@@ -76,8 +76,8 @@ export function areaSwitchedOff(
   area: ManageArea,
   off: ReadonlySet<SwitchName> = switchedOff(),
 ): boolean {
-  const module = AREA_MODULE[area];
-  return module !== undefined && off.has(module);
+  const owner = AREA_MODULE[area];
+  return owner !== undefined && off.has(owner);
 }
 
 export function manageAreasFor(

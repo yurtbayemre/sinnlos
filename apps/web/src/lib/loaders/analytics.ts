@@ -54,8 +54,8 @@ const COLLECTION_MODULE: Readonly<Partial<Record<CountedCollection, SwitchName>>
 /** The tiles shown with `off` switched off, in display order. */
 export function analyticsStats(off: ReadonlySet<SwitchName>): AnalyticsStat[] {
   return ANALYTICS_STATS.filter((stat) => {
-    const module = COLLECTION_MODULE[stat as CountedCollection];
-    return module === undefined || !off.has(module);
+    const owner = COLLECTION_MODULE[stat as CountedCollection];
+    return owner === undefined || !off.has(owner);
   });
 }
 
