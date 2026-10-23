@@ -202,9 +202,10 @@ export function managerFields(callerRoleType: RoleType): string[] {
 /**
  * The caller's manager as a foreign-user summary. Contact fields only for
  * privileged callers; fail-closed for guest / authenticated / unknown roles.
+ * A blocked manager is none (v0.28: blocked people left the directory).
  */
 export function toManagerSummary(row: unknown, callerRoleType: RoleType): Row | null {
-  return isRow(row) ? pick(row, managerFields(callerRoleType)) : null;
+  return isRow(row) && row.blocked !== true ? pick(row, managerFields(callerRoleType)) : null;
 }
 
 /**
@@ -249,7 +250,7 @@ async function loadProfile(
       role: true,
       department: true,
       avatar: true,
-      manager: { select: managerFields(callerRoleType) },
+      manager: { select: [...managerFields(callerRoleType), "blocked"] },
     },
   });
   if (!isRow(full)) return null;

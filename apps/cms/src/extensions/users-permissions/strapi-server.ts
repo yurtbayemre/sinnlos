@@ -1191,6 +1191,32 @@ export function patchAuthController(
   return controller;
 }
 
+/**
+ * The plugin's user controller (v0.28): GET /api/users/:id of a user the
+ * directory hides (blocked, utils/user-visibility.ts adds the filter to the
+ * sanitized query) or of no user at all answers 404 like a missing
+ * document, instead of the plugin's empty 204.
+ */
+function patchUserController(controller: unknown): unknown {
+  const methods = controller as Record<string, unknown> | null;
+  const findOne = methods?.findOne;
+  if (typeof findOne !== "function") {
+    throw new Error(
+      "[users-permissions-extension] the user controller no longer exposes findOne(); the hidden-user 404 cannot be applied (v0.28 tripwire).",
+    );
+  }
+  (methods as Record<string, unknown>).findOne = async function (
+    this: unknown,
+    ctx: { body?: unknown },
+    ...rest: unknown[]
+  ) {
+    const result = await findOne.call(this, ctx, ...rest);
+    if (ctx.body === null || ctx.body === undefined) throw new errors.NotFoundError("Not Found");
+    return result;
+  };
+  return controller;
+}
+
 /** Wraps `factory` so the instance it returns goes through `patch`. */
 function wrapFactory(
   factory: unknown,
@@ -1199,7 +1225,7 @@ function wrapFactory(
 ): Factory {
   if (typeof factory !== "function") {
     throw new Error(
-      `[users-permissions-extension] ${what} is not a factory; password-change revocation cannot be applied (FX40 tripwire).`,
+      `[users-permissions-extension] ${what} is not a factory; the users-permissions extension cannot be applied (FX40 tripwire).`,
     );
   }
   if ((factory as { [WRAPPED]?: boolean })[WRAPPED]) return factory as Factory;
@@ -1234,6 +1260,11 @@ export function createUsersPermissionsExtension() {
         assertAuthController(controller);
         return patchAuthController(controller, strapi);
       },
+    );
+    plugin.controllers.user = wrapFactory(
+      plugin?.controllers?.user,
+      "controllers.user",
+      patchUserController,
     );
     plugin.register = wrapPluginRegister(plugin.register);
     return plugin;

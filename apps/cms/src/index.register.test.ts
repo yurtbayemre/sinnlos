@@ -5,6 +5,7 @@ import { registerRestrictedRelationGuard } from "./bootstrap/restricted-relation
 import { registerUserContactSanitizer } from "./bootstrap/user-contact-sanitizer";
 import lifecycle from "./index";
 import type { RelationModel } from "./utils/restricted-relations";
+import { ACTIVE_USER_FILTER } from "./utils/user-visibility";
 import { SENSITIVE_USER_FIELDS, USER_UID, type ModelSchema } from "./utils/sanitize-user-contact";
 
 /**
@@ -454,7 +455,13 @@ describe("relation side-channel guard registration (FX05)", () => {
       { ...legitUserQuery(), ...rawDbKeys() },
       user,
     );
-    expect(out).toEqual({ ...legitUserQuery(), locale: "sanitized-by-core" });
+    // v0.28: the user model's root sees active users only (utils/user-visibility.ts).
+    const legit = legitUserQuery();
+    expect(out).toEqual({
+      ...legit,
+      filters: { $and: [legit.filters, ACTIVE_USER_FILTER] },
+      locale: "sanitized-by-core",
+    });
   });
 
   it.each(["admin_role", "editor", "guest", undefined])(
@@ -466,7 +473,7 @@ describe("relation side-channel guard registration (FX05)", () => {
         { where: { password: { $startsWith: "$2a$" } }, orderBy: { password: "asc" } },
         user,
       );
-      expect(out).toEqual({ locale: "sanitized-by-core" });
+      expect(out).toEqual({ filters: ACTIVE_USER_FILTER, locale: "sanitized-by-core" });
     },
   );
 

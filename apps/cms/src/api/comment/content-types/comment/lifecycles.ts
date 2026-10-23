@@ -52,6 +52,8 @@ async function notifyAnnouncementAuthor(commentId: number | string): Promise<voi
     populate: { author: true },
   });
   if (!announcement?.author?.id || announcement.author.id === full.author?.id) return;
+  // A blocked author left (v0.28): nothing new reaches them.
+  if (announcement.author.blocked === true) return;
 
   const data = buildNotification({
     type: "comment",

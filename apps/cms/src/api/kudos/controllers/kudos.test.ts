@@ -30,12 +30,22 @@ interface Ctx {
   unauthorized: ReturnType<typeof vi.fn>;
 }
 
+/** The recipients' rows the create looks up (v0.28: a blocked one is refused). */
+const users: Record<number, { id: number; blocked?: boolean }> = { 9: { id: 9 }, 11: { id: 11, blocked: true } };
+
 function setup(body: unknown) {
+  const strapi = {
+    db: {
+      query: () => ({
+        findOne: async ({ where }: { where: { id: number } }) => users[where.id] ?? null,
+      }),
+    },
+  };
   const controller = (
     kudosController as unknown as (deps: { strapi: unknown }) => {
       create(ctx: Ctx): Promise<unknown>;
     }
-  )({ strapi: {} });
+  )({ strapi });
   const ctx: Ctx = {
     state: { user: CALLER },
     request: { body },
@@ -58,6 +68,13 @@ describe("kudos create (FX27)", () => {
     expect(ctx.badRequest).not.toHaveBeenCalled();
     expect(ctx.request.body).toEqual({ data: { ...kudos, to: 9, from: CALLER.id } });
     expect(mocks.superCreate).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses a blocked recipient with details.code recipient (v0.28)", async () => {
+    const { controller, ctx } = setup({ data: { ...kudos, to: 11 } });
+    await controller.create(ctx);
+    expect(ctx.badRequest).toHaveBeenCalledWith("Recipient unavailable", { code: "recipient" });
+    expect(mocks.superCreate).not.toHaveBeenCalled();
   });
 
   it("also takes the payload without the data wrapper", async () => {

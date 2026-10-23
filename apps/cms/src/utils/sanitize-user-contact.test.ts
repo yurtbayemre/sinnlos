@@ -301,3 +301,50 @@ describe("stripSensitiveUserFields — defensive edges (no crash)", () => {
     expect(b).not.toHaveProperty("email");
   });
 });
+
+describe("stripSensitiveUserFields — a BLOCKED user keeps its attribution only (v0.28)", () => {
+  const blocked = () =>
+    fullUser({
+      blocked: true,
+      avatar: { id: 1, url: "/a.png" },
+      department: { id: 2, name: "Eng" },
+      manager: fullUser({ id: 8, documentId: "usr_8" }),
+    });
+  const ATTRIBUTION = {
+    id: 7,
+    documentId: "usr_7",
+    username: "ada",
+    displayName: "Ada Lovelace",
+    blocked: true,
+  };
+
+  it("cuts a populated author for a member and for staff (contact: false)", () => {
+    const announcement = { id: 1, title: "Hi", author: blocked() };
+    expect(strip(announcement, models["api::announcement.announcement"]).author).toEqual(ATTRIBUTION);
+    const staff = stripSensitiveUserFields(
+      { id: 1, title: "Hi", author: blocked() },
+      models["api::announcement.announcement"],
+      { getModel, contact: false },
+    );
+    expect(staff.author).toEqual(ATTRIBUTION);
+  });
+
+  it("leaves an active user to the contact rule (staff keep the contact fields)", () => {
+    const staff = stripSensitiveUserFields(fullUser({ blocked: false }), models[USER_UID], {
+      getModel,
+      contact: false,
+    });
+    expect(staff).toEqual(fullUser({ blocked: false }));
+    expect(strip(fullUser({ blocked: false }), models[USER_UID])).not.toHaveProperty("email");
+  });
+
+  it("cuts blocked members inside a populated relation list", () => {
+    const team = { id: 3, members: [blocked(), fullUser({ id: 9, documentId: "usr_9" })] };
+    const out = stripSensitiveUserFields(team, models["api::team.team"], {
+      getModel,
+      contact: false,
+    });
+    expect(out.members[0]).toEqual(ATTRIBUTION);
+    expect(out.members[1]).toHaveProperty("email");
+  });
+});
