@@ -83,6 +83,14 @@ const GUARDED_RAW_WRITERS: Readonly<Record<string, { rule: GuardRule; writes: st
       "advance (lockDocument, advanceRevision) every announcement, event and document linking " +
       "the deleted row, ascending (§D rule 13)",
   },
+  // v0.28, lane A3.
+  "utils/poll-voter-retention.ts": {
+    rule: "under the lock with a revision advance",
+    writes:
+      "a closed poll's votes (each voter's later duplicates deleted, the voter links removed) and " +
+      "votersRemovedAt on every row of the poll, after lockDocument with the rule re-checked on a " +
+      "fresh read, then advanceRevision, in one transaction per poll",
+  },
   "seed-demo.ts": {
     rule: "boot seed of a fresh database",
     writes:

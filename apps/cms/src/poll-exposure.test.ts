@@ -90,6 +90,8 @@ const REVIEWED_CONSUMERS: Readonly<Record<string, string>> = {
   "utils/poll-ballots.ts":
     "the results count (FX20), called by the results handler after canSeePoll; counts only, no voter",
   "utils/poll-department-delete.ts": "department delete hook, writes `audience` only",
+  "utils/poll-voter-retention.ts":
+    "v0.28 retention, internal: removes a closed poll's voter links and stamps votersRemovedAt; serves no row, sends nothing",
   "utils/restricted-relations.ts": "FX05 guard: no source is trusted into polls",
   "utils/write-allowlist.ts":
     "the poll write rule of the moderator class: checks payloads, serves no row",

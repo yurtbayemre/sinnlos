@@ -65,6 +65,8 @@ export interface PublishedPoll extends PollTargeting {
   visibleToGuests: boolean;
   /** Strictly true only when the column is true (see poll-audience.ts). */
   guestsCanVote: boolean;
+  /** v0.28: the retention removed the voter links (utils/poll-voter-retention.ts); no vote any more. */
+  votersRemoved: boolean;
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -151,6 +153,7 @@ const POLL_COLUMNS = [
   "audience",
   "visibleToGuests",
   "guestsCanVote",
+  "votersRemovedAt",
 ];
 const POLL_POPULATE = { departments: { select: ["documentId", "name"] } };
 
@@ -291,5 +294,6 @@ function toPublishedPoll(row: unknown): PublishedPoll | null {
     // (fields/boolean.js fromDB); anything else, NULL included, is "no".
     visibleToGuests: row.visibleToGuests === true,
     guestsCanVote: row.guestsCanVote === true,
+    votersRemoved: row.votersRemovedAt != null,
   };
 }
