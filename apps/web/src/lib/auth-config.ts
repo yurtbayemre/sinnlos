@@ -265,4 +265,3 @@ export function localSignInEnabled(env: Env): boolean {
 }
 
 export const LOCAL_ENABLED = localSignInEnabled(process.env);
-
