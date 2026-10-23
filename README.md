@@ -216,7 +216,7 @@ Content types: `C` = create, `R` = find + findOne, `U` = update,
 
 | Content type      | `admin_role` | `editor` | `department_head` | `team_lead` | `member` | `guest` | `authenticated` |
 | ----------------- | ------------ | -------- | ----------------- | ----------- | -------- | ------- | --------------- |
-| `acknowledgement` | CRUD         | CR       | CR                | CR          | CR       | —       | CR              |
+| `acknowledgement` | CR           | CR       | CR                | CR          | CR       | —       | CR              |
 | `announcement`    | CRUD         | CRUD     | CRU               | R           | R        | —       | R               |
 | `classified`      | CRUD         | CRUD     | CRUD              | CRUD        | CRUD     | —       | R               |
 | `comment`         | CRD          | CRD      | CRD               | CRD         | CRD      | R       | CR              |
@@ -254,6 +254,7 @@ Custom actions and plugin routes (`✓` = granted, `—` = not granted):
 | `api::kudos.kudos.celebrations`                 | `GET /api/celebrations`                         | ✓            | ✓        | ✓                 | ✓           | ✓        | —       | —               |
 | `api::notification.notification.markRead`       | `POST /api/notifications/mark-read`             | ✓            | ✓        | ✓                 | ✓           | ✓        | ✓       | ✓               |
 | `api::notification.notification.markAllRead`    | `POST /api/notifications/mark-all-read`         | ✓            | ✓        | ✓                 | ✓           | ✓        | ✓       | ✓               |
+| `api::notification.notification.unreadCount`    | `GET /api/notifications/unread-count`           | ✓            | —        | —                 | —           | —        | —       | —               |
 | `api::poll-vote.poll-vote.vote`                 | `POST /api/polls/:id/vote`                      | ✓            | ✓        | ✓                 | ✓           | ✓        | ✓       | ✓               |
 | `api::poll-vote.poll-vote.results`              | `GET /api/polls/:id/results`                    | ✓            | ✓        | ✓                 | ✓           | ✓        | ✓       | ✓               |
 | `api::poll.poll.batchResults`                   | `GET /api/poll-results`                         | ✓            | ✓        | ✓                 | ✓           | ✓        | ✓       | ✓               |

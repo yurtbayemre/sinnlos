@@ -148,6 +148,9 @@ services:
       # v0.27: the roles whose local accounts must use a second factor
       # (TOTP); empty = admin_role,editor (the default), `none` = nobody.
       MFA_REQUIRED_ROLES: ${MFA_REQUIRED_ROLES:-}
+      # v0.28: modules and features switched off (a comma list, empty = all
+      # on); the same value as the web. An unknown name refuses the boot.
+      FEATURES_OFF: ${FEATURES_OFF:-}
       SEED_DEMO_DATA: ${SEED_DEMO_DATA:-0}
       # Admin seed — auto-create first Strapi admin on fresh database.
       # Refused (error log, no admin) for template placeholders and
@@ -314,6 +317,8 @@ services:
       MEILISEARCH_ENABLED: ${MEILISEARCH_ENABLED:-0}
       MEILISEARCH_URL: ${MEILISEARCH_URL:-http://sinnlos-meili:7700}
       MEILISEARCH_SEARCH_KEY: ${MEILISEARCH_SEARCH_KEY:-}
+      # v0.28: the same switch list as the cms (navigation, pages, search).
+      FEATURES_OFF: ${FEATURES_OFF:-}
       # Footer links and analytics (v0.26, infra/.env.example), all optional.
       SOURCE_URL: ${SOURCE_URL:-}
       PRIVACY_URL: ${PRIVACY_URL:-}
