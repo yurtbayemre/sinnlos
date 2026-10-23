@@ -1,13 +1,13 @@
 /**
- * The message keys of the auth and profile form codes (AC02): the four
- * forms (sign-in, register, profile, password) translate the codes their
+ * The message keys of the auth and profile form codes (AC02): the three
+ * forms (sign-in, profile, password) translate the codes their
  * Server Actions answer through these maps, never a Strapi message.
  * Checked against the catalog's keys by the type (messages/en.json via
  * global.d.ts) and against both catalogs by form-messages.test.ts. No
  * server-only import: the forms are client components.
  */
 import type { Messages } from "next-intl";
-import type { RegisterErrorCode, SignInErrorCode } from "@/lib/auth-actions";
+import type { SignInErrorCode } from "@/lib/auth-actions";
 import type {
   PasswordErrorCode,
   PasswordFormState,
@@ -15,8 +15,8 @@ import type {
   ProfileFormState,
 } from "@/lib/profile-actions";
 
-/** Minimum password length of the register and change-password forms. */
-export const PASSWORD_MIN_LENGTH = 6;
+/** Minimum password length of the password forms (v0.27: the shared rule). */
+export { PASSWORD_MIN_LENGTH } from "@sinnlos/domain";
 
 /**
  * Longest profile text (FX26); mirrors PROFILE_TEXT_MAX in
@@ -25,17 +25,11 @@ export const PASSWORD_MIN_LENGTH = 6;
  */
 export const PROFILE_TEXT_MAX = 255;
 
-/** Sign-in and register codes → keys of the `auth` namespace. */
+/** Sign-in codes → keys of the `auth` namespace. */
 export const AUTH_FORM_MESSAGES = {
   invalidCredentials: "error_invalidCredentials",
   rateLimited: "error_rateLimited",
-  registrationDisabled: "error_registrationDisabled",
-  missingFields: "error_missingFields",
-  passwordTooShort: "error_passwordTooShort",
-  emailTaken: "error_emailTaken",
-  registrationFailed: "error_registrationFailed",
-  accountCreatedSignInManually: "error_accountCreatedSignInManually",
-} as const satisfies Record<SignInErrorCode | RegisterErrorCode, keyof Messages["auth"]>;
+} as const satisfies Record<SignInErrorCode, keyof Messages["auth"]>;
 
 type ProfileCode = ProfileErrorCode | NonNullable<ProfileFormState["success"]>;
 type PasswordCode = PasswordErrorCode | NonNullable<PasswordFormState["success"]>;

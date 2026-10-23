@@ -189,7 +189,6 @@ export async function main(args) {
       DEMO_MODE: "0",
       ENTRA_ENABLED: "0",
       AUTH_LOCAL_ENABLED: "1",
-      LOCAL_REGISTRATION: "0",
       LIVE_EVENTS_DISABLED: "1",
       REVALIDATE_SECRET: revalidate,
       INTERNAL_UPLOAD_TOKEN: upload,

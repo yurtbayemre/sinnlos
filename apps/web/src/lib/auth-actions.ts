@@ -6,7 +6,7 @@
  * Components that close over dynamically-imported symbols (like the
  * previous topbar sign-out button) don't work reliably.
  *
- * The form actions answer machine codes (AC02); the forms translate them
+ * The form actions answer machine codes (AC02); the form translates them
  * through lib/auth/form-messages.ts. No Strapi message reaches the UI.
  */
 import { headers } from "next/headers";
@@ -14,19 +14,10 @@ import { redirect, unstable_rethrow } from "next/navigation";
 import type { Route } from "next";
 import { CredentialsSignin } from "next-auth";
 import { signIn, signOut } from "@/auth";
-import { ENTRA, REGISTRATION_ENABLED, entraLogoutUrl } from "@/lib/auth-config";
+import { ENTRA, entraLogoutUrl } from "@/lib/auth-config";
 import { isRateLimitedSignIn } from "@/lib/auth-errors";
-import { STRAPI_URL } from "@/lib/config";
-import { LOCAL_SIGN_IN_TIMEOUT_MS, countsAsFailure } from "@/lib/auth/credentials";
-import { PASSWORD_MIN_LENGTH } from "@/lib/auth/form-messages";
-import {
-  clientIpFrom,
-  loginRateLimiter,
-  maskIdentifier,
-  type LoginAttemptOutcome,
-} from "@/lib/login-rate-limit";
+import { clientIpFrom, loginRateLimiter } from "@/lib/login-rate-limit";
 import { getSession } from "@/lib/session";
-import { parseStrapiError } from "@/lib/strapi-error";
 import { safeInternalPath } from "@/lib/utils";
 
 export async function signInWithMicrosoft(formData: FormData) {
@@ -88,114 +79,6 @@ export async function signInWithCredentials(
     // Strapi unreachable — one answer, no oracle.
     if (!(err instanceof CredentialsSignin)) console.error("[auth] sign-in failed", err);
     return { error: "invalidCredentials", values };
-  }
-  return {};
-}
-
-/** What the register form shows (auth.error_<code>). */
-export type RegisterErrorCode =
-  | "registrationDisabled"
-  | "missingFields"
-  | "passwordTooShort"
-  | "rateLimited"
-  | "emailTaken"
-  | "registrationFailed"
-  | "accountCreatedSignInManually";
-
-export type RegisterFormState = {
-  error?: RegisterErrorCode;
-  values?: { username: string; email: string };
-};
-
-/**
- * Strapi's register refusals the form names (users-permissions 5.55.1
- * controllers/auth.js, ApplicationError): every refusal there is a 400
- * ApplicationError or ValidationError, so the parsed envelope message is
- * compared exactly; anything else is "registrationFailed". The text itself
- * never reaches the UI.
- */
-const REGISTER_REFUSALS: ReadonlyMap<string, RegisterErrorCode> = new Map([
-  ["Email or Username are already taken", "emailTaken"],
-  ["Register action is currently disabled", "registrationDisabled"],
-]);
-
-/** The code of a refused POST /api/auth/local/register. */
-async function registerRefusal(res: Response): Promise<RegisterErrorCode> {
-  if (res.status === 429) return "rateLimited";
-  const { message } = parseStrapiError(await res.text().catch(() => ""));
-  return (message && REGISTER_REFUSALS.get(message)) || "registrationFailed";
-}
-
-export async function registerLocalAccount(
-  _prev: RegisterFormState,
-  formData: FormData,
-): Promise<RegisterFormState> {
-  // Server-side gate: the register page hides itself when registration is
-  // off, but the action must enforce it too — otherwise the endpoint stays
-  // callable directly (e.g. with a stale form or crafted request).
-  if (!REGISTRATION_ENABLED) return { error: "registrationDisabled" };
-  const username = String(formData.get("username") ?? "").trim();
-  const email = String(formData.get("email") ?? "").trim();
-  const password = String(formData.get("password") ?? "");
-  // React 19 resets the form after EVERY settled action, incl. error
-  // returns — echo the typed values back so the form can restore them
-  // (issue #30; classified-form pattern). The password is deliberately
-  // NEVER echoed through the server roundtrip.
-  const values = { username, email };
-  if (!username || !email || !password) return { values, error: "missingFields" };
-  if (password.length < PASSWORD_MIN_LENGTH) return { values, error: "passwordTooShort" };
-  // Same limiter as the login (issue #23): registration is part of the auth
-  // surface, so a blocked source may not probe here either. The attempt is
-  // reserved before the request and settled after it (FX39).
-  const clientIp = clientIpFrom(await headers());
-  const ticket = loginRateLimiter.tryAcquire(clientIp, email);
-  if (ticket === "blocked") return { values, error: "rateLimited" };
-  // Counting rule mirrors authorize(): only real rejections (Strapi answers
-  // invalid input and a taken email with 400) count, never 5xx/429 outages
-  // or network errors. A created account is "neutral" too: it proves no
-  // password of an existing account, so it resets nothing (the sign-in
-  // below settles its own attempt).
-  let outcome: LoginAttemptOutcome = "neutral";
-  let res: Response | null = null;
-  try {
-    res = await fetch(`${STRAPI_URL}/api/auth/local/register`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        // Forward the real client IP so Strapi's per-IP throttle counts per
-        // client instead of pooling everyone on the web container's IP
-        // (issue #23; Traefik overwrites client-spoofed values).
-        "X-Forwarded-For": clientIp,
-      },
-      body: JSON.stringify({ username, email, password, displayName: username }),
-      cache: "no-store",
-      // The local sign-in's timeout (lib/auth/credentials.ts).
-      signal: AbortSignal.timeout(LOCAL_SIGN_IN_TIMEOUT_MS),
-    });
-    if (!res.ok && countsAsFailure(res.status)) outcome = "failure";
-  } catch {
-    // The timeout (or a network failure) would otherwise throw uncaught out
-    // of the Server Action — an opaque digest error page instead of the
-    // {error} form state.
-    res = null;
-  } finally {
-    // The transition log matches the one in authorize() so a block engaged
-    // via this path is visible too.
-    if (loginRateLimiter.settle(ticket, outcome)) {
-      console.warn(
-        `[login-rate-limit] block engaged ip=${clientIp} identifier=${maskIdentifier(email)}`,
-      );
-    }
-  }
-  if (!res) return { values, error: "registrationFailed" };
-  if (!res.ok) return { values, error: await registerRefusal(res) };
-  // Sign straight in with the new credentials.
-  try {
-    await signIn("local", { identifier: email, password, redirectTo: "/" });
-  } catch (err) {
-    // The success redirect (NEXT_REDIRECT) must reach Next.
-    unstable_rethrow(err);
-    return { values, error: "accountCreatedSignInManually" };
   }
   return {};
 }

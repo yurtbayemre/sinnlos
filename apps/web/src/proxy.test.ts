@@ -37,7 +37,10 @@ const { default: proxy, isPublicPath } = await import("./proxy");
 describe("isPublicPath — public entries", () => {
   it("lets the auth pages through", () => {
     expect(isPublicPath("/sign-in")).toBe(true);
-    expect(isPublicPath("/register")).toBe(true);
+    expect(isPublicPath("/forgot-password")).toBe(true);
+    expect(isPublicPath("/set-password")).toBe(true);
+    // v0.27: self-registration is gone; /register is guarded like any page.
+    expect(isPublicPath("/register")).toBe(false);
   });
 
   it("lets the Auth.js endpoints through", () => {
@@ -107,8 +110,8 @@ describe("isPublicPath — guarded paths", () => {
     for (const path of [
       "/sign-in2",
       "/sign-in/x",
-      "/register2",
-      "/register/x",
+      "/forgot-password2",
+      "/set-password/x",
       "/api/live",
       "/api/live/emit/x",
       "/api/live/emitx",
@@ -192,7 +195,8 @@ const passes = (res: Response) => res.headers.get("x-middleware-next") === "1";
 
 const PUBLIC_REQUESTS = [
   "/sign-in",
-  "/register",
+  "/forgot-password",
+  "/set-password",
   "/api/auth/session",
   "/api/live/emit",
   "/robots.txt",

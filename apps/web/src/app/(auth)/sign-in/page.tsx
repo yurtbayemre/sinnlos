@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { redirect } from "next/navigation";
 import type { Route } from "next";
 import { getTranslations } from "next-intl/server";
@@ -7,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { SiteFooter } from "@/components/layout/site-footer";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { LocalSignInForm } from "@/components/auth/local-sign-in-form";
-import { LOCAL_ENABLED, MICROSOFT_ENABLED, OIDC, REGISTRATION_ENABLED } from "@/lib/auth-config";
+import { LOCAL_ENABLED, MICROSOFT_ENABLED, OIDC } from "@/lib/auth-config";
 import { signInWithMicrosoft, signInWithOidc } from "@/lib/auth-actions";
 import { signInErrorKey } from "@/lib/entra-exchange";
 import { safeInternalPath } from "@/lib/utils";
@@ -114,15 +113,6 @@ export default async function SignInPage({
           )}
 
           {LOCAL_ENABLED && <LocalSignInForm from={from} />}
-
-          {REGISTRATION_ENABLED && (
-            <p className="text-center text-sm text-muted-foreground">
-              {t("noAccount")}{" "}
-              <Link href="/register" className="text-primary hover:underline">
-                {t("createOne")}
-              </Link>
-            </p>
-          )}
 
           <p className="text-center text-xs text-muted-foreground">{t("itPolicy")}</p>
         </CardContent>
