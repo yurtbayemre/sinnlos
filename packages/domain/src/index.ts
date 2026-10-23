@@ -18,6 +18,7 @@ export * from "./authoring/validators.js";
 export * from "./authoring/wiki.js";
 export * from "./classified.js";
 export * from "./comment-target.js";
+export * from "./data-protection.js";
 export * from "./entry-id.js";
 export * from "./live-contract.js";
 export * from "./notification-title.js";

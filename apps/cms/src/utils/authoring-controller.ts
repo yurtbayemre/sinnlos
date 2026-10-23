@@ -631,6 +631,7 @@ export async function editableFields(
         mandatory: draft.mandatory !== false,
         completionMode: text(draft.completionMode) ?? "confirm",
         validityMonths: typeof draft.validityMonths === "number" ? draft.validityMonths : null,
+        contact: text(draft.contact),
         departments: documentIdsOf(draft.departments),
         needsRetarget: retarget,
         coverImage: editableMediaOf(draft.coverImage),

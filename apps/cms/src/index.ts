@@ -38,6 +38,7 @@ import { backfillPollAudience } from "./utils/poll-audience-backfill";
 import { backfillRevisions } from "./utils/revision-backfill";
 import { assertNoRevisionDrafts } from "./utils/revision-dp-guard";
 import { backfillTargetingFlags } from "./utils/targeting-flags-backfill";
+import { trainingEvidenceRetentionYears } from "./utils/training-evidence";
 
 /**
  * Strapi application lifecycle: a thin orchestrator (roadmap B01). The
@@ -112,6 +113,8 @@ export default {
     // does any users-permissions JWT mode but legacy-support (refresh mode
     // would bypass the token version and the second-factor claims).
     parseMfaRequiredRoles(process.env.MFA_REQUIRED_ROLES);
+    // v0.28: a retention the evidence job cannot read refuses the boot too.
+    trainingEvidenceRetentionYears(process.env);
     const jwtMode =
       strapi.config?.get?.("plugin::users-permissions.jwtManagement", "legacy-support") ??
       "legacy-support";
