@@ -28,6 +28,17 @@
  *   - one audit row (keys only) in the same transaction.
  * Team membership stays on the team (v0.22): this module never writes it.
  *
+ * v0.27 (deep-dive plan-v027-rev2.md), under the same lock and admin check:
+ *   - invite: a new local account without a password (e-mail unique across
+ *     every provider, case-insensitively; username from the e-mail's local
+ *     part, numbered until free), and an invitation link by mail
+ *     (utils/password-link.ts, utils/account-mail.ts). The account is
+ *     committed first; a failed mail keeps it, and send-link retries;
+ *   - send-link: a new invitation (no password yet) or reset link (one set)
+ *     for a local account bound to no identity provider;
+ *   - reset-mfa: clears another user's second factor and raises their
+ *     token version (they enroll again at the next sign-in).
+ *
  * NOT COVERED: panel and Entra writes to users keep their own paths (the
  * panel's `user` form, the `[entra]` sign-in log line).
  */
@@ -35,10 +46,12 @@ import {
   FORM_KEY,
   ROLE_PRIVILEGE_ORDER,
   USER_ADMIN_FIELDS,
+  USER_ADMIN_INVITE_FIELDS,
   USER_ADMIN_PAGE_SIZE,
   isRoleType,
   type RoleType,
   type UserAdminDetail,
+  type UserAdminInvite,
   type UserAdminListQuery,
   type UserAdminListResponse,
   type UserAdminRow,
@@ -47,6 +60,13 @@ import {
 import { errors } from "@strapi/utils";
 
 import { parseEntraConfig } from "../entra/config";
+import { emailIndexReady } from "../bootstrap/entra-identity-index";
+import { accountMailReady, sendAccountMail, type AccountMailHost } from "./account-mail";
+import { clearMfa } from "./mfa";
+import { isEnrolled, lockUserRow, versionOf, type MfaHost } from "./mfa-core";
+import { refuse } from "./refusal";
+import { issueLink, isLocalUnbound, LINK_SELECT, linkPurpose } from "./password-link";
+import { localSignInEnabled } from "./sign-in-policy";
 import { idpOf } from "../idp/exchange-core";
 import { parseOidcConfig } from "../oidc/config";
 import {
@@ -81,8 +101,11 @@ export interface UserAdminHost {
       count(params: Row): Promise<number>;
       update(params: Row): Promise<unknown>;
     };
-    transaction<T>(callback: () => Promise<T>): Promise<T>;
+    transaction<T>(
+      callback: (scope: { trx: { raw(sql: string, bindings: unknown[]): unknown } }) => Promise<T>,
+    ): Promise<T>;
   };
+  plugin(name: string): { service(name: string): unknown };
 }
 
 const isRecord = (value: unknown): value is Row =>
@@ -102,6 +125,12 @@ const ROW_SELECT = [
   "entraTenantId",
   "oidcIssuer",
   "createdAt",
+  // v0.27, for the invited and mfa flags only (never in an answer):
+  "provider",
+  "password",
+  "microsoftOid",
+  "oidcSubject",
+  "totpEnabledAt",
 ];
 const ROW_POPULATE = {
   role: { select: ["type"] },
@@ -148,6 +177,8 @@ function toRow(row: Row): UserAdminRow {
       isRecord(department) && typeof department.documentId === "string"
         ? { documentId: department.documentId, name: text(department.name) ?? "" }
         : null,
+    invited: isLocalUnbound(row) && !text(row.password),
+    mfa: isEnrolled(row),
   };
 }
 
@@ -437,6 +468,243 @@ export async function handRoleToEntra(
       .query(USER_UID)
       .update({ where: { id }, data: { roleSource: idp, entraAppliedRole: null } });
     await audit(strapi, user, callerId, ["roleSource"]);
+  });
+  return userDetail(strapi, id, callerId);
+}
+
+const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const MAX_TEXT = 255;
+
+/** The invite body: USER_ADMIN_INVITE_FIELDS with their types, or a 400 naming the rest. */
+export function parseUserAdminInvite(body: unknown): UserAdminInvite {
+  const data = isRecord(body) ? body.data : undefined;
+  if (!isRecord(data))
+    throw new errors.ValidationError('Missing "data" payload in the request body');
+  const unknown = Object.keys(data).filter(
+    (key) => !(USER_ADMIN_INVITE_FIELDS as readonly string[]).includes(key),
+  );
+  if (unknown.length > 0) refuseKeys(unknown);
+  const bad: string[] = [];
+  const email = typeof data.email === "string" ? data.email.trim().toLowerCase() : "";
+  if (!EMAIL.test(email) || email.length > MAX_TEXT) bad.push("email");
+  const invite: UserAdminInvite = { email };
+  if (data.displayName !== undefined && data.displayName !== null) {
+    if (typeof data.displayName === "string" && data.displayName.trim().length <= MAX_TEXT)
+      invite.displayName = data.displayName.trim() || null;
+    else bad.push("displayName");
+  }
+  if (data.role !== undefined) {
+    if (isRoleType(data.role) && (ROLE_PRIVILEGE_ORDER as readonly string[]).includes(data.role))
+      invite.role = data.role;
+    else bad.push("role");
+  }
+  if (data.department !== undefined) {
+    if (data.department === null || isDocumentId(data.department))
+      invite.department = data.department as string | null;
+    else bad.push("department");
+  }
+  if (bad.length > 0) refuseKeys(bad);
+  return invite;
+}
+
+/** A free username from the e-mail's local part (numbered when taken). */
+async function freeUsername(strapi: UserAdminHost, email: string): Promise<string> {
+  const base =
+    email
+      .split("@")[0]
+      .replace(/[^a-z0-9._-]+/g, "-")
+      .replace(/^[-.]+|[-.]+$/g, "")
+      .slice(0, 40) || "user";
+  const stem = base.length >= 3 ? base : `${base}-user`;
+  for (let n = 1; n <= 1000; n++) {
+    const candidate = n === 1 ? stem : `${stem}-${n}`;
+    const taken = await strapi.db
+      .query(USER_UID)
+      .findOne({ where: { username: { $eqi: candidate } }, select: ["id"] });
+    if (!taken) return candidate;
+  }
+  throw new errors.ApplicationError("No free username");
+}
+
+async function auditLink(
+  strapi: UserAdminHost,
+  user: Row,
+  callerId: number,
+  action: "create" | "update",
+  keys: string[],
+): Promise<void> {
+  await recordAuditEvent(strapi as unknown as AuditHost, {
+    action,
+    targetUid: USER_UID,
+    targetDocumentId: text(user.documentId) ?? String(user.id),
+    actorKind: "user",
+    actorUserId: callerId,
+    actorClass: "moderator",
+    source: "content-api",
+    keys,
+  });
+}
+
+/** Refuses when invitations cannot work on this instance. */
+function assertLinksPossible(): void {
+  if (!localSignInEnabled()) refuseKeys([FORM_KEY], { [FORM_KEY]: "localSignInOff" });
+  if (!accountMailReady().ok) refuseKeys([FORM_KEY], { [FORM_KEY]: "mailNotConfigured" });
+}
+
+/** A database uniqueness violation (Postgres 23505, SQLite SQLITE_CONSTRAINT_UNIQUE). */
+function uniqueViolation(err: unknown): boolean {
+  if (!isRecord(err)) return false;
+  const code = String(err.code ?? "");
+  return (
+    code === "23505" ||
+    code.startsWith("SQLITE_CONSTRAINT") ||
+    /unique constraint/i.test(String(err.message ?? ""))
+  );
+}
+
+const mailHost = (strapi: UserAdminHost) => strapi as unknown as AccountMailHost;
+
+/** POST /api/user-management/invite (see the module comment). */
+export async function inviteUser(
+  strapi: UserAdminHost,
+  callerId: number,
+  invite: UserAdminInvite,
+): Promise<{ id: number; mail: "sent" | "failed" }> {
+  assertLinksPossible();
+  // rev3 #5: without the e-mail index a second account for an address could slip in.
+  if (emailIndexReady() !== true) refuse(409, "email_duplicates_exist");
+  let mail: { to: string; token: string; name: string } | null = null;
+  let id = 0;
+  try {
+    await strapi.db.transaction(async () => {
+      await lockDirectory(strapi);
+      await assertActiveAdmin(strapi, callerId);
+      const users = strapi.db.query(USER_UID);
+      const taken = await users.findOne({
+        where: { email: { $eqi: invite.email } },
+        select: ["id"],
+      });
+      if (taken) refuseKeys(["email"], { email: "taken" });
+      const role = await strapi.db
+        .query(ROLE_UID)
+        .findOne({ where: { type: invite.role ?? "member" }, select: ["id"] });
+      const roleId = idOf(role);
+      if (roleId === null) refuseKeys(["role"]);
+      let departmentId: number | null = null;
+      if (invite.department) {
+        const department = await strapi.db
+          .query(DEPARTMENT_UID)
+          .findOne({ where: { documentId: invite.department }, select: ["id"] });
+        departmentId = idOf(department);
+        if (departmentId === null) refuseKeys(["department"]);
+      }
+      const username = await freeUsername(strapi, invite.email);
+      const service = strapi.plugin("users-permissions").service("user") as {
+        add(values: Row): Promise<unknown>;
+      };
+      const created = await service.add({
+        username,
+        email: invite.email,
+        displayName: invite.displayName ?? null,
+        provider: "local",
+        confirmed: true,
+        blocked: false,
+        role: roleId,
+        department: departmentId,
+      });
+      const createdId = idOf(created);
+      const row =
+        createdId === null
+          ? null
+          : await users.findOne({ where: { id: createdId }, select: LINK_SELECT });
+      if (!isRecord(row)) throw new errors.ApplicationError("Invitation not created");
+      id = row.id as number;
+      const token = await issueLink(strapi as unknown as MfaHost, row, "invite");
+      mail = { to: invite.email, token, name: invite.displayName || username };
+      await auditLink(strapi, row, callerId, "create", ["invite"]);
+    });
+  } catch (err) {
+    // Another writer (the panel, a first IdP sign-in) took the address meanwhile.
+    if (uniqueViolation(err)) refuseKeys(["email"], { email: "taken" });
+    throw err;
+  }
+  const sent = mail
+    ? await sendAccountMail(mailHost(strapi), {
+        ...(mail as { to: string; token: string; name: string }),
+        kind: "invite",
+      })
+    : false;
+  return { id, mail: sent ? "sent" : "failed" };
+}
+
+/** POST /api/user-management/:id/send-link: a new invitation or reset link. */
+export async function sendLink(
+  strapi: UserAdminHost,
+  callerId: number,
+  id: number,
+): Promise<{ id: number; mail: "sent" | "failed" }> {
+  assertLinksPossible();
+  let mail: {
+    to: string;
+    token: string;
+    name: string;
+    kind: "invite" | "reset";
+    locale: unknown;
+  } | null = null;
+  await strapi.db.transaction(async ({ trx }) => {
+    await lockDirectory(strapi);
+    await assertActiveAdmin(strapi, callerId);
+    // rev3 #7: the link is stamped with the version read under the row lock.
+    await lockUserRow(strapi as unknown as MfaHost, trx, id);
+    const row = await strapi.db.query(USER_UID).findOne({ where: { id }, select: LINK_SELECT });
+    if (!isRecord(row)) throw new errors.NotFoundError("Not Found");
+    if (!isLocalUnbound(row)) refuseKeys([FORM_KEY], { [FORM_KEY]: "notLocal" });
+    if (row.blocked === true) refuseKeys([FORM_KEY], { [FORM_KEY]: "blocked" });
+    const kind = linkPurpose(row);
+    const token = await issueLink(strapi as unknown as MfaHost, row, kind);
+    mail = {
+      to: text(row.email) ?? "",
+      token,
+      name: text(row.displayName) || text(row.username) || "",
+      kind,
+      locale: row.locale,
+    };
+    await auditLink(strapi, row, callerId, "update", [
+      kind === "invite" ? "invite" : "passwordLink",
+    ]);
+  });
+  const sent = mail ? await sendAccountMail(mailHost(strapi), mail) : false;
+  return { id, mail: sent ? "sent" : "failed" };
+}
+
+/**
+ * POST /api/user-management/:id/reset-mfa: never one's own (the
+ * self-service path is disable). The admin's session must still be at the
+ * version it was verified at (rev3 #1).
+ */
+export async function resetUserMfa(
+  strapi: UserAdminHost,
+  callerId: number,
+  callerTv: number | undefined,
+  id: number,
+): Promise<UserAdminDetail> {
+  await strapi.db.transaction(async ({ trx }) => {
+    await lockDirectory(strapi);
+    await assertActiveAdmin(strapi, callerId);
+    const caller = await strapi.db
+      .query(USER_UID)
+      .findOne({ where: { id: callerId }, select: ["id", "tokenVersion"] });
+    if (
+      callerTv === undefined ||
+      versionOf(isRecord(caller) ? caller.tokenVersion : 0) !== callerTv
+    ) {
+      refuse(401, "session_outdated", "The session is out of date; sign in again");
+    }
+    const user = await loadUser(strapi, id);
+    if (!user) throw new errors.NotFoundError("Not Found");
+    if (user.id === callerId) refuseKeys([FORM_KEY], { [FORM_KEY]: "selfChange" });
+    await clearMfa(strapi as never, trx, id);
+    await audit(strapi, user, callerId, ["mfa"]);
   });
   return userDetail(strapi, id, callerId);
 }

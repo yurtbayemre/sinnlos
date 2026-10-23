@@ -2,18 +2,23 @@ import { errors } from "@strapi/utils";
 
 import { ADMIN, hasRole } from "../../../bootstrap/roles";
 import { parseRowId } from "../../../utils/entry-id";
+import { answerRefusals } from "../../../utils/refusal";
 import {
   handRoleToEntra,
+  inviteUser,
   listUsers,
+  parseUserAdminInvite,
   parseUserAdminQuery,
   parseUserAdminUpdate,
+  resetUserMfa,
+  sendLink,
   updateUser,
   userDetail,
   type UserAdminHost,
 } from "../../../utils/user-admin";
 
 interface Context {
-  state: { user?: { id?: unknown; role?: { type?: string } | null } };
+  state: { user?: { id?: unknown; role?: { type?: string } | null }; assurance?: { tv: number } };
   params: { id?: unknown };
   query?: Record<string, unknown>;
   request: { body?: unknown };
@@ -73,5 +78,27 @@ export default {
     const callerId = adminId(ctx);
     noQuery(ctx);
     answer(ctx, { data: await handRoleToEntra(host(), callerId, targetId(ctx)) });
+  },
+  async invite(ctx: Context) {
+    const callerId = adminId(ctx);
+    noQuery(ctx);
+    const invite = parseUserAdminInvite(ctx.request.body);
+    await answerRefusals(ctx, async () => {
+      answer(ctx, { data: await inviteUser(host(), callerId, invite) });
+      ctx.status = 201;
+    });
+  },
+  async sendLink(ctx: Context) {
+    const callerId = adminId(ctx);
+    noQuery(ctx);
+    answer(ctx, { data: await sendLink(host(), callerId, targetId(ctx)) });
+  },
+  async resetMfa(ctx: Context) {
+    const callerId = adminId(ctx);
+    noQuery(ctx);
+    const id = targetId(ctx);
+    await answerRefusals(ctx, async () => {
+      answer(ctx, { data: await resetUserMfa(host(), callerId, ctx.state.assurance?.tv, id) });
+    });
   },
 };
