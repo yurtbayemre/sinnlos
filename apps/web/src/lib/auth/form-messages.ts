@@ -44,6 +44,8 @@ export const PROFILE_FORM_MESSAGES = {
   profileSaveFailed: "error_saveFailed",
   passwordChanged: "passwordChanged",
   passwordTooShort: "passwordTooShort",
+  passwordTooLong: "passwordTooLong",
+  passwordCommon: "passwordCommon",
   passwordMismatch: "passwordMismatch",
   passwordWrongOrThrottled: "passwordChangeFailed",
   passwordRateLimited: "passwordRateLimited",

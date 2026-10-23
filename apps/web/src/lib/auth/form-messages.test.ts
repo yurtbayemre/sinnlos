@@ -27,6 +27,8 @@ const PROFILE_CODES = ["profileSaved", "tooLong", "invalid", "profileSaveFailed"
 const PASSWORD_CODES = [
   "passwordChanged",
   "passwordTooShort",
+  "passwordTooLong",
+  "passwordCommon",
   "passwordMismatch",
   "passwordWrongOrThrottled",
   "passwordRateLimited",

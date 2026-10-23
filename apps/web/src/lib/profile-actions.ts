@@ -11,18 +11,19 @@
  *    then revokes every older JWT of the user (its token version) and
  *    answers with a new one, which goes into this tab's Auth.js session
  *    (keepSessionSignedIn): this tab stays signed in, every other session
- *    of the user lands on /sign-in?expired=1 with its next cms request.
+ *    of the user lands on /sign-in?expired=1 with its next cms request
+ *    (lib/auth/keep-session.ts). v0.27: the new password follows the
+ *    shared rule (12 characters; the cms also refuses common ones).
  *
  * Both answer machine codes (AC02); the forms translate them through
  * lib/auth/form-messages.ts. No Strapi message reaches the UI.
  */
 import { refresh } from "next/cache";
 import { headers } from "next/headers";
-import { unstable_rethrow } from "next/navigation";
-import { unstable_update } from "@/auth";
+import { passwordLengthProblem } from "@sinnlos/domain";
 import { runCmsAction } from "@/lib/action-result";
-import { strapiJwtUpdate } from "@/lib/auth/callbacks";
-import { PASSWORD_MIN_LENGTH, PROFILE_TEXT_MAX } from "@/lib/auth/form-messages";
+import { PROFILE_TEXT_MAX } from "@/lib/auth/form-messages";
+import { keepSessionSignedIn } from "@/lib/auth/keep-session";
 import { clientIpFrom } from "@/lib/login-rate-limit";
 import { strapi } from "@/lib/strapi";
 
@@ -60,11 +61,14 @@ export type ProfileFormState = {
 };
 
 /**
- * A password change's failure: the local checks, then Strapi's refusal of
- * the current password (400), its throttle (429) and an outage.
+ * A password change's failure: the local checks, the cms's password rule
+ * (v0.27: tooShort, tooLong, common), then Strapi's refusal of the current
+ * password (400), its throttle (429) and an outage.
  */
 export type PasswordErrorCode =
   | "passwordTooShort"
+  | "passwordTooLong"
+  | "passwordCommon"
   | "passwordMismatch"
   | "passwordWrongOrThrottled"
   | "passwordRateLimited"
@@ -123,42 +127,14 @@ export async function updateProfile(
   return { error: result.code === "invalid" ? "invalid" : "profileSaveFailed", values };
 }
 
-/**
- * Hands the Strapi JWT of a password change to this tab's Auth.js session
- * (FX40): unstable_update() runs the jwt callback with trigger "update",
- * which takes it with the server's proof (strapiJwtUpdate: an HMAC under
- * the Auth.js secret, so a browser's own POST /api/auth/session cannot
- * store a JWT it made up) for a local session of the same user
- * (lib/auth/callbacks.ts applyStrapiJwtUpdate) and re-issues the session
- * cookie with it through the request's cookie jar. Next then re-renders the
- * page in this same request, and strapi() there already sends the new JWT:
- * lib/strapi-token.ts reads the session from the cookie jar
- * (withJarCookies), not from the request's Cookie header, which still
- * carries the JWT the cms has just revoked. Never throws: the password did
- * change, and without the new JWT this session merely ends with its next
- * cms request (/sign-in?expired=1), like every other one of the user.
- */
-async function keepSessionSignedIn(jwt: unknown): Promise<void> {
-  if (typeof jwt !== "string" || jwt === "") {
-    console.error(
-      "[profile] change password: the cms answered without a JWT; this session ends with its next request",
-    );
-    return;
-  }
-  const update = strapiJwtUpdate(jwt);
-  if (!update) {
-    console.error(
-      "[profile] change password: no AUTH_SECRET to sign the session update; this session ends with its next request",
-    );
-    return;
-  }
-  try {
-    await unstable_update(update as unknown as Parameters<typeof unstable_update>[0]);
-  } catch (error) {
-    unstable_rethrow(error);
-    console.error("[profile] change password: could not store the new JWT in the session", error);
-  }
-}
+/** The cms's password-rule refusals of a password change (v0.27). */
+const PASSWORD_RULE_CODES: Readonly<
+  Record<string, "passwordTooShort" | "passwordTooLong" | "passwordCommon">
+> = {
+  password_tooShort: "passwordTooShort",
+  password_tooLong: "passwordTooLong",
+  password_common: "passwordCommon",
+};
 
 export async function changePassword(
   _prev: PasswordFormState,
@@ -167,10 +143,14 @@ export async function changePassword(
   const currentPassword = String(formData.get("currentPassword") ?? "");
   const password = String(formData.get("password") ?? "");
   const passwordConfirmation = String(formData.get("passwordConfirmation") ?? "");
-  if (password.length < PASSWORD_MIN_LENGTH) return { error: "passwordTooShort" };
+  const length = passwordLengthProblem(password);
+  if (length) return { error: length === "tooShort" ? "passwordTooShort" : "passwordTooLong" };
   if (password !== passwordConfirmation) return { error: "passwordMismatch" };
   const clientIp = clientIpFrom(await headers());
-  const result = await runCmsAction<"passwordRateLimited", { jwt?: unknown } | null>(
+  const result = await runCmsAction<
+    "passwordRateLimited" | "passwordTooShort" | "passwordTooLong" | "passwordCommon",
+    { jwt?: unknown } | null
+  >(
     () =>
       strapi<{ jwt?: unknown } | null>("/api/auth/change-password", {
         method: "POST",
@@ -186,13 +166,23 @@ export async function changePassword(
       label: "[profile] change password",
       // Strapi's throttle (10 attempts/min): say so instead of blaming the
       // current password (FX11).
-      mapError: (cms) => (cms.status === 429 ? "passwordRateLimited" : undefined),
+      // The cms's password rule (v0.27) answers the plugin's 400 with
+      // message password_<problem>.
+      mapError: (cms) =>
+        cms.status === 429 ? "passwordRateLimited" : PASSWORD_RULE_CODES[cms.message ?? ""],
       // FX40: the cms revoked the session's JWT; keep this tab signed in.
-      after: (answer) => keepSessionSignedIn(answer?.jwt),
+      after: (answer) => keepSessionSignedIn(answer?.jwt, "[profile] change password"),
     },
   );
   if (result.ok) return { success: "passwordChanged" };
-  if (result.code === "passwordRateLimited") return { error: "passwordRateLimited" };
+  if (
+    result.code === "passwordRateLimited" ||
+    result.code === "passwordTooShort" ||
+    result.code === "passwordTooLong" ||
+    result.code === "passwordCommon"
+  ) {
+    return { error: result.code };
+  }
   if (result.code === "unavailable") return { error: "passwordChangeUnavailable" };
   // A wrong current password is Strapi's 400 (and so is every other
   // refusal of the request): the form's "check your current password".

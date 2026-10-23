@@ -63,6 +63,9 @@ export type StrapiListResponse<T> = {
 /** A single-object envelope (`/api/me`, custom endpoints). */
 export type StrapiDataResponse<T> = { data: T };
 
+/** The cms's error name for a session that must set up its second factor first (v0.27). */
+export const MFA_SETUP_REQUIRED = "MfaSetupRequired";
+
 /**
  * A plain RequestInit minus the cache knobs: every strapi() call is
  * no-store (see the contract above), so `cache` and `next` are rejected at
@@ -104,7 +107,13 @@ export async function strapi<T>(path: string, init: StrapiInit = {}): Promise<T>
   }
 
   if (!res.ok) {
-    throw new StrapiError(res.status, res.statusText, await res.text());
+    const error = new StrapiError(res.status, res.statusText, await res.text());
+    // v0.27: the session must set up its second factor before anything
+    // else (the cms allows it /api/me and the setup routes only).
+    if (res.status === 403 && token && error.strapiName === MFA_SETUP_REQUIRED) {
+      redirect("/mfa/setup");
+    }
+    throw error;
   }
 
   // DELETE answers 204 with an empty body — res.json() would throw on it.

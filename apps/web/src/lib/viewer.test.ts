@@ -66,6 +66,7 @@ describe("getViewer", () => {
       displayName: "Ada Lovelace",
       role: "editor",
       department: { id: 3, documentId: "dept-3", name: "Engineering", slug: "engineering" },
+      mfaRestricted: false,
     });
     expect(strapiMock.mock.calls).toEqual([["/api/me"]]);
   });
@@ -142,7 +143,15 @@ describe("toViewer", () => {
       "department",
       "displayName",
       "id",
+      "mfaRestricted",
       "role",
     ]);
+  });
+
+  it("reads the second-factor restriction of /api/me (v0.27), false unless it says true", () => {
+    expect(toViewer(meResponse({ mfa: { restricted: true } }).data).mfaRestricted).toBe(true);
+    expect(toViewer(meResponse({ mfa: { restricted: false } }).data).mfaRestricted).toBe(false);
+    expect(toViewer(meResponse({ mfa: { restricted: "yes" } }).data).mfaRestricted).toBe(false);
+    expect(toViewer(meResponse().data).mfaRestricted).toBe(false);
   });
 });
