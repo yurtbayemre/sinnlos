@@ -8,6 +8,7 @@ import {
   type UserAdminListQuery,
 } from "@sinnlos/domain";
 import { FetchErrorBanner } from "@/components/fetch-error";
+import { LOCAL_ENABLED } from "@/lib/auth-config";
 import { ManagePageHeader } from "@/components/manage/page-parts";
 import { buttonVariants } from "@/components/ui/button";
 import { inputClass } from "@/components/manage/form-controls";
@@ -50,7 +51,14 @@ export default async function ManageUsersPage({ searchParams }: Props) {
 
   return (
     <div className="space-y-6">
-      <ManagePageHeader title={t("title")} description={t("description")} back="/manage" />
+      <ManagePageHeader
+        title={t("title")}
+        description={t("description")}
+        back="/manage"
+        action={
+          LOCAL_ENABLED ? { href: "/manage/users/invite", label: t("invite.title") } : undefined
+        }
+      />
       <form method="get" action="/manage/users" className="flex flex-wrap items-end gap-3">
         <div className="min-w-0 flex-1 space-y-1.5">
           <label htmlFor="users-q" className="block text-sm font-medium">
@@ -139,6 +147,16 @@ export default async function ManageUsersPage({ searchParams }: Props) {
               <span className="text-sm text-muted-foreground">
                 {user.department?.name ?? t("list.noDepartment")}
               </span>
+              {user.invited && (
+                <span className="rounded-full bg-muted px-2 py-0.5 text-xs font-medium">
+                  {t("list.invited")}
+                </span>
+              )}
+              {user.mfa && (
+                <span className="rounded-full bg-muted px-2 py-0.5 text-xs font-medium">
+                  {t("list.mfa")}
+                </span>
+              )}
               {user.blocked && (
                 <span className="rounded-full bg-destructive/10 px-2 py-0.5 text-xs font-medium text-destructive">
                   {t("list.blocked")}

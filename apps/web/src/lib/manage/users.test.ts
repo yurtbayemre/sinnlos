@@ -11,7 +11,9 @@ let viewer: Viewer;
 vi.mock("@/lib/strapi/client", () => ({ strapi: (...args: unknown[]) => strapi(...args) }));
 vi.mock("next/cache", () => ({ refresh: () => refresh() }));
 vi.mock("@/lib/viewer", () => ({ getViewer: async () => viewer }));
-const { saveUser, handRoleToEntra } = await import("./user-actions");
+const { saveUser, handRoleToEntra, inviteUser, sendLink, resetUserMfa } =
+  await import("./user-actions");
+const { parseInviteLines } = await import("@/components/manage/user-invite-form");
 
 const DEPT = "dept00000000000000000001";
 const user: UserAdminDetail = {
@@ -140,5 +142,88 @@ describe("user actions (v0.23)", () => {
     viewer.id = null;
     await expect(handRoleToEntra(12)).resolves.toEqual({ ok: false, code: "unavailable" });
     expect(strapi).not.toHaveBeenCalled();
+  });
+});
+
+describe("invitations, links and the 2FA reset (v0.27)", () => {
+  const invite = {
+    email: " ada@example.test ",
+    displayName: "Ada",
+    role: "member",
+    department: DEPT,
+  };
+
+  it("invites with the trimmed body and answers sent or mailFailed", async () => {
+    strapi.mockResolvedValue({ data: { id: 40, mail: "sent" } });
+    await expect(inviteUser(invite)).resolves.toBe("sent");
+    expect(strapi.mock.calls.at(-1)![0]).toBe("/api/user-management/invite");
+    expect(body()).toEqual({
+      email: "ada@example.test",
+      displayName: "Ada",
+      role: "member",
+      department: DEPT,
+    });
+    strapi.mockResolvedValue({ data: { id: 41, mail: "failed" } });
+    await expect(inviteUser({ ...invite, displayName: "" })).resolves.toBe("mailFailed");
+    expect(body()).toEqual({ email: "ada@example.test", role: "member", department: DEPT });
+  });
+
+  it.each([
+    ["a taken address", cmsError(400, { keys: ["email"], codes: { email: "taken" } }), "taken"],
+    ["local sign-in off", cmsError(400, { codes: { _form: "localSignInOff" } }), "localSignInOff"],
+    [
+      "no mail set up",
+      cmsError(400, { codes: { _form: "mailNotConfigured" } }),
+      "mailNotConfigured",
+    ],
+    ["case duplicates", cmsError(409, { code: "email_duplicates_exist" }), "emailDuplicates"],
+    ["another refusal", cmsError(400, { keys: ["role"] }), "invalid"],
+    ["an outage", cmsError(503), "failed"],
+  ])("maps %s", async (_label, error, outcome) => {
+    strapi.mockRejectedValue(error);
+    await expect(inviteUser(invite)).resolves.toBe(outcome);
+  });
+
+  it("refuses a malformed body or a non-admin without a request", async () => {
+    await expect(inviteUser({ ...invite, email: "no-at" })).resolves.toBe("invalid");
+    await expect(inviteUser({ ...invite, role: "superuser" })).resolves.toBe("invalid");
+    await expect(inviteUser({ ...invite, department: "x" })).resolves.toBe("invalid");
+    viewer.role = "editor";
+    await expect(inviteUser(invite)).resolves.toBe("failed");
+    expect(strapi).not.toHaveBeenCalled();
+  });
+
+  it("sends a link and maps the cms's refusals", async () => {
+    strapi.mockResolvedValue({ data: { id: 12, mail: "sent" } });
+    await expect(sendLink(12)).resolves.toEqual({ ok: true, data: null });
+    expect(strapi.mock.calls.at(-1)![0]).toBe("/api/user-management/12/send-link");
+    strapi.mockResolvedValue({ data: { id: 12, mail: "failed" } });
+    await expect(sendLink(12)).resolves.toEqual({ ok: false, code: "mailFailed" });
+    strapi.mockRejectedValue(cmsError(400, { codes: { _form: "notLocal" } }));
+    await expect(sendLink(12)).resolves.toEqual({ ok: false, code: "notLocal" });
+  });
+
+  it("resets the second factor and re-renders", async () => {
+    await expect(resetUserMfa(12)).resolves.toEqual({ ok: true, data: null });
+    expect(strapi.mock.calls.at(-1)![0]).toBe("/api/user-management/12/reset-mfa");
+    expect(refresh).toHaveBeenCalled();
+  });
+
+  it("reads one person per line: address and an optional name", () => {
+    const text = [
+      "ada@example.test;Ada Lovelace",
+      "",
+      " bob@example.test ",
+      "not-an-address",
+      "ADA@example.test",
+    ].join("\n");
+    expect(parseInviteLines(text)).toEqual([
+      { email: "ada@example.test", name: "Ada Lovelace", valid: true },
+      { email: "bob@example.test", name: "", valid: true },
+      { email: "not-an-address", name: "", valid: false },
+      { email: "ADA@example.test", name: "", valid: false },
+    ]);
+    const many = Array.from({ length: 150 }, (_, i) => `u${i}@x.test`).join("\n");
+    expect(parseInviteLines(many)).toHaveLength(100);
   });
 });
