@@ -19,6 +19,9 @@ const MODELS: Record<string, VisibilityModel> = {
     uid: USER_UID,
     attributes: {
       username: { type: "string" },
+      email: { type: "email" },
+      phone: { type: "string" },
+      jobTitle: { type: "string" },
       displayName: { type: "string" },
       blocked: { type: "boolean" },
       password: { type: "password", private: true },
@@ -183,5 +186,59 @@ describe("hideBlockedUsers: explicit user fields", () => {
         },
       },
     });
+  });
+});
+
+describe("hideBlockedUsers: probes through withheld fields (Codex review)", () => {
+  it("narrows a relation filter on a withheld user field to active users, at the root and nested", () => {
+    expect(hide({ filters: { author: { email: { $startsWith: "a" } } } }, ANNOUNCEMENT)).toEqual({
+      filters: { author: { $and: [{ email: { $startsWith: "a" } }, ACTIVE] } },
+    });
+    expect(
+      hide(
+        { filters: { $or: [{ department: { members: { phone: { $eq: "1" } } } }] } },
+        ANNOUNCEMENT,
+      ),
+    ).toEqual({
+      filters: {
+        $or: [{ department: { members: { $and: [{ phone: { $eq: "1" } }, ACTIVE] } } }],
+      },
+    });
+    // From the user root: the manager clause, then the root filter.
+    expect(hide({ filters: { manager: { jobTitle: "x" } } }, USER_UID)).toEqual({
+      filters: { $and: [{ manager: { $and: [{ jobTitle: "x" }, ACTIVE] } }, ACTIVE] },
+    });
+  });
+
+  it("leaves attribution filters alone (a blocked author's content stays findable)", () => {
+    const query = { filters: { author: { id: { $eq: 42 }, displayName: { $eq: "Ada" } } } };
+    expect(hide(query, ANNOUNCEMENT)).toBe(query);
+  });
+
+  it("narrows a populate filter on a withheld field, also inside a nested populate", () => {
+    expect(
+      hide({ populate: { author: { filters: { email: { $eq: "x" } } } } }, ANNOUNCEMENT),
+    ).toEqual({
+      populate: { author: { filters: { $and: [{ email: { $eq: "x" } }, ACTIVE] } } },
+    });
+    expect(
+      hide({ populate: { department: { filters: { head: { phone: "1" } } } } }, ANNOUNCEMENT),
+    ).toEqual({
+      populate: { department: { filters: { head: { $and: [{ phone: "1" }, ACTIVE] } } } },
+    });
+  });
+
+  it("refuses a root sort through a relation onto a withheld user field", () => {
+    expect(() => hide({ sort: "author.email:asc" }, ANNOUNCEMENT)).toThrow(
+      /Invalid key email at author\.email/,
+    );
+    expect(() => hide({ sort: { author: { jobTitle: "desc" } } }, ANNOUNCEMENT)).toThrow(
+      /Invalid key jobTitle/,
+    );
+    expect(() =>
+      hide({ sort: ["title:asc", "author.displayName:asc"] }, ANNOUNCEMENT),
+    ).not.toThrow();
+    // The user root lists active users only: its own fields sort freely.
+    expect(() => hide({ sort: "jobTitle:asc" }, USER_UID)).not.toThrow();
   });
 });

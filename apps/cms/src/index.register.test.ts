@@ -347,11 +347,23 @@ describe("relation side-channel guard registration (FX05)", () => {
         ).rejects.toThrow("Invalid key role at children.author.role");
 
         const granted = authWith(...READS, `${DEPARTMENT}.find`, `${ROLE}.find`);
-        for (const query of [throughDepartment(), throughRole()]) {
-          await expect(
-            strapi.contentAPI.sanitize.query(query, wikiPage, { auth: granted }),
-          ).resolves.toEqual({ ...query, locale: "sanitized-by-core" });
-        }
+        await expect(
+          strapi.contentAPI.sanitize.query(throughDepartment(), wikiPage, { auth: granted }),
+        ).resolves.toEqual({ ...throughDepartment(), locale: "sanitized-by-core" });
+        // v0.28: an author's role is withheld from a blocked author, so a
+        // filter on it matches active authors only (utils/user-visibility.ts).
+        await expect(
+          strapi.contentAPI.sanitize.query(throughRole(), wikiPage, { auth: granted }),
+        ).resolves.toEqual({
+          populate: {
+            children: {
+              filters: {
+                author: { $and: [{ role: { type: { $eq: "x" } } }, ACTIVE_USER_FILTER] },
+              },
+            },
+          },
+          locale: "sanitized-by-core",
+        });
       },
     );
 
@@ -408,7 +420,8 @@ describe("relation side-channel guard registration (FX05)", () => {
       registerRestrictedRelationGuard(strapi);
       const query = {
         filters: { department: { name: "x" } },
-        sort: "author.role.type:asc",
+        // v0.28: a root sort onto a withheld user field is refused (user-visibility.ts).
+        sort: "author.displayName:asc",
         populate: { children: { populate: { author: "true" } }, department: "true" },
       };
       await expect(

@@ -30,9 +30,21 @@
  * is rewritten into the object form (the same query the core would build);
  * every other level is returned as it came (same reference).
  *
+ * Probes (Codex review of lane A1): what the output cut withholds must not
+ * be learnable from WHICH rows match either. A filter through a relation to
+ * a user that names anything beyond the attribution (email, phone, job
+ * title, department, …) matches active users only: `filters[author][email]
+ * [$startsWith]=a` no longer selects a blocked author's rows, at the root
+ * and inside populate filters, at any depth. A root sort through a relation
+ * onto such a field is refused with the core's `Invalid key` 400 (the web
+ * sends none; a sort inside a populate may follow no relation at all,
+ * utils/restricted-relations.ts).
+ *
  * Pure: the schema comes in through `getModel` (see user-visibility.test.ts).
  */
-import { USER_UID } from "./sanitize-user-contact";
+import { errors } from "@strapi/utils";
+
+import { BLOCKED_USER_FIELDS, USER_UID } from "./sanitize-user-contact";
 
 /** The slice of a Strapi attribute the walk reads. */
 interface Attribute {
@@ -234,23 +246,146 @@ function rewrite(value: unknown, model: VisibilityModel | undefined, getModel: G
   return out;
 }
 
+/** Whether a filter at the user model names anything the blocked cut withholds. */
+function namesWithheld(filters: unknown): boolean {
+  if (Array.isArray(filters)) return filters.some(namesWithheld);
+  if (!isPlainObject(filters)) return false;
+  return Object.entries(filters).some(([key, value]) =>
+    key.startsWith("$") ? namesWithheld(value) : !BLOCKED_USER_FIELDS.includes(key),
+  );
+}
+
+/**
+ * Filters with every user-level clause that names a withheld field narrowed
+ * to active users. Operators walk on the same model, like the core's.
+ * Returns the same reference when nothing changes.
+ */
+function constrainFilters(
+  filters: unknown,
+  model: VisibilityModel | undefined,
+  getModel: GetModel,
+): unknown {
+  if (Array.isArray(filters)) {
+    const items = filters.map((item) => constrainFilters(item, model, getModel));
+    return items.some((item, index) => item !== filters[index]) ? items : filters;
+  }
+  if (!isPlainObject(filters)) return filters;
+  let out: Row | null = null;
+  for (const [key, value] of Object.entries(filters)) {
+    const attr = model?.attributes?.[key];
+    let next: unknown;
+    if (!attr) {
+      next = constrainFilters(value, model, getModel);
+    } else {
+      const nested = nestedModel(attr, getModel);
+      next = nested ? constrainFilters(value, nested, getModel) : value;
+      if (attr.type === "relation" && attr.target === USER_UID && namesWithheld(value)) {
+        next = { $and: [next, ACTIVE_USER_FILTER] };
+      }
+    }
+    if (next !== value) {
+      out ??= { ...filters };
+      out[key] = next;
+    }
+  }
+  return out ?? filters;
+}
+
+/** Populate filters (object form) constrained like the root's, at any depth. */
+function constrainPopulate(
+  value: unknown,
+  model: VisibilityModel | undefined,
+  getModel: GetModel,
+): unknown {
+  if (!isPlainObject(value)) return value;
+  let out: Row | null = null;
+  for (const [key, sub] of Object.entries(value)) {
+    const attr = model?.attributes?.[key];
+    if (!attr || !isPlainObject(sub)) continue;
+    const nested = nestedModel(attr, getModel);
+    let next: Row = sub;
+    if (sub.filters !== undefined) {
+      let filters = constrainFilters(sub.filters, nested, getModel);
+      if (attr.type === "relation" && attr.target === USER_UID && namesWithheld(sub.filters)) {
+        filters = andFilters(filters, ACTIVE_USER_FILTER);
+      }
+      if (filters !== sub.filters) next = { ...next, filters };
+    }
+    if (sub.populate !== undefined) {
+      const populate = constrainPopulate(sub.populate, nested, getModel);
+      if (populate !== sub.populate) next = { ...next, populate };
+    }
+    if (next !== sub) {
+      out ??= { ...value };
+      out[key] = next;
+    }
+  }
+  return out ?? value;
+}
+
+/** Refuses a root sort that follows a relation onto a withheld user field. */
+function assertSort(sort: unknown, model: VisibilityModel | undefined, getModel: GetModel): void {
+  const paths: string[][] = [];
+  const collect = (value: unknown, prefix: string[]) => {
+    if (typeof value === "string") {
+      if (prefix.length > 0) {
+        paths.push(prefix);
+        return;
+      }
+      for (const token of value.split(",")) {
+        const path = token.split(":")[0].trim();
+        if (path) paths.push(path.split("."));
+      }
+    } else if (Array.isArray(value)) {
+      for (const item of value) collect(item, prefix);
+    } else if (isPlainObject(value)) {
+      for (const [key, sub] of Object.entries(value)) collect(sub, [...prefix, key]);
+    }
+  };
+  collect(sort, []);
+  for (const path of paths) {
+    let current = model;
+    let throughRelation = false;
+    for (const [index, segment] of path.entries()) {
+      const attr = current?.attributes?.[segment];
+      if (!attr) break;
+      if (throughRelation && current?.uid === USER_UID && !BLOCKED_USER_FIELDS.includes(segment)) {
+        const at = path.slice(0, index + 1).join(".");
+        throw new errors.ValidationError(`Invalid key ${segment} at ${at}`, {
+          key: segment,
+          path: at,
+        });
+      }
+      if (attr.type !== "relation") break;
+      throughRelation = true;
+      current = nestedModel(attr, getModel);
+    }
+  }
+}
+
 /**
  * The sanitized content-API query with blocked people hidden from the
  * directory: the root filter on the user model, the directory relations'
- * populate filter, `blocked` in explicit user `fields`. Returns the query
- * itself when nothing applies.
+ * populate filter, `blocked` in explicit user `fields`, and the probes
+ * through withheld fields closed. Returns the query itself when nothing
+ * applies.
  */
 export function hideBlockedUsers(
   query: Row,
   model: VisibilityModel | undefined,
   getModel: GetModel,
 ): Row {
+  if (query.sort !== undefined) assertSort(query.sort, model, getModel);
   let out = query;
+  if (out.filters !== undefined) {
+    const filters = constrainFilters(out.filters, model, getModel);
+    if (filters !== out.filters) out = { ...out, filters };
+  }
   if (model?.uid === USER_UID) {
     out = { ...out, filters: andFilters(out.filters, ACTIVE_USER_FILTER) };
   }
   if (out.populate !== undefined) {
-    const populate = rewrite(out.populate, model, getModel);
+    const populate = constrainPopulate(rewrite(out.populate, model, getModel), model, getModel);
     if (populate !== out.populate) out = { ...out, populate };
   }
   return out;

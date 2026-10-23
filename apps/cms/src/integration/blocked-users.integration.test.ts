@@ -152,6 +152,35 @@ describe.each(testEngines())("blocked people hidden on %s", (engine) => {
     }
   });
 
+  it("withheld fields cannot be probed through filters or sort (Codex review)", async () => {
+    const byAnnouncement = `filters[documentId][$eq]=${announcement.documentId}`;
+    for (const caller of ["editor", "member"] as const) {
+      const email = await t.api<{ data: Row[] }>(
+        caller,
+        `/api/announcements?${byAnnouncement}&filters[author][email][$eq]=it-gone@integration.test`,
+      );
+      expect(email.status, caller).toBe(200);
+      expect(email.body.data, caller).toEqual([]);
+      // The attribution stays findable: the author's content is the record.
+      const id = await t.api<{ data: Row[] }>(
+        caller,
+        `/api/announcements?${byAnnouncement}&filters[author][id][$eq]=${gone.id}`,
+      );
+      expect(
+        id.body.data.map((row) => row.documentId),
+        caller,
+      ).toEqual([announcement.documentId]);
+      const populated = await t.api<{ data: { author?: unknown }[] }>(
+        caller,
+        `/api/announcements?${byAnnouncement}&populate[author][filters][phone][$eq]=%2B49%2030%209999`,
+      );
+      expect(populated.body.data[0].author ?? null, caller).toBeNull();
+      expect((await t.api(caller, `/api/announcements?sort=author.email:asc`)).status, caller).toBe(
+        400,
+      );
+    }
+  });
+
   it("refuses kudos to a blocked person, and /api/me names no blocked manager", async () => {
     const kudos = await t.api<{ error?: { details?: { code?: string } } }>(
       "member",
