@@ -30,35 +30,35 @@ The owner rule still applies: **no bloat**. Every item below has the smallest sc
 
 ## Must be done before v1.0.0
 
-### Trust and portability (v0.26)
+### Trust and portability (v0.26) — shipped in v0.26.0 (2026-10-23)
 
-- [ ] **M1 License.** Two parts:
+- [x] **M1 License.** Two parts:
   - `LICENSE` (AGPL-3.0-only), the `license` field in every package.json, and the third-party notices the dependencies require (the images ship bundled code).
   - A source link in the app (AGPL §13) and `CONTRIBUTING.md` with the CLA requirement. The CLA text needs a lawyer's check. Until it is signed, no outside contributions are merged.
-- [ ] **M2 No owner infrastructure in the product.**
+- [x] **M2 No owner infrastructure in the product.**
   - Remove the hard-wired Plausible script (`apps/web/src/app/layout.tsx`, `plausible.yurtbay.dev` on every page). Analytics load only when configured.
   - Remove the owner-host defaults from `infra/backup/pg-backup.sh` and `infra/deploy.sh`: `/home/bigemo/...`, `momsbest`, `/usr/local/sbin/backup-run`, and the Traefik override that is always on.
   - The smoke sign-in must not require demo accounts.
   - Host specifics move into an optional local override.
-- [ ] **M3 Operator links.** Privacy and imprint links, plus an optional whistleblower-channel link, configured by env and reachable before sign-in. There is no subsystem behind them.
-- [ ] **M4 Reproducible install, upgrade and restore.**
+- [x] **M3 Operator links.** Privacy and imprint links, plus an optional whistleblower-channel link, configured by env and reachable before sign-in. There is no subsystem behind them.
+- [x] **M4 Reproducible install, upgrade and restore.**
   - Based on the bundled Caddy.
   - Versioned images published to GHCR on release tags.
   - The upgrade path keeps the backup and the checks.
   - Rehearsed on a fresh host: fresh install, upgrade from v0.25.x, restore.
-- [ ] **M5 Strapi administration surface protected at the edge.**
+- [x] **M5 Strapi administration surface protected at the edge.**
   - The surface includes `/admin` and also `/content-manager/*`, `/users-permissions/*`, `/upload*` and the other admin APIs. Strapi CE has no 2FA for panel admins.
   - Allowed source networks are configurable; the default is private networks only.
   - Apply it to both Caddy and the Traefik override.
-- [ ] **M6 First intranet admin.** An explicit, documented install step. The seed creates the Strapi super-admin only, but `/manage/users` needs an intranet `admin_role`. v0.27 can replace the step with an invitation.
-- [ ] **M8 (part) Demo seed refused in production.** Demo users share a known password.
-- [ ] **M12 Release hygiene.**
+- [x] **M6 First intranet admin.** An explicit, documented install step. The seed creates the Strapi super-admin only, but `/manage/users` needs an intranet `admin_role`. v0.27 can replace the step with an invitation.
+- [x] **M8 (part) Demo seed refused in production.** Demo users share a known password.
+- [x] **M12 Release hygiene.**
   - `SECURITY.md` with GitHub private vulnerability reporting enabled, the supported versions and the response targets.
   - Release notes with upgrade and breaking-change sections.
   - The version and SHA on the images, in a cms boot line, and next to the source link.
   - The package.json versions follow the release.
-- [ ] **S4 (start) `docs/INSTALL.md`.** One page, written together with the fresh-host rehearsal.
-- [ ] **S5 Signed images and SBOM** through GitHub artifact attestations, on the published images.
+- [x] **S4 (start) `docs/INSTALL.md`.** One page, written together with the fresh-host rehearsal.
+- [ ] **S5 Signed images and SBOM** through GitHub artifact attestations, on the published images. The workflow (`release-images.yml`) is built; publication waits for the lawyer review (owner decision 2026-10-22).
 
 ### Accounts (v0.27)
 
@@ -120,7 +120,7 @@ The owner rule still applies: **no bloat**. Every item below has the smallest sc
 - [ ] Browser check of Meilisearch on the test instance (⌘K typo, a compound-word part, department news hidden, guests without news).
 - [ ] Entra sign-in tested against a real tenant (issue #20).
 - [ ] Remove the merged worktrees and leftover folders on the development machine.
-- [ ] A lawyer checks the CLA text.
+- [ ] A lawyer checks the CLA text, the two Strapi Enterprise packages in the cms image, and the review list of packages without a license file (printed by `scripts/third-party-notices.mjs` in the image build). GHCR publication waits for it.
 
 ## After v1.0.0
 
