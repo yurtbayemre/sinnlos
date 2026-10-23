@@ -66,6 +66,7 @@ describe("codes", () => {
         "videoUrlNotYoutube",
         "quizInvalid",
         "frozenAfterVotes",
+        "votersRemoved",
         "visibilityTarget",
         "optionCount",
         "optionDuplicate",

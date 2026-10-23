@@ -168,7 +168,10 @@ describe("loadPublishedPoll", () => {
 
   it("pins the lookup to the published row and loads the targeting and guest fields", async () => {
     const { strapi, queries } = host({ [POLL_UID]: row });
-    await expect(loadPublishedPoll(strapi, "12")).resolves.toEqual(row);
+    await expect(loadPublishedPoll(strapi, "12")).resolves.toEqual({
+      ...row,
+      votersRemoved: false,
+    });
     expect(queries).toEqual([
       {
         uid: POLL_UID,
@@ -184,6 +187,7 @@ describe("loadPublishedPoll", () => {
             "audience",
             "visibleToGuests",
             "guestsCanVote",
+            "votersRemovedAt",
           ],
           populate: { departments: { select: ["documentId", "name"] } },
         },
@@ -205,6 +209,13 @@ describe("loadPublishedPoll", () => {
       visibleToGuests: true,
       guestsCanVote: true,
     });
+  });
+
+  it("says votersRemoved once the retention stamped the row (v0.28)", async () => {
+    const { strapi } = host({
+      [POLL_UID]: { ...row, votersRemovedAt: "2026-11-01T02:56:00.000Z" },
+    });
+    await expect(loadPublishedPoll(strapi, "12")).resolves.toMatchObject({ votersRemoved: true });
   });
 
   it("answers null when no published row matches (missing, draft id, draft-only document)", async () => {
@@ -249,6 +260,7 @@ describe("loadPublishedPoll", () => {
       departments: [],
       visibleToGuests: false,
       guestsCanVote: false,
+      votersRemoved: false,
     });
   });
 });
@@ -378,6 +390,7 @@ describe("pollResultsBody", () => {
     ],
     visibleToGuests: true,
     guestsCanVote: false,
+    votersRemoved: false,
   };
   const tally = { counts: [1, 2, 0], total: 3, myVoteIndex: 1 };
 

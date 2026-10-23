@@ -22,6 +22,7 @@ import {
   prepareDatetimeContract,
   registerTimestamptzGuard,
 } from "./database/ensure-timestamptz";
+import { assertSearchLogRetention } from "./cron/prune-search-logs";
 import { reportDigestConfig } from "./digest/send-digests";
 import { parseEntraConfig } from "./entra/config";
 import { parseOidcConfig } from "./oidc/config";
@@ -108,6 +109,9 @@ export default {
     // v0.21: with MEILISEARCH_ENABLED=1 a missing URL or write key refuses
     // the boot (search/meili-index.ts); off, nothing is read.
     parseMeiliConfig(process.env);
+    // v0.28: an invalid SEARCH_LOG_RETENTION_DAYS refuses the boot (cron/
+    // prune-search-logs.ts); unset or blank keeps 90 days.
+    assertSearchLogRetention(process.env);
     // v0.27: an unknown role in MFA_REQUIRED_ROLES refuses the boot, and so
     // does any users-permissions JWT mode but legacy-support (refresh mode
     // would bypass the token version and the second-factor claims).

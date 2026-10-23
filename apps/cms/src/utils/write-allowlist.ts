@@ -1198,6 +1198,8 @@ export const REFUSED_ATTRIBUTES: Readonly<Record<string, Readonly<Record<string,
   [POLL_UID]: {
     audience: "derived targeting flag (derivedFromMerged, contract K10)",
     author: "ownership: the caller, set on create (callerFields)",
+    votersRemovedAt:
+      "the retention's terminal mark (v0.28, utils/poll-voter-retention.ts); dropped from every Document Service write by the poll guard",
   },
   [DUTY_PLAN_UID]: {
     author: "ownership: the caller, set on create (callerFields)",

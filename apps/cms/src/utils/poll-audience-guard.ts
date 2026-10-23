@@ -3,6 +3,7 @@ import { errors } from "@strapi/utils";
 
 import { parseAdminJsonField } from "./json-field";
 import { POLL_AUDIENCE_DEPARTMENTS } from "./poll-audience";
+import { instantMsOrNull } from "./time";
 
 /**
  * Write-time enforcement of the poll audience flag (decision 02, fail
@@ -439,14 +440,80 @@ export async function assertPollNotFrozen(
   );
 }
 
+/** The code of a refused `closesAt` change once the voters were removed (@sinnlos/domain authoring/codes.ts). */
+export const VOTERS_REMOVED = "votersRemoved";
+
 /**
- * The poll guard: the vote freeze before the write, the audience flag
- * after it, in the guard's one transaction (joined into the document
- * lock's, slot 2).
+ * THE VOTER REMOVAL (v0.28, owner decision 2026-10-23): 30 days after a
+ * poll closes, the retention removes its voter links and stamps every row
+ * with `votersRemovedAt` (utils/poll-voter-retention.ts). "Already voted"
+ * can no longer match anybody then, so the poll must never open again:
+ *   - `votersRemovedAt` is the retention's alone: dropped from every
+ *     create and update payload, and cleared on a clone (a new poll);
+ *   - once a row carries it, a `closesAt` that differs from the published
+ *     row's (an update carrying one, draft-only included, or a publish of
+ *     a draft that differs) answers 400 with `codes.closesAt:
+ *     votersRemoved`. Same lock and transaction as the vote freeze.
+ */
+export function withoutVotersRemoved(context: DocumentMiddlewareContext): void {
+  const params = isRecord(context.params) ? context.params : null;
+  const data = params && isRecord(params.data) ? params.data : null;
+  if (context.action === "clone") {
+    context.params = { ...params, data: { ...data, votersRemovedAt: null } };
+    return;
+  }
+  if (!data || !("votersRemovedAt" in data)) return;
+  const rest = { ...data };
+  delete rest.votersRemovedAt;
+  context.params = { ...params, data: rest };
+}
+
+const sameInstant = (a: unknown, b: unknown): boolean => {
+  const ms = (value: unknown) =>
+    typeof value === "string" || value instanceof Date ? instantMsOrNull(value) : null;
+  return ms(a) === ms(b);
+};
+
+/** Throws `votersRemoved` when the action would reopen a poll whose voters were removed. */
+export async function assertPollNotReopened(
+  strapi: Pick<PollAudienceGuardHost, "db">,
+  action: string,
+  params: unknown,
+): Promise<void> {
+  if (action !== "publish" && action !== "update") return;
+  const documentId = isRecord(params) ? params.documentId : undefined;
+  if (typeof documentId !== "string" || documentId === "") return;
+  const data = isRecord(params) && isRecord(params.data) ? params.data : {};
+  const carried = action === "update" && data.closesAt !== undefined;
+  if (!carried && !publishes(action, params)) return;
+  const rows = await strapi.db.query(POLL_UID).findMany({
+    where: { documentId },
+    select: ["id", "publishedAt", "closesAt", "votersRemovedAt"],
+  });
+  const list = (Array.isArray(rows) ? rows : []).filter(isRecord);
+  if (!list.some((row) => row.votersRemovedAt != null)) return;
+  const draft = list.find((row) => row.publishedAt == null) ?? null;
+  const baseline = list.find((row) => row.publishedAt != null) ?? draft;
+  const next = carried ? data.closesAt : draft?.closesAt;
+  if (sameInstant(next, baseline?.closesAt)) return;
+  throw new errors.ValidationError(
+    "This poll's voters were removed after it closed: it can no longer be reopened",
+    { keys: ["closesAt"], codes: { closesAt: VOTERS_REMOVED } },
+  );
+}
+
+/**
+ * The poll guard: the vote freeze and the voter-removal freeze before the
+ * write, the audience flag after it, in the guard's one transaction
+ * (joined into the document lock's, slot 2).
  */
 export function createPollAudienceGuard(strapi: PollAudienceGuardHost): DocumentMiddleware {
   return createAudienceGuard(strapi, POLL_AUDIENCE_GUARD_LOG, [{ uid: POLL_UID, label: "poll" }], {
-    before: (context) => assertPollNotFrozen(strapi, context.action ?? "", context.params),
+    before: async (context) => {
+      withoutVotersRemoved(context);
+      await assertPollNotFrozen(strapi, context.action ?? "", context.params);
+      await assertPollNotReopened(strapi, context.action ?? "", context.params);
+    },
   });
 }
 

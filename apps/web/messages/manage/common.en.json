@@ -201,6 +201,7 @@
     "videoUrlNotYoutube": "Enter a YouTube video address.",
     "quizInvalid": "The quiz is not valid.",
     "frozenAfterVotes": "Someone has voted, so this can no longer change.",
+    "votersRemoved": "This poll ended more than 30 days ago and who voted is no longer stored, so it cannot be reopened.",
     "visibilityTarget": "Choose who may see it.",
     "taken": "This name is already taken.",
     "optionCount": "A poll needs between 2 and 20 answers.",

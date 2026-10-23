@@ -18,8 +18,8 @@ import {
  *   - notification-janitor: the where clause selects the same rows on
  *     SQLite and Postgres (instants stored per the datetime contract), and
  *     `deleteMany` takes the recipient and actor link rows with it
- *     (ON DELETE CASCADE), while unread rows, recently read rows and
- *     fan-out anchor rows stay;
+ *     (ON DELETE CASCADE), unread rows 180 days after creation (v0.28),
+ *     while recent rows and fan-out anchor rows stay;
  *   - classified-janitor: the plain-date comparison, and the purge through
  *     the Document Service, whose delete lifecycles remove the ad's
  *     marketplace images after the commit (an admin upload stays); on
@@ -50,7 +50,7 @@ describe.each(testEngines())("retention janitors on %s", (engine) => {
     await t?.stop();
   });
 
-  it("prunes read notifications 90 days after reading, with their link rows, and nothing else", async () => {
+  it("prunes read notifications 90 days after reading and unread ones 180 days after creation, with their link rows, and nothing else", async () => {
     const now = new Date();
     const ago = (days: number) => new Date(now.getTime() - days * DAY).toISOString();
     const recipient = t.fixtures.users.member.id;
@@ -70,7 +70,8 @@ describe.each(testEngines())("retention janitors on %s", (engine) => {
     };
     const old = await make("IT read long ago", { readAt: ago(100), createdAt: ago(120) });
     const recent = await make("IT read recently", { readAt: ago(10), createdAt: ago(200) });
-    const unread = await make("IT unread", { readAt: null, createdAt: ago(400) });
+    const unread = await make("IT unread", { readAt: null, createdAt: ago(150) });
+    const unreadOld = await make("IT unread long ago", { readAt: null, createdAt: ago(400) });
     const anchor = await make("IT anchor", {
       type: "announcement",
       readAt: ago(300),
@@ -80,7 +81,7 @@ describe.each(testEngines())("retention janitors on %s", (engine) => {
     });
 
     const { pruneNotifications } = t.requireBuilt<Janitors>("src/cron/prune-notifications");
-    await expect(pruneNotifications(t.strapi, now)).resolves.toBe(1);
+    await expect(pruneNotifications(t.strapi, now)).resolves.toBe(2);
 
     const left = await t.strapi.db.query(NOTIFICATION).findMany({
       where: { title: { $startsWith: "IT " } },
@@ -93,6 +94,7 @@ describe.each(testEngines())("retention janitors on %s", (engine) => {
       const count = (id: number) =>
         t.strapi.db.query(link).count({ where: { notification_id: id } });
       expect(await count(old.id), link).toBe(0);
+      expect(await count(unreadOld.id), link).toBe(0);
       expect(await count(recent.id), link).toBe(1);
       expect(await count(anchor.id), link).toBe(1);
     }

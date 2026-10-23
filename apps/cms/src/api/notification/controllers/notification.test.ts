@@ -216,11 +216,20 @@ interface DeleteCtx {
 }
 
 const REMINDER_DOC = "r3v9q2m8x7c4b1n6p5z0r2t8";
+const FANOUT_DOC = "f3v9q2m8x7c4b1n6p5z0r2t8";
+const HALF_DOC = "h3v9q2m8x7c4b1n6p5z0r2t8";
 
 function setupDelete(id: unknown) {
   const rows = [
-    { id: 7, documentId: NOTIFICATION_DOC, sourceType: null },
-    { id: 9, documentId: REMINDER_DOC, sourceType: "course" },
+    { id: 7, documentId: NOTIFICATION_DOC, sourceType: null, sourceDocumentId: null },
+    {
+      id: 9,
+      documentId: REMINDER_DOC,
+      sourceType: "course",
+      sourceDocumentId: "c@2026-10-01:soon",
+    },
+    { id: 11, documentId: FANOUT_DOC, sourceType: "announcement", sourceDocumentId: "a1" },
+    { id: 12, documentId: HALF_DOC, sourceType: null, sourceDocumentId: "e1" },
   ];
   const findOne = vi.fn(async ({ where }: { where: Record<string, unknown> }) => {
     failLikePostgres(where);
@@ -252,7 +261,7 @@ describe("notification delete: numeric id or documentId (PL01)", () => {
     await controller.delete(ctx);
     expect(findOne).toHaveBeenCalledWith({
       where: { id: 7 },
-      select: ["id", "documentId", "sourceType"],
+      select: ["id", "documentId", "sourceType", "sourceDocumentId"],
     });
     expect(ctx.params.id).toBe(NOTIFICATION_DOC);
     expect(mocks.superDelete).toHaveBeenCalledWith(ctx);
@@ -279,6 +288,17 @@ describe("notification delete: numeric id or documentId (PL01)", () => {
       const { controller, ctx } = setupDelete(id);
       await controller.delete(ctx);
       expect(ctx.badRequest, id).toHaveBeenCalledWith("Training reminders cannot be deleted");
+    }
+    expect(mocks.superDelete).not.toHaveBeenCalled();
+  });
+
+  it("refuses to delete any fan-out anchor, half-set ones included: the re-publish ledger (v0.28)", async () => {
+    for (const id of ["11", FANOUT_DOC, "12", HALF_DOC]) {
+      const { controller, ctx } = setupDelete(id);
+      await controller.delete(ctx);
+      expect(ctx.badRequest, id).toHaveBeenCalledWith(
+        "Notifications of an announcement or event cannot be deleted",
+      );
     }
     expect(mocks.superDelete).not.toHaveBeenCalled();
   });

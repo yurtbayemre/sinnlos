@@ -1016,7 +1016,9 @@ describe("v2 rules: attribute coverage and field lists (§B1.7, §N6)", () => {
     expect(Object.keys(REFUSED_ATTRIBUTES[DOCUMENT]).sort()).toEqual(
       ["audience", "ownerDepartment", "scheduleError", "uploadedBy"].sort(),
     );
-    expect(Object.keys(REFUSED_ATTRIBUTES[POLL]).sort()).toEqual(["audience", "author"].sort());
+    expect(Object.keys(REFUSED_ATTRIBUTES[POLL]).sort()).toEqual(
+      ["audience", "author", "votersRemovedAt"].sort(),
+    );
   });
 
   it("carries exactly the @sinnlos/domain field lists per class, on create and update", () => {

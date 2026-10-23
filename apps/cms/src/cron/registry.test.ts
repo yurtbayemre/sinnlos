@@ -41,7 +41,7 @@ const spec = (fn: CronTaskSpec["fn"]): CronTaskSpec => ({
 });
 
 describe("cronRegistry", () => {
-  it("lists the eight tasks with their rules, all in the given zone", () => {
+  it("lists the eleven tasks with their rules, all in the given zone", () => {
     const table = cronRegistry("Pacific/Auckland").map(({ name, rule, tz }) => ({
       name,
       rule,
@@ -54,6 +54,9 @@ describe("cronRegistry", () => {
       { name: "notification-janitor", rule: "40 3 * * *", tz: "Pacific/Auckland" },
       { name: "classified-janitor", rule: "45 3 * * *", tz: "Pacific/Auckland" },
       { name: "audit-janitor", rule: "50 3 * * *", tz: "Pacific/Auckland" },
+      { name: "ack-janitor", rule: "52 3 * * *", tz: "Pacific/Auckland" },
+      { name: "rsvp-janitor", rule: "54 3 * * *", tz: "Pacific/Auckland" },
+      { name: "poll-voter-janitor", rule: "56 3 * * *", tz: "Pacific/Auckland" },
       { name: "training-reminders", rule: "45 6 * * *", tz: "Pacific/Auckland" },
       { name: "digest-mailer", rule: "30 7 * * *", tz: "Pacific/Auckland" },
     ]);
@@ -258,6 +261,9 @@ describe("buildCronTasks", () => {
       "notification-janitor",
       "classified-janitor",
       "audit-janitor",
+      "ack-janitor",
+      "rsvp-janitor",
+      "poll-voter-janitor",
       "training-reminders",
       "digest-mailer",
     ]);

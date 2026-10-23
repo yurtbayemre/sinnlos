@@ -768,6 +768,8 @@ export async function editableFields(
         guestsCanVote: bool(draft.guestsCanVote),
         needsRetarget: retarget,
         hasVotes: await pollHasVotes(strapi, rows.documentId),
+        // v0.28: closesAt is frozen too (poll-audience-guard.ts votersRemoved).
+        votersRemoved: draft.votersRemovedAt != null || rows.published?.votersRemovedAt != null,
       };
     case DUTY_PLAN_UID: {
       // The stored lists passed the lifecycle; anything else reads as empty.
