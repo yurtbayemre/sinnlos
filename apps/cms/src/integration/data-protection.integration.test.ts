@@ -9,7 +9,6 @@ import type {
 } from "@sinnlos/domain";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import type { ErrorBody } from "./authoring.test.helper";
 import { createTestStrapi, testEngines, type Row, type TestStrapi } from "./harness.test.helper";
 import { holdTransaction, qualified, settle, waitForLockWait } from "./pg-lock.test.helper";
 
@@ -35,7 +34,10 @@ interface Person {
   password: string;
 }
 
-type Answer<T> = T & ErrorBody;
+/** A success body, or Strapi's error envelope with its details code. */
+type Answer<T> = T & {
+  error?: { status?: number; name?: string; message?: string; details?: { code?: string } };
+};
 
 interface TrainingEvidence {
   pruneTrainingEvidence(
@@ -78,7 +80,7 @@ describe.each(testEngines())("data protection (v0.28, lane A2) on %s", (engine) 
     const username = `it-dp-${++suffix}`;
     const password = randomBytes(12).toString("base64url");
     const service = t.strapi.plugin("users-permissions").service("user") as {
-      add(data: Row): Promise<Row>;
+      add(data: Record<string, unknown>): Promise<Row>;
     };
     const user = await service.add({
       username,

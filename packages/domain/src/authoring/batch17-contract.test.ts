@@ -37,6 +37,8 @@ describe("batch 17 consumer contracts", () => {
         videoUrl: null,
         course: { documentId: "course-1", title: "Course", slug: "course", completionMode: "exam" },
         quiz: [{ question: "Choose one", options: ["First", "Second"] }],
+        // v0.28: the published versions, sent back with the completion.
+        version: { course: "2026-10-16T08:00:00.000Z", lesson: "2026-10-16T08:00:00.000Z" },
       },
     };
     const partial: QuizCheckRequest = {
@@ -78,6 +80,7 @@ describe("batch 17 consumer contracts", () => {
       mandatory: true,
       completionMode: "exam",
       validityMonths: 12,
+      contact: null,
       departments: [],
       needsRetarget: false,
       coverImage: null,
