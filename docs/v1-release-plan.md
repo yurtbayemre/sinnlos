@@ -1,6 +1,12 @@
 # Road to v1.0.0
 
-Status: 2026-10-22, owner-approved. Baseline is v0.25.0 (`0c26656e`). This file lists **everything that still has to be done before v1.0.0**. Each item gets ticked when its release ships.
+Status: 2026-10-23, owner-approved. Baseline was v0.25.0 (`0c26656e`). This file lists **everything that still has to be done before v1.0.0**. Each item gets ticked when its release ships.
+
+**Current state (2026-10-23):**
+
+- **v0.26.0 "portable"** is shipped and live since 2026-10-23 03:26 CEST.
+- **v0.27.0 "accounts"** is shipped and live since 2026-10-23 12:47 CEST; the owner's browser check passed.
+- **Next is v0.28 "data protection"**: planning has started, and the owner decisions are below.
 
 ## What v1.0.0 means
 
@@ -27,6 +33,19 @@ The owner rule still applies: **no bloat**. Every item below has the smallest sc
 | Upgrade floor                                           | **v1.0.0 supports upgrades from v0.25.x only**                                                                                                                                                                                                        |
 | Module switches                                         | **Before v1.0.0**                                                                                                                                                                                                                                     |
 | SHOULD items                                            | **All of them before v1.0.0** too                                                                                                                                                                                                                     |
+
+## Owner decisions (2026-10-23)
+
+| Question                         | Decision                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Password minimum (v0.27)         | **12 characters**, plus a list of common passwords. No character-class rules. Existing shorter passwords keep working until they are next changed.                                                                                                                                                                                                                                                                                                                                                |
+| Mandatory TOTP (v0.27)           | **Admin and editor** (`MFA_REQUIRED_ROLES`). Everyone else can turn it on. SSO users get MFA from their identity provider.                                                                                                                                                                                                                                                                                                                                                                        |
+| Link lifetimes (v0.27)           | **Invitation 7 days, password reset 1 hour.** A new link makes the old one invalid.                                                                                                                                                                                                                                                                                                                                                                                                               |
+| Self-registration (v0.27)        | **Removed.** Invitations replace it.                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| Export and anonymisation (v0.28) | **In the web at `/manage/users`, for admins:** a JSON download (Art. 15), plus "anonymise" (Art. 17) with a preview and a confirmation. No host script.                                                                                                                                                                                                                                                                                                                                           |
+| Anonymisation of content (v0.28) | **Business content stays and its author becomes anonymous** ("former person"): announcements, wiki, documents, comments, and kudos written by the person.<br>**Deleted:** the profile, the avatar, reactions, poll votes, RSVPs, kudos addressed to the person, notifications, and marketplace ads.                                                                                                                                                                                               |
+| Unterweisung evidence (v0.28)    | **Kept for 3 years after the validity ends**, or after the person leaves (changeable by env). It survives anonymisation.                                                                                                                                                                                                                                                                                                                                                                          |
+| Modules (v0.28, S2)              | **The base cannot be switched off:** dashboard, announcements (with comments and reactions), people and org chart, departments and teams, search, notifications and digest, profile, manage, quick links, **wiki** and **documents**.<br>**Everything else is a module** that can be switched off: events, training/Unterweisungen, marketplace, kudos, celebrations (birthdays and anniversaries), polls, duty plans, and KPIs. Modules are on by default, and switching one off keeps its data. |
 
 ## Must be done before v1.0.0
 
@@ -62,7 +81,7 @@ The owner rule still applies: **no bloat**. Every item below has the smallest sc
 
 ### Accounts (v0.27) — shipped in v0.27.0 (2026-10-23)
 
-- [x] **M8 Password baseline.** Minimum length 10 to 12 characters, enforced server-side on every path (create, change, reset, registration), plus a common-password list. No policy engine and no rotation rules.
+- [x] **M8 Password baseline.** Minimum length 12 characters (owner decision), enforced server-side on every path (create, change, reset, registration), plus a common-password list. No policy engine and no rotation rules.
 - [x] **M7 Invitation and password recovery: one token flow, local accounts only.**
   - An admin invites one person at `/manage/users`, who gets a set-password link by e-mail. "Forgot password" uses the same flow.
   - The token is stored as a hash, has an expiry, is single use and is bound to `tokenVersion`.
@@ -75,8 +94,9 @@ The owner rule still applies: **no bloat**. Every item below has the smallest sc
   - Specified together with M7, so a reset never bypasses MFA.
 - [x] **S3 Bulk invitations** (pasted list or CSV) on top of M7.
 - [x] **S7 Stale UI texts.** Some texts still send people to the Strapi panel: roles, and the empty states for announcements, departments, teams and courses.
+- [x] **Self-registration removed** (owner decision). This also removes the plugin's own forgot/reset/register/connect paths.
 
-### Data protection (v0.28)
+### Data protection (v0.28) — in planning (owner decisions 2026-10-23 above)
 
 - [ ] **M11 Data inventory and retention.**
   - One table: data class, purpose, who sees it (per role), deletion trigger and default retention. It serves as the data-protection officer's Art. 30 entry and the annex to the works agreement.
@@ -87,18 +107,22 @@ The owner rule still applies: **no bloat**. Every item below has the smallest sc
   - At completion the receipt stores the course title, version and validity.
   - Reports can include people who have left.
   - The proof per person can be exported as CSV: date, course and version, confirmation, quiz result.
+  - **Retention:** 3 years after the validity ends, or after the person leaves (env-configurable). The proof survives anonymisation.
   - Each course gets an "ask the responsible person" contact.
   - This must land before M10, so anonymisation never destroys the evidence.
 - [ ] **M10 Offboarding and data-subject rights, run by the admin.**
   - The admin first blocks the person and revokes their sessions.
-  - **Export** of one person's data (Art. 15), with a dry run.
-  - **Anonymisation** of the person (Art. 17), with a dry run. Training evidence is kept under its retention class.
+  - **Export** of one person's data (Art. 15), as a JSON download at `/manage/users`.
+  - **Anonymisation** of the person (Art. 17) at `/manage/users`, with a preview and a confirmation. Business content stays with an anonymous author; personal items are deleted (see the owner decisions). Training evidence is kept under its retention class.
   - Media and the search index are cleaned up after the commit; the cleanup can be rerun.
   - Re-applying anonymisations after a restore is documented.
   - The documentation says honestly what remains.
   - Blocked people disappear from the directory and the org chart (today `PEOPLE_QUERY` does not filter `blocked`).
   - There is no self-service portal.
-- [ ] **S2 Module switches.** One env list for marketplace, kudos and celebrations. The navigation hides them and the cms refuses them.
+- [ ] **S2 Module switches.**
+  - One env list covers every module outside the base: events, training, marketplace, kudos, celebrations, polls, duty plans and KPIs.
+  - Every module is on by default.
+  - A module that is switched off disappears from the navigation, the dashboard and the digest, and the cms refuses its routes. Its data stays.
 
 ### Polish and release candidate (v0.29)
 
