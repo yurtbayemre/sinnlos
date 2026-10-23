@@ -5,6 +5,7 @@ import { fetchUserExport, fetchUserTrainingEvidence } from "@/lib/api/manage/use
 import { zonedDateKey } from "@/lib/plain-date";
 import { capabilitiesFor } from "@/lib/roles";
 import { StrapiError } from "@/lib/strapi-error";
+import { isOff } from "@/lib/switches";
 import { evidenceCsv } from "@/lib/training-report-csv";
 import { getViewer } from "@/lib/viewer";
 
@@ -75,9 +76,12 @@ export async function exportDownload(rawId: string): Promise<NextResponse> {
 /**
  * GET …/evidence: `sinnlos-nachweise-<id>-<date>.csv`. The evidence answer
  * names the person by display name only, so the file is named by the
- * account id (no second read for the username).
+ * account id (no second read for the username). With the training module
+ * switched off (FEATURES_OFF) it is not offered and answers 404 without a
+ * read, like every training page; the export still holds the receipts.
  */
 export async function evidenceDownload(rawId: string): Promise<NextResponse> {
+  if (isOff("training")) return new NextResponse("Not found", { status: 404 });
   const id = userIdOf(rawId);
   const refused = await refusal(id);
   if (refused) return refused;

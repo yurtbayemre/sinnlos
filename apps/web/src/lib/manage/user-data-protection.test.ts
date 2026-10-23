@@ -157,6 +157,16 @@ describe("the downloads (v0.28)", () => {
   });
 });
 
+describe("the evidence download with training switched off (v0.28)", () => {
+  afterEach(() => vi.unstubAllEnvs());
+
+  it("answers 404 without reading the evidence", async () => {
+    vi.stubEnv("FEATURES_OFF", "training");
+    expect((await evidenceDownload("12")).status).toBe(404);
+    expect(strapi).not.toHaveBeenCalled();
+  });
+});
+
 describe("evidenceCsv (v0.28)", () => {
   const row = (over: Partial<TrainingEvidenceRow> = {}): TrainingEvidenceRow => ({
     id: 1,

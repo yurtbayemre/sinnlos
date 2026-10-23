@@ -613,7 +613,8 @@
     "renewCourse": "Jetzt erneuern",
     "lessonRenew": "erneuern",
     "renewSoon": "Dein Abschluss läuft am {date} ab. Du kannst die Lektion jetzt erneut abschließen.",
-    "renewOverdue": "Dein Abschluss ist am {date} abgelaufen. Bitte schließe die Lektion erneut ab."
+    "renewOverdue": "Dein Abschluss ist am {date} abgelaufen. Bitte schließe die Lektion erneut ab.",
+    "reload": "Neu laden"
   },
   "trainingReport": {
     "title": "Schulungs-Report",

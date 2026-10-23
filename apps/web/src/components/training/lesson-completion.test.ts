@@ -85,3 +85,13 @@ describe("LessonCompletion", () => {
     expect(exam).not.toContain(en.training.quizInstantHint);
   });
 });
+
+describe("a refused completion (v0.28)", () => {
+  it("keeps the version-changed warning until the reader reloads; refreshes after any other refusal", async () => {
+    const { refreshesAfterFailure } = await import("./complete-lesson-button");
+    expect(refreshesAfterFailure("changed")).toBe(false);
+    for (const code of ["quizFailed", "invalid", "unavailable", "quizContentInvalid"]) {
+      expect(refreshesAfterFailure(code), code).toBe(true);
+    }
+  });
+});

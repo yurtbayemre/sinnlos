@@ -14,6 +14,16 @@ import { isSharedErrorCode, startCmsAction, type CommonCode } from "@/lib/action
 import { completeLesson, type TrainingActionError } from "@/lib/training-actions";
 
 /**
+ * Whether a refused completion pulls the server's state at once. Not for
+ * "changed" (v0.28: an author published the lesson or course again): the
+ * new version remounts the lesson, which would wipe the warning and the
+ * quiz without a word, so the reader reloads with the button instead.
+ */
+export function refreshesAfterFailure(code: string): boolean {
+  return code !== TRAINING_VERSION_CHANGED;
+}
+
+/**
  * "Mark lesson as completed" control (ack-button clone, issue #29).
  * Date labels are pre-formatted on the server; after a successful action
  * the server-side refresh() delivers the authoritative state as new
@@ -63,7 +73,7 @@ export function CompleteLessonButton({
         // authoritative state from the server.
         setError(code);
         if (code === "quizFailed") onQuizRefused?.();
-        router.refresh();
+        if (refreshesAfterFailure(code)) router.refresh();
       },
     });
   };
@@ -78,6 +88,11 @@ export function CompleteLessonButton({
       ) : (
         <Button onClick={handleComplete} disabled={isPending || disabled}>
           {isPending ? t("completing") : t("completeButton")}
+        </Button>
+      )}
+      {error === TRAINING_VERSION_CHANGED && (
+        <Button type="button" variant="outline" size="sm" onClick={() => router.refresh()}>
+          {t("reload")}
         </Button>
       )}
       {error && (

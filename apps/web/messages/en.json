@@ -613,7 +613,8 @@
     "renewCourse": "Renew now",
     "lessonRenew": "renew",
     "renewSoon": "Your completion expires on {date}. You can complete this lesson again now.",
-    "renewOverdue": "Your completion expired on {date}. Please complete this lesson again."
+    "renewOverdue": "Your completion expired on {date}. Please complete this lesson again.",
+    "reload": "Reload"
   },
   "trainingReport": {
     "title": "Training report",
