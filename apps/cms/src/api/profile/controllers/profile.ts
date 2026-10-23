@@ -37,7 +37,11 @@
  */
 import { GUEST, hasRole, type RoleType as IntranetRoleType } from "../../../bootstrap/roles";
 import { ENTRA_MANAGED_PROFILE_FIELDS } from "../../../entra/profile";
+import type { RequestAssurance } from "../../../extensions/users-permissions/strapi-server";
 import { idpOf } from "../../../idp/exchange-core";
+import { mfaActivate, mfaDisable, mfaSetup } from "../../../utils/mfa";
+import { answerRefusals } from "../../../utils/refusal";
+import { isEnrolled, requiredMfa } from "../../../utils/mfa-core";
 import { OIDC_MANAGED_PROFILE_FIELDS } from "../../../oidc/provision";
 import {
   SENSITIVE_USER_FIELDS,
@@ -234,7 +238,11 @@ export function entraManagedFields(row: Row): string[] {
  * Shared read for GET and PUT: always the caller's own id (never from the
  * request), manager loaded through an explicit select.
  */
-async function loadProfile(userId: number, callerRoleType: RoleType): Promise<Row | null> {
+async function loadProfile(
+  userId: number,
+  callerRoleType: RoleType,
+  assurance?: RequestAssurance,
+): Promise<Row | null> {
   const full: unknown = await strapi.db.query(USER_UID).findOne({
     where: { id: userId },
     populate: {
@@ -250,12 +258,24 @@ async function loadProfile(userId: number, callerRoleType: RoleType): Promise<Ro
     manager: toManagerSummary(full.manager, callerRoleType),
     entraManagedFields: entraManagedFields(full),
     managedBy: idpOf(full),
+    // v0.27: whether this account needs, has and still lacks a second factor.
+    mfa: {
+      required: requiredMfa(full),
+      enrolled: isEnrolled(full),
+      restricted: assurance?.restricted === true,
+    },
   };
 }
 
 /** The slice of the Koa context these handlers use. */
 export interface ProfileContext {
-  state: { user?: { id: number; role?: { type?: string | null } | null } | null };
+  status?: number;
+  body?: unknown;
+  set?(field: string, value: string): void;
+  state: {
+    user?: { id: number; role?: { type?: string | null } | null } | null;
+    assurance?: RequestAssurance;
+  };
   request: { body?: unknown };
   send(body: unknown): unknown;
   unauthorized(): unknown;
@@ -294,9 +314,43 @@ export default {
     const user = ctx.state.user;
     if (!user) return ctx.unauthorized();
 
-    const profile = await loadProfile(user.id, user.role?.type);
+    const profile = await loadProfile(user.id, user.role?.type, ctx.state.assurance);
     if (!profile) return ctx.notFound();
     return ctx.send({ data: profile });
+  },
+
+  // v0.27: the caller's own second factor (utils/mfa.ts). The answers carry
+  // a secret, a JWT or recovery codes: never cached.
+  async mfaSetup(ctx: ProfileContext) {
+    const user = ctx.state.user;
+    if (!user) return ctx.unauthorized();
+    ctx.set?.("Cache-Control", "no-store");
+    const caller = { userId: user.id, assurance: ctx.state.assurance };
+    await answerRefusals(ctx as never, async () => {
+      ctx.send({ data: await mfaSetup(strapi as never, caller) });
+    });
+  },
+
+  async mfaActivate(ctx: ProfileContext) {
+    const user = ctx.state.user;
+    if (!user) return ctx.unauthorized();
+    ctx.set?.("Cache-Control", "no-store");
+    const body = isRow(ctx.request.body) ? ctx.request.body : {};
+    const caller = { userId: user.id, assurance: ctx.state.assurance };
+    await answerRefusals(ctx as never, async () => {
+      ctx.send({ data: await mfaActivate(strapi as never, caller, body) });
+    });
+  },
+
+  async mfaDisable(ctx: ProfileContext) {
+    const user = ctx.state.user;
+    if (!user) return ctx.unauthorized();
+    ctx.set?.("Cache-Control", "no-store");
+    const body = isRow(ctx.request.body) ? ctx.request.body : {};
+    const caller = { userId: user.id, assurance: ctx.state.assurance };
+    await answerRefusals(ctx as never, async () => {
+      ctx.send({ data: await mfaDisable(strapi as never, caller, body) });
+    });
   },
 
   async updateMe(ctx: ProfileContext) {
