@@ -6,6 +6,7 @@ import { NextResponse, type NextRequest } from "next/server";
 // A plain constants module without imports (process.env only), so it loads
 // in the proxy runtime like in a render. The one DEMO_MODE source (WD08).
 import { DEMO_MODE } from "@/lib/config";
+import { switchOfPath, switchedOff } from "@/lib/switches";
 
 /**
  * Static files that must stay reachable without a session. Kept as an
@@ -116,6 +117,18 @@ export function signInPath(req: NextRequest): string {
 }
 
 /**
+ * A page or route handler of a switched-off module or feature (FEATURES_OFF,
+ * v0.28; lib/switches.ts) renders the 404 page: the request is rewritten to
+ * a path no route matches (an `_` folder is never routable). null: on.
+ * The cms refuses the module's API routes on its own; this only keeps the
+ * pages from asking it and showing the "cms is down" banner.
+ */
+export function switchedOffResponse(req: NextRequest): NextResponse | null {
+  if (switchOfPath(req.nextUrl.pathname, switchedOff()) === null) return null;
+  return NextResponse.rewrite(new URL("/_switched-off", req.nextUrl));
+}
+
+/**
  * In production this guard redirects unauthenticated users to /sign-in.
  * When DEMO_MODE=1 we skip the check entirely so the UI is browsable
  * without Microsoft Entra ID configured.
@@ -138,13 +151,15 @@ export function signInPath(req: NextRequest): string {
  * posted without JavaScript is followed with a GET (signInRedirectStatus).
  */
 export default async function proxy(req: NextRequest) {
-  if (DEMO_MODE) return NextResponse.next();
+  if (DEMO_MODE) return switchedOffResponse(req) ?? NextResponse.next();
 
   const { nextUrl } = req;
   if (isPublicPath(nextUrl.pathname)) return NextResponse.next();
 
   const { auth } = await import("@/auth");
-  if (await auth()) return NextResponse.next();
+  // Signed in: a switched-off section answers 404 (after the sign-in check,
+  // so a signed-out visitor still lands on /sign-in first).
+  if (await auth()) return switchedOffResponse(req) ?? NextResponse.next();
 
   const target = signInPath(req);
   if (isServerActionRequest(req)) {

@@ -44,7 +44,7 @@ vi.mock("@/lib/api/announcements", () => ({ listAckReportAnnouncements: outage }
 vi.mock("@/lib/api/analytics", () => ({
   countPage: outage,
   reactionsPage: outage,
-  unreadNotificationsPage: outage,
+  unreadNotificationCount: outage,
   recentComments: outage,
   searchSummary: outage,
 }));

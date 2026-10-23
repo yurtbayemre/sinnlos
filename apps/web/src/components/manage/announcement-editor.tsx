@@ -80,6 +80,7 @@ export function AnnouncementEditor({
   optionsFailed,
   optionsTruncated,
   ownDepartment,
+  readConfirmations = true,
 }: {
   editable: AnnouncementEditable | null;
   access: AreaAccess;
@@ -90,6 +91,12 @@ export function AnnouncementEditor({
   optionsTruncated: boolean;
   /** A department author's department (pinned), else null. */
   ownDepartment: { documentId: string; name: string } | null;
+  /**
+   * False while FEATURES_OFF switches read confirmations off (v0.28): no
+   * confirmation section, so a create sends requiresAck false and an edit
+   * leaves the stored value untouched (the cms refuses true then).
+   */
+  readConfirmations?: boolean;
 }) {
   const t = useTranslations("manage.announcements");
   const tc = useTranslations("manage.common");
@@ -263,7 +270,7 @@ export function AnnouncementEditor({
           />
         </Section>
 
-        {!departmentAuthor && (
+        {!departmentAuthor && readConfirmations && (
           <Section title={t("sections.confirmation")}>
             <CheckboxField
               id={id("requiresAck")}

@@ -14,13 +14,17 @@
  *     shrunken nav that the persistent layout would keep until a reload;
  *   - /manage follows capabilitiesFor(role).manage, fail-closed: since
  *     batch 15 the moderators and the department authors (admin_role only
- *     before; decision 06 §L1). It replaces the plan's `adminOnly` flag.
+ *     before; decision 06 §L1). It replaces the plan's `adminOnly` flag;
+ *   - an entry with a `module` is hidden while FEATURES_OFF switches that
+ *     module off (v0.28, lib/switches.ts).
  * The nav is UX only: every page gates itself, and the CMS decides.
  */
 import type { Route } from "next";
 import type { Messages } from "next-intl";
+import type { ModuleName, SwitchName } from "@sinnlos/domain";
 import type { IconName } from "@/components/icon-map";
 import { capabilitiesFor, isReadDenied, type ReadSection } from "@/lib/roles";
+import { switchedOff } from "@/lib/switches";
 
 export type NavLabelKey = keyof Messages["nav"];
 
@@ -37,17 +41,31 @@ export interface NavItem {
   /** A tab of the phone tab bar; every other entry sits in its More sheet. */
   mobilePrimary?: boolean;
   capability?: NavCapability;
+  /** The FEATURES_OFF module the section belongs to (v0.28). */
+  module?: ModuleName;
 }
 
 /** In display order; /manage is the reverse proxy's safe name for the admin area (/admin is Strapi). */
 export const NAV_ITEMS: readonly NavItem[] = [
   { href: "/", labelKey: "dashboard", mobileLabelKey: "home", icon: "Home", mobilePrimary: true },
   { href: "/people", labelKey: "people", icon: "Contact" },
-  { href: "/duties", labelKey: "duties", icon: "CalendarClock", capability: "duties" },
-  { href: "/kpis", labelKey: "kpis", icon: "TrendingUp", capability: "kpis" },
-  { href: "/events", labelKey: "events", icon: "Calendar", mobilePrimary: true },
+  {
+    href: "/duties",
+    labelKey: "duties",
+    icon: "CalendarClock",
+    capability: "duties",
+    module: "duty-plans",
+  },
+  { href: "/kpis", labelKey: "kpis", icon: "TrendingUp", capability: "kpis", module: "kpis" },
+  { href: "/events", labelKey: "events", icon: "Calendar", mobilePrimary: true, module: "events" },
   { href: "/wiki", labelKey: "wiki", icon: "BookOpen", mobilePrimary: true },
-  { href: "/training", labelKey: "training", icon: "GraduationCap", capability: "training" },
+  {
+    href: "/training",
+    labelKey: "training",
+    icon: "GraduationCap",
+    capability: "training",
+    module: "training",
+  },
   {
     href: "/departments",
     labelKey: "departments",
@@ -63,14 +81,15 @@ export const NAV_ITEMS: readonly NavItem[] = [
     mobilePrimary: true,
     capability: "announcements",
   },
-  { href: "/kudos", labelKey: "kudos", icon: "Award", capability: "kudos" },
+  { href: "/kudos", labelKey: "kudos", icon: "Award", capability: "kudos", module: "kudos" },
   {
     href: "/marketplace",
     labelKey: "marketplace",
     icon: "ShoppingBag",
     capability: "marketplace",
+    module: "marketplace",
   },
-  { href: "/polls", labelKey: "polls", icon: "BarChart3" },
+  { href: "/polls", labelKey: "polls", icon: "BarChart3", module: "polls" },
   { href: "/documents", labelKey: "documents", icon: "FileText" },
   { href: "/manage", labelKey: "admin", icon: "Settings", capability: "manage" },
 ];
@@ -87,9 +106,13 @@ export function isNavActive(pathname: string, href: string): boolean {
 }
 
 /** The entries the viewer's role may use, in display order (see the header). */
-export function navItemsFor(role: string | null | undefined): NavItem[] {
+export function navItemsFor(
+  role: string | null | undefined,
+  off: ReadonlySet<SwitchName> = switchedOff(),
+): NavItem[] {
   const { manage } = capabilitiesFor(role);
   return NAV_ITEMS.filter((item) => {
+    if (item.module !== undefined && off.has(item.module)) return false;
     if (item.capability === undefined) return true;
     if (item.capability === "manage") return manage;
     return !isReadDenied(role, item.capability);

@@ -47,10 +47,11 @@ import { getLocale, getTranslations } from "next-intl/server";
 import { appTimeZone } from "@/lib/app-time-zone";
 import { walkAllPages } from "@/lib/paginate";
 import { instantEpochMs, zonedDateKey, zonedDayStart } from "@/lib/plain-date";
-import type { IndexedSearchKind } from "@sinnlos/domain";
+import { searchKindEnabled, type IndexedSearchKind, type SwitchName } from "@sinnlos/domain";
 import { DEMO_MODE } from "@/lib/config";
 import { isReadDenied, type ReadSection } from "@/lib/roles";
 import { meiliCandidates } from "@/lib/search-meili";
+import { switchedOff } from "@/lib/switches";
 import { strapi, type StrapiListResponse } from "@/lib/strapi";
 
 export const SEARCH_KINDS = [
@@ -155,6 +156,18 @@ export function isRoleGatedKind(kind: SearchKind): boolean {
 export function searchKindDenied(kind: SearchKind, role: string | null | undefined): boolean {
   const section = SEARCH_KIND_SECTION[kind];
   return section !== undefined && isReadDenied(role, section);
+}
+
+/**
+ * True for a content kind whose module FEATURES_OFF switches off (v0.28:
+ * events, polls): it is neither read nor listed, whatever Meilisearch still
+ * holds until its next rebuild (the cms leaves those kinds out of it).
+ */
+export function searchKindSwitchedOff(
+  kind: SearchKind,
+  off: ReadonlySet<SwitchName> = switchedOff(),
+): boolean {
+  return (kind === "event" || kind === "poll") && !searchKindEnabled(off, kind);
 }
 
 /** The term as the live search uses it: cut to MAX_TERM_LENGTH. */
@@ -535,7 +548,9 @@ export async function searchLive(
   const role = viewerRole();
   const paths = liveSearchPaths(term, null);
   const ranked = DEMO_MODE ? Promise.resolve(null) : candidates(normalizeTerm(term));
+  const off = switchedOff();
   const read = async (kind: LiveKind): Promise<unknown> => {
+    if (searchKindSwitchedOff(kind, off)) return [];
     if (kind === "person") return strapi<unknown>(liveSearchPaths(term, await role).person);
     if (isRoleGatedKind(kind) && searchKindDenied(kind, await role)) return [];
     const ids = (await ranked)?.get(kind);

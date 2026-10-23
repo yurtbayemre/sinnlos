@@ -175,6 +175,12 @@ const ROUTES: [method: string, pattern: RegExp, handler: DemoHandler][] = [
   ["POST", /^\/api\/lesson-progresses$/, write.completeLesson],
   ["GET", /^\/api\/quick-links$/, ({ params }) => list(quickLinks, params)],
   ["GET", /^\/api\/notifications$/, ({ data, params }) => list(data.notifications, params)],
+  // v0.28: the admin's platform-wide unread total (the demo has one recipient).
+  [
+    "GET",
+    /^\/api\/notifications\/unread-count$/,
+    ({ data }) => ({ count: data.notifications.filter((row) => !row.readAt).length }),
+  ],
   ["POST", /^\/api\/notifications\/mark-read$/, write.markNotificationsRead],
   ["POST", /^\/api\/notifications\/mark-all-read$/, write.markAllNotificationsRead],
   ["GET", /^\/api\/comments$/, ({ data, params }) => list(data.comments, params)],

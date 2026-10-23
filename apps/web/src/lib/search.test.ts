@@ -644,6 +644,41 @@ describe("GET /search: no reads the role cannot make (SH02)", () => {
   });
 });
 
+describe("GET /search: switched-off modules (FEATURES_OFF, v0.28)", () => {
+  beforeEach(() => {
+    viewerMock.mockResolvedValue({ role: "member" });
+    vi.stubEnv("FEATURES_OFF", "events,polls");
+  });
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it.each(["event", "poll"])("the %s preload is empty without a request", async (kind) => {
+    const res = await get(`?kind=${kind}`);
+    expect(await res.json()).toEqual({ items: [] });
+    expect(strapiMock).not.toHaveBeenCalled();
+  });
+
+  it("the live search reads neither events nor polls, and every other kind", async () => {
+    await get("?q=ada");
+    const bases = paths().map((path) => path.split("?")[0]);
+    expect(bases).not.toContain("/api/events");
+    expect(bases).not.toContain("/api/polls");
+    expect(bases).toContain("/api/announcements");
+  });
+
+  it("names only events and polls as switchable kinds", () => {
+    const off = new Set(["events", "polls", "kudos", "training"] as const);
+    expect(search.SEARCH_KINDS.filter((kind) => search.searchKindSwitchedOff(kind, off))).toEqual([
+      "event",
+      "poll",
+    ]);
+    expect(
+      search.SEARCH_KINDS.filter((kind) => search.searchKindSwitchedOff(kind, new Set())),
+    ).toEqual([]);
+  });
+});
+
 describe("POST /search (telemetry)", () => {
   it("logs the settled term and answers 204", async () => {
     strapiMock.mockResolvedValue({});

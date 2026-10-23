@@ -6,6 +6,7 @@ import { lacksDepartment } from "@/lib/manage/access";
 import { AREA_PATH } from "@/lib/manage/areas";
 import { areaGate } from "@/lib/manage/page-gate";
 import { loadTargetingOptions } from "@/lib/loaders/manage/options";
+import { isOff } from "@/lib/switches";
 
 export async function generateMetadata() {
   const t = await getTranslations("manage.documents");
@@ -49,6 +50,7 @@ export default async function NewDocumentPage() {
         optionsFailed={options.failed}
         optionsTruncated={options.truncated}
         ownDepartment={departmentAuthor ? viewer.department : null}
+        readConfirmations={!isOff("read-confirmations")}
       />
     </div>
   );
