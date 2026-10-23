@@ -60,21 +60,21 @@ The owner rule still applies: **no bloat**. Every item below has the smallest sc
 - [x] **S4 (start) `docs/INSTALL.md`.** One page, written together with the fresh-host rehearsal.
 - [ ] **S5 Signed images and SBOM** through GitHub artifact attestations, on the published images. The workflow (`release-images.yml`) is built; publication waits for the lawyer review (owner decision 2026-10-22).
 
-### Accounts (v0.27)
+### Accounts (v0.27) — shipped in v0.27.0 (2026-10-23)
 
-- [ ] **M8 Password baseline.** Minimum length 10 to 12 characters, enforced server-side on every path (create, change, reset, registration), plus a common-password list. No policy engine and no rotation rules.
-- [ ] **M7 Invitation and password recovery: one token flow, local accounts only.**
+- [x] **M8 Password baseline.** Minimum length 10 to 12 characters, enforced server-side on every path (create, change, reset, registration), plus a common-password list. No policy engine and no rotation rules.
+- [x] **M7 Invitation and password recovery: one token flow, local accounts only.**
   - An admin invites one person at `/manage/users`, who gets a set-password link by e-mail. "Forgot password" uses the same flow.
   - The token is stored as a hash, has an expiry, is single use and is bound to `tokenVersion`.
   - Accounts with an identity-provider binding never get a password.
   - Redemption leads to sign-in, never straight to a session.
   - The generic Strapi reset routes stay revoked.
-- [ ] **M9 TOTP for local accounts.**
+- [x] **M9 TOTP for local accounts.**
   - Enforceable per role (at least admin and editor), with recovery codes.
   - Enforced in the cms on every path that issues a JWT, not only on the web form.
   - Specified together with M7, so a reset never bypasses MFA.
-- [ ] **S3 Bulk invitations** (pasted list or CSV) on top of M7.
-- [ ] **S7 Stale UI texts.** Some texts still send people to the Strapi panel: roles, and the empty states for announcements, departments, teams and courses.
+- [x] **S3 Bulk invitations** (pasted list or CSV) on top of M7.
+- [x] **S7 Stale UI texts.** Some texts still send people to the Strapi panel: roles, and the empty states for announcements, departments, teams and courses.
 
 ### Data protection (v0.28)
 
