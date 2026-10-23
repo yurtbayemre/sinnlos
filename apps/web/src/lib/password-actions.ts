@@ -91,12 +91,13 @@ export async function setPasswordFromLink(
   if (password !== String(formData.get("confirm") ?? "")) return { error: "passwordMismatch" };
   const length = passwordLengthProblem(password);
   if (length) return { error: length === "tooShort" ? "passwordTooShort" : "passwordTooLong" };
-  // Per IP and per link (its user id): guessing a token for one account
-  // stays as slow as a sign-in.
-  const ticket = passwordLinkRateLimiter.tryAcquire(
-    clientIpFrom(await headers()),
-    `set:${token.slice(0, token.indexOf("."))}`,
-  );
+  // Per client IP only. Never per link or user id: the id prefix is a
+  // small public number, so a per-id bucket would let anyone lock a
+  // person's valid link with garbage tokens for their id. The token's 256
+  // random bits make guessing infeasible anyway; a set password gives its
+  // place back, so only refused attempts count.
+  const clientIp = clientIpFrom(await headers());
+  const ticket = passwordLinkRateLimiter.tryAcquire(clientIp, `set-password@${clientIp}`);
   if (ticket === "blocked") return { error: "tooManyRequests" };
   let res: Response | null = null;
   try {

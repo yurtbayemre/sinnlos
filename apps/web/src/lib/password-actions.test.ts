@@ -7,8 +7,9 @@ import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
  * mapping and the success redirect. Global fetch is stubbed; the limiter
  * and next/navigation are the real ones.
  */
+let clientIp = "203.0.113.9";
 vi.mock("next/headers", () => ({
-  headers: async () => new Headers({ "x-forwarded-for": "203.0.113.9" }),
+  headers: async () => new Headers({ "x-forwarded-for": clientIp }),
 }));
 vi.mock("@/i18n/locale", () => ({ getUserLocale: async () => "de" }));
 
@@ -50,6 +51,7 @@ const cmsError = (code: string) =>
   );
 
 beforeEach(() => {
+  clientIp = "203.0.113.9";
   fetchMock.mockReset();
   fetchMock.mockResolvedValue(new Response(null, { status: 202 }));
   vi.spyOn(console, "error").mockImplementation(() => undefined);
@@ -150,6 +152,35 @@ describe("setPasswordFromLink", () => {
     const { setPasswordFromLink } = await load();
     fetchMock.mockResolvedValue(cmsError(cmsCode));
     await expect(setPasswordFromLink({}, form(good))).resolves.toEqual({ error: code });
+  });
+
+  it("limits refused attempts per client IP, never per link: garbage for an id cannot lock its valid link", async () => {
+    const { setPasswordFromLink } = await load();
+    fetchMock.mockImplementation(async () => cmsError("token_invalid"));
+    // Other IPs flood invalid tokens for user 42.
+    for (let ip = 1; ip <= 30; ip++) {
+      clientIp = `198.51.100.${ip}`;
+      for (let i = 0; i < 3; i++) {
+        await setPasswordFromLink({}, form({ ...good, token: `42.${"x".repeat(43)}` }));
+      }
+    }
+    // The person's own valid link, from a fresh IP, still goes through.
+    clientIp = "192.0.2.50";
+    fetchMock.mockReset();
+    fetchMock.mockResolvedValue(new Response(null, { status: 204 }));
+    await expect(setPasswordFromLink({}, form(good))).rejects.toThrow();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses a flood from one IP with tooManyRequests", async () => {
+    const { setPasswordFromLink } = await load();
+    fetchMock.mockImplementation(async () => cmsError("token_invalid"));
+    for (let i = 0; i < 10; i++) await setPasswordFromLink({}, form(good));
+    fetchMock.mockClear();
+    await expect(setPasswordFromLink({}, form(good))).resolves.toEqual({
+      error: "tooManyRequests",
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("answers setPasswordFailed for an outage", async () => {
