@@ -41,6 +41,7 @@ const { getNotifications, markAllNotificationsRead, markNotificationsRead } =
   await import("./notification-actions");
 const { updateProfile } = await import("./profile-actions");
 const { checkLesson, completeLesson } = await import("./training-actions");
+const DEMO_VERSION = { course: "2026-01-01T00:00:00.000Z", lesson: "2026-01-01T00:00:00.000Z" };
 const { fetchMyProgress } = await import("./training");
 const { createClassified, deleteClassified, updateClassified } =
   await import("./classified-actions");
@@ -231,15 +232,19 @@ describe("DEMO_MODE writes change what the reads show", () => {
     expect(
       await checkLesson("demolesson00000000000001", [{ questionIndex: 0, optionIndex: 1 }]),
     ).toMatchObject({ ok: true, data: { passed: true } });
-    expect(await completeLesson("demolesson00000000000001", [0])).toMatchObject({
+    expect(await completeLesson("demolesson00000000000001", [0], DEMO_VERSION)).toMatchObject({
       ok: false,
       code: "quizFailed",
     });
-    expect(await completeLesson("demolesson00000000000002", null)).toEqual({ ok: true });
+    expect(await completeLesson("demolesson00000000000002", null, DEMO_VERSION)).toEqual({
+      ok: true,
+    });
     expect((await fetchMyProgress()).completed.has("demolesson00000000000002")).toBe(true);
     // The fixture's receipts of last year are Ada's own (the user filter of fetchMyProgress).
     expect((await fetchMyProgress()).completed.has("demolesson00000000000003")).toBe(true);
-    expect(await completeLesson("demolesson00000000000002", null)).toMatchObject({ ok: false });
+    expect(await completeLesson("demolesson00000000000002", null, DEMO_VERSION)).toMatchObject({
+      ok: false,
+    });
   });
 
   it("marketplace: create, edit and delete one's own ad; another's ad is forbidden", async () => {

@@ -69,4 +69,18 @@ describe("APP_TIME_ZONE in the web", () => {
     vi.stubEnv("APP_TIME_ZONE", "Nowhere/Zone");
     expect(() => register()).toThrow(/IANA time zone name/);
   });
+
+  it("register() refuses an unknown FEATURES_OFF value and logs the switches (v0.28)", () => {
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.stubEnv("APP_TIME_ZONE", "Europe/Berlin");
+    vi.stubEnv("FEATURES_OFF", "");
+    register();
+    expect(info).toHaveBeenCalledWith("[switches] everything on");
+    vi.stubEnv("FEATURES_OFF", "polls,events");
+    register();
+    expect(info).toHaveBeenCalledWith("[switches] off: events, polls");
+    vi.stubEnv("FEATURES_OFF", "events,chat");
+    expect(() => register()).toThrow(/chat/);
+  });
 });

@@ -126,4 +126,29 @@ describe("navItemsFor", () => {
       expect(hrefs(role).sort()).toEqual([...EVERYONE, ...READ_GATED].sort());
     },
   );
+
+  it("hides the sections of switched-off modules for every role (FEATURES_OFF, v0.28)", () => {
+    const off = new Set([
+      "events",
+      "polls",
+      "duty-plans",
+      "kpis",
+      "training",
+      "kudos",
+      "marketplace",
+    ] as const);
+    expect(navItemsFor("admin_role", off).map((item) => item.href)).toEqual([
+      "/",
+      "/people",
+      "/wiki",
+      "/departments",
+      "/teams",
+      "/announcements",
+      "/documents",
+      "/manage",
+    ]);
+    expect(navItemsFor("admin_role", new Set()).map((item) => item.href)).toEqual(
+      NAV_ITEMS.map((item) => item.href),
+    );
+  });
 });

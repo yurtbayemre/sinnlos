@@ -34,6 +34,7 @@ const lesson = (
       quiz,
       completionMode,
       lessonDocumentId: "k3m9x0000000000000000000",
+      version: { course: "2026-10-01T08:00:00.000Z", lesson: "2026-10-02T09:30:00.000Z" },
       completedAtLabel,
       nextHref: null,
     }),
@@ -82,5 +83,15 @@ describe("LessonCompletion", () => {
     const exam = lesson("exam", QUIZ, "1 October 2026");
     expect(exam).toContain(en.training.quizExamHint);
     expect(exam).not.toContain(en.training.quizInstantHint);
+  });
+});
+
+describe("a refused completion (v0.28)", () => {
+  it("keeps the version-changed warning until the reader reloads; refreshes after any other refusal", async () => {
+    const { refreshesAfterFailure } = await import("./complete-lesson-button");
+    expect(refreshesAfterFailure("changed")).toBe(false);
+    for (const code of ["quizFailed", "invalid", "unavailable", "quizContentInvalid"]) {
+      expect(refreshesAfterFailure(code), code).toBe(true);
+    }
   });
 });

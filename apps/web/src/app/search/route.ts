@@ -6,6 +6,7 @@ import {
   logSearch,
   parseSearchLog,
   searchKindDenied,
+  searchKindSwitchedOff,
   searchLive,
 } from "@/lib/search-action";
 import { getSession } from "@/lib/session";
@@ -45,6 +46,7 @@ export async function GET(req: NextRequest) {
   const kind = params.get("kind");
   if (kind !== null) {
     if (!isPreloadKind(kind)) return json({ error: "Unknown kind" }, 400);
+    if (searchKindSwitchedOff(kind)) return json({ items: [] });
     if (isRoleGatedKind(kind) && searchKindDenied(kind, (await getViewer()).role)) {
       return json({ items: [] });
     }

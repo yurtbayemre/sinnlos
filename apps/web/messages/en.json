@@ -602,6 +602,8 @@
     "quizSomeWrong": "{count, plural, one {# answer is not right yet} other {# answers are not right yet}} — adjust and check again.",
     "completeLocked": "Completion unlocks after passing the comprehension check.",
     "quizContentInvalid": "This quiz contains invalid content. Please contact the course author.",
+    "versionChanged": "This training was updated. Please reload.",
+    "contact": "Questions to: {contact}",
     "quizNotPassed": "Not all answers are correct (the questions may have changed). Answer them again.",
     "statusDueSoon": "Expires on {date}",
     "statusExpired": "Expired on {date}, please repeat it",
@@ -611,7 +613,8 @@
     "renewCourse": "Renew now",
     "lessonRenew": "renew",
     "renewSoon": "Your completion expires on {date}. You can complete this lesson again now.",
-    "renewOverdue": "Your completion expired on {date}. Please complete this lesson again."
+    "renewOverdue": "Your completion expired on {date}. Please complete this lesson again.",
+    "reload": "Reload"
   },
   "trainingReport": {
     "title": "Training report",
@@ -640,7 +643,15 @@
     "lessonsOf": "{done}/{total}",
     "noPeople": "Nobody in this selection.",
     "downloadStatus": "Status (CSV)",
-    "downloadReceipts": "Proof (CSV)"
+    "downloadReceipts": "Proof (CSV)",
+    "leaversTitle": "People who left",
+    "leaversHint": "Blocked and anonymised people with receipts for this course, named from their receipts. They do not count above. Admins only.",
+    "leaversShow": "Show",
+    "leaversHide": "Hide",
+    "leaversNone": "No people who left have receipts for this course.",
+    "columnLeft": "Left",
+    "leftBlocked": "blocked",
+    "leftAnonymised": "anonymised"
   },
   "duties": {
     "title": "Responsibilities",
@@ -650,6 +661,7 @@
     "notStaffed": "not staffed",
     "until": "until {time}",
     "unknownPerson": "Unknown person",
+    "formerPerson": "Former person",
     "allDepartments": "All departments",
     "filter": "Filter by department",
     "empty": "No duty plans published yet.",

@@ -58,9 +58,16 @@ export function trainingReport(): Promise<TrainingReportSummaryResponse> {
 }
 
 /** One course's people and receipts in the caller's scope; 404 outside it. */
-export function courseTrainingReport(documentId: string): Promise<TrainingReportCourseResponse> {
+/**
+ * `leavers` (v0.28, admin_role only; the cms answers 403 to anyone else):
+ * the blocked and anonymised people with receipts for the course, apart.
+ */
+export function courseTrainingReport(
+  documentId: string,
+  { leavers = false }: { leavers?: boolean } = {},
+): Promise<TrainingReportCourseResponse> {
   return strapi<TrainingReportCourseResponse>(
-    `/api/courses/${encodeURIComponent(documentId)}/report`,
+    `/api/courses/${encodeURIComponent(documentId)}/report${leavers ? "?leavers=1" : ""}`,
   );
 }
 

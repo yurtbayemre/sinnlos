@@ -48,14 +48,13 @@ export function reactionsPage(): Promise<StrapiListResponse<unknown>> {
   );
 }
 
-/** One unread notification, for the platform-wide unread total. */
-export function unreadNotificationsPage(): Promise<StrapiListResponse<unknown>> {
-  return strapi<StrapiListResponse<unknown>>(
-    withQuery(
-      "/api/notifications",
-      strapiQuery().sortBy("createdAt:desc").pageSize(1).filter("readAt", "$null", true),
-    ),
-  );
+/**
+ * The platform-wide unread total (v0.28): a number from the admin-only
+ * aggregate route. Notification reads are own rows only for every role
+ * since v0.28, so the old one-row list would count the admin's own.
+ */
+export function unreadNotificationCount(): Promise<{ count: number }> {
+  return strapi<{ count: number }>("/api/notifications/unread-count");
 }
 
 /** The search telemetry of the last 30 days (admin-only custom route). */

@@ -10,6 +10,7 @@ import { AREA_PATH } from "@/lib/manage/areas";
 import { areaGate } from "@/lib/manage/page-gate";
 import { loadEditable } from "@/lib/loaders/manage/editor";
 import { loadTargetingOptions } from "@/lib/loaders/manage/options";
+import { isOff } from "@/lib/switches";
 
 type Params = { params: Promise<{ documentId: string }> };
 
@@ -66,6 +67,7 @@ export default async function EditDocumentPage({ params }: Params) {
         optionsFailed={options.failed}
         optionsTruncated={options.truncated}
         ownDepartment={editable.roleClass === "departmentAuthor" ? viewer.department : null}
+        readConfirmations={!isOff("read-confirmations")}
       />
       <PreviewSection>
         <DocumentPreview editable={editable} />

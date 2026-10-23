@@ -10,7 +10,7 @@ import { loadEvents } from "@/lib/loaders/events";
 import { getSession } from "@/lib/session";
 import { getViewer } from "@/lib/viewer";
 import type { EventRsvpSummary } from "@/lib/types";
-import { cn } from "@/lib/utils";
+import { cn, displayNameOf } from "@/lib/utils";
 import { EmptyState } from "@/components/empty-state";
 import { FetchErrorBanner } from "@/components/fetch-error";
 import { PageHeader } from "@/components/page-header";
@@ -181,9 +181,9 @@ function EventCard({
               </span>
             )}
           </div>
-          {event.organizer?.displayName && (
+          {displayNameOf(event.organizer, null) && (
             <div className="mt-1 text-xs text-muted-foreground">
-              {t("organizedBy", { name: event.organizer.displayName })}
+              {t("organizedBy", { name: displayNameOf(event.organizer, "") })}
             </div>
           )}
           {rsvp && (

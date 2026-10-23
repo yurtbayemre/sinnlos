@@ -256,7 +256,7 @@ GET http://cms.test/api/comments?sort=createdAt:desc&pagination[pageSize]=5&popu
 GET http://cms.test/api/documents?&pagination[pageSize]=1 cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
 GET http://cms.test/api/events?&pagination[pageSize]=1 cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
 GET http://cms.test/api/me cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
-GET http://cms.test/api/notifications?sort=createdAt:desc&pagination[pageSize]=1&filters[readAt][$null]=true cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
+GET http://cms.test/api/notifications/unread-count cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
 GET http://cms.test/api/polls?&pagination[pageSize]=1 cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
 GET http://cms.test/api/reactions?sort=createdAt:desc&pagination[pageSize]=1 cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
 GET http://cms.test/api/search-logs/summary?days=30 cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]

@@ -17,7 +17,7 @@ import {
 import type { Messages } from "next-intl";
 import { getFormatter, getTranslations } from "next-intl/server";
 import { formatInstant, type DateTimeFields } from "@/lib/date-format";
-import { ANALYTICS_STATS, loadAnalytics, type AnalyticsStat } from "@/lib/loaders/analytics";
+import { loadAnalytics, type AnalyticsStat } from "@/lib/loaders/analytics";
 import { loadPeopleCount } from "@/lib/loaders/people-count";
 import { isAdmin } from "@/lib/roles";
 import { getViewer } from "@/lib/viewer";
@@ -93,7 +93,7 @@ export default async function AnalyticsPage() {
           <Suspense fallback={<UsersTile label={t("users")} value={<StatValueSkeleton />} />}>
             <UsersStatTile label={t("users")} unknownLabel={unknown} />
           </Suspense>
-          {ANALYTICS_STATS.map((stat) => {
+          {view.stats.map((stat) => {
             const meta = STAT_META[stat];
             return (
               <StatTile

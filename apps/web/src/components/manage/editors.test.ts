@@ -460,6 +460,21 @@ describe("PollEditor", () => {
     expect(html).toContain(t.common.actions.closeNow);
   });
 
+  it("locks the end date once the voter links are removed (v0.28)", () => {
+    const render_ = (votersRemoved: boolean) =>
+      render(
+        createElement(PollEditor, {
+          ...props,
+          access: { ...props.access, verbs: [...props.access.verbs] },
+          editable: { ...poll, closesAt: "2026-08-31T22:00:00.000Z", votersRemoved },
+          closed: true,
+        }),
+      );
+    expect(isDisabled(tagById(render_(true), "poll-closesAt"))).toBe(true);
+    expect(render_(true)).toContain(t.common.errors.votersRemoved);
+    expect(isDisabled(tagById(render_(false), "poll-closesAt"))).toBe(false);
+  });
+
   it("a new poll: two answers of at most 200 characters, closing days from today, guest voting off", () => {
     const html = render(
       createElement(PollEditor, {

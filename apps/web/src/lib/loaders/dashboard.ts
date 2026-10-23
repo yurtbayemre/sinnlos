@@ -1,7 +1,9 @@
+import type { SwitchName } from "@sinnlos/domain";
 import { zonedDateKey, zonedDayStart } from "@/lib/plain-date";
 import { isReadDenied } from "@/lib/roles";
 import { SKIPPED_READ, tryFetch } from "@/lib/safe-fetch";
 import { api } from "@/lib/strapi";
+import { switchedOff } from "@/lib/switches";
 import type { QuickLink } from "@/lib/types";
 import { pickLatestNews, type LatestNewsView } from "./announcements";
 import { countOfList, countOfWalk, type Count } from "./count";
@@ -19,7 +21,9 @@ type Role = string | null | undefined;
  * The sections the viewer's role can read (lib/roles.ts isReadDenied,
  * SH02): the others are neither requested nor shown (guest reads no
  * departments, teams, announcements, kudos or training). An unreadable
- * role (null) still reads: the CMS decides.
+ * role (null) still reads: the CMS decides. A module or feature switched
+ * off by FEATURES_OFF (v0.28) is neither requested nor shown for anyone:
+ * its tile and banner go, and no "cms is down" banner for its 404.
  */
 export interface DashboardSections {
   org: boolean;
@@ -27,15 +31,23 @@ export interface DashboardSections {
   acks: boolean;
   kudos: boolean;
   training: boolean;
+  events: boolean;
 }
 
-export function dashboardSections(role: Role): DashboardSections {
+export function dashboardSections(
+  role: Role,
+  off: ReadonlySet<SwitchName> = switchedOff(),
+): DashboardSections {
   return {
     org: !isReadDenied(role, "departments") && !isReadDenied(role, "teams"),
     news: !isReadDenied(role, "announcements"),
-    acks: !isReadDenied(role, "announcements") && !isReadDenied(role, "acknowledgements"),
-    kudos: !isReadDenied(role, "kudos"),
-    training: !isReadDenied(role, "training"),
+    acks:
+      !isReadDenied(role, "announcements") &&
+      !isReadDenied(role, "acknowledgements") &&
+      !off.has("read-confirmations"),
+    kudos: !isReadDenied(role, "kudos") && !off.has("kudos"),
+    training: !isReadDenied(role, "training") && !off.has("training"),
+    events: !off.has("events"),
   };
 }
 
@@ -50,7 +62,8 @@ export interface DashboardView {
   counts: {
     departments: Count | null;
     teams: Count | null;
-    events: Count;
+    /** null with the events module switched off (FEATURES_OFF). */
+    events: Count | null;
     news: Count | null;
   };
   quickLinks: QuickLink[];
@@ -81,7 +94,9 @@ export async function loadDashboard(
     // Targeting is applied by the CMS policy — no department argument.
     sections.news ? tryFetch(() => api.announcements.list(), "dashboard") : SKIPPED_READ,
     // Upcoming only: the tile counts the events that still matter.
-    tryFetch(() => api.events.upcoming(startOfToday, now.toISOString()), "dashboard"),
+    sections.events
+      ? tryFetch(() => api.events.upcoming(startOfToday, now.toISOString()), "dashboard")
+      : SKIPPED_READ,
     tryFetch(() => api.quickLinks.list(), "dashboard"),
   ]);
 
@@ -90,7 +105,7 @@ export async function loadDashboard(
     counts: {
       departments: sections.org ? countOfWalk(departments) : null,
       teams: sections.org ? countOfWalk(teams) : null,
-      events: countOfList(events),
+      events: sections.events ? countOfList(events) : null,
       news: sections.news ? countOfList(announcements) : null,
     },
     quickLinks: quickLinks.data?.data ?? [],

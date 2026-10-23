@@ -10,7 +10,16 @@ export type TrainingFixture = {
 };
 type Fixtures = {
   runId: string;
-  users: { lead: Account; member: Account; editor: Account; admin: Account; inviter: Account };
+  users: {
+    lead: Account;
+    member: Account;
+    editor: Account;
+    admin: Account;
+    inviter: Account;
+    privacy: Account;
+    leaver: Account & { id: number };
+  };
+  privacy: { announcement: { title: string; documentId: string }; comment: string };
   teams: { editable: Team; readonly: Team };
   training: TrainingFixture;
   exam: TrainingFixture;

@@ -157,10 +157,16 @@ export default async function ManageUsersPage({ searchParams }: Props) {
                   {t("list.mfa")}
                 </span>
               )}
-              {user.blocked && (
-                <span className="rounded-full bg-destructive/10 px-2 py-0.5 text-xs font-medium text-destructive">
-                  {t("list.blocked")}
+              {user.anonymisedAt ? (
+                <span className="rounded-full bg-muted px-2 py-0.5 text-xs font-medium">
+                  {t("anonymisedBadge")}
                 </span>
+              ) : (
+                user.blocked && (
+                  <span className="rounded-full bg-destructive/10 px-2 py-0.5 text-xs font-medium text-destructive">
+                    {t("list.blocked")}
+                  </span>
+                )
               )}
             </li>
           ))}

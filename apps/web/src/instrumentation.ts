@@ -4,8 +4,10 @@
  * APP_TIME_ZONE Next.js 16 does not exit: it logs "An error occurred while
  * loading instrumentation hook: …" and answers every request with 500, so
  * the healthcheck fails instead of pages quietly computing deadlines or
- * rendering dates in a wrong zone.
+ * rendering dates in a wrong zone. The same holds for an unknown
+ * FEATURES_OFF value (v0.28, lib/switches.ts), which refuses the cms boot.
  */
+import { featuresOff } from "@sinnlos/domain";
 import { canonicalTimeZone, resolveAppTimeZone } from "./lib/plain-date";
 
 /**
@@ -53,4 +55,6 @@ export function register(): void {
   console.info(`[datetime] web process time zone ${processZone}, APP_TIME_ZONE ${appZone}`);
   const warning = webZoneWarning(process.env, processZone);
   if (warning) console.warn(warning);
+  const off = [...featuresOff(process.env)].sort();
+  console.info(off.length ? `[switches] off: ${off.join(", ")}` : "[switches] everything on");
 }

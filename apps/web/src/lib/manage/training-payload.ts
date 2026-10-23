@@ -3,6 +3,7 @@ import {
   TRAINING_FIELDS,
   checkRequiredString,
   checkMarkdown,
+  checkNullableString,
   checkEnum,
   checkOrder,
   validateQuiz,
@@ -45,6 +46,11 @@ const COURSE_RULES: readonly FieldRule<CourseValues>[] = [
         ? { value: months }
         : { code: "invalid" };
     },
+  },
+  {
+    key: "contact",
+    inputs: ["contact"],
+    convert: (v) => checked(textOrNull(v.contact), checkNullableString),
   },
   { key: "departments", inputs: ["departments"], convert: (v) => ({ value: [...v.departments] }) },
   {

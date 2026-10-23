@@ -1,4 +1,9 @@
-import type { CourseValidityStatus, TrainingReportCourseResponse } from "@sinnlos/domain";
+import type {
+  CourseValidityStatus,
+  TrainingCompletionMode,
+  TrainingEvidenceRow,
+  TrainingReportCourseResponse,
+} from "@sinnlos/domain";
 import { instantEpochMs, isPlainDate, zonedDateKey, zonedTimeOfDay } from "@/lib/plain-date";
 
 /**
@@ -82,6 +87,46 @@ export function receiptsCsv(report: Report, timeZone: string): string {
       person.department,
       titles.get(receipt.lessonDocumentId) ?? receipt.lessonDocumentId,
       germanInstant(receipt.completedAt, timeZone, true),
+    ]),
+  ]);
+}
+
+const MODE_LABELS: Record<TrainingCompletionMode, string> = {
+  confirm: "Bestätigung",
+  quizGate: "Quiz",
+  exam: "Prüfung",
+};
+
+const QUIZ_LABELS: Record<TrainingEvidenceRow["quiz"], string> = {
+  passed: "bestanden",
+  none: "–",
+  unknown: "unbekannt",
+};
+
+/**
+ * One person's training evidence (v0.28, /manage/users/[id], admin only):
+ * every receipt, newest first as the cms lists them, from its snapshot, so
+ * a deleted course still has its row. Datum; Kurs; Version (the course's
+ * publication at completion); Lektion; Abschlussart; Quiz; Gültig bis;
+ * Hinweis. A receipt from before v0.28 had its snapshot filled later: its
+ * version, quiz and validity are unknown, and the note says so.
+ */
+export function evidenceCsv(rows: readonly TrainingEvidenceRow[], timeZone: string): string {
+  return toCsv([
+    ["Datum", "Kurs", "Version", "Lektion", "Abschlussart", "Quiz", "Gültig bis", "Hinweis"],
+    ...rows.map((row) => [
+      germanInstant(row.completedAt, timeZone, true),
+      row.course.title,
+      row.version ? germanInstant(row.version, timeZone, true) : "unbekannt",
+      row.lesson.title,
+      row.completionMode ? MODE_LABELS[row.completionMode] : "unbekannt",
+      QUIZ_LABELS[row.quiz],
+      row.validity === "until"
+        ? germanDay(row.validUntil)
+        : row.validity === "noExpiry"
+          ? "unbefristet"
+          : "unbekannt",
+      row.backfilled ? "Stand unbekannt (vor v0.28)" : "",
     ]),
   ]);
 }

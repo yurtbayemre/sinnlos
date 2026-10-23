@@ -94,6 +94,7 @@ export function DocumentEditor({
   optionsFailed,
   optionsTruncated,
   ownDepartment,
+  readConfirmations = true,
 }: {
   editable: DocumentEditable | null;
   access: AreaAccess;
@@ -103,6 +104,12 @@ export function DocumentEditor({
   optionsTruncated: boolean;
   /** A department author's department (pinned), else null. */
   ownDepartment: { documentId: string; name: string } | null;
+  /**
+   * False while FEATURES_OFF switches read confirmations off (v0.28): no
+   * confirmation section, so a create sends requiresAck false and an edit
+   * leaves the stored value untouched (the cms refuses true then).
+   */
+  readConfirmations?: boolean;
 }) {
   const t = useTranslations("manage.documents");
   const tc = useTranslations("manage.common");
@@ -323,7 +330,7 @@ export function DocumentEditor({
           )}
         </Section>
 
-        {!departmentAuthor && (
+        {!departmentAuthor && readConfirmations && (
           <Section title={t("sections.confirmation")}>
             <CheckboxField
               id={id("requiresAck")}

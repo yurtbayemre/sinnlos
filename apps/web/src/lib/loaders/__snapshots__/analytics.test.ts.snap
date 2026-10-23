@@ -44,6 +44,17 @@ exports[`loadAnalytics > CMS down: every count unknown, no 0 anywhere 1`] = `
   "failed": true,
   "recentComments": [],
   "search": null,
+  "stats": [
+    "announcements",
+    "events",
+    "wiki-pages",
+    "wiki-spaces",
+    "documents",
+    "polls",
+    "comments",
+    "reactions",
+    "unreadNotifications",
+  ],
 }
 `;
 
@@ -122,6 +133,17 @@ exports[`loadAnalytics > partial failure: a failed count is unknown and raises t
     "zeroRate": 38,
     "zeroResultCount": 3,
   },
+  "stats": [
+    "announcements",
+    "events",
+    "wiki-pages",
+    "wiki-spaces",
+    "documents",
+    "polls",
+    "comments",
+    "reactions",
+    "unreadNotifications",
+  ],
 }
 `;
 
@@ -200,5 +222,16 @@ exports[`loadAnalytics > success: every total, the search summary with its zero 
     "zeroRate": 38,
     "zeroResultCount": 3,
   },
+  "stats": [
+    "announcements",
+    "events",
+    "wiki-pages",
+    "wiki-spaces",
+    "documents",
+    "polls",
+    "comments",
+    "reactions",
+    "unreadNotifications",
+  ],
 }
 `;

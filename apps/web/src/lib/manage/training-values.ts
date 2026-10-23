@@ -8,6 +8,8 @@ export interface CourseValues {
   completionMode: string;
   /** Months as typed; empty = once is enough. */
   validityMonths: string;
+  /** Who answers questions about the course ("Fragen an: …", v0.28); empty = nobody named. */
+  contact: string;
   /** Department documentIds; empty = every staff member. */
   departments: string[];
   coverImage: EditableMedia | null;
@@ -26,6 +28,7 @@ export const emptyCourseValues = (): CourseValues => ({
   mandatory: false,
   completionMode: "confirm",
   validityMonths: "",
+  contact: "",
   departments: [],
   coverImage: null,
 });
@@ -43,6 +46,7 @@ export const courseValuesFromEditable = (item: CourseEditable): CourseValues => 
   mandatory: item.mandatory,
   completionMode: item.completionMode,
   validityMonths: item.validityMonths === null ? "" : String(item.validityMonths),
+  contact: item.contact ?? "",
   departments: [...item.departments],
   coverImage: item.coverImage,
 });
@@ -68,6 +72,7 @@ export function coerceCourseValues(raw: unknown): CourseValues {
     mandatory: r.mandatory === true,
     completionMode: str(r.completionMode),
     validityMonths: str(r.validityMonths).slice(0, 10),
+    contact: str(r.contact).slice(0, 1_000),
     departments: idList(r.departments),
     coverImage: coerceDocumentValues({ file: r.coverImage }).file,
   };
