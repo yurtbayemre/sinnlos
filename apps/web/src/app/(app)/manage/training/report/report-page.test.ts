@@ -133,7 +133,34 @@ it("lists one course's people, filtered by status", async () => {
   expect(rows(elements(await openCourse()))).toBe(3);
   expect(rows(elements(await openCourse("expired")))).toBe(2);
   expect(rows(elements(await openCourse("bogus")))).toBe(3);
-  expect(state.course).toHaveBeenCalledWith(DOC);
+  expect(state.course).toHaveBeenCalledWith(DOC, { leavers: false });
+});
+
+it("adds the people who left for an admin who asks, never for a head (v0.28)", async () => {
+  const leaver = { ...person(9, "done"), left: "anonymised" as const };
+  state.course.mockResolvedValue({
+    data: {
+      scope: "all",
+      department: null,
+      course,
+      lessons: [],
+      people: [person(1, "expired"), person(2, "done")],
+      leavers: [leaver],
+    },
+  });
+  const withLeavers = () =>
+    CoursePage({
+      params: Promise.resolve({ course: DOC }),
+      searchParams: Promise.resolve({ leavers: "1" }),
+    });
+  const rows = (tree: ReturnType<typeof elements>) => tree.filter((el) => el.type === "tr").length;
+  // Two tables: header + two people, header + one leaver.
+  expect(rows(elements(await withLeavers()))).toBe(5);
+  expect(state.course).toHaveBeenLastCalledWith(DOC, { leavers: true });
+  state.role = "department_head";
+  state.department = { name: "Lager" };
+  await withLeavers();
+  expect(state.course).toHaveBeenLastCalledWith(DOC, { leavers: false });
 });
 
 it("answers 404 for the cms's 404 and a malformed id", async () => {

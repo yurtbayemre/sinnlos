@@ -5,6 +5,11 @@
  */
 import {
   USER_ADMIN_PATH,
+  type AnonymisePreviewResponse,
+  type AnonymiseRequest,
+  type AnonymiseResponse,
+  type TrainingEvidenceResponse,
+  type UserExport,
   type UserAdminDetailResponse,
   type UserAdminInvite,
   type UserAdminListQuery,
@@ -59,4 +64,28 @@ export function sendUserMfaReset(id: number): Promise<UserAdminDetailResponse> {
 /** Hands the role back to Entra: the next sign-in applies Entra's role. */
 export function sendRoleToEntra(id: number): Promise<UserAdminDetailResponse> {
   return strapi(`/api/${USER_ADMIN_PATH}/${id}/role-to-entra`, { method: "POST" });
+}
+
+/** v0.28: one person's training receipts with their snapshots (the evidence CSV). */
+export function fetchUserTrainingEvidence(id: number): Promise<TrainingEvidenceResponse> {
+  return strapi(`/api/${USER_ADMIN_PATH}/${id}/training-evidence`);
+}
+
+/** v0.28 (Art. 15): everything stored about the person; the cms records an `export` audit row. */
+export function fetchUserExport(id: number): Promise<UserExport> {
+  return strapi(`/api/${USER_ADMIN_PATH}/${id}/export`);
+}
+
+/** v0.28 (Art. 17): what the anonymisation would delete, rewrite and keep (advisory counts). */
+export function fetchAnonymisePreview(id: number): Promise<AnonymisePreviewResponse> {
+  return strapi(`/api/${USER_ADMIN_PATH}/${id}/anonymise`);
+}
+
+/** v0.28 (Art. 17): anonymises the blocked person; `confirm` is their current username. */
+export function sendAnonymise(id: number, confirm: string): Promise<AnonymiseResponse> {
+  const body: { data: AnonymiseRequest } = { data: { confirm } };
+  return strapi(`/api/${USER_ADMIN_PATH}/${id}/anonymise`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
 }

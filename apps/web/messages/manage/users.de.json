@@ -141,5 +141,54 @@
     "confirm": "Zurücksetzen",
     "done": "Zwei-Faktor-Anmeldung zurückgesetzt.",
     "failed": "Das Zurücksetzen hat nicht geklappt. Bitte erneut versuchen."
-  }
+  },
+  "dataProtection": {
+    "title": "Datenschutz",
+    "export": "Daten exportieren (JSON)",
+    "evidence": "Schulungsnachweise (CSV)",
+    "exportHint": "Der Export enthält alles, was das Intranet zu dieser Person speichert, und eine Liste dessen, was er nicht enthält. Er wird im Aktivitätsprotokoll vermerkt.",
+    "anonymisedAt": "Anonymisiert am {date}. Das Konto bleibt gesperrt und kann nicht mehr geändert werden.",
+    "anonymise": {
+      "button": "Anonymisieren …",
+      "title": "Person anonymisieren?",
+      "body": "Das lässt sich nicht rückgängig machen. Persönliches wird gelöscht; Beiträge bleiben unter „Ehemalige Person“. Exportieren Sie die Daten vorher, wenn die Person sie angefordert hat.",
+      "loading": "Die Vorschau wird geladen …",
+      "deleted": "Wird gelöscht",
+      "kept": "Bleibt, ohne Namen",
+      "rewritten": "{count, plural, =0 {Keine Benachrichtigungen anderer nennen die Person.} one {In einer Benachrichtigung anderer wird der Name ersetzt.} other {In # Benachrichtigungen anderer wird der Name ersetzt.}}",
+      "evidenceNote": "Die Schulungsnachweise bleiben mit Namen erhalten, bis ihre Aufbewahrungsfrist abläuft (gesetzliche Nachweispflicht).",
+      "confirmLabel": "Zur Bestätigung den Benutzernamen eingeben: {username}",
+      "cancel": "Abbrechen",
+      "confirm": "Endgültig anonymisieren",
+      "blockFirst": "Zum Anonymisieren die Person zuerst sperren (im Formular oben).",
+      "done": "Die Person ist anonymisiert.",
+      "doneAvatarKept": "Die Person ist anonymisiert. Das Profilbild (Datei {id}) wird noch anderswo verwendet oder ließ sich nicht entfernen: bitte in der Medienbibliothek prüfen."
+    },
+    "error": {
+      "notBlocked": "Die Person ist nicht gesperrt. Bitte zuerst sperren.",
+      "anonymised": "Die Person ist bereits anonymisiert.",
+      "confirm": "Der Benutzername stimmt nicht.",
+      "failed": "Das hat nicht geklappt. Bitte erneut versuchen."
+    },
+    "classes": {
+      "reactions": "Reaktionen",
+      "pollVotes": "Umfragestimmen",
+      "rsvps": "Terminzusagen",
+      "kudosReceived": "Erhaltene Kudos",
+      "notifications": "Benachrichtigungen",
+      "acknowledgements": "Lesebestätigungen",
+      "classifieds": "Kleinanzeigen",
+      "announcements": "Neuigkeiten",
+      "wikiPages": "Wiki-Seiten",
+      "documents": "Dokumente",
+      "events": "Termine",
+      "polls": "Umfragen",
+      "comments": "Kommentare",
+      "kudosGiven": "Vergebene Kudos",
+      "dutyPlans": "Dienstpläne",
+      "kpis": "Kennzahlen",
+      "trainingReceipts": "Schulungsnachweise"
+    }
+  },
+  "anonymisedBadge": "Anonymisiert"
 }
