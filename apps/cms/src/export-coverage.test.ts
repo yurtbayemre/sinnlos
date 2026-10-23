@@ -2,7 +2,7 @@ import { readdirSync, readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { CONTENT_RELATIONS, ORGANISATION_RELATIONS } from "./utils/user-export";
+import { ACCOUNT_FIELDS, CONTENT_RELATIONS, ORGANISATION_RELATIONS } from "./utils/user-export";
 
 /**
  * The data export covers every relation to the user model (v0.28,
@@ -12,6 +12,16 @@ import { CONTENT_RELATIONS, ORGANISATION_RELATIONS } from "./utils/user-export";
  */
 
 const USER_UID = "plugin::users-permissions.user";
+/** Credentials and second-factor state: never exported. */
+const SECRETS = [
+  "password",
+  "resetPasswordToken",
+  "confirmationToken",
+  "tokenVersion",
+  "totpSecret",
+  "totpRecoveryCodes",
+  "totpLastStep",
+];
 const SRC = __dirname;
 
 interface Schema {
@@ -75,20 +85,21 @@ describe("the data export (Art. 15) covers every relation to a person", () => {
   });
 
   it("selects no secret", () => {
-    const secrets = [
-      "password",
-      "resetPasswordToken",
-      "confirmationToken",
-      "tokenVersion",
-      "totpSecret",
-      "totpRecoveryCodes",
-      "totpLastStep",
-    ];
     for (const relation of CONTENT_RELATIONS) {
       expect(
-        relation.select.filter((field) => secrets.includes(field)),
+        relation.select.filter((field) => SECRETS.includes(field)),
         relation.key,
       ).toEqual([]);
     }
+    expect(ACCOUNT_FIELDS.filter((field) => SECRETS.includes(field))).toEqual([]);
+  });
+
+  it("copies every column of the account except the secrets", () => {
+    const user = schemas().get(USER_UID)!;
+    const columns = Object.entries(user.attributes)
+      .filter(([, attribute]) => attribute.type !== "relation" && attribute.type !== "media")
+      .map(([field]) => field);
+    const copied = new Set<string>([...ACCOUNT_FIELDS, ...SECRETS]);
+    expect(columns.filter((field) => !copied.has(field)).sort()).toEqual([]);
   });
 });

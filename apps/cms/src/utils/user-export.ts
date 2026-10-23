@@ -305,7 +305,8 @@ async function walk(strapi: ExportHost, uid: string, where: Row, select: string[
   }
 }
 
-const ACCOUNT_FIELDS = [
+/** The account columns the export copies; export-coverage.test.ts holds them complete. */
+export const ACCOUNT_FIELDS = [
   "documentId",
   "username",
   "email",
@@ -326,6 +327,8 @@ const ACCOUNT_FIELDS = [
   "roleSource",
   "entraTenantId",
   "microsoftOid",
+  "entraAppliedRole",
+  "entraManagerOid",
   "oidcIssuer",
   "oidcSubject",
   "totpEnabledAt",
