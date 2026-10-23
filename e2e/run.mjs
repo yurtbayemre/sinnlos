@@ -88,7 +88,7 @@ export async function main(args) {
   await writeFile(join(runtime, "owner"), runId, { mode: 0o600, flag: "wx" });
   await mkdir(logs, { recursive: true });
   const secret = () => randomBytes(32).toString("hex");
-  const secrets = Array.from({ length: 16 }, secret);
+  const secrets = Array.from({ length: 18 }, secret);
   const [
     dbPassword,
     leadPassword,
@@ -96,6 +96,8 @@ export async function main(args) {
     editorPassword,
     adminPassword,
     inviterPassword,
+    privacyPassword,
+    leaverPassword,
     appKey1,
     appKey2,
     apiSalt,
@@ -194,6 +196,9 @@ export async function main(args) {
       LIVE_EVENTS_DISABLED: "1",
       REVALIDATE_SECRET: revalidate,
       INTERNAL_UPLOAD_TOKEN: upload,
+      // v0.28: one module off for the whole run (cms and web read the same
+      // value); switches.spec.ts checks it, and no other spec uses it.
+      FEATURES_OFF: "marketplace",
     };
     await envFile("db", {
       POSTGRES_USER: "sinnlos_e2e",
@@ -212,6 +217,10 @@ export async function main(args) {
       E2E_EDITOR_PASSWORD: editorPassword,
       E2E_ADMIN_PASSWORD: adminPassword,
       E2E_INVITER_PASSWORD: inviterPassword,
+      // v0.28: an admin for the data-protection spec and the person it
+      // anonymises (privacy.spec.ts).
+      E2E_PRIVACY_PASSWORD: privacyPassword,
+      E2E_LEAVER_PASSWORD: leaverPassword,
       // v0.27: only the admins need a second factor here, so the older specs
       // (editor, lead, member) sign in as before while mfa.spec.ts and
       // invite.spec.ts go through the mandatory enrollment.
@@ -306,7 +315,9 @@ export async function main(args) {
       "editor",
       "inviter",
       "lead",
+      "leaver",
       "member",
+      "privacy",
     ]);
     const mailpitAddress = await docker([...compose, "port", "mailpit", "8025"], "mailpit-port");
     assert.match(mailpitAddress, /^127\.0\.0\.1:\d+$/);
