@@ -75,29 +75,102 @@ rule into the users-permissions provider store at every boot
 (`apps/cms/src/bootstrap/auth-providers.ts`), so an Entra-only install
 refuses password sign-ins in the cms as well, not only in the web form.
 
-- **Registration** (`POST /api/auth/local/register`) is open only with
-  `LOCAL_REGISTRATION=1`: the cms derives users-permissions'
-  `allow_register` from it at every boot
-  (`apps/cms/src/bootstrap/advanced-settings.ts`), and the web shows the
-  form only while local sign-in is on. The cms never verifies a registered
-  address.
+- **Registration** (`POST /api/auth/local/register`) is gone (v0.27):
+  users-permissions' `allow_register` is false at every boot, the route is
+  revoked for `public`, and a leftover `LOCAL_REGISTRATION=1` only earns a
+  boot warning. Accounts come from an admin's invitation at
+  `/manage/users`, the Strapi admin, or an identity provider.
 - **Default role:** the same boot pins `default_role` to `member`, so a new
   local user is a `member`.
-- **Password resets** by e-mail do not exist: `forgotPassword` and
-  `resetPassword` are revoked from the anonymous `public` role
-  (`PUBLIC_REVOKED_PERMISSIONS`); with them, the reset flow would hand an
-  Entra-only account a local password around the single sign-on. An admin
-  sets passwords in the Strapi admin.
+- **Passwords:** at least 12 characters, at most 72 bytes (bcrypt), and not
+  one of the 5,000 most common passwords of that length (SecLists, in
+  `apps/cms/src/utils/common-passwords.ts`, never shipped to the browser).
+  The rule runs on every write that carries a password: the Content
+  Manager, the user-write guard of the Document Service, the plugin's
+  change-password validator and the set-password link. Sign-in never
+  re-checks it, so older, shorter passwords keep working until changed.
+- **Password links** (invitation and reset): the plugin's own
+  `forgotPassword` and `resetPassword` answer 404 at the controller and stay
+  revoked for `public`. Instead the web's `/forgot-password` and
+  `/set-password` pages call `POST /api/auth/password/forgot` and `/set` on
+  the cms: `auth: false`, but only with `x-internal-token` equal to
+  `INTERNAL_UPLOAD_TOKEN` (404 without it, or while it is unset on either
+  side), and under `/api/auth/*`, which the edge sends to the web, so
+  nobody outside reaches them.
+  - Links exist only for a local account bound to no identity provider,
+    and never hand an Entra or OIDC account a password.
+  - The link is `/set-password#<user id>.<43 base64url characters>`: the
+    token sits in the fragment, so it reaches no server log and no
+    `Referer`; the page reads it once and removes it from the address bar.
+    The cms keeps only its SHA-256, with purpose, expiry (invitation 7
+    days, reset 1 hour) and the token version, in `resetPasswordToken`.
+  - Redemption is one transaction (row lock, constant-time compare,
+    password rule, hash, token cleared, token version raised). It issues
+    **no** JWT: the user signs in afterwards, second factor included. A
+    newer link, a block or a password change invalidates an older link.
+  - `forgot` answers the same 202 at once, before any lookup, and sends
+    the mail afterwards, so neither the answer nor its timing tells whether
+    an account exists. The web limits submissions per IP and per address,
+    and Traefik's sign-in edge limit covers both pages.
+- **E-mail addresses** are unique ignoring case: the boot creates the
+  unique index `up_users_email_lower_uq` on `lower(email)`. If
+  case-duplicates already exist it logs an error and skips the index, and
+  invitations answer 409 `email_duplicates_exist` until an admin resolves
+  them.
 - **Password change** (`POST /api/auth/change-password`, the `/profile`
   form): the cms keeps a token version per user and refuses older JWTs, so
   the change signs the account out of every other browser and device; the
-  tab that changed it stays signed in (it gets a JWT of the new version). A
-  password an admin sets in the Strapi admin raises the version as well and
-  signs that user out everywhere. How the version works is under
+  tab that changed it stays signed in (it gets a JWT of the new version,
+  which keeps that session's second-factor assurance only when the
+  request's token version was still current). A password an admin sets in
+  the Strapi admin raises the version as well and signs that user out
+  everywhere. How the version works is under
   [Token versions](#token-versions).
 - **Blocking** a user in the Strapi admin takes effect on their next request
   (Strapi refuses a blocked user's JWT), and they lose the uploaded files
   within 60 seconds (the web's `/uploads` proxy re-checks the JWT).
+
+### Second factor (TOTP)
+
+v0.27. Password sign-ins of the roles in `MFA_REQUIRED_ROLES` (unset or
+empty: `admin_role`, `editor`; `none`: nobody; an unknown role refuses the
+boot) need an authenticator app; anyone else may turn it on at `/profile`.
+Single sign-on users get their second factor from their identity provider.
+
+- **Claims.** Every JWT the cms issues carries `am` (`pw` for a password
+  sign-in, `idp` for the Entra and OIDC exchanges) and, after a verified
+  code, `mfa: 1`. The assurance comes only from the request that issues the
+  token, never from the user row.
+- **Per-request gate** (`apps/cms/src/extensions/users-permissions/strapi-server.ts`, decorating the
+  users-permissions strategy): `am: idp` passes; a password token passes
+  with `mfa: 1` or when the user needs no second factor. A required but not
+  yet enrolled user gets a **restricted** session: only `GET /api/me`,
+  `POST /api/me/mfa/setup` and `/activate`; everything else answers 403
+  `MfaSetupRequired`, and the web sends that session to `/mfa/setup`. An
+  enrolled user's token without `mfa: 1`, a token from before v0.27 of a
+  required user, or an unknown claim value answers 401. Role changes and
+  resets therefore count on the next request.
+- **Sign-in.** `POST /api/auth/local` takes an optional `otp` (a code or a
+  recovery code). Only after a correct password does the cms answer
+  `mfa_required` or `mfa_invalid`. A code is accepted once (its time step is
+  stored with a conditional update), a recovery code too.
+- **Enrollment.** The cms generates the secret and hands the web a sealed
+  enrollment, bound to the user, their token version and 10 minutes.
+  Activation needs a valid code **and the current password**, also in a
+  restricted session; it stores the secret encrypted with Strapi's
+  `admin::encryption` (`ENCRYPTION_KEY`), returns ten recovery codes once
+  (stored as hashes) and a JWT with `mfa: 1`.
+- **Resets.** An admin resets a user's second factor at `/manage/users`;
+  a locked-out sole admin runs `infra/mfa-reset.sh <email>` on the host.
+  Both clear the factor and raise the token version, so every session of
+  that user ends. A wrong or rotated `ENCRYPTION_KEY` makes codes fail
+  (never a bypass); recovery codes still work, and a rotation needs
+  `mfa-reset.sh` for every enrolled user, so keep the key in the `.env`
+  backup.
+- **Limits.** API tokens (the `content-api-token` strategy) are outside
+  this guarantee. The web's live stream and uploads re-check `GET /api/me`
+  at most every 60 seconds; a live stream that is already open ends at its
+  next rotation, 15 to 30 minutes later (accepted).
 
 ### Microsoft Entra ID
 
@@ -116,8 +189,8 @@ Optional and off unless `ENTRA_ENABLED=1` (D-ENTRA-01,
    audience, issued at most 10 minutes ago plus 5 minutes of clock
    tolerance), reads Graph `/me`, and finds the user by **tenant id +
    object id**, never by e-mail, backed by a unique database index.
-3. A new user is created on the spot (username `entra-<object id>`,
-   independent of `LOCAL_REGISTRATION`) with the role of their Entra app
+3. A new user is created on the spot (username `entra-<object id>`) with
+   the role of their Entra app
    role (`ENTRA_SYNC_MODE=dry-run`: at most `member`). A local account with the same e-mail is never taken over: the
    sign-in answers "account exists" until an admin who has confirmed the
    account is theirs binds it
