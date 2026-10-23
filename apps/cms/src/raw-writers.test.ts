@@ -130,6 +130,11 @@ const OTHER_RAW_WRITERS: Readonly<Record<string, string>> = {
     "wiki revisions (not a guarded type): the after-image of a draft save, in its transaction",
   "bootstrap/sync-permissions.ts": "roles and permissions",
   "cron/prune-audit-events.ts": "audit events (the retention janitor)",
+  // v0.28, lane A3.
+  "cron/prune-acknowledgements.ts":
+    "acknowledgements of documents gone in every state (the retention janitor)",
+  "cron/prune-rsvps.ts":
+    "RSVPs (the retention janitor), re-checked under the event's document lock; the event itself is never written",
   "cron/prune-notifications.ts": "notifications",
   "cron/prune-search-logs.ts": "search logs",
   "cron/purge-expired-classifieds.ts": "classifieds through the Document Service",

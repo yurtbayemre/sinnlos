@@ -9,9 +9,12 @@
  * reminders at 06:45, so the digest that mails at 07:30 carries them. When the host's nightly backup runs (infra/backup/pg-backup.sh,
  * or the host's backup-run at 04:00; docs/DEPLOYMENT.md §7.3) does not
  * matter for the janitors: they remove only old rows and files (orphaned
- * uploads after 24 hours, search logs, read notifications and expired ads
- * after 90 days, audit events after AUDIT_RETENTION_DAYS), so everything
- * they remove is already in the earlier nightly backups. The scheduled
+ * uploads after 24 hours, search logs after SEARCH_LOG_RETENTION_DAYS, read
+ * notifications and expired ads after 90 days, unread notifications after
+ * 180, audit events after AUDIT_RETENTION_DAYS, RSVPs 180 days after their
+ * event, poll voter links 30 days after the close) or rows of documents
+ * deleted for good (acknowledgements, RSVPs, notification anchors), so
+ * everything they remove is already in the earlier nightly backups. The scheduled
  * publisher is the one task that changes current content; each run does
  * what a moderator's publish or unpublish in the same minute would do
  * (decision 06 §D rule 12), and pg_dump takes a consistent snapshot.
@@ -40,17 +43,27 @@ import { meilisearchEnabled } from "@sinnlos/domain";
 
 import { parseEnvFlag, sendDigests, type DigestStrapi } from "../digest/send-digests";
 import { pruneAuditEvents, type AuditJanitorStrapi } from "./prune-audit-events";
-import { pruneNotifications, type NotificationJanitorStrapi } from "./prune-notifications";
+import { pruneAcknowledgements, type AckJanitorStrapi } from "./prune-acknowledgements";
+import {
+  pruneNotifications,
+  pruneOrphanedAnchors,
+  type AnchorJanitorStrapi,
+} from "./prune-notifications";
+import { pruneRsvps, type RsvpJanitorStrapi } from "./prune-rsvps";
 import { pruneSearchLogs } from "./prune-search-logs";
 import { purgeExpiredClassifieds, type ClassifiedJanitorStrapi } from "./purge-expired-classifieds";
 import { runScheduledPublishing, type ScheduledPublishStrapi } from "./scheduled-publish";
 import { sweepOrphanedUploads } from "./sweep-orphaned-uploads";
 import { sendTrainingReminders, type TrainingReminderStrapi } from "./training-reminders";
+import { unlinkPollVoters, type PollVoterJanitorStrapi } from "../utils/poll-voter-retention";
 import { syncSearchIndex, type SearchStrapi } from "../search/meili-index";
 
 /** The slice of the Strapi instance the tasks use: what each of them needs. */
 export type CronStrapi = DigestStrapi &
-  NotificationJanitorStrapi &
+  AnchorJanitorStrapi &
+  AckJanitorStrapi &
+  RsvpJanitorStrapi &
+  PollVoterJanitorStrapi &
   ClassifiedJanitorStrapi &
   AuditJanitorStrapi &
   ScheduledPublishStrapi &
@@ -101,21 +114,23 @@ export function cronRegistry(
       tz: timeZone,
       fn: (strapi) => sweepOrphanedUploads(strapi),
     },
-    // 90-day retention for the anonymous search telemetry (issue #19).
+    // The search telemetry after SEARCH_LOG_RETENTION_DAYS (issue #19, v0.28).
     {
       name: "search-log-janitor",
       rule: "35 3 * * *",
       tz: timeZone,
-      fn: (strapi) => pruneSearchLogs(strapi),
+      fn: (strapi) => pruneSearchLogs(strapi, env),
     },
-    // LF07: read notifications 90 days after they were read; unread rows
-    // and fan-out anchors stay (prune-notifications.ts).
+    // LF07, v0.28: read notifications 90 days after they were read, unread
+    // ones 180 days after they were created; fan-out anchors only once their
+    // source is gone in every state (prune-notifications.ts).
     {
       name: "notification-janitor",
       rule: "40 3 * * *",
       tz: timeZone,
       fn: async (strapi) => {
         await pruneNotifications(strapi);
+        await pruneOrphanedAnchors(strapi);
       },
     },
     // LF07: ads (and their images) 90 days after their last listed day
@@ -136,6 +151,36 @@ export function cronRegistry(
       tz: timeZone,
       fn: async (strapi) => {
         await pruneAuditEvents(strapi);
+      },
+    },
+    // v0.28: read confirmations of documents gone in every state
+    // (prune-acknowledgements.ts; no age rule).
+    {
+      name: "ack-janitor",
+      rule: "52 3 * * *",
+      tz: timeZone,
+      fn: async (strapi) => {
+        await pruneAcknowledgements(strapi);
+      },
+    },
+    // v0.28: RSVPs 180 days after their event ended, or once it is gone
+    // (prune-rsvps.ts).
+    {
+      name: "rsvp-janitor",
+      rule: "54 3 * * *",
+      tz: timeZone,
+      fn: async (strapi) => {
+        await pruneRsvps(strapi);
+      },
+    },
+    // v0.28: poll voter links 30 days after the close; the results stay and
+    // the poll cannot reopen (utils/poll-voter-retention.ts).
+    {
+      name: "poll-voter-janitor",
+      rule: "56 3 * * *",
+      tz: timeZone,
+      fn: async (strapi) => {
+        await unlinkPollVoters(strapi);
       },
     },
     // v0.20: due-soon and expired mandatory training, once per reminder

@@ -82,6 +82,26 @@ describe("search-log time filters on SQLite (FX25)", () => {
     expect(rows.map((r) => r.term)).toEqual(["fresh"]);
   });
 
+  it("follows SEARCH_LOG_RETENTION_DAYS (v0.28)", async () => {
+    const log = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    await pruneSearchLogs({ db: { connection: knex }, log }, { SEARCH_LOG_RETENTION_DAYS: "365" });
+    expect(await count()).toBe(2);
+    await pruneSearchLogs({ db: { connection: knex }, log }, { SEARCH_LOG_RETENTION_DAYS: "30" });
+    expect(await count()).toBe(1);
+    expect(log.info).toHaveBeenCalledWith(
+      "[search-log-janitor] pruned 1 row(s) older than 30 days",
+    );
+  });
+
+  it("deletes nothing with an invalid SEARCH_LOG_RETENTION_DAYS, and says so", async () => {
+    const log = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    await pruneSearchLogs({ db: { connection: knex }, log }, { SEARCH_LOG_RETENTION_DAYS: "0" });
+    expect(await count()).toBe(2);
+    expect(log.error).toHaveBeenCalledWith(
+      '[search-log-janitor] SEARCH_LOG_RETENTION_DAYS="0" is invalid; nothing was deleted',
+    );
+  });
+
   it("the summary counts the rows inside its window", async () => {
     const controller = (
       searchLogController as unknown as (deps: { strapi: unknown }) => {
