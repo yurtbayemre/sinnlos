@@ -39,6 +39,7 @@ const FIELD_ORDER = [
   "mandatory",
   "completionMode",
   "validityMonths",
+  "contact",
   "coverImage",
   "departments",
   "publishAt",
@@ -211,6 +212,23 @@ export function TrainingCourseEditor({
                 value={values.validityMonths}
                 disabled={pending}
                 onChange={(e) => setValue("validityMonths", e.target.value)}
+                className={inputClass}
+              />
+            )}
+          </Field>
+          <Field
+            id={id("contact")}
+            label={t("fields.contact.label")}
+            hint={t("fields.contact.hint")}
+            error={error("contact")}
+          >
+            {(a11y) => (
+              <input
+                {...a11y}
+                value={values.contact}
+                maxLength={255}
+                disabled={pending}
+                onChange={(e) => setValue("contact", e.target.value)}
                 className={inputClass}
               />
             )}

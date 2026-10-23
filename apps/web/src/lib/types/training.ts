@@ -13,6 +13,8 @@ export interface Course {
   completionMode?: TrainingCompletionMode;
   /** Months a completion stays valid; null/absent = once is enough (v0.20). */
   validityMonths?: number | null;
+  /** Who answers questions about the course, plain text (v0.28). */
+  contact?: string | null;
   coverImage?: { url?: string; formats?: { small?: { url?: string } } | null } | null;
   lessons?: Lesson[];
   createdAt?: string;

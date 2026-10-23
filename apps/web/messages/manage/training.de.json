@@ -53,6 +53,10 @@
       "label": "Gültigkeit in Monaten",
       "hint": "Nach so vielen Monaten muss der Kurs wiederholt werden, z. B. 12 für eine jährliche Unterweisung. Leer: einmal reicht."
     },
+    "contact": {
+      "label": "Fragen an",
+      "hint": "Wer Fragen zum Kurs beantwortet, z. B. „Sicherheitsfachkraft Max Muster, Tel. 123“. Erscheint auf der Kursseite. Leer: niemand genannt."
+    },
     "departments": {
       "label": "Abteilungen",
       "hint": "Nur diese Abteilungen sehen den Kurs und müssen ihn machen. Keine Auswahl: alle Mitarbeiter."

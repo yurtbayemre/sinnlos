@@ -84,6 +84,11 @@ export default async function CoursePage({ params }: Params) {
             {t("repeatEvery", { count: course.validityMonths })}
           </p>
         ) : null}
+        {course.contact?.trim() ? (
+          <p className="mt-2 text-sm text-muted-foreground">
+            {t("contact", { contact: course.contact.trim() })}
+          </p>
+        ) : null}
         <div className="mt-3 flex flex-wrap items-center gap-4 text-sm">
           <CourseStatus
             t={t}
