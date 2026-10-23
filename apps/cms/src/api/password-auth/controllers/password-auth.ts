@@ -4,7 +4,8 @@
  * forgot: always 202 with the same body, answered BEFORE any lookup, so
  * neither the answer nor its timing says whether an account exists. The
  * lookup and the mail run once the response has finished (rev3 #10), at
- * most MAX_RESET_JOBS at a time (more are dropped with a log line), only
+ * most MAX_RESET_JOBS at a time, each until its mail transport has settled
+ * (also after the mail timeout; more are dropped with a log line), only
  * for a local account bound to no identity provider that has a password
  * and is not blocked, while local sign-in is on and mail is configured;
  * the link is stamped under the row lock. The web limits the requests per
@@ -77,7 +78,8 @@ export async function requestReset(strapi: Host, email: string, locale: unknown)
       mail = { to: String(row.email), token, name, locale: locale ?? row.locale };
     });
     const pending = mail as { to: string; token: string; name: string; locale: unknown } | null;
-    if (pending) await sendAccountMail(strapi, { ...pending, kind: "reset" });
+    if (pending)
+      await sendAccountMail(strapi, { ...pending, kind: "reset" }, { untilSettled: true });
   } catch (err) {
     strapi.log.warn(`[auth] password reset request failed (${errorLabel(err)})`);
   }

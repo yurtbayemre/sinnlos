@@ -88,11 +88,15 @@ export interface AccountMailHost {
 
 /**
  * Sends one account mail; true when the transport took it. Never throws and
- * never logs the link or the address (the token is in the link).
+ * never logs the link or the address (the token is in the link). The answer
+ * comes after MAIL_TIMEOUT_MS at the latest, but the transport goes on;
+ * `untilSettled` returns only once it has settled (a caller that bounds its
+ * sends keeps its slot that long).
  */
 export async function sendAccountMail(
   strapi: AccountMailHost,
   mail: { to: string; kind: AccountMailKind; token: string; name: string; locale?: unknown },
+  { untilSettled = false }: { untilSettled?: boolean } = {},
 ): Promise<boolean> {
   const ready = accountMailReady();
   if ("reason" in ready) {
@@ -107,12 +111,14 @@ export async function sendAccountMail(
     mail.name,
   );
   let timer: NodeJS.Timeout | undefined;
+  let sending: Promise<unknown> | undefined;
   try {
     const email = strapi.plugin("email").service("email") as {
       send(options: { to: string; subject: string; text: string; html: string }): Promise<unknown>;
     };
+    sending = email.send({ to: mail.to, ...rendered });
     await Promise.race([
-      email.send({ to: mail.to, ...rendered }),
+      sending,
       new Promise((_, reject) => {
         timer = setTimeout(() => reject(new Error("timeout")), MAIL_TIMEOUT_MS);
       }),
@@ -124,5 +130,6 @@ export async function sendAccountMail(
     return false;
   } finally {
     clearTimeout(timer);
+    if (untilSettled) await sending?.catch(() => undefined);
   }
 }
