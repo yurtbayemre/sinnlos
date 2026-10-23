@@ -57,18 +57,19 @@ services:
       - "traefik.http.middlewares.sinnlos-ratelimit.ratelimit.average=100"
       - "traefik.http.middlewares.sinnlos-ratelimit.ratelimit.burst=100"
       - "traefik.http.middlewares.sinnlos-ratelimit.ratelimit.period=1s"
-      # Schärferes Limit für die Login-POSTs (Server Actions, die
+      # Schärferes Limit für die Login- und Passwort-Link-POSTs (Server Actions,
+      # /sign-in, /forgot-password und /set-password, die
       # sonst am ungebremsten Catch-all hängen — Issue #23). Edge-Limit ist
       # nur Grobschutz und zählt auch ERFOLGREICHE Logins — daher NAT-
       # freundlich dimensioniert (Montagmorgen hinter einer Büro-NAT-IP darf
-      # nicht 429en). Autoritativ bleibt der App-Limiter in
+      # nicht 429en). Autoritativ bleiben die App-Limiter in
       # apps/web/src/lib/login-rate-limit.ts: Server-Action-POSTs sind nicht
       # pfadgebunden, /api/auth/callback/local ruft authorize() direkt auf,
       # und nur der App-Limiter zählt ausschließlich Fehlversuche.
       - "traefik.http.middlewares.sinnlos-authlimit.ratelimit.average=10"
       - "traefik.http.middlewares.sinnlos-authlimit.ratelimit.burst=20"
       - "traefik.http.middlewares.sinnlos-authlimit.ratelimit.period=1s"
-      - "traefik.http.routers.sinnlos-signin.rule=Host(`${DOMAIN:?set DOMAIN in infra/.env to the public host name}`) && Path(`/sign-in`) && Method(`POST`)"
+      - "traefik.http.routers.sinnlos-signin.rule=Host(`${DOMAIN:?set DOMAIN in infra/.env to the public host name}`) && (Path(`/sign-in`) || Path(`/forgot-password`) || Path(`/set-password`)) && Method(`POST`)"
       - "traefik.http.routers.sinnlos-signin.priority=90"
       - "traefik.http.routers.sinnlos-signin.entrypoints=websecure"
       - "traefik.http.routers.sinnlos-signin.tls.certresolver=lehttp"

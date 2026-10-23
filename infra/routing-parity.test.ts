@@ -16,7 +16,8 @@
  *     the canonical list below,
  *  2. ALL Traefik routers with their load-bearing priorities (auth 100 >
  *     signin 90 > cms 50 > live 10 > web 1): /api/auth/* and POST
- *     /sign-in must win over the cms /api rule and the catch-all,
+ *     /sign-in|/forgot-password|/set-password must win over the cms /api rule
+ *     and the catch-all,
  *     /live/* over the catch-all; each router uses only middlewares of its
  *     own container, and the live router no compression (FX34),
  *  3. the Caddy route order as Caddy computes it — @nextauth must stay
@@ -159,12 +160,18 @@ const TRAEFIK_ROUTER_PROBES: Array<[Method, string, string]> = [
   ["GET", "/api/auth/session", "sinnlos-auth"],
   ["POST", "/api/auth/callback/local", "sinnlos-auth"],
   ["GET", "/api/auth/callback/microsoft-entra-id", "sinnlos-auth"],
-  // POST-only router: the sign-in Server Action POSTs get the tighter edge
-  // rate limit (issue #23)…
+  // POST-only router: the sign-in and password-link Server Action POSTs get
+  // the tighter edge rate limit (issue #23; v0.27 /forgot-password sends
+  // mails, /set-password redeems link tokens)…
   ["POST", "/sign-in", "sinnlos-signin"],
+  ["POST", "/forgot-password", "sinnlos-signin"],
+  ["POST", "/set-password", "sinnlos-signin"],
   // …while the GET renders and look-alike paths stay on the catch-all
   // (v0.27: /register is gone and no longer edge-limited).
   ["GET", "/sign-in", "sinnlos-web"],
+  ["GET", "/forgot-password", "sinnlos-web"],
+  ["GET", "/set-password", "sinnlos-web"],
+  ["POST", "/set-password/x", "sinnlos-web"],
   ["POST", "/register", "sinnlos-web"],
   ["POST", "/sign-in/x", "sinnlos-web"],
   ["POST", "/sign-in2", "sinnlos-web"],
