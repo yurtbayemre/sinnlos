@@ -52,6 +52,34 @@ export function parseMfaRequiredRoles(value: string | undefined): RoleType[] {
   return names as RoleType[];
 }
 
+// On globalThis: the count must reach index.ts whichever copy of this module the plugin loaded.
+const MFA_GATE = Symbol.for("sinnlos.users-permissions.mfa-gate.interceptions");
+
+/** The users-permissions register() wrapper notes how many strategies it decorated. */
+export function recordMfaGate(interceptions: number): void {
+  (globalThis as Record<symbol, unknown>)[MFA_GATE] = interceptions;
+}
+
+/**
+ * Boot check (index.ts bootstrap, after every plugin's register()): the
+ * second-factor gate decorated exactly one strategy in THIS boot, or the
+ * cms does not start, whatever MFA_REQUIRED_ROLES says (the gate also
+ * holds enrolled users to their second factor). Consumes the count, so a
+ * later boot in the same process must record its own.
+ */
+export function assertMfaGate(log: { info(message: string): void }): void {
+  const count = (globalThis as Record<symbol, unknown>)[MFA_GATE];
+  recordMfaGate(0);
+  if (count !== 1) {
+    throw new Error(
+      `[mfa] the second-factor gate is not installed (the users-permissions strategy was decorated ${String(count ?? 0)} times, expected 1); refusing to boot`,
+    );
+  }
+  log.info(
+    `[mfa] gate installed (second factor required for: ${mfaRequiredRoles().join(", ") || "nobody"})`,
+  );
+}
+
 /** The roles of this process (the env is read once per call; register() validated it). */
 export function mfaRequiredRoles(
   env: Record<string, string | undefined> = process.env,

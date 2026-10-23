@@ -118,6 +118,7 @@ import {
   consumeSecondFactor,
   isEnrolled,
   mfaRequiredRoles,
+  recordMfaGate,
   requiredMfa,
   type MfaHost,
 } from "../../utils/mfa-core";
@@ -1001,6 +1002,7 @@ export function wrapPluginRegister(
     } finally {
       auth.register = registerStrategy;
     }
+    recordMfaGate(decorated);
     if (decorated !== 1) {
       throw new Error(
         "[users-permissions-extension] the users-permissions content-api strategy was not registered " +

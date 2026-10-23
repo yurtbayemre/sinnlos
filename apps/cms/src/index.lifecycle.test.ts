@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import lifecycle from "./index";
+import { recordMfaGate } from "./utils/mfa-core";
 
 /**
  * The call order of register() and bootstrap() in src/index.ts (roadmap
@@ -95,6 +96,8 @@ const strapi = {
 beforeEach(() => {
   calls.length = 0;
   failing.clear();
+  // What the users-permissions register() wrapper records in a real boot.
+  recordMfaGate(1);
 });
 
 describe("src/index.ts lifecycle order (B01)", () => {

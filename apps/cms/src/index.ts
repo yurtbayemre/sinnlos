@@ -25,7 +25,7 @@ import {
 import { reportDigestConfig } from "./digest/send-digests";
 import { parseEntraConfig } from "./entra/config";
 import { parseOidcConfig } from "./oidc/config";
-import { parseMfaRequiredRoles, sealService } from "./utils/mfa-core";
+import { assertMfaGate, parseMfaRequiredRoles, sealService } from "./utils/mfa-core";
 import { seedAdminUser } from "./utils/admin-seed";
 import { backfillDepartmentAudience } from "./utils/department-audience-backfill";
 import { ensureDraftTwins } from "./utils/draft-twins";
@@ -168,6 +168,9 @@ export default {
     // v0.27: the second factor seals its secrets with this service; refuse
     // to start without it rather than at the first enrollment.
     sealService(strapi);
+    // v0.27: the per-request second-factor gate is in place (exactly one
+    // decorated strategy in this boot), or no start; logs `[mfa] gate installed`.
+    assertMfaGate(strapi.log);
     // D-ENTRA-01 spec L, on every boot and whether Entra is on or off: the
     // (tenant, object id) unique index (a failure is logged, and fatal only
     // with Entra on), grant.email = local sign-in on, grant.microsoft off,

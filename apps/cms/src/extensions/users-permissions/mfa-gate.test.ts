@@ -5,6 +5,7 @@
  */
 import { describe, expect, it, vi } from "vitest";
 
+import { assertMfaGate } from "../../utils/mfa-core";
 import {
   decorateStrategy,
   mfaDecision,
@@ -110,6 +111,11 @@ describe("wrapPluginRegister", () => {
       service.register("admin", { name: "admin" } as never);
     };
     await wrapPluginRegister(plugin)({ strapi: { get: () => auth } });
+    const log = { info: vi.fn() };
+    assertMfaGate(log);
+    expect(log.info).toHaveBeenCalledWith(expect.stringContaining("[mfa] gate installed"));
+    // Consumed: a boot whose wrapper never ran does not pass on this one's count.
+    expect(() => assertMfaGate(log)).toThrow("refusing to boot");
     expect(auth.register).toBe(original);
     expect(auth.registered[1].strategy).toEqual({ name: "admin" });
     expect(
@@ -132,9 +138,11 @@ describe("wrapPluginRegister", () => {
           authenticate: async () => ({}),
         } as never);
     };
+    const shared = authService();
     await expect(
-      wrapPluginRegister(twice)({ strapi: { get: () => authService() } as never }),
+      wrapPluginRegister(twice)({ strapi: { get: () => shared } as never }),
     ).rejects.toThrow("second-factor gate");
+    expect(() => assertMfaGate({ info: vi.fn() })).toThrow("decorated 2 times");
     expect(() => wrapPluginRegister(undefined)).toThrow("no register()");
   });
 });
