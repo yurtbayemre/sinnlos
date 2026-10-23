@@ -43,7 +43,9 @@ export default async function MfaSetupPage() {
       setup = (await strapi<Setup>("/api/me/mfa/setup", { method: "POST" }))?.data ?? null;
     } catch (error) {
       if (!(error instanceof StrapiError)) throw error;
-      console.warn(`[mfa] setup refused: ${error.status} ${String(error.strapiDetails?.code ?? "")}`);
+      console.warn(
+        `[mfa] setup refused: ${error.status} ${String(error.strapiDetails?.code ?? "")}`,
+      );
     }
   }
   const { secret, otpauthUri, enrollment } = setup ?? {};

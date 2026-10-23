@@ -22,10 +22,7 @@ export const dynamic = "force-dynamic";
 export default async function InviteUsersPage() {
   const { capabilities } = await manageGate();
   if (!capabilities.users.manage || !LOCAL_ENABLED) redirect("/manage/users");
-  const [t, options] = await Promise.all([
-    getTranslations("manage.users"),
-    loadOrgOptions("team"),
-  ]);
+  const [t, options] = await Promise.all([getTranslations("manage.users"), loadOrgOptions("team")]);
   return (
     <div className="space-y-6">
       <ManagePageHeader
