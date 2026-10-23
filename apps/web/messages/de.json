@@ -652,6 +652,7 @@
     "notStaffed": "nicht besetzt",
     "until": "bis {time}",
     "unknownPerson": "Unbekannte Person",
+    "formerPerson": "Ehemalige Person",
     "allDepartments": "Alle Abteilungen",
     "filter": "Nach Abteilung filtern",
     "empty": "Noch keine Dienstpläne veröffentlicht.",

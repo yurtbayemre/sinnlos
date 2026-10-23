@@ -652,6 +652,7 @@
     "notStaffed": "not staffed",
     "until": "until {time}",
     "unknownPerson": "Unknown person",
+    "formerPerson": "Former person",
     "allDepartments": "All departments",
     "filter": "Filter by department",
     "empty": "No duty plans published yet.",

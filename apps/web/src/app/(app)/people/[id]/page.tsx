@@ -17,8 +17,8 @@ type Person = UserLite & { teams?: Team[] };
 
 /**
  * One read for metadata and page: the same GET in one render is sent once
- * (Next's fetch dedupe). The users-permissions findOne answers an unknown id
- * with an empty body (204); a 404 means the same.
+ * (Next's fetch dedupe). The cms answers an unknown id, and since v0.28 a
+ * blocked or anonymised person, with a 404 (an empty 204 before): notFound().
  */
 async function fetchPerson(id: number): Promise<Person | null> {
   try {

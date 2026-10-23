@@ -42,7 +42,9 @@ async function Person({ userId, people }: { userId: number; people: People }) {
   const person = people[userId];
   return (
     <>
-      <span className="font-medium">{person?.name ?? t("unknownPerson")}</span>
+      <span className="font-medium">
+        {person?.former ? t("formerPerson") : (person?.name ?? t("unknownPerson"))}
+      </span>
       {person?.phone && (
         <>
           {" · "}

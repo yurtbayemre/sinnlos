@@ -169,8 +169,9 @@ export function DutyPlanEditor({
 
   const nameOf = useMemo(() => {
     const names = new Map(people.map((person) => [person.id, person.displayName]));
-    return (userId: number) => names.get(userId) ?? `#${userId}`;
-  }, [people]);
+    // An id the directory no longer lists: a blocked or anonymised person (v0.28).
+    return (userId: number) => names.get(userId) ?? t("fields.shifts.formerPerson", { id: userId });
+  }, [people, t]);
 
   const personOptions = useMemo(() => {
     const known = new Set(people.map((person) => person.id));
@@ -183,9 +184,12 @@ export function DutyPlanEditor({
         value: String(person.id),
         label: person.jobTitle ? `${person.displayName} (${person.jobTitle})` : person.displayName,
       })),
-      ...unknown.map((userId) => ({ value: String(userId), label: `#${userId}` })),
+      ...unknown.map((userId) => ({
+        value: String(userId),
+        label: t("fields.shifts.formerPerson", { id: userId }),
+      })),
     ];
-  }, [people, values.shifts]);
+  }, [people, values.shifts, t]);
 
   const overlaps = useMemo(() => dutyShiftOverlaps(values.shifts), [values.shifts]);
 

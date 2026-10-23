@@ -45,6 +45,7 @@
       "remove": "Schicht entfernen",
       "person": "Person",
       "choosePerson": "Person wählen",
+      "formerPerson": "Ehemalige Person (#{id})",
       "day": "Tag",
       "template": "Vorlage",
       "custom": "Eigene Zeiten",
