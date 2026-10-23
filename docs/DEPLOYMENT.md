@@ -1674,8 +1674,9 @@ systemctl start docker
 >   unread notifications after 180 days. The first nights work off the
 >   backlog (unread notifications older than 180 days, RSVPs of events
 >   that ended more than 180 days ago, voter links of polls closed more
->   than 30 days ago, confirmations of deleted documents); each night's
->   backup still holds what the next run deletes.
+>   than 30 days ago, confirmations of deleted documents). The jobs assume
+>   the nightly host backup ran before them (03:00 in the standard setup);
+>   they do not wait for it.
 > - **Optional env:** `FEATURES_OFF` (cms and web, the same value),
 >   `TRAINING_EVIDENCE_RETENTION_YEARS` (3), `SEARCH_LOG_RETENTION_DAYS`
 >   (90). An invalid value refuses the cms boot. The boot logs
