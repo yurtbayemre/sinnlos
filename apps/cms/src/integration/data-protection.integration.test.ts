@@ -529,4 +529,73 @@ describe.each(testEngines())("data protection (v0.28, lane A2) on %s", (engine) 
     },
     60_000,
   );
+
+  it.runIf(engine === "postgres")(
+    "a Content Manager save that waited behind an anonymisation is refused",
+    async () => {
+      const gus = await person("Gus Panel");
+      const held = await holdTransaction(t);
+      await held.raw(`SELECT 1 FROM ${qualified(t, "up_users")} WHERE id = ? FOR UPDATE`, [gus.id]);
+      const save = settle(
+        t.strapi
+          .documents(USER)
+          .update({ documentId: gus.documentId, data: { displayName: "Gus Restored" } }),
+      );
+      await waitForLockWait(t);
+      await held.raw(
+        `UPDATE ${qualified(t, "up_users")} SET blocked = true, anonymised_at = now(), display_name = 'Former person' WHERE id = ?`,
+        [gus.id],
+      );
+      await held.commit();
+      const outcome = await save;
+      expect(outcome.ok).toBe(false);
+      expect(String((outcome as { error?: unknown }).error)).toContain("anonymised");
+      expect((await row(gus.id)).displayName).toBe("Former person");
+    },
+    60_000,
+  );
+
+  it.runIf(engine === "postgres")(
+    "the evidence job waits for a running anonymisation and applies its later deadline",
+    async () => {
+      const hal = await person("Hal Evidence");
+      const evidence = t.requireBuilt<TrainingEvidence>("src/utils/training-evidence");
+      const receipt = (validUntil: string, completedAt: string) => ({
+        user: hal.id,
+        targetDocumentId: lesson.documentId,
+        completedAt,
+        snapshot: {
+          v: 1,
+          course: null,
+          lesson: null,
+          completionMode: "confirm",
+          quizPassed: null,
+          validUntil,
+          learner: { displayName: "Hal Evidence", email: null },
+        },
+      });
+      // Superseded and past its deadline for an active person (2021-01-10 + 3 years).
+      await t.strapi.db
+        .query(PROGRESS)
+        .create({ data: receipt("2021-01-10", "2020-01-10T10:00:00.000Z") });
+      await t.strapi.db
+        .query(PROGRESS)
+        .create({ data: receipt("2027-01-10", "2026-01-10T10:00:00.000Z") });
+      const held = await holdTransaction(t);
+      await held.raw(`SELECT 1 FROM ${qualified(t, "up_users")} WHERE id = ? FOR UPDATE`, [hal.id]);
+      const job = settle(
+        evidence.pruneTrainingEvidence(t.strapi, {}, new Date("2026-10-23T12:00:00.000Z")),
+      );
+      await waitForLockWait(t);
+      await held.raw(
+        `UPDATE ${qualified(t, "up_users")} SET blocked = true, anonymised_at = ? WHERE id = ?`,
+        ["2026-10-22T10:00:00.000Z", hal.id],
+      );
+      await held.commit();
+      expect((await job).ok).toBe(true);
+      // Anonymised: max(2021-01-10, 2026-10-22) + 3 years lies ahead, both stay.
+      expect(await t.strapi.db.query(PROGRESS).count({ where: { user: { id: hal.id } } })).toBe(2);
+    },
+    60_000,
+  );
 });

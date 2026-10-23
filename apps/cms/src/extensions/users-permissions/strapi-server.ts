@@ -814,17 +814,18 @@ export type DocumentMiddleware = (
  *    clone of an ANONYMISED user is refused (400 `anonymised`): the Content
  *    Manager and PUT /api/users/:id cannot unblock, refill or remove the
  *    tombstone (its kept identity-provider ids refuse a returning sign-in,
- *    utils/anonymise.ts). The anonymisation itself, the seed and the
- *    intranet's own writers go through the query engine.
+ *    utils/anonymise.ts). The check and the write run in one transaction
+ *    holding the user's row lock (`FOR UPDATE` on Postgres; SQLite has one
+ *    writer), the same lock the anonymisation holds, so a panel save that
+ *    waited for a running anonymisation re-reads the tombstone and is
+ *    refused instead of restoring the row (Codex lane review). The
+ *    anonymisation itself, the seed and the intranet's own writers go
+ *    through the query engine.
  * In refresh mode only the drop and the tombstone refusal apply.
  */
 export function createUserWriteGuard(strapi: TokenVersionStrapi): DocumentMiddleware {
-  return async (context, next) => {
-    if (context.uid !== USER_UID) return next();
+  const guardWrite = async (context: DocumentMiddlewareContext, next: () => Promise<unknown>) => {
     const params = isRecord(context.params) ? context.params : {};
-    if (TOMBSTONE_REFUSED_ACTIONS.includes(context.action ?? "")) {
-      await refuseTombstone(strapi, params.documentId);
-    }
     if (!USER_WRITE_ACTIONS.includes(context.action ?? "")) return next();
     let data = isRecord(params.data) ? params.data : undefined;
     const guarded = data
@@ -857,14 +858,45 @@ export function createUserWriteGuard(strapi: TokenVersionStrapi): DocumentMiddle
     if (passwordSave.getStore()?.userId === id) return next();
     return saveAfterBump(strapi, id, next);
   };
+  return async (context, next) => {
+    if (context.uid !== USER_UID) return next();
+    const params = isRecord(context.params) ? context.params : {};
+    const documentId = params.documentId;
+    if (
+      !TOMBSTONE_REFUSED_ACTIONS.includes(context.action ?? "") ||
+      typeof documentId !== "string" ||
+      documentId === ""
+    ) {
+      return guardWrite(context, next);
+    }
+    return strapi.db.transaction(async ({ trx }) => {
+      await refuseTombstone(strapi, trx, documentId);
+      return guardWrite(context, next);
+    });
+  };
 }
 
-/** Throws when `documentId` names an anonymised user (see createUserWriteGuard). */
-async function refuseTombstone(strapi: TokenVersionStrapi, documentId: unknown): Promise<void> {
-  if (typeof documentId !== "string" || documentId === "") return;
-  const row = await strapi.db
-    .query(USER_UID)
-    .findOne({ where: { documentId }, select: ["id", ANONYMISED_ATTRIBUTE] });
+/**
+ * Locks the user `documentId` names (Postgres) and throws when it is
+ * anonymised, re-read under that lock (see createUserWriteGuard).
+ */
+async function refuseTombstone(
+  strapi: TokenVersionStrapi,
+  trx: RawRunner,
+  documentId: string,
+): Promise<void> {
+  const users = strapi.db.query(USER_UID);
+  const found = await users.findOne({ where: { documentId }, select: ["id"] });
+  const id = isRecord(found) ? userIdOf(found.id) : null;
+  if (id === null) return;
+  const target = tokenVersionTarget(strapi);
+  if (target.client === "postgres") {
+    await trx.raw(
+      `SELECT 1 FROM ${quote(target.schema)}.${quote(target.table)} WHERE ${quote(target.idColumn)} = ? FOR UPDATE`,
+      [id],
+    );
+  }
+  const row = await users.findOne({ where: { id }, select: ["id", ANONYMISED_ATTRIBUTE] });
   if (isRecord(row) && row[ANONYMISED_ATTRIBUTE] != null) {
     throw new errors.ApplicationError("anonymised", { code: "anonymised" });
   }

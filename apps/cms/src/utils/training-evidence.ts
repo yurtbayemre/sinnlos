@@ -13,6 +13,7 @@ import {
 } from "@sinnlos/domain";
 
 import { chunks } from "./authoring-controller";
+import { lockUserRow, type MfaHost } from "./mfa-core";
 import { appTimeZone, todayIn } from "./time";
 
 /**
@@ -394,7 +395,11 @@ export function currentReceiptIds(receipts: readonly GroupedReceipt[]): Set<numb
  * The nightly evidence job: fill missing snapshots first (bounded), then
  * delete the receipts the rule lets go, person by person (users in id
  * pages, each person's receipts read whole, so "newest" is global for
- * them). Unlinked receipts are never read here: they stay.
+ * them). Each person is decided in one transaction holding their row lock,
+ * the lock the anonymisation holds: `anonymisedAt` and the receipts are
+ * re-read under it, so an anonymisation committing meanwhile is seen and
+ * its later deadlines apply (Codex lane review). Unlinked receipts are
+ * never read here: they stay.
  */
 export async function pruneTrainingEvidence(
   strapi: DbStrapi & { log: { info(message: string): void } },
@@ -414,7 +419,7 @@ export async function pruneTrainingEvidence(
     const users = rows(
       await strapi.db.query(USER_UID).findMany({
         where: { id: { $gt: afterId } },
-        select: ["id", "anonymisedAt"],
+        select: ["id"],
         orderBy: [{ id: "asc" }],
         limit: TRAINING_EVIDENCE_PAGE,
       }),
@@ -422,27 +427,36 @@ export async function pruneTrainingEvidence(
     if (users.length === 0) break;
     afterId = users[users.length - 1].id as number;
     for (const user of users) {
-      const receipts = await receiptsOf(strapi, user.id as number);
-      if (receipts.length === 0) continue;
-      const current = currentReceiptIds(receipts);
-      const anonymisedAt = publicationStamp(user.anonymisedAt);
-      const expired = receipts
-        .filter((receipt) =>
-          receiptExpired(receipt, {
-            current: current.has(receipt.id),
-            anonymisedAt,
-            todayKey,
-            years,
-            timeZone,
-          }),
-        )
-        .map((receipt) => receipt.id);
-      for (const ids of chunks(expired, TRAINING_EVIDENCE_PAGE)) {
-        const result = await strapi.db
-          .query(PROGRESS_UID)
-          .deleteMany({ where: { id: { $in: ids } } });
-        deleted += (result as { count?: number })?.count ?? 0;
-      }
+      const id = user.id as number;
+      if ((await strapi.db.query(PROGRESS_UID).count({ where: { user: { id } } })) === 0) continue;
+      deleted += await strapi.db.transaction(async ({ trx }) => {
+        await lockUserRow(strapi as unknown as MfaHost, trx, id);
+        const fresh = await strapi.db
+          .query(USER_UID)
+          .findOne({ where: { id }, select: ["id", "anonymisedAt"] });
+        const receipts = await receiptsOf(strapi, id);
+        const current = currentReceiptIds(receipts);
+        const anonymisedAt = publicationStamp(isRecord(fresh) ? fresh.anonymisedAt : null);
+        const expired = receipts
+          .filter((receipt) =>
+            receiptExpired(receipt, {
+              current: current.has(receipt.id),
+              anonymisedAt,
+              todayKey,
+              years,
+              timeZone,
+            }),
+          )
+          .map((receipt) => receipt.id);
+        let removed = 0;
+        for (const ids of chunks(expired, TRAINING_EVIDENCE_PAGE)) {
+          const result = await strapi.db
+            .query(PROGRESS_UID)
+            .deleteMany({ where: { id: { $in: ids } } });
+          removed += (result as { count?: number })?.count ?? 0;
+        }
+        return removed;
+      });
     }
   }
   strapi.log.info(
