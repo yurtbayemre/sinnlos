@@ -98,13 +98,13 @@ The Strapi super-admin from section 3 can use the admin panel, but it is not an 
 
 3. Sign in to `https://<DOMAIN>` with that e-mail address. As an admin you set up the second factor right away: scan the QR code with an authenticator app (Aegis, 2FAS, Google or Microsoft Authenticator), enter the current password and a code, and keep the ten recovery codes somewhere safe. Departments, teams and users are managed at **/manage**.
 
-Everyone else gets an invitation: **/manage/users → Einladen** (Invite), for one person or several at once. The e-mail carries a link to set a password, valid for 7 days. Accounts can also come from your identity provider (Microsoft Entra ID or OIDC, see [DEPLOYMENT.md](DEPLOYMENT.md)). Do not grant the content-API roles the generic user permissions.
+Everyone else gets an invitation: **/manage/users → Invite people** (German: _Personen einladen_), for one person or several at once. The e-mail carries a link to set a password, valid for 7 days. Accounts can also come from your identity provider (Microsoft Entra ID or OIDC, see [DEPLOYMENT.md](DEPLOYMENT.md)). Do not grant the content-API roles the generic user permissions.
 
 ### Passwords and the second factor
 
-- **Passwords** need at least 12 characters and must not be a common one. A forgotten password: **/forgot-password** on the sign-in page mails a reset link, valid for 1 hour; an admin can also send one with **Link senden** (Send link) at /manage/users.
+- **Passwords** need at least 12 characters and must not be a common one. A forgotten password: **/forgot-password** on the sign-in page mails a reset link, valid for 1 hour; an admin can also send one with **Send a password reset link** (_Passwort-Link senden_; for an invitation without a password: **Send the invitation again**) on the user's page at /manage/users.
 - **Second factor:** admins and editors (`MFA_REQUIRED_ROLES`) set it up at their first sign-in; everyone else can turn it on at **/profile**. Each sign-in then asks for a code from the app, or for one of the recovery codes (each works once).
-- **A lost phone:** an admin opens the user at /manage/users and chooses **2FA zurücksetzen** (Reset 2FA); the user sets it up again at the next sign-in.
+- **A lost phone:** an admin opens the user at /manage/users and chooses **Reset two-factor sign-in** (_Zwei-Faktor-Anmeldung zurücksetzen_); the user sets it up again at the next sign-in.
 - **The only admin is locked out** (phone and recovery codes gone): on the host, as the deploy user, run `infra/mfa-reset.sh <email>`. It clears the second factor of exactly that account and signs it out everywhere.
 - **`ENCRYPTION_KEY`:** the app secrets are encrypted with it. With a different key no code works (recovery codes still do); after a deliberate change, run `infra/mfa-reset.sh` for every account that had a second factor.
 
