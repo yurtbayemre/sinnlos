@@ -22,7 +22,7 @@ import { uploadBlockCache } from "@/lib/upload-block-cache";
  *      (`emitFresh`, LF05), and a recovering cms leg is announced at once.
  *
  * `@/lib/session` is mocked (the real module pulls in next-auth), as are
- * `@/lib/config` and global fetch (the cms's /api/users/me); the JWT check's
+ * `@/lib/config` and global fetch (the cms's /api/me); the JWT check's
  * status map is the real one.
  */
 const session = vi.hoisted(() => ({
@@ -35,10 +35,12 @@ vi.mock("@/lib/session", () => ({
 }));
 vi.mock("@/lib/config", () => ({ STRAPI_URL: "http://cms.test" }));
 
-/** What the cms answers the JWT check (GET /api/users/me) with. */
-const cms = vi.hoisted(() => ({ me: (): Response => Response.json({ id: 1, blocked: false }) }));
+/** What the cms answers the JWT check (GET /api/me) with. */
+const cms = vi.hoisted(() => ({
+  me: (): Response => Response.json({ data: { id: 1, blocked: false } }),
+}));
 const fetchMock = vi.fn(async (url: string) => {
-  if (url === "http://cms.test/api/users/me?fields[0]=blocked") return cms.me();
+  if (url === "http://cms.test/api/me") return cms.me();
   throw new Error(`unexpected fetch ${url}`);
 });
 vi.stubGlobal("fetch", fetchMock);
@@ -94,7 +96,7 @@ beforeEach(() => {
   vi.spyOn(Math, "random").mockReturnValue(0);
   session.current = signedIn(1);
   session.jwt = strapiJwt(1);
-  cms.me = () => Response.json({ id: 1, blocked: false });
+  cms.me = () => Response.json({ data: { id: 1, blocked: false } });
   fetchMock.mockClear();
   uploadBlockCache.clear();
   delete process.env.LIVE_EVENTS_DISABLED;
@@ -127,7 +129,7 @@ describe("GET /live/stream", () => {
     cms.me = () => new Response("Unauthorized", { status: 401 });
     expect((await GET(new Request("http://web.test/live/stream"))).status).toBe(401);
     expect(fetchMock).toHaveBeenCalledWith(
-      "http://cms.test/api/users/me?fields[0]=blocked",
+      "http://cms.test/api/me",
       expect.objectContaining({ headers: { Authorization: `Bearer ${session.jwt}` } }),
     );
     expect(getLiveBus().connectionCount()).toBe(0);

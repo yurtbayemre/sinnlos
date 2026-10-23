@@ -7,10 +7,13 @@
  * its embedded Strapi JWT — even after an admin blocked the account: pages
  * failed at once (strapi() gets a 401 and redirects to sign-in), the files
  * did not. Now every /uploads request also needs the session's Strapi JWT
- * to be accepted by Strapi: a no-store GET /api/users/me with that JWT.
+ * to be accepted by Strapi: a no-store GET /api/me with that JWT.
  * users-permissions answers it with 401 for a blocked account, a deleted
  * user and an invalid or expired token alike (strategies/users-permissions
- * `authenticate`), so all of them lose the files.
+ * `authenticate`), so all of them lose the files. v0.27: a session that
+ * must set up its second factor first (data.mfa.restricted, the cms's
+ * per-request gate) counts as blocked too. /api/me, not /api/users/me: it
+ * is the one profile read such a session may still make.
  *
  * One page shows many images, so the answer is remembered per session
  * token for BLOCK_STATUS_TTL_MS (60 s): a block reaches the files within a
@@ -101,9 +104,9 @@ export function tokenTag(jwt: string): string {
   return createHash("sha256").update(jwt).digest("hex");
 }
 
-/** The account-status probe: the caller's own profile, field-limited. */
+/** The account-status probe: the caller's own profile (FX02 allowlist). */
 export function userCheckUrl(strapiUrl: string): string {
-  return `${strapiUrl}/api/users/me?fields[0]=blocked`;
+  return `${strapiUrl}/api/me`;
 }
 
 type Fetch = (input: string, init: RequestInit) => Promise<Response>;
@@ -129,11 +132,14 @@ export async function probeAccountStatus(
   if (res.status === 401) return "blocked";
   if (!res.ok) return "unavailable";
   try {
-    const me: unknown = await res.json();
+    const body: unknown = await res.json();
+    const me = typeof body === "object" && body !== null ? (body as { data?: unknown }).data : null;
     if (typeof me !== "object" || me === null) return "unavailable";
+    const { blocked, mfa } = me as { blocked?: unknown; mfa?: { restricted?: unknown } | null };
     // The strategy refuses a blocked account before this answer is built;
-    // the flag is checked anyway.
-    return (me as { blocked?: unknown }).blocked === true ? "blocked" : "active";
+    // the flag is checked anyway. A restricted session reads nothing but
+    // its own profile and the second-factor setup (v0.27).
+    return blocked === true || mfa?.restricted === true ? "blocked" : "active";
   } catch {
     return "unavailable";
   }

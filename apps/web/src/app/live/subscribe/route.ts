@@ -20,8 +20,15 @@
  * then is the connection's newer one). The add/remove body of the previous
  * client is still accepted for tabs that run the old bundle after a
  * deploy (live-bus.ts subscribe()).
+ *
+ * v0.27: like the stream, a subscription also needs the session's JWT to be
+ * accepted by the cms for a usable session (the cached /api/me check of
+ * lib/upload-block-cache.ts): a refused, blocked or second-factor-restricted
+ * session gets 401. An outage ("unavailable") admits, as the stream does.
  */
-import { getSession } from "@/lib/session";
+import { STRAPI_URL } from "@/lib/config";
+import { getSession, getStrapiToken } from "@/lib/session";
+import { checkUploadAccess } from "@/lib/upload-block-cache";
 
 import { getLiveBus, liveEventsDisabled } from "@/lib/live-bus";
 import {
@@ -63,6 +70,10 @@ export async function POST(req: Request) {
   }
   if (liveEventsDisabled()) {
     return Response.json({ error: "live events disabled" }, { status: 404 });
+  }
+  const jwt = await getStrapiToken();
+  if (!jwt || (await checkUploadAccess({ userId, jwt, strapiUrl: STRAPI_URL })) === "blocked") {
+    return Response.json({ error: "unauthorized" }, { status: 401 });
   }
 
   const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;

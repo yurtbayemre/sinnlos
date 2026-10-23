@@ -16,7 +16,7 @@ import {
  *   1. the map: TTL, one entry per session token (user id + JWT hash), so
  *      two sessions of a user neither share nor evict each other's entry,
  *      bounded (the oldest write goes first), never holds the raw JWT,
- *   2. the probe: a no-store GET /api/users/me with the session's JWT;
+ *   2. the probe: a no-store GET /api/me with the session's JWT;
  *      401 or a blocked flag = blocked, 200 = active, anything else
  *      (403, 5xx, network, bad JSON) = unavailable,
  *   3. checkUploadAccess: caches active/blocked (never unavailable), one
@@ -37,7 +37,8 @@ const fetchWith = (...responses: Array<Response | Error>): FetchMock => {
   return mock;
 };
 
-const me = (blocked = false) => Response.json({ id: 7, documentId: "u7", blocked });
+const me = (blocked = false, restricted = false) =>
+  Response.json({ data: { id: 7, documentId: "u7", blocked, mfa: { restricted } } });
 
 describe("BlockStatusCache", () => {
   it("remembers a status for the TTL, then forgets it", () => {
@@ -114,7 +115,7 @@ describe("probeAccountStatus", () => {
     expect(await probeAccountStatus("http://cms.test", "jwt-1", fetchMock)).toBe("active");
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toBe(userCheckUrl("http://cms.test"));
-    expect(url).toBe("http://cms.test/api/users/me?fields[0]=blocked");
+    expect(url).toBe("http://cms.test/api/me");
     expect(init.headers).toEqual({ Authorization: "Bearer jwt-1" });
     expect(init.cache).toBe("no-store");
     expect(init.signal).toBeInstanceOf(AbortSignal);
@@ -125,6 +126,9 @@ describe("probeAccountStatus", () => {
       [new Response("Unauthorized", { status: 401 }), "blocked"],
       [me(true), "blocked"],
       [me(false), "active"],
+      // v0.27: a session that must set up its second factor first.
+      [me(false, true), "blocked"],
+      [Response.json({ id: 7, blocked: false }), "unavailable"],
       [new Response("Forbidden", { status: 403 }), "unavailable"],
       [new Response("err", { status: 500 }), "unavailable"],
       [new Response("err", { status: 502 }), "unavailable"],

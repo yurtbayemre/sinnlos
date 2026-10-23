@@ -32,9 +32,10 @@
  * counts as degraded, and its owners poll at the short intervals.
  *
  * Admission needs more than the Auth.js cookie: the session's Strapi JWT
- * must still be accepted by the cms (the cached /api/users/me check of
- * /uploads, lib/upload-block-cache.ts, 60 s per JWT). A password change
- * (FX40), a block or a deleted account makes the cms refuse that JWT, so
+ * must still be accepted by the cms (the cached /api/me check of /uploads,
+ * lib/upload-block-cache.ts, 60 s per JWT). A password change (FX40), a
+ * block, a deleted account or (v0.27) a session that must set up its
+ * second factor first makes the check refuse that JWT, so
  * the stream answers 401 and the client's instant-close stop ends the
  * retries; without that check the same cookie kept receiving the user's
  * notification and channel pings until the JWT's exp. A cms that cannot

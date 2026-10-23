@@ -7,7 +7,7 @@ import { uploadBlockCache } from "@/lib/upload-block-cache";
  *   1. no session or no Strapi JWT: 401 before any cms request; an invalid
  *      path: 404 before the check,
  *   2. every other request first asks Strapi whether the session's JWT is
- *      still accepted (no-store GET /api/users/me with that JWT); a blocked
+ *      still accepted (no-store GET /api/me with that JWT); a blocked
  *      or rejected account gets 401 and no bytes, a cms that cannot say
  *      gets 503 and no bytes,
  *   3. the answer is reused for 60 s per user and JWT (one check for a
@@ -35,7 +35,7 @@ vi.stubGlobal("fetch", fetchMock);
 
 const { GET } = await import("./route");
 
-const CHECK = "http://cms.test/api/users/me?fields[0]=blocked";
+const CHECK = "http://cms.test/api/me";
 const FILE = "http://cms.test/uploads/report_abc123.pdf";
 
 function get(path: string[] = ["report_abc123.pdf"]) {
@@ -53,7 +53,7 @@ function cms(account: () => Response) {
   );
 }
 
-const active = () => Response.json({ id: 7, documentId: "u7", blocked: false });
+const active = () => Response.json({ data: { id: 7, documentId: "u7", blocked: false } });
 const rejected = () => new Response("Unauthorized", { status: 401 });
 
 const urls = () => fetchMock.mock.calls.map(([url]) => url);
@@ -95,7 +95,7 @@ describe("GET /uploads/[...path] (FX41)", () => {
 
     uploadBlockCache.clear();
     fetchMock.mockReset();
-    cms(() => Response.json({ id: 7, blocked: true }));
+    cms(() => Response.json({ data: { id: 7, blocked: true } }));
     expect((await get()).status).toBe(401);
     expect(urls()).toEqual([CHECK]);
   });
