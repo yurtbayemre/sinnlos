@@ -5,6 +5,7 @@ import { registerRestrictedRelationGuard } from "./bootstrap/restricted-relation
 import { registerUserContactSanitizer } from "./bootstrap/user-contact-sanitizer";
 import lifecycle from "./index";
 import type { RelationModel } from "./utils/restricted-relations";
+import { ACTIVE_USER_FILTER } from "./utils/user-visibility";
 import { SENSITIVE_USER_FIELDS, USER_UID, type ModelSchema } from "./utils/sanitize-user-contact";
 
 /**
@@ -85,6 +86,8 @@ function datetimeHost() {
   const hooks = new Map<string, Array<(context: unknown) => Promise<void>>>();
   return {
     hooks,
+    // No API routers: nothing for the FEATURES_OFF decoration to walk.
+    apis: {},
     log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
     db: { dialect: { client: "sqlite" } },
     documents: { use: vi.fn() },
@@ -344,11 +347,23 @@ describe("relation side-channel guard registration (FX05)", () => {
         ).rejects.toThrow("Invalid key role at children.author.role");
 
         const granted = authWith(...READS, `${DEPARTMENT}.find`, `${ROLE}.find`);
-        for (const query of [throughDepartment(), throughRole()]) {
-          await expect(
-            strapi.contentAPI.sanitize.query(query, wikiPage, { auth: granted }),
-          ).resolves.toEqual({ ...query, locale: "sanitized-by-core" });
-        }
+        await expect(
+          strapi.contentAPI.sanitize.query(throughDepartment(), wikiPage, { auth: granted }),
+        ).resolves.toEqual({ ...throughDepartment(), locale: "sanitized-by-core" });
+        // v0.28: an author's role is withheld from a blocked author, so a
+        // filter on it matches active authors only (utils/user-visibility.ts).
+        await expect(
+          strapi.contentAPI.sanitize.query(throughRole(), wikiPage, { auth: granted }),
+        ).resolves.toEqual({
+          populate: {
+            children: {
+              filters: {
+                author: { $and: [{ role: { type: { $eq: "x" } } }, ACTIVE_USER_FILTER] },
+              },
+            },
+          },
+          locale: "sanitized-by-core",
+        });
       },
     );
 
@@ -405,7 +420,8 @@ describe("relation side-channel guard registration (FX05)", () => {
       registerRestrictedRelationGuard(strapi);
       const query = {
         filters: { department: { name: "x" } },
-        sort: "author.role.type:asc",
+        // v0.28: a root sort onto a withheld user field is refused (user-visibility.ts).
+        sort: "author.displayName:asc",
         populate: { children: { populate: { author: "true" } }, department: "true" },
       };
       await expect(
@@ -452,7 +468,13 @@ describe("relation side-channel guard registration (FX05)", () => {
       { ...legitUserQuery(), ...rawDbKeys() },
       user,
     );
-    expect(out).toEqual({ ...legitUserQuery(), locale: "sanitized-by-core" });
+    // v0.28: the user model's root sees active users only (utils/user-visibility.ts).
+    const legit = legitUserQuery();
+    expect(out).toEqual({
+      ...legit,
+      filters: { $and: [legit.filters, ACTIVE_USER_FILTER] },
+      locale: "sanitized-by-core",
+    });
   });
 
   it.each(["admin_role", "editor", "guest", undefined])(
@@ -464,7 +486,7 @@ describe("relation side-channel guard registration (FX05)", () => {
         { where: { password: { $startsWith: "$2a$" } }, orderBy: { password: "asc" } },
         user,
       );
-      expect(out).toEqual({ locale: "sanitized-by-core" });
+      expect(out).toEqual({ filters: ACTIVE_USER_FILTER, locale: "sanitized-by-core" });
     },
   );
 

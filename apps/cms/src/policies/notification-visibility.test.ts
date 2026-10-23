@@ -39,12 +39,14 @@ describe("notification-visibility policy", () => {
     expect(ctx.request.query.filters).toBeUndefined();
   });
 
-  it("lets admin_role through without scoping the query", async () => {
+  it("narrows admin_role to its own notifications too (v0.28: no bypass)", async () => {
     const admin = { id: 1, role: { id: ADMIN_ROLE, type: "admin_role" } };
     const ctx = context(admin, { filters: { read: { $eq: false } } });
     await expect(run(ctx)).resolves.toBe(true);
-    // Bypass: the client filter survives verbatim, no `recipient` scoping added.
-    expect(ctx.request.query.filters).toEqual({ read: { $eq: false } });
+    // The platform-wide unread total is GET /api/notifications/unread-count.
+    expect(ctx.request.query.filters).toEqual({
+      $and: [{ read: { $eq: false } }, { recipient: { id: 1 } }],
+    });
   });
 
   it("narrows a member to its OWN notifications", async () => {

@@ -135,3 +135,16 @@ describe("lesson-progress-visibility policy", () => {
     expect(rows).toEqual([{ id: 1 }]);
   });
 });
+
+describe("lesson-progress-visibility with the training reports off (v0.28)", () => {
+  it.each(["training-reports", "training"])("ends the admin_role bypass (%s)", async (off) => {
+    process.env.FEATURES_OFF = off;
+    try {
+      const ctx = policyContext({ id: 1, role: { id: 1, type: "admin_role" } }, { query: {} });
+      await expect(run(ctx).result).resolves.toBe(true);
+      expect(ctx.request.query).toEqual({ filters: { user: { id: 1 } } });
+    } finally {
+      delete process.env.FEATURES_OFF;
+    }
+  });
+});

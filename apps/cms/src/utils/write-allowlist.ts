@@ -49,6 +49,7 @@ import {
   WIKI_SPACE_UID as WIKI_SPACE,
 } from "./authoring-uids";
 import { parseRowId } from "./entry-id";
+import { isOff } from "./module-switches";
 import { isPlainDate, zonedDateKey, zonedDayStart } from "./plain-date";
 import { forcePublishedStatus, getMutableQuery } from "./policy-query";
 import { appTimeZone } from "./time";
@@ -360,6 +361,14 @@ export const valueChecks = {
 /** A `date` attribute: 'YYYY-MM-DD' naming a real day, or null. */
 const checkNullablePlainDate: ValueCheck = (value) =>
   value === null || isPlainDate(value) ? null : "invalidDate";
+
+/**
+ * `requiresAck`: a boolean, and never `true` while `read-confirmations` is
+ * in FEATURES_OFF (v0.28): nobody could confirm it. `false` stays writable,
+ * so a form can clear the flag of an older document.
+ */
+const checkAckFlag: ValueCheck = (value) =>
+  checkBoolean(value) ?? (value === true && isOff("read-confirmations") ? "invalid" : null);
 
 /** Poll options: 2-20 unique trimmed answers of at most 200 characters (plan item 2b). */
 const checkPollOptions: ValueCheck = (value) =>
@@ -781,7 +790,7 @@ const ANNOUNCEMENT_MODERATOR: WriteRule = {
     department: toOne("department"),
     team: toOne("team"),
     audienceRoles: roleTypes(ROLE_PRIVILEGE_ORDER),
-    requiresAck: value(checkBoolean),
+    requiresAck: value(checkAckFlag),
     ackDeadline: value(checkNullablePlainDate),
     publishAt: value(checkNullableInstant),
   },
@@ -867,7 +876,7 @@ const DOCUMENT_MODERATOR: WriteRule = {
     ...DOCUMENT_COMMON,
     departments: toMany("departments"),
     file: media("ownUpload"),
-    requiresAck: value(checkBoolean),
+    requiresAck: value(checkAckFlag),
     publishAt: value(checkNullableInstant),
     unpublishAt: value(checkNullableInstant),
   },

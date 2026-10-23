@@ -6,6 +6,7 @@ import {
   isUnpublishScheduledUid,
 } from "../utils/authoring-uids";
 import { recordAuditEvent, type AuditHost } from "../utils/audit";
+import { isUidOff } from "../utils/module-switches";
 import {
   advanceRevision,
   lockDocument,
@@ -885,6 +886,9 @@ export async function runScheduledPublishing(
   };
   await runInAuthoringScope({ source: "cron" }, async () => {
     for (const uid of SCHEDULED_UIDS) {
+      // FEATURES_OFF (v0.28): a switched-off module's schedule waits until
+      // it is on again (events, courses, lessons).
+      if (isUidOff(uid)) continue;
       if (isUnpublishScheduledUid(uid)) {
         await runPass(uid, "unpublish", await dueUnpublishes(strapi, uid, start, attempts));
       }

@@ -70,6 +70,15 @@ describe("comment afterCreate", () => {
     expect(notificationRows(strapi).map((n) => n.recipient)).toEqual([{ id: USER.carol }]);
   });
 
+  it("a blocked announcement author is not notified (v0.28)", async () => {
+    const { strapi, announcement } = setup();
+    const carol = strapi.tables[USER_UID].find((user) => user.id === USER.carol)!;
+    carol.blocked = true;
+    const row = await comment(strapi, { author: USER.alice, targetDocumentId: announcement });
+    await lifecycles.afterCreate({ result: row });
+    expect(notificationRows(strapi)).toEqual([]);
+  });
+
   it("the author's own comment notifies nobody", async () => {
     const { strapi, announcement } = setup();
     const row = await comment(strapi, { author: USER.carol, targetDocumentId: announcement });

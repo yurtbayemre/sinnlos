@@ -8,6 +8,7 @@ import {
   type RelationModel,
 } from "../utils/restricted-relations";
 import { pickContentApiQueryParams, type RouteWithQuerySchema } from "../utils/rest-query-params";
+import { hideBlockedUsers } from "../utils/user-visibility";
 import { MODERATORS, hasRole } from "./roles";
 
 type SanitizeQuery = (
@@ -88,6 +89,11 @@ export interface RestrictedRelationGuardHost {
  * follow no relation or media at all (batch 16; the walk refuses it with
  * the same 400 before anything is asked): Strapi 5.57 answers 500 for one.
  *
+ * Blocked people (v0.28, utils/user-visibility.ts): the same wrapper, last,
+ * hides blocked users from the user model's root and from the directory
+ * relations' populates, for EVERY caller (the moderators' bypass is about
+ * hidden wiki content, not about people who left).
+ *
  * Fails loudly: if a Strapi upgrade moves `contentAPI.sanitize.query` or
  * `auth.verify`, boot throws instead of silently re-opening the side
  * channel.
@@ -135,7 +141,7 @@ export function registerRestrictedRelationGuard(strapi: RestrictedRelationGuardH
       onPopulateQueryRelation: (relation) => populateRelations.push(relation),
     });
     await assertPopulateQueryGrants(populateRelations, canFind(sanitizeOptions?.auth));
-    return guarded;
+    return hideBlockedUsers(guarded, schema, getModel);
   };
 
   const factory = (schema: RelationModel) => (data: unknown) =>

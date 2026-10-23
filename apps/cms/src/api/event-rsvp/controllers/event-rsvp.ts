@@ -128,7 +128,7 @@ export default factories.createCoreController(RSVP_UID, ({ strapi }) => ({
     const rows: RsvpRow[] = await strapi.db.query(RSVP_UID).findMany({
       where: { targetDocumentId: { $in: targets } },
       select: ["id", "targetDocumentId", "status", "respondedAt"],
-      populate: { user: { select: ["id", "displayName"] } },
+      populate: { user: { select: ["id", "displayName", "blocked"] } },
     });
     const callerId = typeof user.id === "number" ? user.id : null;
     return ctx.send({ data: summarizeRsvps(rows, targets, callerId) });

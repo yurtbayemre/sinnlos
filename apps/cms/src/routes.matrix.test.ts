@@ -325,8 +325,6 @@ const GOLDEN: Record<string, PolicySpec[]> = {
   "api::acknowledgement.acknowledgement.find": ["global::acknowledgement-visibility"],
   "api::acknowledgement.acknowledgement.findOne": ["global::acknowledgement-visibility"],
   "api::acknowledgement.acknowledgement.create": [],
-  "api::acknowledgement.acknowledgement.update": [],
-  "api::acknowledgement.acknowledgement.delete": [],
 
   "api::announcement.announcement.find": ["global::announcement-visibility"],
   "api::announcement.announcement.findOne": ["global::announcement-visibility"],
@@ -444,6 +442,7 @@ const GOLDEN: Record<string, PolicySpec[]> = {
   "api::notification.notification.delete": ["global::is-notification-recipient"],
   "api::notification.notification.markRead": [],
   "api::notification.notification.markAllRead": [],
+  "api::notification.notification.unreadCount": [],
 
   "api::poll.poll.find": ["global::poll-visibility"],
   "api::poll.poll.findOne": ["global::poll-visibility"],
@@ -533,8 +532,6 @@ const GOLDEN: Record<string, PolicySpec[]> = {
 // ---------------------------------------------------------------------------
 
 const ALLOWLIST: Record<string, string> = {
-  "api::acknowledgement.acknowledgement.update": "admin_role-only correction of read receipts",
-  "api::acknowledgement.acknowledgement.delete": "admin_role-only correction of read receipts",
   "api::classified.classified.find": "internal flea market, staff-readable (guest holds no grant)",
   "api::classified.classified.findOne":
     "internal flea market, staff-readable (guest holds no grant)",
@@ -563,6 +560,9 @@ const FX01_REMOVED = [
   "api::reaction.reaction.update",
   "api::lesson-progress.lesson-progress.update",
   "api::lesson-progress.lesson-progress.delete",
+  // v0.28: immutable read receipts.
+  "api::acknowledgement.acknowledgement.update",
+  "api::acknowledgement.acknowledgement.delete",
 ];
 
 // ---------------------------------------------------------------------------

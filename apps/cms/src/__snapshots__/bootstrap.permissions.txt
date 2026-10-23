@@ -1,8 +1,6 @@
 admin_role|api::acknowledgement.acknowledgement.create
-admin_role|api::acknowledgement.acknowledgement.delete
 admin_role|api::acknowledgement.acknowledgement.find
 admin_role|api::acknowledgement.acknowledgement.findOne
-admin_role|api::acknowledgement.acknowledgement.update
 admin_role|api::announcement.announcement.authoringList
 admin_role|api::announcement.announcement.create
 admin_role|api::announcement.announcement.delete
@@ -112,6 +110,7 @@ admin_role|api::notification.notification.find
 admin_role|api::notification.notification.findOne
 admin_role|api::notification.notification.markAllRead
 admin_role|api::notification.notification.markRead
+admin_role|api::notification.notification.unreadCount
 admin_role|api::poll-vote.poll-vote.results
 admin_role|api::poll-vote.poll-vote.vote
 admin_role|api::poll.poll.authoringList

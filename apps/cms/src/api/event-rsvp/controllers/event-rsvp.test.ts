@@ -675,7 +675,7 @@ describe("event-rsvp summary (FX21)", () => {
         {
           where: { targetDocumentId: { $in: [EVT_1] } },
           select: ["id", "targetDocumentId", "status", "respondedAt"],
-          populate: { user: { select: ["id", "displayName"] } },
+          populate: { user: { select: ["id", "displayName", "blocked"] } },
         },
       ],
     ]);

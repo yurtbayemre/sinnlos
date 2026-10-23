@@ -81,6 +81,17 @@ export const SENSITIVE_USER_FIELDS = [
  */
 export const PRIVILEGED_ROLE_TYPES: ReadonlySet<string> = new Set<string>(STAFF_ROLES);
 
+/**
+ * What is left of a BLOCKED user wherever it is populated (v0.28, plan rev3
+ * R1), for every caller, staff included: the attribution of the content
+ * they wrote, and `username` as the web's fallback for an empty display
+ * name. Contact data, job title, avatar, department and every relation go.
+ * The directory itself no longer lists blocked people
+ * (utils/user-visibility.ts), which also adds `blocked` to an explicit
+ * user field list so this cut always knows.
+ */
+export const BLOCKED_USER_FIELDS = ["id", "documentId", "displayName", "username", "blocked"];
+
 /** True when a caller with this `role.type` must have the fields stripped. */
 export function shouldSanitizeForRole(roleType: string | null | undefined): boolean {
   return !(typeof roleType === "string" && PRIVILEGED_ROLE_TYPES.has(roleType));
@@ -104,6 +115,11 @@ export interface ModelSchema {
 export interface StripOptions {
   /** Resolve a model uid to its schema; may return undefined for unknowns. */
   getModel: (uid: string) => ModelSchema | undefined;
+  /**
+   * Strip SENSITIVE_USER_FIELDS (default true). False for a privileged
+   * caller: then only blocked users are cut (BLOCKED_USER_FIELDS).
+   */
+  contact?: boolean;
 }
 
 /**
@@ -152,10 +168,19 @@ function visit(
 
   const record = data as Record<string, unknown>;
 
-  // This node IS a user → drop the sensitive keys directly.
+  // This node IS a user: a blocked one keeps its attribution only (and is
+  // not descended into); otherwise drop the sensitive keys directly.
   if (schema.uid === USER_UID) {
-    for (const field of SENSITIVE_USER_FIELDS) {
-      if (field in record) delete record[field];
+    if (record.blocked === true) {
+      for (const key of Object.keys(record)) {
+        if (!BLOCKED_USER_FIELDS.includes(key)) delete record[key];
+      }
+      return;
+    }
+    if (options.contact !== false) {
+      for (const field of SENSITIVE_USER_FIELDS) {
+        if (field in record) delete record[field];
+      }
     }
   }
 

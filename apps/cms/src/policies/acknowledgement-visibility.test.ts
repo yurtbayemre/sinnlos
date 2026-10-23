@@ -88,3 +88,17 @@ describe("acknowledgement-visibility policy", () => {
     expect(ctx.query.filters).toBe("UNTOUCHED");
   });
 });
+
+describe("acknowledgement-visibility with read-confirmations off (v0.28)", () => {
+  it("ends the admin_role bypass: own rows only", async () => {
+    process.env.FEATURES_OFF = "read-confirmations";
+    try {
+      const admin = { id: 1, role: { id: ADMIN_ROLE, type: "admin_role" } };
+      const ctx = context(admin);
+      await expect(run(ctx)).resolves.toBe(true);
+      expect(ctx.request.query.filters).toEqual({ user: { id: 1 } });
+    } finally {
+      delete process.env.FEATURES_OFF;
+    }
+  });
+});

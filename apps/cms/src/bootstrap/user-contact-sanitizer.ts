@@ -27,7 +27,8 @@ function roleTypeOf(ctx: unknown): string | undefined {
 /**
  * Register a role-aware `content-api.output` sanitizer that removes employee
  * contact fields (email/phone/hireDate/officeLocation/microsoftOid) from
- * every response served to a non-privileged caller — the directory itself
+ * every response served to a non-privileged caller, and (v0.28, for every
+ * caller) cuts a populated BLOCKED user to its attribution — the directory itself
  * (/api/users*, /api/users/me) AND every populated user relation in any
  * content type (announcement/wiki author, document.uploadedBy,
  * event.organizer, notification.actor, comment/reaction author, manager,
@@ -61,9 +62,11 @@ export function registerUserContactSanitizer(strapi: UserContactSanitizerHost): 
     const ctx = strapi.requestContext.get();
     // No HTTP request in scope → internal call; leave the data untouched.
     if (!ctx) return data;
-    if (!shouldSanitizeForRole(roleTypeOf(ctx))) return data;
+    // Every caller: blocked users are cut to their attribution (v0.28);
+    // contact fields only for a caller outside the staff roles.
     return stripSensitiveUserFields(data, schema, {
       getModel: (uid: string) => strapi.getModel(uid),
+      contact: shouldSanitizeForRole(roleTypeOf(ctx)),
     });
   };
 

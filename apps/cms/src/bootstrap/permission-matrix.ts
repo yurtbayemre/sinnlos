@@ -105,7 +105,8 @@ export const PERMISSION_MATRIX: Record<
   Partial<Record<ContentTypeUid, CrudAction[]>>
 > = {
   admin_role: {
-    "api::acknowledgement.acknowledgement": ALL_ACTIONS,
+    // No update/delete (v0.28): the routes are gone, receipts are immutable.
+    "api::acknowledgement.acknowledgement": ["find", "findOne", "create"],
     // Training authoring uses can-author, explicit status and version tokens; no delete.
     "api::course.course": [...READ_ACTIONS, "create", "update"],
     "api::lesson.lesson": [...READ_ACTIONS, "create", "update"],
@@ -466,6 +467,9 @@ export const CUSTOM_ACTION_GRANTS: Record<string, readonly MatrixRoleType[] | "*
   "api::kudos.kudos.celebrations": STAFF_ROLES,
   "api::notification.notification.markRead": "*",
   "api::notification.notification.markAllRead": "*",
+  // v0.28: the platform-wide unread total of /manage/analytics, a number
+  // only; the notification reads are the caller's own for every role.
+  "api::notification.notification.unreadCount": [ADMIN],
   // Every role, guest included: guests need both for the polls opened to
   // them. Which polls a caller may see and vote on is decided per poll by
   // utils/poll-audience.ts (canSeePoll/canVoteOnPoll: department targeting,
@@ -569,6 +573,9 @@ const REMOVED_CORE_ACTIONS: Partial<Record<ContentTypeUid, CrudAction[]>> = {
   "api::kudos.kudos": ["update"],
   "api::reaction.reaction": ["update"],
   "api::lesson-progress.lesson-progress": ["update", "delete"],
+  // v0.28: admin_role held both; an update answered with another person's
+  // receipt past the own-rows read policy.
+  "api::acknowledgement.acknowledgement": ["update", "delete"],
 };
 
 /**

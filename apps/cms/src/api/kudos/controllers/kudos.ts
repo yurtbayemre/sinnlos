@@ -9,7 +9,8 @@ export default factories.createCoreController("api::kudos.kudos", ({ strapi }) =
    * `from` is always the caller (§5.21). `to` must be a user's row id (an
    * integer, which is what the web's sendKudos sends) and not the caller
    * (FX27): a missing `to` created kudos for nobody, and kudos to oneself
-   * were stored and listed.
+   * were stored and listed. Nor to a blocked person (v0.28): they left the
+   * directory, so the 400 carries `details.code: "recipient"`.
    */
   async create(ctx) {
     const user = ctx.state.user;
@@ -19,6 +20,12 @@ export default factories.createCoreController("api::kudos.kudos", ({ strapi }) =
     const to: unknown = body?.to;
     if (!isRowId(to)) return ctx.badRequest("to must be a user id");
     if (to === user.id) return ctx.badRequest("Kudos cannot be sent to yourself");
+    const recipient = await strapi.db
+      .query("plugin::users-permissions.user")
+      .findOne({ where: { id: to }, select: ["id", "blocked"] });
+    if (recipient?.blocked === true) {
+      return ctx.badRequest("Recipient unavailable", { code: "recipient" });
+    }
     ctx.request.body = {
       data: { ...body, from: user.id },
     };

@@ -34,6 +34,10 @@ vi.mock("./database/ensure-timestamptz", () => ({
   assertTimestamptzContract: step("assertTimestamptzContract"),
 }));
 vi.mock("./utils/env-guard", () => ({ enforceSecretGuard: step("enforceSecretGuard") }));
+vi.mock("./utils/module-switches", () => ({
+  switchesStatusLine: () => "[switches] everything on",
+  decorateSwitchedRoutes: syncStep("decorateSwitchedRoutes"),
+}));
 vi.mock("./bootstrap/user-contact-sanitizer", () => ({
   registerUserContactSanitizer: step("registerUserContactSanitizer"),
 }));
@@ -111,6 +115,8 @@ describe("src/index.ts lifecycle order (B01)", () => {
       "enforceSecretGuard",
       "checkEntraConfig",
       "checkOidcConfig",
+      // v0.28: before bootstrap() registers the routes.
+      "decorateSwitchedRoutes",
       "registerUserContactSanitizer",
       "registerRestrictedRelationGuard",
       "registerDocumentMiddlewares",

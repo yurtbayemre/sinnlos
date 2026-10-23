@@ -5,7 +5,9 @@ import {
   SEARCH_BUILD_INDEX_UID,
   SEARCH_INDEX_SETTINGS,
   SEARCH_INDEX_UID,
+  featuresOff,
   meilisearchEnabled,
+  searchKindEnabled,
   type IndexedSearchKind,
   type SearchIndexDocument,
 } from "@sinnlos/domain";
@@ -107,10 +109,19 @@ export function toSearchDocument(
   };
 }
 
-/** Every published row of every indexed kind as index documents. */
-export async function loadSearchDocuments(strapi: SearchStrapi): Promise<SearchIndexDocument[]> {
+/**
+ * Every published row of every indexed kind as index documents; a kind of a
+ * module in FEATURES_OFF (v0.28: events, polls) is left out, so the next
+ * rebuild drops it from the index.
+ */
+export async function loadSearchDocuments(
+  strapi: SearchStrapi,
+  env: Record<string, string | undefined> = process.env,
+): Promise<SearchIndexDocument[]> {
   const documents: SearchIndexDocument[] = [];
+  const off = featuresOff(env);
   for (const kind of INDEXED_SEARCH_KINDS) {
+    if (!searchKindEnabled(off, kind)) continue;
     const { uid, title, text: fields } = SOURCES[kind];
     const rows = await strapi.db.query(uid).findMany({
       where: PUBLISHED,
@@ -237,7 +248,7 @@ export async function syncSearchIndex(
 ): Promise<void> {
   const config = parseMeiliConfig(env);
   if (!config) return;
-  const documents = await loadSearchDocuments(strapi);
+  const documents = await loadSearchDocuments(strapi, env);
   const signature = searchFingerprint(documents);
   const live = await meili(
     config,

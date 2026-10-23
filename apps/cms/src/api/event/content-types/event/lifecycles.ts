@@ -1,5 +1,6 @@
 import { eventNeedsRetarget } from "@sinnlos/domain";
 
+import { isOff } from "../../../../utils/module-switches";
 import {
   publishedRowWhere,
   scheduleSourceFanout,
@@ -108,6 +109,10 @@ async function loadEventAudience(ev: EventRow): Promise<SourceAudience<EventRow>
  * heals on the next publish.
  */
 function notifyForEvent(ev: EventRow): Promise<void> {
+  // FEATURES_OFF (v0.28): no notification links to a switched-off module;
+  // a publish after it is on again fans out as usual (the dedup is per
+  // recipient).
+  if (isOff("events")) return Promise.resolve();
   // After the commit (LF02), see announcement/lifecycles.ts.
   return scheduleSourceFanout({
     strapi,

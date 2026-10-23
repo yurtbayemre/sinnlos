@@ -42,7 +42,7 @@
  * uploadWeekly (which writes its own schedule into the core store) keep
  * running. None of them mails, sweeps or deletes anything.
  */
-import { meilisearchEnabled } from "@sinnlos/domain";
+import { isSwitchedOff, meilisearchEnabled } from "@sinnlos/domain";
 
 import { parseEnvFlag, sendDigests, type DigestStrapi } from "../digest/send-digests";
 import { pruneAuditEvents, type AuditJanitorStrapi } from "./prune-audit-events";
@@ -210,14 +210,19 @@ export function cronRegistry(
     },
     // v0.20: due-soon and expired mandatory training, once per reminder
     // cycle (training-reminders.ts); before the digest, which lists them.
-    {
-      name: "training-reminders",
-      rule: "45 6 * * *",
-      tz: timeZone,
-      fn: async (strapi) => {
-        await sendTrainingReminders(strapi);
-      },
-    },
+    // Not registered while `training` is in FEATURES_OFF (v0.28).
+    ...(isSwitchedOff(env, "training")
+      ? []
+      : [
+          {
+            name: "training-reminders",
+            rule: "45 6 * * *",
+            tz: timeZone,
+            fn: async (strapi: CronStrapi) => {
+              await sendTrainingReminders(strapi);
+            },
+          },
+        ]),
     // Morning e-mail digests (issue #18): daily users every day, weekly users
     // on Mondays (digest-plan.ts); without SMTP_* env a logged no-op.
     {

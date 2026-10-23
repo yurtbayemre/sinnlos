@@ -511,10 +511,11 @@ describe.each(testEngines())("wiki revisions are closed on %s", (engine) => {
       // v0.18 adds 10 duty-plan actions (5 core, 5 authoring): 184;
       // v0.19 adds 10 KPI actions: 194; v0.20 the 2 training report actions: 196;
       // v0.23 the 4 user administration actions and the 3 revoked generic user writes: 203.
-      // (v0.25-v0.27 bring it to 213); v0.28 the 4 export, anonymisation and evidence actions: 217.
+      // (v0.25-v0.27 bring it to 213); v0.28 the 4 export, anonymisation and evidence actions
+      // and the admin unread count: 218.
       expect(lines).toEqual([
         "info [bootstrap] revoked 18 obsolete permission(s)",
-        "info [bootstrap] permission drift: none (report-only check of 217 managed actions)",
+        "info [bootstrap] permission drift: none (report-only check of 218 managed actions)",
       ]);
       expect(
         await t.strapi.db

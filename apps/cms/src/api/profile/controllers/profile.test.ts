@@ -753,8 +753,9 @@ describe("toSelfProfile / toManagerSummary", () => {
     expect(toSelfProfile({ id: 1, manager: MANAGER_ROW })).toEqual({ id: 1 });
   });
 
-  it("returns null for a missing manager and filters a FULL row by role", () => {
+  it("returns null for a missing or blocked manager and filters a FULL row by role", () => {
     expect(toManagerSummary(null, "member")).toBeNull();
+    expect(toManagerSummary({ ...MANAGER_ROW, blocked: true }, "member")).toBeNull();
     expect(toManagerSummary(undefined, "member")).toBeNull();
     const full = toManagerSummary(MANAGER_ROW, "member")!;
     expect(Object.keys(full).sort()).toEqual(
