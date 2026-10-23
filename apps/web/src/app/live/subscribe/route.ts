@@ -24,7 +24,8 @@
  * v0.27: like the stream, a subscription also needs the session's JWT to be
  * accepted by the cms for a usable session (the cached /api/me check of
  * lib/upload-block-cache.ts): a refused, blocked or second-factor-restricted
- * session gets 401. An outage ("unavailable") admits, as the stream does.
+ * session gets 401; a cms that cannot say gets 503 (never admitted), as on
+ * the stream.
  */
 import { STRAPI_URL } from "@/lib/config";
 import { getSession, getStrapiToken } from "@/lib/session";
@@ -72,8 +73,10 @@ export async function POST(req: Request) {
     return Response.json({ error: "live events disabled" }, { status: 404 });
   }
   const jwt = await getStrapiToken();
-  if (!jwt || (await checkUploadAccess({ userId, jwt, strapiUrl: STRAPI_URL })) === "blocked") {
-    return Response.json({ error: "unauthorized" }, { status: 401 });
+  const access = jwt ? await checkUploadAccess({ userId, jwt, strapiUrl: STRAPI_URL }) : "blocked";
+  if (access === "blocked") return Response.json({ error: "unauthorized" }, { status: 401 });
+  if (access === "unavailable") {
+    return Response.json({ error: "unavailable" }, { status: 503 });
   }
 
   const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;

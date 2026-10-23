@@ -17,7 +17,7 @@ import type { LiveFrame } from "@/lib/live-contract";
  *      that run the old bundle after a deploy;
  *   5. v0.27: the session's JWT must be usable at the cms (the cached
  *      /api/me check): refused or second-factor-restricted → 401, an
- *      outage admits.
+ *      outage → 503.
  *
  * `@/lib/session` is mocked (the real module pulls in next-auth); the cms
  * answer of the /api/me check is a stubbed global fetch.
@@ -114,10 +114,10 @@ describe("POST /live/subscribe", () => {
     session.jwt = `jwt-${crypto.randomUUID()}`;
     cms.me = () => Response.json({ data: { id: 1, blocked: false, mfa: { restricted: true } } });
     expect((await post({ connId: id, rev: 1, channels: [] })).status).toBe(401);
-    // An outage does not keep a usable session out.
+    // An outage is no positive answer: 503, never admitted.
     session.jwt = `jwt-${crypto.randomUUID()}`;
     cms.me = () => new Response("down", { status: 503 });
-    expect((await post({ connId: id, rev: 1, channels: [] })).status).toBe(200);
+    expect((await post({ connId: id, rev: 1, channels: [] })).status).toBe(503);
   });
 
   it("sets the full set per revision and ignores a stale one", async () => {

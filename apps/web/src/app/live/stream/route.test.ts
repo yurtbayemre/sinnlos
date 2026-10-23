@@ -8,8 +8,9 @@ import { uploadBlockCache } from "@/lib/upload-block-cache";
  * The per-tab SSE stream (/live/stream) on the real in-memory bus. Pinned:
  *   1. no session → 401, LIVE_EVENTS_DISABLED=1 → 404, both before a
  *      connection exists; a session whose Strapi JWT is missing or refused
- *      by the cms (revoked by a password change, blocked, deleted) → 401,
- *      while a cms that cannot say (an outage) still gets its stream;
+ *      by the cms (revoked by a password change, blocked, deleted,
+ *      second factor to set up) → 401, and a cms that cannot say (an
+ *      outage) → 503: admission needs a positive answer (v0.27);
  *   2. the stream opens with `retry` and the hello naming the connection,
  *      and carries the headers the edge relies on;
  *   3. every close the server decides on ends with a terminal
@@ -135,12 +136,24 @@ describe("GET /live/stream", () => {
     expect(getLiveBus().connectionCount()).toBe(0);
   });
 
-  it("opens while the cms cannot say (an outage is emitFresh's business, not a refusal)", async () => {
-    cms.me = () => new Response("Bad Gateway", { status: 502 });
-    const stream = await open();
-    expect(stream.res.status).toBe(200);
-    expect(await stream.read()).toMatch(/^retry: 3000\nevent: hello\n/);
-    expect(getLiveBus().connectionCount()).toBe(1);
+  it("answers 503 while the cms cannot say: no stream without a positive answer (v0.27)", async () => {
+    // A revoked or restricted session must not slip in during an outage.
+    for (const answer of [
+      () => new Response("Bad Gateway", { status: 502 }),
+      (): Response => {
+        throw new TypeError("fetch failed");
+      },
+    ]) {
+      cms.me = answer;
+      expect((await GET(new Request("http://web.test/live/stream"))).status).toBe(503);
+    }
+    expect(getLiveBus().connectionCount()).toBe(0);
+  });
+
+  it("refuses a session that must set up its second factor (401)", async () => {
+    cms.me = () => Response.json({ data: { id: 1, blocked: false, mfa: { restricted: true } } });
+    expect((await GET(new Request("http://web.test/live/stream"))).status).toBe(401);
+    expect(getLiveBus().connectionCount()).toBe(0);
   });
 
   it("asks the cms once per JWT and minute, not per stream", async () => {
