@@ -201,6 +201,7 @@
     "videoUrlNotYoutube": "Enter a YouTube video address.",
     "quizInvalid": "The quiz is not valid.",
     "frozenAfterVotes": "Someone has voted, so this can no longer change.",
+    "votersRemoved": "This poll ended more than 30 days ago and who voted is no longer stored, so it cannot be reopened.",
     "visibilityTarget": "Choose who may see it.",
     "taken": "This name is already taken.",
     "optionCount": "A poll needs between 2 and 20 answers.",
@@ -215,7 +216,8 @@
     "selfChange": "Only another admin can change your own role or block.",
     "entraManaged": "The identity provider (Microsoft Entra or single sign-on) manages this field for this account.",
     "managerCycle": "That person already reports to this user, directly or indirectly.",
-    "notEntraBound": "This account does not sign in with an identity provider (Microsoft Entra or single sign-on)."
+    "notEntraBound": "This account does not sign in with an identity provider (Microsoft Entra or single sign-on).",
+    "anonymised": "This account is anonymised and can no longer be changed."
   },
   "fields": {
     "required": "required",

@@ -16,6 +16,7 @@
  * token-version.integration.test.ts.
  */
 import { AsyncLocalStorage } from "node:async_hooks";
+import { errors } from "@strapi/utils";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -171,6 +172,18 @@ type PasswordBody = { currentPassword?: string; password?: string };
  * password actions persist the new password through the user service's
  * edit(), then answer with issue()'s result, unawaited.
  */
+/**
+ * The plugin's user controller, a plain object like the plugin's: findOne
+ * sets the body (null when not found).
+ */
+function fakeUserController(rows: Record<string, unknown> = {}) {
+  return {
+    findOne: async (ctx: { params?: { id?: string }; body?: unknown }) => {
+      ctx.body = rows[String(ctx.params?.id)] ?? null;
+    },
+  };
+}
+
 function fakeAuthFactory(): Factory {
   return ({ strapi }) => {
     const service = (name: string) =>
@@ -277,7 +290,7 @@ function harness(
   };
   const plugin: UsersPermissionsPlugin = {
     services: { jwt: realJwtFactory, user: fakeUserFactory() },
-    controllers: { auth: authFactory },
+    controllers: { auth: authFactory, user: fakeUserController() },
     register: async () => undefined,
   };
   createUsersPermissionsExtension()(plugin);
@@ -640,7 +653,7 @@ describe("the plugin's real auth controller: sign-in reads the version before th
     };
     const plugin: UsersPermissionsPlugin = {
       services: { jwt: realJwtFactory, user: userFactory },
-      controllers: { auth: realAuthFactory },
+      controllers: { auth: realAuthFactory, user: fakeUserController() },
       register: async () => undefined,
     };
     createUsersPermissionsExtension()(plugin);
@@ -1023,7 +1036,7 @@ async function raceHarness(engines: SqliteEngine[], hooks: RaceHook[]): Promise<
   };
   const plugin: UsersPermissionsPlugin = {
     services: { jwt: realJwtFactory, user: fakeUserFactory() },
-    controllers: { auth: fakeAuthFactory() },
+    controllers: { auth: fakeAuthFactory(), user: fakeUserController() },
     register: async () => undefined,
   };
   createUsersPermissionsExtension()(plugin);
@@ -1310,7 +1323,12 @@ describe("the Document Service guard of the user type (admin-panel passwords, to
     const h = guardHarness();
     const before = (await h.jwt.issue({ id: 2 })) as string;
     await h.documents.update({ documentId: "doc-2", data: { displayName: "Renamed" } });
-    expect(h.writes()).toEqual([`save ${JSON.stringify({ displayName: "Renamed" })}`]);
+    // v0.28: every update of a stored user runs under its row lock (the tombstone check).
+    expect(h.writes()).toEqual([
+      "begin",
+      `save ${JSON.stringify({ displayName: "Renamed" })}`,
+      "commit",
+    ]);
     expect(h.users.get(2)?.tokenVersion).toBe(3);
     await expect(h.jwt.verify(before)).resolves.toMatchObject({ id: 2 });
     expect(h.logs).toEqual([]);
@@ -1392,9 +1410,9 @@ describe("the Document Service guard of the user type (admin-panel passwords, to
     for (const action of ["create", "update", "clone"]) {
       await h.run(action, { documentId: "doc-1", data: { username: "x", tokenVersion: 0 } });
     }
-    expect(h.writes()).toEqual(
-      Array.from({ length: 3 }, () => `save ${JSON.stringify({ username: "x" })}`),
-    );
+    // Create has no stored row; update and clone run under the row lock (v0.28).
+    const save = `save ${JSON.stringify({ username: "x" })}`;
+    expect(h.writes()).toEqual([save, "begin", save, "commit", "begin", save, "commit"]);
     h.queries.length = 0;
     // A password write that tries to set the version back: raised, not reset.
     await h.documents.update({
@@ -1403,6 +1421,28 @@ describe("the Document Service guard of the user type (admin-panel passwords, to
     });
     expect(h.users.get(2)?.tokenVersion).toBe(4);
     expect(h.logs.filter((line) => line.includes("tokenVersion dropped"))).toHaveLength(4);
+  });
+
+  it("v0.28: anonymisedAt never reaches a write; an anonymised user is not updated, deleted or cloned", async () => {
+    const h = guardHarness();
+    h.users.set(1, { ...h.users.get(1)!, anonymisedAt: "2026-10-23T10:00:00.000Z" } as never);
+    for (const action of ["update", "delete", "clone"]) {
+      await expect(
+        h.run(action, { documentId: "doc-1", data: { blocked: false } }),
+        action,
+      ).rejects.toThrow("anonymised");
+    }
+    // Refused under the lock, before any write.
+    expect(h.writes()).toEqual(["begin", "rollback", "begin", "rollback", "begin", "rollback"]);
+    h.queries.length = 0;
+    await h.run("update", { documentId: "doc-2", data: { displayName: "x", anonymisedAt: null } });
+    await h.run("create", { data: { username: "y", anonymisedAt: "2026-01-01T00:00:00.000Z" } });
+    expect(h.writes()).toEqual([
+      "begin",
+      `save ${JSON.stringify({ displayName: "x" })}`,
+      "commit",
+      `save ${JSON.stringify({ username: "y" })}`,
+    ]);
   });
 
   it("leaves other content types and the reading actions alone", async () => {
@@ -1450,7 +1490,7 @@ describe("the Document Service guard of the user type (admin-panel passwords, to
     await expect(
       h.documents.update({ documentId: "doc-99", data: { password: "p-long-enough-1" } }),
     ).rejects.toThrow("cannot be found is refused");
-    expect(h.writes()).toEqual([]);
+    expect(h.writes()).toEqual(["begin", "rollback"]);
   });
 
   it("in refresh mode only keeps tokenVersion out", async () => {
@@ -1459,7 +1499,11 @@ describe("the Document Service guard of the user type (admin-panel passwords, to
       documentId: "doc-2",
       data: { password: "p-long-enough-1", tokenVersion: 0 },
     });
-    expect(h.writes()).toEqual([`save ${JSON.stringify({ password: "p-long-enough-1" })}`]);
+    expect(h.writes()).toEqual([
+      "begin",
+      `save ${JSON.stringify({ password: "p-long-enough-1" })}`,
+      "commit",
+    ]);
   });
 
   it("registerUserWriteGuard hangs it onto the Document Service, or refuses to boot", () => {
@@ -1530,7 +1574,7 @@ describe("jwtManagement 'refresh': the plugin's own session revocation applies",
     const verify = vi.fn(async () => ({ id: 2, sessionId: "s" }));
     const plugin: UsersPermissionsPlugin = {
       services: { jwt: () => ({ issue, verify }), user: fakeUserFactory() },
-      controllers: { auth: fakeAuthFactory() },
+      controllers: { auth: fakeAuthFactory(), user: fakeUserController() },
       register: async () => undefined,
     };
     createUsersPermissionsExtension()(plugin);
@@ -1560,7 +1604,7 @@ describe("the extension itself", () => {
   it("wraps each factory once, also when the plugin module is loaded again (a second boot)", () => {
     const plugin: UsersPermissionsPlugin = {
       services: { jwt: realJwtFactory, user: fakeUserFactory() },
-      controllers: { auth: fakeAuthFactory() },
+      controllers: { auth: fakeAuthFactory(), user: fakeUserController() },
       register: async () => undefined,
     };
     const extend = createUsersPermissionsExtension();
@@ -1572,12 +1616,34 @@ describe("the extension itself", () => {
     expect(plugin.controllers.auth).toBe(auth);
   });
 
+  it("answers 404 for GET /api/users/:id of a hidden or missing user (v0.28)", async () => {
+    const plugin: UsersPermissionsPlugin = {
+      services: { jwt: realJwtFactory, user: fakeUserFactory() },
+      controllers: { auth: fakeAuthFactory(), user: fakeUserController({ "7": { id: 7 } }) },
+      register: async () => undefined,
+    };
+    createUsersPermissionsExtension()(plugin);
+    const controller = plugin.controllers.user as {
+      findOne(ctx: { params: { id: string }; body?: unknown }): Promise<unknown>;
+    };
+    // A second load of the extension (a second boot) wraps it once.
+    const wrapped = controller.findOne;
+    createUsersPermissionsExtension()(plugin);
+    expect(controller.findOne).toBe(wrapped);
+    const found = { params: { id: "7" }, body: undefined as unknown };
+    await controller.findOne(found);
+    expect(found.body).toEqual({ id: 7 });
+    await expect(controller.findOne({ params: { id: "8" } })).rejects.toBeInstanceOf(
+      errors.NotFoundError,
+    );
+  });
+
   it("refuses to boot when the plugin no longer has the expected shape (upgrade tripwire)", () => {
     const extend = createUsersPermissionsExtension();
     expect(() =>
       extend({
         services: { jwt: {}, user: fakeUserFactory() },
-        controllers: { auth: fakeAuthFactory() },
+        controllers: { auth: fakeAuthFactory(), user: fakeUserController() },
       }),
     ).toThrow("services.jwt is not a factory");
     expect(() =>
@@ -1586,10 +1652,19 @@ describe("the extension itself", () => {
     expect(() =>
       extend({ services: { jwt: realJwtFactory, user: fakeUserFactory() }, controllers: {} }),
     ).toThrow("controllers.auth is not a factory");
+    expect(() =>
+      extend({
+        services: { jwt: realJwtFactory, user: fakeUserFactory() },
+        controllers: { auth: fakeAuthFactory() },
+      }),
+    ).toThrow("the user controller no longer exposes findOne()");
     const strapi = harness().strapi;
     const noVerify: UsersPermissionsPlugin = {
       services: { jwt: () => ({ issue: () => "" }), user: () => ({ add: () => undefined }) },
-      controllers: { auth: () => ({ changePassword: async () => undefined }) },
+      controllers: {
+        auth: () => ({ changePassword: async () => undefined }),
+        user: fakeUserController(),
+      },
       register: async () => undefined,
     };
     extend(noVerify);

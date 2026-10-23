@@ -435,6 +435,8 @@ function hermeticEnv(): Record<string, string | undefined> {
     // Off unless a suite asks for them.
     SEED_DEMO_DATA: undefined,
     LOCAL_REGISTRATION: undefined,
+    // v0.28: every module and feature on unless a suite switches one off.
+    FEATURES_OFF: undefined,
     WEB_INTERNAL_URL: undefined,
     REVALIDATE_SECRET: undefined,
     LIVE_EVENTS_DISABLED: undefined,

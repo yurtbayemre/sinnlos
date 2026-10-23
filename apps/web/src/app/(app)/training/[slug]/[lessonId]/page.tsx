@@ -121,10 +121,12 @@ export default async function LessonPage({
           lesson.quiz,
           lesson.course.completionMode,
           completedAtIso,
+          lesson.version,
         ])}
         quiz={lesson.quiz}
         completionMode={lesson.course.completionMode}
         lessonDocumentId={lessonId}
+        version={lesson.version}
         completedAtLabel={completedAtLabel}
         nextHref={
           next?.documentId ? (`/training/${course.slug}/${next.documentId}` as Route) : null

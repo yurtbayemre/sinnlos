@@ -30,6 +30,8 @@ const teamUid = "api::team.team";
 const courseUid = "api::course.course";
 const lessonUid = "api::lesson.lesson";
 const progressUid = "api::lesson-progress.lesson-progress";
+const announcementUid = "api::announcement.announcement";
+const commentUid = "api::comment.comment";
 let phase = "environment check";
 /** @type {Cms | undefined} */
 let strapi;
@@ -109,6 +111,23 @@ async function start() {
         password: fixturePassword("E2E_INVITER_PASSWORD"),
         documentId: "",
       },
+      // v0.28 (privacy.spec.ts): an admin, and a member with a comment whom
+      // that admin blocks, exports and anonymises.
+      privacy: {
+        email: "privacy@e2e.test",
+        password: fixturePassword("E2E_PRIVACY_PASSWORD"),
+        documentId: "",
+      },
+      leaver: {
+        email: "leaver@e2e.test",
+        password: fixturePassword("E2E_LEAVER_PASSWORD"),
+        documentId: "",
+        id: 0,
+      },
+    },
+    privacy: {
+      announcement: { title: "E2E Privacy Announcement", documentId: "" },
+      comment: "E2E leaver comment",
     },
     teams: {
       editable: {
@@ -210,7 +229,13 @@ async function start() {
   const userService = cms.plugin("users-permissions").service("user");
   /** @param {string} key */
   const roleTypeOf = (key) =>
-    key === "lead" ? "team_lead" : key === "admin" || key === "inviter" ? "admin_role" : key;
+    key === "lead"
+      ? "team_lead"
+      : key === "admin" || key === "inviter" || key === "privacy"
+        ? "admin_role"
+        : key === "leaver"
+          ? "member"
+          : key;
   for (const [key, fixture] of Object.entries(fixtures.users)) {
     const roleType = roleTypeOf(key);
     const role = await cms.db
@@ -229,6 +254,7 @@ async function start() {
       department: department.id,
     });
     fixture.documentId = user.documentId;
+    if ("id" in fixture) fixture.id = user.id;
   }
   for (const [key, fixture] of Object.entries(fixtures.teams)) {
     const team = await cms.documents(teamUid).create({
@@ -280,9 +306,27 @@ async function start() {
     fixture.lesson.documentId = lesson.documentId;
   }
 
+  const announcement = await cms.documents(announcementUid).create({
+    data: {
+      title: fixtures.privacy.announcement.title,
+      body: "An announcement the leaver commented on.",
+      audience: "all",
+    },
+    status: "published",
+  });
+  fixtures.privacy.announcement.documentId = announcement.documentId;
+  await cms.documents(commentUid).create({
+    data: {
+      body: fixtures.privacy.comment,
+      targetType: "announcement",
+      targetDocumentId: announcement.documentId,
+      author: fixtures.users.leaver.documentId,
+    },
+  });
+
   phase = "fixture relationship assertions";
   assert.equal(await cms.db.query(departmentUid).count(), 1, "Expected one department");
-  assert.equal(await cms.db.query(userUid).count(), 5, "Expected five local users");
+  assert.equal(await cms.db.query(userUid).count(), 7, "Expected seven local users");
   assert.equal(await cms.db.query(teamUid).count(), 2, "Expected two teams");
   for (const [key, fixture] of Object.entries(fixtures.users)) {
     const user = await cms.db.query(userUid).findOne({
@@ -409,7 +453,7 @@ async function start() {
     });
   });
   console.log(
-    "[e2e-cms] Ready: normal bootstrap and fixture assertions passed (1 department, 5 users, 2 teams, 3 published quiz courses and lessons).",
+    "[e2e-cms] Ready: normal bootstrap and fixture assertions passed (1 department, 7 users, 2 teams, 3 published quiz courses and lessons, 1 commented announcement).",
   );
 }
 

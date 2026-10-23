@@ -1,4 +1,5 @@
 import { ADMIN } from "../bootstrap/roles";
+import { isOff } from "../utils/module-switches";
 import { ownRowsFilter } from "../utils/policy-factories";
 
 /**
@@ -6,7 +7,9 @@ import { ownRowsFilter } from "../utils/policy-factories";
  * its OWN acknowledgements (user = caller); `admin_role` bypasses the
  * filter so the /manage/acknowledgements report can aggregate the
  * confirmation state across all users. Editors do not: a read receipt is
- * personal data, not content.
+ * personal data, not content. With `read-confirmations` in FEATURES_OFF
+ * (v0.28) the report is gone and so is the bypass: admin_role reads its own
+ * rows only.
  *
  * The own-rows clause is $and-ed onto the REAL request query, so a client
  * `user` filter can only narrow the result, never widen it to other users'
@@ -20,4 +23,8 @@ import { ownRowsFilter } from "../utils/policy-factories";
  * all — it cannot read announcements, so ack grants would be dead attack
  * surface.)
  */
-export default ownRowsFilter({ ownerField: "user", bypass: [ADMIN] });
+export default ownRowsFilter({
+  ownerField: "user",
+  bypass: [ADMIN],
+  bypassWhile: () => !isOff("read-confirmations"),
+});

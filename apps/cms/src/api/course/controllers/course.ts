@@ -3,6 +3,7 @@ import {
   isDocumentId,
   isInScopedAudience,
   type TrainingReportCourseResponse,
+  type TrainingReportLeaver,
   type TrainingReportScope,
   type TrainingReportSummaryResponse,
 } from "@sinnlos/domain";
@@ -10,6 +11,7 @@ import {
 import { ADMIN, TRAINING_REPORT_ROLES, hasRole } from "../../../bootstrap/roles";
 import { authoringActions } from "../../../utils/authoring-controller";
 import { appTimeZone, todayIn } from "../../../utils/time";
+import { loadLeavers } from "../../../utils/training-evidence";
 import { buildCourseReport } from "../../../utils/training-report";
 import {
   courseAudience,
@@ -61,6 +63,17 @@ export default factories.createCoreController("api::course.course", ({ strapi })
     return buildCourseReport(course, people, receipts, todayIn(zone).toString(), zone);
   }
 
+  async function leaversOf(course: RosterCourse): Promise<TrainingReportLeaver[]> {
+    const { people, receipts } = await loadLeavers(
+      strapi,
+      course.lessons.map((lesson) => lesson.documentId),
+    );
+    const zone = appTimeZone();
+    const built = buildCourseReport(course, people, receipts, todayIn(zone).toString(), zone);
+    const left = new Map(people.map((person) => [person.id, person.left]));
+    return built.people.map((person) => ({ ...person, left: left.get(person.userId)! }));
+  }
+
   const inScope = (scope: Scope, course: RosterCourse) =>
     scope.scope === "all" || isInScopedAudience(course, scope.departmentId);
 
@@ -88,12 +101,24 @@ export default factories.createCoreController("api::course.course", ({ strapi })
       return ctx.send(body);
     },
 
+    /**
+     * `?leavers=1` (v0.28, owner decision 2026-10-23): admin_role only, the
+     * blocked and anonymised people with receipts for this course, named
+     * from their receipts' snapshot (utils/training-evidence.ts). Heads and
+     * leads keep their current scope (403 with the parameter).
+     */
     async reportCourse(ctx) {
       if (!ctx.state.user) return ctx.unauthorized();
-      if (Object.keys(ctx.query ?? {}).length)
+      const query = ctx.query ?? {};
+      const withLeavers = query.leavers === "1";
+      if (
+        Object.keys(query).some((key) => key !== "leavers") ||
+        ("leavers" in query && !withLeavers)
+      )
         return ctx.badRequest("Query parameters not allowed");
       const scope = await scopeOf(ctx.state.user);
       if (!scope) return ctx.forbidden();
+      if (withLeavers && !hasRole(ctx.state.user, [ADMIN])) return ctx.forbidden();
       ctx.set("Cache-Control", "private, no-store");
       const documentId = ctx.params.id;
       const [course] = isDocumentId(documentId)
@@ -104,6 +129,7 @@ export default factories.createCoreController("api::course.course", ({ strapi })
       const body: TrainingReportCourseResponse = {
         data: { ...publicScope(scope), ...built, lessons: course.lessons },
       };
+      if (withLeavers) body.data.leavers = await leaversOf(course);
       return ctx.send(body);
     },
   };

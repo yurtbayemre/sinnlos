@@ -243,6 +243,11 @@ export interface PollEditable extends EditableBase {
   needsRetarget: boolean;
   /** A vote exists: `options` and `anonymous` are frozen (frozenAfterVotes). */
   hasVotes: boolean;
+  /**
+   * v0.28: the retention removed the voter links (30 days after the close):
+   * `closesAt` is frozen too (votersRemoved). The cms always sends it.
+   */
+  votersRemoved?: boolean;
 }
 
 /** The answer of `GET /api/<plural>/:documentId/editable`, with `ETag: "<version>"`. */
@@ -467,7 +472,10 @@ export type ActivityAction =
   | "restore"
   | "schedulePublish"
   | "scheduleUnpublish"
-  | "scheduleFailed";
+  | "scheduleFailed"
+  // v0.28: an export or anonymisation of a user (targetUid users-permissions user).
+  | "export"
+  | "anonymise";
 
 export type ActivityActorKind = "user" | "admin" | "system";
 export type ActivitySource = "content-api" | "admin" | "cron" | "system";

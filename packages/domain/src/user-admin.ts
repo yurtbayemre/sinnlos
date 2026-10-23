@@ -55,6 +55,8 @@ export interface UserAdminRow {
   invited: boolean;
   /** v0.27: the account has a second factor (TOTP) enabled. */
   mfa: boolean;
+  /** v0.28: anonymised (ISO 8601), for good: no field of it can be changed any more. */
+  anonymisedAt: string | null;
 }
 
 /** One user with everything the edit form shows. */

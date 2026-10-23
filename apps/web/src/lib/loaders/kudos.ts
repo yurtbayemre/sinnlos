@@ -1,6 +1,7 @@
 import { kudosRecipientQuery, toKudosRecipients, type KudosRecipient } from "@/lib/people-dto";
 import { isReadDenied } from "@/lib/roles";
 import { SKIPPED_READ, tryFetch } from "@/lib/safe-fetch";
+import { isOff } from "@/lib/switches";
 import { api } from "@/lib/strapi";
 import type { UserLite } from "@/lib/types";
 import { fetchAllUsers } from "@/lib/users";
@@ -52,13 +53,14 @@ export interface KudosView {
 /**
  * The /kudos page (WD03). The celebrations are the staff roles' only: the
  * `authenticated` fallback reads kudos but not birthdays and anniversaries
- * (SH02, no request). The picker gets every active colleague but the
+ * (SH02, no request), and nobody reads them while FEATURES_OFF switches
+ * `celebrations` off (v0.28). The picker gets every active colleague but the
  * caller (`selfId`).
  */
 export async function loadKudos(role: Role, selfId: number | null): Promise<KudosView> {
   const [kudos, celebrations, people] = await Promise.all([
     tryFetch(() => api.kudos.list(), "kudos"),
-    isReadDenied(role, "celebrations")
+    isReadDenied(role, "celebrations") || isOff("celebrations")
       ? SKIPPED_READ
       : tryFetch(() => api.celebrations(), "celebrations"),
     tryFetch(() => fetchAllUsers<UserLite>(kudosRecipientQuery(selfId)), "people"),

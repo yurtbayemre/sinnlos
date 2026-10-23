@@ -250,6 +250,17 @@ describe("due publishes (rules 4, 6, 9)", () => {
     expect(await run()).toEqual(emptyResult());
   });
 
+  it("lets a switched-off module's schedule wait until it is on again (FEATURES_OFF, v0.28)", async () => {
+    const draft = await docs(EVENT).create({ data: { title: "Party", publishAt: PAST } });
+    process.env.FEATURES_OFF = "events";
+    try {
+      expect((await run()).published).toEqual([]);
+    } finally {
+      delete process.env.FEATURES_OFF;
+    }
+    expect((await run()).published).toEqual([`${EVENT} ${draft.documentId}`]);
+  });
+
   it("leaves a future schedule alone", async () => {
     const draft = await docs(EVENT).create({ data: { title: "Later", publishAt: FUTURE } });
     expect((await run()).published).toEqual([]);

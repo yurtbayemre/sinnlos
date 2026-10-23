@@ -82,12 +82,14 @@ export default async function DashboardPage() {
             href="/teams"
           />
         )}
-        <StatTile
-          icon={Calendar}
-          label={tNav("events")}
-          value={<StatCount count={counts.events} unknownLabel={unknown} />}
-          href="/events"
-        />
+        {counts.events && (
+          <StatTile
+            icon={Calendar}
+            label={tNav("events")}
+            value={<StatCount count={counts.events} unknownLabel={unknown} />}
+            href="/events"
+          />
+        )}
         <StatTile icon={BookOpen} label={tNav("wiki")} value={t("browse")} href="/wiki" />
         {counts.news && (
           <StatTile

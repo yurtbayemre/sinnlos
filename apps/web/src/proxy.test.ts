@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 /**
  * `@/auth` is mocked for the proxy() cases at the end (auth() counts its
@@ -328,5 +328,57 @@ describe("proxy() — a request without a session", () => {
     const res = await proxy(request("/polls/new", { method: "POST", action: true }));
     expect(passes(res)).toBe(true);
     expect(res.headers.get("x-action-redirect")).toBeNull();
+  });
+});
+
+/**
+ * FEATURES_OFF (v0.28): a signed-in request for a page or route handler of
+ * a switched-off module or feature is rewritten to the 404 page; everything
+ * else passes. The signed-out visitor still goes to /sign-in first.
+ */
+describe("proxy() — switched-off modules and features", () => {
+  const rewrittenTo = (res: Response) => res.headers.get("x-middleware-rewrite");
+
+  beforeEach(() => {
+    state.demo = false;
+    authMock.mockReset();
+    authMock.mockResolvedValue({ user: { id: 7 } });
+    vi.stubEnv("FEATURES_OFF", "events, training-reports");
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("rewrites the pages and route handlers of an off module to the 404 page", async () => {
+    for (const path of ["/events", "/events/abc/ics", "/manage/events", "/manage/events/x"]) {
+      const res = await proxy(request(path));
+      expect(passes(res), path).toBe(false);
+      expect(rewrittenTo(res), path).toBe("https://intranet.example.test/_switched-off");
+    }
+  });
+
+  it("rewrites an off feature's paths, not its module's other pages", async () => {
+    const report = await proxy(request("/manage/training/report/abc/export"));
+    expect(rewrittenTo(report)).toBe("https://intranet.example.test/_switched-off");
+    expect(passes(await proxy(request("/manage/training")))).toBe(true);
+    expect(passes(await proxy(request("/training")))).toBe(true);
+  });
+
+  it("matches whole path segments only, and leaves the rest alone", async () => {
+    for (const path of ["/eventsx", "/", "/wiki/events", "/people"]) {
+      expect(passes(await proxy(request(path))), path).toBe(true);
+    }
+  });
+
+  it("sends a signed-out visitor to /sign-in first", async () => {
+    authMock.mockResolvedValue(null);
+    const res = await proxy(request("/events"));
+    expect(res.status).toBe(307);
+  });
+
+  it("passes everything with FEATURES_OFF unset", async () => {
+    vi.stubEnv("FEATURES_OFF", "");
+    expect(passes(await proxy(request("/events")))).toBe(true);
   });
 });

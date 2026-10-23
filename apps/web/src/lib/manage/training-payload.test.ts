@@ -26,6 +26,7 @@ describe("training payloads", () => {
         mandatory: false,
         completionMode: "confirm",
         validityMonths: null,
+        contact: null,
         departments: [],
         coverImage: null,
       },
@@ -36,6 +37,23 @@ describe("training payloads", () => {
         mode: "update",
       }),
     ).toEqual({ ok: true, data: { completionMode: "exam" } });
+  });
+  it("sends the course contact trimmed, an empty one as null, a long one refused (v0.28)", () => {
+    const initial = { ...emptyCourseValues(), title: "Course" };
+    const update = { ...ctx, mode: "update" as const };
+    expect(
+      buildCoursePayload({ ...initial, contact: " Max Muster, Tel. 123 " }, initial, update),
+    ).toEqual({ ok: true, data: { contact: "Max Muster, Tel. 123" } });
+    const named = { ...initial, contact: "Max" };
+    expect(buildCoursePayload({ ...named, contact: "  " }, named, update)).toEqual({
+      ok: true,
+      data: { contact: null },
+    });
+    expect(
+      buildCoursePayload({ ...initial, contact: "x".repeat(256) }, initial, update),
+    ).toMatchObject({
+      ok: false,
+    });
   });
   it("omits retained image and raw legacy text, clears an image only on explicit change", () => {
     const coverImage = { id: 3, name: "x.png", mime: "image/png", size: 1, url: "/uploads/x.png" };

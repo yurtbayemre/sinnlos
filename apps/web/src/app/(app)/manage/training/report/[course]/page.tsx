@@ -40,20 +40,28 @@ const isStatus = (value: unknown): value is CourseValidityStatus =>
  * One course of the named training report (v0.20): every person it is for in
  * the caller's scope (GET /api/courses/:id/report; the cms scopes it to the
  * department of a head or lead and answers 404 outside it), filtered by
- * status (?status=), with the two CSV downloads (./export).
+ * status (?status=), with the two CSV downloads (./export). An admin can
+ * add the people who left (?leavers=1, v0.28): blocked and anonymised
+ * people with receipts for the course, named from their receipts, in their
+ * own table; they never count in the numbers above.
  */
 export default async function CourseReportPage({
   params,
   searchParams,
 }: {
   params: Promise<{ course: string }>;
-  searchParams: Promise<{ status?: string | string[] }>;
+  searchParams: Promise<{ status?: string | string[]; leavers?: string | string[] }>;
 }) {
   const viewer = await getViewer();
   if (!capabilitiesFor(viewer.role).reports.training) redirect("/");
-  const [{ course: documentId }, { status: rawStatus }] = await Promise.all([params, searchParams]);
+  const [{ course: documentId }, { status: rawStatus, leavers: rawLeavers }] = await Promise.all([
+    params,
+    searchParams,
+  ]);
   if (!isDocumentId(documentId)) notFound();
   const status = isStatus(rawStatus) ? rawStatus : undefined;
+  const admin = isAdmin(viewer.role);
+  const withLeavers = admin && rawLeavers === "1";
 
   const [t, format, locale] = await Promise.all([
     getTranslations("trainingReport"),
@@ -61,7 +69,7 @@ export default async function CourseReportPage({
     getLocale(),
   ]);
   const back = "/manage/training/report" as Route;
-  if (!isAdmin(viewer.role) && !viewer.department) {
+  if (!admin && !viewer.department) {
     return (
       <div className="space-y-8">
         <ManagePageHeader title={t("title")} back={back} backLabel={t("backToCourses")} />
@@ -72,7 +80,7 @@ export default async function CourseReportPage({
 
   const result = await tryFetch(async () => {
     try {
-      return (await courseTrainingReport(documentId)).data;
+      return (await courseTrainingReport(documentId, { leavers: withLeavers })).data;
     } catch (error) {
       if (error instanceof StrapiError && error.status === 404) return null;
       throw error;
@@ -91,6 +99,15 @@ export default async function CourseReportPage({
 
   const base = `/manage/training/report/${documentId}`;
   const people = status ? report.people.filter((p) => p.status === status) : report.people;
+  const leavers = withLeavers ? (report.leavers ?? []) : [];
+  // The filter tabs keep the leavers toggle, the toggle keeps the filter.
+  const query = (next: { status?: string; leavers?: boolean }) => {
+    const search = new URLSearchParams();
+    if (next.status) search.set("status", next.status);
+    if (next.leavers) search.set("leavers", "1");
+    const text = search.toString();
+    return (text ? `${base}?${text}` : base) as Route;
+  };
 
   return (
     <div className="space-y-6">
@@ -123,11 +140,11 @@ export default async function CourseReportPage({
       </div>
 
       <nav aria-label={t("filterLabel")} className="flex flex-wrap gap-2">
-        <FilterTab href={base as Route} active={!status} label={t("filterAll")} />
+        <FilterTab href={query({ leavers: withLeavers })} active={!status} label={t("filterAll")} />
         {REPORT_STATUSES.map((value) => (
           <FilterTab
             key={value}
-            href={`${base}?status=${value}` as Route}
+            href={query({ status: value, leavers: withLeavers })}
             active={status === value}
             label={`${t(FILTER_LABEL[value])} (${report.course.counts[value]})`}
           />
@@ -191,6 +208,84 @@ export default async function CourseReportPage({
           )}
         </CardContent>
       </Card>
+
+      {admin && (
+        <section aria-labelledby="report-leavers" className="space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h2 id="report-leavers" className="text-lg font-semibold">
+              {t("leaversTitle")}
+            </h2>
+            <Link
+              href={query({ status, leavers: !withLeavers })}
+              className="text-sm font-medium text-primary hover:underline"
+            >
+              {withLeavers ? t("leaversHide") : t("leaversShow")}
+            </Link>
+          </div>
+          <p className="text-sm text-muted-foreground">{t("leaversHint")}</p>
+          {withLeavers && (
+            <Card>
+              <CardContent className="overflow-x-auto p-0">
+                {leavers.length === 0 ? (
+                  <p className="p-6 text-sm text-muted-foreground">{t("leaversNone")}</p>
+                ) : (
+                  <table className="w-full text-sm">
+                    <thead className="border-b text-left text-xs text-muted-foreground">
+                      <tr>
+                        <th scope="col" className="px-4 py-2 font-medium">
+                          {t("columnName")}
+                        </th>
+                        <th scope="col" className="px-4 py-2 font-medium">
+                          {t("columnLeft")}
+                        </th>
+                        <th scope="col" className="px-4 py-2 font-medium">
+                          {t("columnStatus")}
+                        </th>
+                        <th scope="col" className="px-4 py-2 font-medium">
+                          {t("columnLessons")}
+                        </th>
+                        <th scope="col" className="px-4 py-2 font-medium">
+                          {t("columnCompletedAt")}
+                        </th>
+                        <th scope="col" className="px-4 py-2 font-medium">
+                          {t("columnDueOn")}
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {leavers.map((person) => (
+                        <tr key={person.userId} className="border-b last:border-0">
+                          <td className="px-4 py-2">
+                            <div className="font-medium">{person.name}</div>
+                            {person.email && (
+                              <div className="text-xs text-muted-foreground">{person.email}</div>
+                            )}
+                          </td>
+                          <td className="px-4 py-2">
+                            {t(person.left === "anonymised" ? "leftAnonymised" : "leftBlocked")}
+                          </td>
+                          <td className="px-4 py-2">
+                            <ReportStatusBadge status={person.status} />
+                          </td>
+                          <td className="px-4 py-2 tabular-nums">
+                            {t("lessonsOf", { done: person.completed, total: person.total })}
+                          </td>
+                          <td className="px-4 py-2">
+                            {formatInstant(format, person.completedAt, SHORT_DAY) ?? "–"}
+                          </td>
+                          <td className="px-4 py-2">
+                            {formatDateOnly(locale, person.dueKey, SHORT_DAY) ?? "–"}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </CardContent>
+            </Card>
+          )}
+        </section>
+      )}
     </div>
   );
 }

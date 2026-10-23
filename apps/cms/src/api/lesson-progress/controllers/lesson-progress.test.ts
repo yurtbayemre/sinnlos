@@ -167,14 +167,30 @@ function setup(body: unknown, progress: Row[] = []) {
     state: { user: MEMBER as { id: number; role: { type: string } } | undefined },
     request: { body },
     badRequest: vi.fn((message: string, details?: unknown) => ({ status: 400, message, details })),
+    status: 200,
+    body: undefined as unknown,
     unauthorized: vi.fn(() => ({ status: 401 })),
     send: vi.fn((payload: unknown) => payload),
   };
   return { controller, ctx, calls, tables };
 }
 
+/** The player's `version` of every published lesson and course of this stub (v0.28). */
+const VERSION = { course: "2026-09-01T00:00:00.000Z", lesson: "2026-09-01T00:00:00.000Z" };
+
+/** The body with the player's version added where the caller sent none (v0.28). */
+function withVersion(body: unknown): unknown {
+  if (typeof body !== "object" || body === null || Array.isArray(body)) return body;
+  const outer = body as Row;
+  if (typeof outer.data === "object" && outer.data !== null && !Array.isArray(outer.data)) {
+    const data = outer.data as Row;
+    return "version" in data ? body : { ...outer, data: { ...data, version: VERSION } };
+  }
+  return "version" in outer ? body : { ...outer, version: VERSION };
+}
+
 async function complete(body: unknown, progress?: Row[]) {
-  const s = setup(body, progress);
+  const s = setup(withVersion(body), progress);
   await s.controller.create(s.ctx);
   return s;
 }
@@ -196,6 +212,7 @@ describe("lesson-progress create: target rules (S09)", () => {
             user: MEMBER.id,
             targetDocumentId: PUBLISHED_LESSON,
             completedAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T.*Z$/),
+            snapshot: expect.objectContaining({ v: 1 }),
           },
         },
       },
@@ -210,7 +227,7 @@ describe("lesson-progress create: target rules (S09)", () => {
       op: "findOne",
       params: {
         where: { documentId: PUBLISHED_LESSON, publishedAt: { $notNull: true } },
-        select: ["documentId", "title", "body", "order", "videoUrl", "quiz"],
+        select: ["documentId", "title", "body", "order", "videoUrl", "quiz", "publishedAt"],
         populate: {
           course: {
             select: [
@@ -290,6 +307,7 @@ describe("lesson-progress create: a quiz lesson needs the correct answers (#70)"
           user: MEMBER.id,
           targetDocumentId: QUIZ_LESSON,
           completedAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T.*Z$/),
+          snapshot: expect.objectContaining({ quizPassed: true }),
         },
       },
     ]);
@@ -389,15 +407,69 @@ describe("lesson-progress create: course audience (v0.20)", () => {
   });
 
   it("lets a member of a linked department and a moderator complete it", async () => {
-    const member = setup({ data: { targetDocumentId: WAREHOUSE_LESSON } });
+    const member = setup(withVersion({ data: { targetDocumentId: WAREHOUSE_LESSON } }));
     member.tables[USER_UID][0].department = { id: WAREHOUSE };
     await member.controller.create(member.ctx);
     expect(member.ctx.badRequest).not.toHaveBeenCalled();
 
-    const editor = setup({ data: { targetDocumentId: WAREHOUSE_LESSON } });
+    const editor = setup(withVersion({ data: { targetDocumentId: WAREHOUSE_LESSON } }));
     editor.ctx.state.user = EDITOR;
     await editor.controller.create(editor.ctx);
     expect(editor.ctx.badRequest).not.toHaveBeenCalled();
     expect(created(editor.calls)).toHaveLength(1);
+  });
+});
+
+describe("lesson-progress create: the published version and the evidence snapshot (v0.28)", () => {
+  it("answers 409 changed without the player's version, or with another one, and writes nothing", async () => {
+    for (const version of [
+      undefined,
+      null,
+      {},
+      { ...VERSION, lesson: "2026-09-02T00:00:00.000Z" },
+      { ...VERSION, course: "x" },
+    ]) {
+      const s = setup({ data: { targetDocumentId: PUBLISHED_LESSON, version } });
+      await s.controller.create(s.ctx);
+      expect(s.ctx.status, JSON.stringify(version)).toBe(409);
+      expect((s.ctx.body as { error: { details: { code: string } } }).error.details.code).toBe(
+        "changed",
+      );
+      expect(created(s.calls)).toEqual([]);
+    }
+  });
+
+  it("compares instants, not spellings", async () => {
+    const { ctx, calls } = await complete({
+      data: {
+        targetDocumentId: PUBLISHED_LESSON,
+        version: { course: "2026-09-01T02:00:00+02:00", lesson: "2026-09-01T00:00:00Z" },
+      },
+    });
+    expect(ctx.status).toBe(200);
+    expect(created(calls)).toHaveLength(1);
+  });
+
+  it("stores what was checked: course, lesson, versions, mode, quiz outcome, validity and learner", async () => {
+    const quiz = await complete({ data: { targetDocumentId: QUIZ_LESSON, answers: [2, 0] } });
+    expect(created(quiz.calls)[0].params.data).toMatchObject({
+      snapshot: {
+        v: 1,
+        course: { publishedAt: VERSION.course },
+        lesson: { documentId: QUIZ_LESSON, publishedAt: VERSION.lesson },
+        completionMode: "confirm",
+        quizPassed: true,
+        validUntil: null,
+        learner: { displayName: "#5", email: null },
+      },
+    });
+    const yearly = await complete({ data: { targetDocumentId: YEARLY_LESSON } });
+    const snapshot = (created(yearly.calls)[0].params.data as { snapshot: Row }).snapshot;
+    expect(snapshot.quizPassed).toBeNull();
+    expect(snapshot.validUntil).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    // Never echoed to the learner.
+    expect(yearly.ctx.send).toHaveBeenCalledWith({
+      data: expect.not.objectContaining({ snapshot: expect.anything() }),
+    });
   });
 });

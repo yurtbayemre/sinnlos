@@ -18,12 +18,13 @@ const searchMock = vi.fn<() => Promise<unknown>>();
 vi.mock("@/lib/api/analytics", () => ({
   countPage: (collection: string) => countMock(collection),
   reactionsPage: () => reactionsMock(),
-  unreadNotificationsPage: () => unreadMock(),
+  unreadNotificationCount: () => unreadMock(),
   recentComments: () => commentsMock(),
   searchSummary: () => searchMock(),
 }));
 
-const { loadAnalytics, zeroResultRate, ANALYTICS_STATS } = await import("./analytics");
+const { loadAnalytics, zeroResultRate, ANALYTICS_STATS, analyticsStats } =
+  await import("./analytics");
 
 const total = (n: number) => ({
   data: [{ id: 1 }],
@@ -62,7 +63,7 @@ const outage = () => new StrapiError(502, "Bad Gateway", "");
 beforeEach(() => {
   countMock.mockReset().mockImplementation(async (c) => total(TOTALS[c] ?? 0));
   reactionsMock.mockReset().mockResolvedValue(total(120));
-  unreadMock.mockReset().mockResolvedValue(total(6));
+  unreadMock.mockReset().mockResolvedValue({ count: 6 });
   commentsMock.mockReset().mockResolvedValue(COMMENTS);
   searchMock.mockReset().mockResolvedValue(SEARCH);
   vi.spyOn(console, "error").mockImplementation(() => {});
@@ -116,6 +117,30 @@ describe("loadAnalytics", () => {
     expect(view).toMatchSnapshot();
     expect(Object.values(view.counts).every((c) => c.value === null)).toBe(true);
     expect(view.failed).toBe(true);
+  });
+
+  it("an unread answer of another shape is unknown, never 0", async () => {
+    unreadMock.mockResolvedValue(total(6));
+    const view = await loadAnalytics();
+    expect(view.counts.unreadNotifications).toEqual({ value: null, truncated: false });
+    expect(view.failed).toBe(true);
+  });
+
+  it("FEATURES_OFF: off modules' tiles and the search section are neither read nor shown (v0.28)", async () => {
+    expect(analyticsStats(new Set(["events", "polls"]))).toEqual(
+      ANALYTICS_STATS.filter((stat) => stat !== "events" && stat !== "polls"),
+    );
+    vi.stubEnv("FEATURES_OFF", "events,search-logging");
+    try {
+      const view = await loadAnalytics();
+      expect(countMock.mock.calls.map(([c]) => c)).not.toContain("events");
+      expect(searchMock).not.toHaveBeenCalled();
+      expect(view.stats).not.toContain("events");
+      expect(view.stats).toContain("polls");
+      expect(view).toMatchObject({ search: null, failed: false, countsFailed: false });
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
   it("the zero-result rate is whole percent, 0 without searches", () => {

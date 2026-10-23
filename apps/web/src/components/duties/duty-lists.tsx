@@ -8,6 +8,7 @@ import { appTimeZone } from "@/lib/app-time-zone";
 import { loadDuties, type DutiesView, type DutyPlanView } from "@/lib/loaders/duties";
 import { addDaysToKey, zonedDateKey, zonedDayStart } from "@/lib/plain-date";
 import { isReadDenied } from "@/lib/roles";
+import { isOff } from "@/lib/switches";
 import { getViewer } from "@/lib/viewer";
 
 /**
@@ -42,7 +43,9 @@ async function Person({ userId, people }: { userId: number; people: People }) {
   const person = people[userId];
   return (
     <>
-      <span className="font-medium">{person?.name ?? t("unknownPerson")}</span>
+      <span className="font-medium">
+        {person?.former ? t("formerPerson") : (person?.name ?? t("unknownPerson"))}
+      </span>
       {person?.phone && (
         <>
           {" · "}
@@ -158,6 +161,8 @@ export async function DutyDayList({
  * without the read or while no plan is published; a failed read says so.
  */
 export async function DutiesNowSection({ department }: { department?: string }) {
+  // Duty plans switched off (FEATURES_OFF, v0.28): no section and no read.
+  if (isOff("duty-plans")) return null;
   const viewer = await getViewer();
   if (isReadDenied(viewer.role, "duties")) return null;
   const t = await getTranslations("duties");

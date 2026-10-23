@@ -123,6 +123,7 @@ describe("loadDashboard", () => {
       acks: false,
       kudos: false,
       training: false,
+      events: true,
     });
   });
 
@@ -133,7 +134,29 @@ describe("loadDashboard", () => {
       acks: true,
       kudos: true,
       training: true,
+      events: true,
     });
+  });
+
+  it("switched-off modules and features are neither read nor shown, for any role (v0.28)", async () => {
+    const off = new Set(["events", "kudos", "training", "read-confirmations"] as const);
+    expect(dashboardSections("admin_role", off)).toEqual({
+      org: true,
+      news: true,
+      acks: false,
+      kudos: false,
+      training: false,
+      events: false,
+    });
+    vi.stubEnv("FEATURES_OFF", "events");
+    try {
+      const view = await loadDashboard("member", NOW, ZONE);
+      expect(reads.events).not.toHaveBeenCalled();
+      expect(view.counts.events).toBeNull();
+      expect(view.failed).toBe(false);
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
   it("a feed without pagination meta counts its rows (DEMO_MODE fixtures)", async () => {

@@ -49,6 +49,7 @@ import {
   shouldSanitizeForRole,
 } from "../../../utils/sanitize-user-contact";
 import { tryParsePlainDate } from "../../../utils/time";
+import { writeWhileUnblocked } from "../../../utils/unblocked-write";
 
 const EDITABLE_FIELDS = [
   "displayName",
@@ -202,9 +203,10 @@ export function managerFields(callerRoleType: RoleType): string[] {
 /**
  * The caller's manager as a foreign-user summary. Contact fields only for
  * privileged callers; fail-closed for guest / authenticated / unknown roles.
+ * A blocked manager is none (v0.28: blocked people left the directory).
  */
 export function toManagerSummary(row: unknown, callerRoleType: RoleType): Row | null {
-  return isRow(row) ? pick(row, managerFields(callerRoleType)) : null;
+  return isRow(row) && row.blocked !== true ? pick(row, managerFields(callerRoleType)) : null;
 }
 
 /**
@@ -249,7 +251,7 @@ async function loadProfile(
       role: true,
       department: true,
       avatar: true,
-      manager: { select: managerFields(callerRoleType) },
+      manager: { select: [...managerFields(callerRoleType), "blocked"] },
     },
   });
   if (!isRow(full)) return null;
@@ -428,10 +430,11 @@ export default {
       return ctx.badRequest("digestFrequency must be daily or weekly");
     }
 
-    await strapi.db.query(USER_UID).update({
-      where: { id: user.id },
-      data,
-    });
+    // v0.28 (utils/unblocked-write.ts): never after a block or anonymisation.
+    const written = await writeWhileUnblocked(strapi as never, user.id, () =>
+      strapi.db.query(USER_UID).update({ where: { id: user.id }, data }),
+    );
+    if (!written) return ctx.unauthorized();
 
     // Same allowlisted shape as GET (FX02): own record + manager summary.
     const profile = await loadProfile(user.id, user.role?.type);

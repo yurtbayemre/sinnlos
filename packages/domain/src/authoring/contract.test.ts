@@ -66,6 +66,7 @@ describe("codes", () => {
         "videoUrlNotYoutube",
         "quizInvalid",
         "frozenAfterVotes",
+        "votersRemoved",
         "visibilityTarget",
         "optionCount",
         "optionDuplicate",
@@ -79,7 +80,12 @@ describe("codes", () => {
         "managerCycle",
       ].sort(),
     );
-    expect([...AUTHORING_FORM_CODES]).toEqual(["neverPublished", "spaceNotEmpty", "notEntraBound"]);
+    expect([...AUTHORING_FORM_CODES]).toEqual([
+      "neverPublished",
+      "spaceNotEmpty",
+      "notEntraBound",
+      "anonymised",
+    ]);
     expect(AUTHORING_CODES).toHaveLength(
       AUTHORING_FIELD_CODES.length + AUTHORING_FORM_CODES.length,
     );

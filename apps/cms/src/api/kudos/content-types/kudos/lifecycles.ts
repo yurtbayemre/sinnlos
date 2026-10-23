@@ -1,4 +1,5 @@
 import { afterCommit, inOwnTransaction } from "../../../../utils/after-commit";
+import { isOff } from "../../../../utils/module-switches";
 import { NOTIFICATION_UID, buildNotification } from "../../../../utils/notify";
 
 interface KudosEvent {
@@ -20,14 +21,19 @@ export default {
   },
 };
 
-/** Re-reads the kudos after the commit; one that is not there notifies nobody. */
+/**
+ * Re-reads the kudos after the commit; one that is not there notifies
+ * nobody. Nor does one while `kudos` is in FEATURES_OFF (v0.28: an admin
+ * panel create would link a closed page), or one to a blocked person.
+ */
 async function notifyRecipient(kudosId: number | string): Promise<void> {
+  if (isOff("kudos")) return;
   const full = await strapi.db.query("api::kudos.kudos").findOne({
     where: { id: kudosId },
     populate: { from: true, to: true },
   });
   if (!full?.to?.id || !full?.from?.id) return;
-  if (full.to.id === full.from.id) return;
+  if (full.to.id === full.from.id || full.to.blocked === true) return;
 
   const data = buildNotification({
     type: "kudos",

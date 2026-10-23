@@ -29,6 +29,7 @@ exports[`loadDashboard > CMS down: every count unknown, no links, no news, the b
   "quickLinks": [],
   "sections": {
     "acks": true,
+    "events": true,
     "kudos": true,
     "news": true,
     "org": true,
@@ -104,6 +105,7 @@ exports[`loadDashboard > partial failure: the failed tile is unknown (null), not
   ],
   "sections": {
     "acks": true,
+    "events": true,
     "kudos": true,
     "news": true,
     "org": true,
@@ -179,6 +181,7 @@ exports[`loadDashboard > success: walk counts from the rows, feed counts from th
   ],
   "sections": {
     "acks": true,
+    "events": true,
     "kudos": true,
     "news": true,
     "org": true,
@@ -254,6 +257,7 @@ exports[`loadDashboard > truncated: a walk cut at its cap is a lower bound (N+) 
   ],
   "sections": {
     "acks": true,
+    "events": true,
     "kudos": true,
     "news": true,
     "org": true,

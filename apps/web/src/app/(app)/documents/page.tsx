@@ -3,6 +3,7 @@ import { getFormatter, getTranslations } from "next-intl/server";
 import { fetchMyDocumentAcks } from "@/lib/acknowledgements";
 import { formatInstant, LONG_DAY, SHORT_DAY } from "@/lib/date-format";
 import { isReadDenied } from "@/lib/roles";
+import { isOff } from "@/lib/switches";
 import { api } from "@/lib/strapi";
 import { SKIPPED_READ, tryFetch } from "@/lib/safe-fetch";
 import { getViewer } from "@/lib/viewer";
@@ -49,7 +50,8 @@ export default async function DocumentsPage() {
   // Read confirmation (v0.20): only a role holding the acknowledgement
   // grants confirms (guest reads documents, never acknowledges). Without
   // receipts every mandatory document shows its button, with the banner.
-  const canAck = !isReadDenied(viewer.role, "acknowledgements");
+  // Nobody confirms while FEATURES_OFF switches read confirmations off.
+  const canAck = !isReadDenied(viewer.role, "acknowledgements") && !isOff("read-confirmations");
   const receipts =
     canAck && docs.some((d) => d.requiresAck)
       ? await tryFetch(() => fetchMyDocumentAcks(), "documents")

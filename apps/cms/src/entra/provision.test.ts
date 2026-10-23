@@ -448,9 +448,11 @@ describe("runEntraExchange: role writes are atomic (spec I)", () => {
           inTransaction: true,
         },
       ]);
-      expect(host.calls.locks, dialect).toEqual(dialect === "postgres" ? [7] : []);
-      // The profile sync stays outside (no aborted-transaction trap).
-      expect(host.calls.update.filter((call) => !call.inTransaction).length).toBeGreaterThan(0);
+      // The role write's row lock, then the profile sync's (v0.28: its own short
+      // transaction under the row lock, utils/unblocked-write.ts; never the role's,
+      // so a failing profile write cannot abort the admission).
+      expect(host.calls.locks, dialect).toEqual(dialect === "postgres" ? [7, 7] : []);
+      expect(host.calls.transactions, dialect).toBeGreaterThan(1);
     }
   });
 
@@ -506,7 +508,8 @@ describe("runEntraExchange: role writes are atomic (spec I)", () => {
         return builder;
       };
       expect((await run(host, { ...PERSON, roles: ["Intranet.Editor"] })).status).toBe(200);
-      expect(order).toEqual(["directory", "row"]);
+      // Then the profile sync's own row lock (v0.28, utils/unblocked-write.ts).
+      expect(order).toEqual(["directory", "row", "row"]);
     } finally {
       lockDocument.mockImplementation(async () => 1);
     }

@@ -4,6 +4,7 @@ import { errors } from "@strapi/utils";
 import {
   affectedDocumentIds,
   assertPollNotFrozen,
+  assertPollNotReopened,
   createPollAudienceGuard,
   frozenChanges,
   POLL_AUDIENCE_GUARD_CHUNK,
@@ -11,6 +12,7 @@ import {
   registerPollAudienceGuard,
   type DocumentMiddlewareContext,
   type PollAudienceGuardHost,
+  withoutVotersRemoved,
 } from "./poll-audience-guard";
 
 /**
@@ -730,6 +732,154 @@ describe("vote freeze", () => {
     const guard = createPollAudienceGuard(strapi);
     const next = vi.fn(async () => null);
     await refusal(guard(context("publish", { documentId: "p1" }), next));
+    expect(next).not.toHaveBeenCalled();
+  });
+});
+
+describe("voter removal freeze (v0.28)", () => {
+  const CLOSED = "2026-09-01T10:00:00.000Z";
+  const PUBLISHED = { id: 2, publishedAt: "2026-08-01T00:00:00.000Z", closesAt: CLOSED };
+  const DRAFT = { id: 1, publishedAt: null, closesAt: CLOSED };
+  const stamped = (row: object) => ({ ...row, votersRemovedAt: "2026-10-02T01:56:00.000Z" });
+
+  function reopenHost(rows: object[]) {
+    const reads: unknown[] = [];
+    const strapi = {
+      db: {
+        query: vi.fn(() => ({
+          findMany: vi.fn(async (params: Record<string, unknown>) => {
+            reads.push(params);
+            return rows;
+          }),
+          updateMany: vi.fn(),
+          count: vi.fn(async () => 0),
+        })),
+        transaction: async <T>(callback: () => Promise<T>) => callback(),
+      },
+      log: { info: vi.fn() },
+    };
+    return { strapi: strapi as unknown as PollAudienceGuardHost, reads };
+  }
+
+  const refusal = async (promise: Promise<unknown>) => {
+    const error = await promise.then(
+      () => undefined,
+      (e: unknown) => e,
+    );
+    expect(error).toBeInstanceOf(errors.ValidationError);
+    return (error as InstanceType<typeof errors.ValidationError>).details;
+  };
+
+  const REFUSED = { keys: ["closesAt"], codes: { closesAt: "votersRemoved" } };
+
+  it("refuses a closesAt change once the voters were removed, draft-only included", async () => {
+    const { strapi, reads } = reopenHost([stamped(DRAFT), stamped(PUBLISHED)]);
+    for (const status of [undefined, "published"]) {
+      expect(
+        await refusal(
+          assertPollNotReopened(strapi, "update", {
+            documentId: "p1",
+            ...(status ? { status } : {}),
+            data: { closesAt: "2099-01-01T00:00:00.000Z" },
+          }),
+        ),
+        String(status),
+      ).toEqual(REFUSED);
+    }
+    expect(
+      await refusal(
+        assertPollNotReopened(strapi, "update", { documentId: "p1", data: { closesAt: null } }),
+      ),
+    ).toEqual(REFUSED);
+    expect(reads[0]).toEqual({
+      where: { documentId: "p1" },
+      select: ["id", "publishedAt", "closesAt", "votersRemovedAt"],
+    });
+  });
+
+  it("refuses publishing a draft whose closesAt differs", async () => {
+    const { strapi } = reopenHost([
+      stamped({ ...DRAFT, closesAt: "2099-01-01T00:00:00.000Z" }),
+      stamped(PUBLISHED),
+    ]);
+    expect(await refusal(assertPollNotReopened(strapi, "publish", { documentId: "p1" }))).toEqual(
+      REFUSED,
+    );
+  });
+
+  it("passes the same instant in another spelling, other fields, and polls whose voters stay", async () => {
+    const { strapi } = reopenHost([stamped(DRAFT), stamped(PUBLISHED)]);
+    await expect(
+      assertPollNotReopened(strapi, "update", {
+        documentId: "p1",
+        data: { closesAt: "2026-09-01T12:00:00+02:00", question: "Q?" },
+      }),
+    ).resolves.toBeUndefined();
+    await expect(
+      assertPollNotReopened(strapi, "update", { documentId: "p1", data: { question: "Q?" } }),
+    ).resolves.toBeUndefined();
+    await expect(
+      assertPollNotReopened(strapi, "publish", { documentId: "p1" }),
+    ).resolves.toBeUndefined();
+    const open = reopenHost([DRAFT, PUBLISHED]);
+    await expect(
+      assertPollNotReopened(open.strapi, "update", {
+        documentId: "p1",
+        data: { closesAt: "2099-01-01T00:00:00.000Z" },
+      }),
+    ).resolves.toBeUndefined();
+  });
+
+  it("reads nothing for actions that cannot reopen", async () => {
+    const { strapi, reads } = reopenHost([stamped(DRAFT), stamped(PUBLISHED)]);
+    for (const action of ["create", "clone", "unpublish", "discardDraft", "delete"]) {
+      await assertPollNotReopened(strapi, action, { documentId: "p1", data: { closesAt: null } });
+    }
+    await assertPollNotReopened(strapi, "update", { documentId: "p1", data: { question: "Q" } });
+    expect(reads).toEqual([]);
+  });
+
+  it("keeps votersRemovedAt the retention's: dropped from writes, cleared on a clone", () => {
+    const update: DocumentMiddlewareContext = {
+      action: "update",
+      params: { documentId: "p1", data: { question: "Q", votersRemovedAt: null } },
+    };
+    withoutVotersRemoved(update);
+    expect(update.params).toEqual({ documentId: "p1", data: { question: "Q" } });
+    const create: DocumentMiddlewareContext = {
+      action: "create",
+      params: { data: { question: "Q", votersRemovedAt: "2026-10-02T00:00:00.000Z" } },
+    };
+    withoutVotersRemoved(create);
+    expect(create.params).toEqual({ data: { question: "Q" } });
+    const clone: DocumentMiddlewareContext = { action: "clone", params: { documentId: "p1" } };
+    withoutVotersRemoved(clone);
+    expect(clone.params).toEqual({ documentId: "p1", data: { votersRemovedAt: null } });
+    const untouched: DocumentMiddlewareContext = {
+      action: "update",
+      params: { documentId: "p1", data: { question: "Q" } },
+    };
+    const before = untouched.params;
+    withoutVotersRemoved(untouched);
+    expect(untouched.params).toBe(before);
+  });
+
+  it("runs inside the guard before the write, so a refusal writes nothing", async () => {
+    const { strapi } = reopenHost([stamped(DRAFT), stamped(PUBLISHED)]);
+    const guard = createPollAudienceGuard(strapi);
+    const next = vi.fn(async () => null);
+    expect(
+      await refusal(
+        guard(
+          {
+            uid: "api::poll.poll",
+            action: "update",
+            params: { documentId: "p1", data: { closesAt: "2099-01-01T00:00:00.000Z" } },
+          },
+          next,
+        ),
+      ),
+    ).toEqual(REFUSED);
     expect(next).not.toHaveBeenCalled();
   });
 });

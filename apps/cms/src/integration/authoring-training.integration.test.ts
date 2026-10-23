@@ -302,8 +302,18 @@ describe.each(testEngines())("training authoring on %s", (engine) => {
   it("a draft quiz clear leaves the published quiz and progress intact, discard restores it, republish copies the clear", async () => {
     const parent = await course("published");
     const child = await lesson(parent.documentId, "published");
+    const player = await t.api<{ data?: { version?: unknown } }>(
+      "member",
+      `/api/lessons/${child.documentId}/player`,
+    );
     const completed = await t.api("member", "/api/lesson-progresses", {
-      json: { data: { targetDocumentId: child.documentId, answers: [1] } },
+      json: {
+        data: {
+          targetDocumentId: child.documentId,
+          answers: [1],
+          version: player.body?.data?.version,
+        },
+      },
     });
     expect(completed.status, completed.text).toBe(200);
     const clear = await api.update(

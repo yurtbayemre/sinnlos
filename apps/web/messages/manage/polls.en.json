@@ -30,7 +30,7 @@
     },
     "anonymous": {
       "label": "Anonymous voting",
-      "hint": "Nobody sees who voted for what.",
+      "hint": "Nobody in the intranet sees who voted for what. It is stored only against double votes and deleted 30 days after the end (without an end date: while the poll exists).",
       "frozen": "Fixed once someone has voted."
     },
     "departments": {

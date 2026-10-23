@@ -53,6 +53,10 @@
       "label": "Validity in months",
       "hint": "After this many months the course must be repeated, e.g. 12 for yearly safety training. Empty: once is enough."
     },
+    "contact": {
+      "label": "Questions to",
+      "hint": "Who answers questions about the course, e.g. \"Safety officer Max Muster, ext. 123\". Shown on the course page. Empty: nobody named."
+    },
     "departments": {
       "label": "Departments",
       "hint": "Only these departments see the course and must take it. None selected: every employee."

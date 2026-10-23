@@ -1,6 +1,8 @@
 import { factories } from "@strapi/strapi";
+import { ADMIN, hasRole } from "../../../bootstrap/roles";
 import { parseEntryRef, parseRowId } from "../../../utils/entry-id";
 import { emitLiveEvent } from "../../../utils/live-events";
+import { isAnchoredNotification } from "../../../utils/notification-source";
 
 /** Most ids one mark-read call takes (the web marks one at a time). */
 const MARK_READ_MAX_IDS = 200;
@@ -36,6 +38,22 @@ export default factories.createCoreController("api::notification.notification", 
     return ctx.send({ updated: count });
   },
 
+  /**
+   * GET /api/notifications/unread-count (v0.28): `{ count }`, every
+   * recipient's unread rows together, for /manage/analytics. A number only:
+   * the notification reads lost their admin_role bypass, so nobody reads
+   * another person's notifications through the API any more.
+   */
+  async unreadCount(ctx) {
+    const user = ctx.state.user;
+    if (!user) return ctx.unauthorized();
+    if (!hasRole(user, [ADMIN])) return ctx.forbidden();
+    const count = await strapi.db
+      .query("api::notification.notification")
+      .count({ where: { readAt: null } });
+    return ctx.send({ count });
+  },
+
   async markAllRead(ctx) {
     const user = ctx.state.user;
     if (!user) return ctx.unauthorized();
@@ -65,19 +83,27 @@ export default factories.createCoreController("api::notification.notification", 
    *
    * A training reminder (sourceType "course", v0.20) is the daily
    * training-reminders cron's ledger: deleting it would send it again the
-   * next morning, so the API refuses (400); the web offers no delete, and a
-   * correction goes through the admin panel.
+   * next morning, so the API refuses (400). Since v0.28 the same holds for
+   * every anchored row (utils/notification-source.ts isAnchoredNotification):
+   * an announcement or event notification is the fan-out's ledger, and
+   * deleting it would notify that recipient again on the next re-publish.
+   * The web offers no delete; the retention janitor removes anchors once
+   * their source is gone (cron/prune-notifications.ts), and a correction
+   * goes through the admin panel.
    */
   async delete(ctx) {
     const where = parseEntryRef(ctx.params.id);
     if (!where) return ctx.notFound();
     const entity = await strapi.db.query("api::notification.notification").findOne({
       where,
-      select: ["id", "documentId", "sourceType"],
+      select: ["id", "documentId", "sourceType", "sourceDocumentId"],
     });
     if (!entity) return ctx.notFound();
     if (entity.sourceType === "course") {
       return ctx.badRequest("Training reminders cannot be deleted");
+    }
+    if (isAnchoredNotification(entity)) {
+      return ctx.badRequest("Notifications of an announcement or event cannot be deleted");
     }
     ctx.params.id = entity.documentId;
     return super.delete(ctx);

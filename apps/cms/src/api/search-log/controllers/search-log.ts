@@ -1,5 +1,6 @@
 import { factories } from "@strapi/strapi";
 
+import { isOff } from "../../../utils/module-switches";
 import { sanitizeSearchLogInput } from "../../../utils/search-log-input";
 
 const UID = "api::search-log.search-log";
@@ -11,9 +12,15 @@ export default factories.createCoreController(UID, ({ strapi }) => ({
    * strapi.db.query and the response is an empty 204 — no entity echo,
    * nothing to sanitize, no author stored BY DESIGN (privacy: the
    * analytics question is "does search work", not "who searched what").
+   * With `search-logging` in FEATURES_OFF (v0.28) it answers the same 204
+   * and stores nothing; the summary route is closed (feature-enabled).
    */
   async create(ctx) {
     if (!ctx.state.user) return ctx.unauthorized();
+    if (isOff("search-logging")) {
+      ctx.status = 204;
+      return;
+    }
 
     const body = (ctx.request.body as any)?.data ?? ctx.request.body;
     const input = sanitizeSearchLogInput(body);

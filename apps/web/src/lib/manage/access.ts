@@ -14,8 +14,9 @@
  *     pages explain instead of showing a list or a form (§N1).
  * Pure; the shape is plain data, so pages hand it to client forms.
  */
-import type { AuthoringRoleClass } from "@sinnlos/domain";
+import type { AuthoringRoleClass, ModuleName, SwitchName } from "@sinnlos/domain";
 import type { AuthoringScope, AuthoringVerb, Capabilities } from "@/lib/roles";
+import { switchedOff } from "@/lib/switches";
 import { AREA_CAPABILITY, MANAGE_AREAS, type ManageArea } from "./areas";
 
 /** The verbs of the capability model, in the order the publish bar uses them. */
@@ -60,8 +61,32 @@ export function canDo(access: AreaAccess | null | undefined, verb: AuthoringVerb
 }
 
 /** The /manage areas the viewer authors in, in landing order. */
-export function manageAreasFor(capabilities: Capabilities): Exclude<ManageArea, "lessons">[] {
-  return MANAGE_AREAS.filter((area) => areaAccess(capabilities, area) !== null);
+/** The FEATURES_OFF module of each area that belongs to one (v0.28). */
+const AREA_MODULE: Readonly<Partial<Record<ManageArea, ModuleName>>> = {
+  events: "events",
+  polls: "polls",
+  courses: "training",
+  lessons: "training",
+  dutyPlans: "duty-plans",
+  kpis: "kpis",
+};
+
+/** Whether FEATURES_OFF switches the area's module off (its pages answer 404 then). */
+export function areaSwitchedOff(
+  area: ManageArea,
+  off: ReadonlySet<SwitchName> = switchedOff(),
+): boolean {
+  const owner = AREA_MODULE[area];
+  return owner !== undefined && off.has(owner);
+}
+
+export function manageAreasFor(
+  capabilities: Capabilities,
+  off: ReadonlySet<SwitchName> = switchedOff(),
+): Exclude<ManageArea, "lessons">[] {
+  return MANAGE_AREAS.filter(
+    (area) => areaAccess(capabilities, area) !== null && !areaSwitchedOff(area, off),
+  );
 }
 
 /**

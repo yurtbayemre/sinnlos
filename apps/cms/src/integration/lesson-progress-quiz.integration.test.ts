@@ -60,15 +60,20 @@ describe.each(testEngines())("answerless lesson player and grading on %s", (engi
       `/api/lessons/${typeof target === "string" ? target : target.documentId}/check${query}`,
       { json: { data: { answers } } },
     );
-  const complete = (caller: Caller, target: Row | string, answers?: unknown) =>
-    t.api<ErrorBody & { data?: ProgressRow }>(caller, "/api/lesson-progresses", {
+  // v0.28: the completion sends back the player's version (absent where the player refuses).
+  const complete = async (caller: Caller, target: Row | string, answers?: unknown) => {
+    const targetDocumentId = typeof target === "string" ? target : target.documentId;
+    const shown = await player(caller, target);
+    return t.api<ErrorBody & { data?: ProgressRow }>(caller, "/api/lesson-progresses", {
       json: {
         data: {
-          targetDocumentId: typeof target === "string" ? target : target.documentId,
+          targetDocumentId,
           ...(answers === undefined ? {} : { answers }),
+          version: shown.body?.data?.version,
         },
       },
     });
+  };
   const receipts = (target: Row) =>
     t.strapi.db.query(PROGRESS).findMany({ where: { targetDocumentId: target.documentId } });
   const rawQuiz = (target: Row, quiz: unknown) => {
@@ -111,7 +116,7 @@ describe.each(testEngines())("answerless lesson player and grading on %s", (engi
         const res = await player(role, lessons[key]);
         expect(res.status, res.text).toBe(200);
         expect(Object.keys(res.body.data).sort()).toEqual(
-          ["documentId", "title", "body", "order", "videoUrl", "course", "quiz"].sort(),
+          ["documentId", "title", "body", "order", "videoUrl", "course", "quiz", "version"].sort(),
         );
         expect(res.body.data.quiz).toEqual(
           QUIZ.map(({ question, options }) => ({ question, options })),
@@ -299,6 +304,7 @@ describe.each(testEngines())("answerless lesson player and grading on %s", (engi
           answers: [1, 0],
           passed: true,
           user: t.fixtures.users.admin_role.id,
+          version: (await player("member", lessons.confirm)).body.data.version,
         },
       },
     });

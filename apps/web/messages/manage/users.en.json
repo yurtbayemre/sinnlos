@@ -141,5 +141,54 @@
     "confirm": "Reset",
     "done": "Two-factor sign-in reset.",
     "failed": "The reset did not work. Please try again."
-  }
+  },
+  "dataProtection": {
+    "title": "Data protection",
+    "export": "Export data (JSON)",
+    "evidence": "Training evidence (CSV)",
+    "exportHint": "The export holds everything the intranet stores about this person, and a list of what it does not hold. It is recorded in the activity log.",
+    "anonymisedAt": "Anonymised on {date}. The account stays blocked and can no longer be changed.",
+    "anonymise": {
+      "button": "Anonymise …",
+      "title": "Anonymise this person?",
+      "body": "This cannot be undone. Personal data is deleted; content stays under \"Former person\". Export the data first if the person asked for it.",
+      "loading": "Loading the preview …",
+      "deleted": "Deleted",
+      "kept": "Kept, without the name",
+      "rewritten": "{count, plural, =0 {No notification of anyone else names the person.} one {The name is replaced in one notification of someone else.} other {The name is replaced in # notifications of other people.}}",
+      "evidenceNote": "The training evidence keeps the name until its retention period ends (legal duty to keep proof).",
+      "confirmLabel": "Type the username to confirm: {username}",
+      "cancel": "Cancel",
+      "confirm": "Anonymise for good",
+      "blockFirst": "To anonymise this person, block them first (in the form above).",
+      "done": "The person is anonymised.",
+      "doneAvatarKept": "The person is anonymised. The profile picture (file {id}) is still used elsewhere or could not be removed: please check the Media Library."
+    },
+    "error": {
+      "notBlocked": "The person is not blocked. Block them first.",
+      "anonymised": "The person is already anonymised.",
+      "confirm": "The username does not match.",
+      "failed": "That did not work. Please try again."
+    },
+    "classes": {
+      "reactions": "Reactions",
+      "pollVotes": "Poll votes",
+      "rsvps": "Event replies",
+      "kudosReceived": "Kudos received",
+      "notifications": "Notifications",
+      "acknowledgements": "Read confirmations",
+      "classifieds": "Marketplace ads",
+      "announcements": "Announcements",
+      "wikiPages": "Wiki pages",
+      "documents": "Documents",
+      "events": "Events",
+      "polls": "Polls",
+      "comments": "Comments",
+      "kudosGiven": "Kudos given",
+      "dutyPlans": "Duty plans",
+      "kpis": "KPIs",
+      "trainingReceipts": "Training receipts"
+    }
+  },
+  "anonymisedBadge": "Anonymised"
 }

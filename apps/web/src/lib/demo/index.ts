@@ -97,6 +97,9 @@ function pollResultsBatch(data: DemoData, params: URLSearchParams) {
   return { data: results };
 }
 
+/** The demo's one published version of every course and lesson (v0.28 player `version`). */
+const DEMO_PUBLISHED_AT = "2026-01-01T00:00:00.000Z";
+
 /** GET /api/lessons/:id/player: the published lesson without the answer key. */
 const lessonPlayer: DemoHandler = ({ data, match }) => {
   const lesson = data.lessonRows.find((row) => row.documentId === decodeURIComponent(match[1]!));
@@ -119,6 +122,8 @@ const lessonPlayer: DemoHandler = ({ data, match }) => {
         question,
         options,
       })),
+      // v0.28: the demo has one published state per row (its creation time stands in).
+      version: { course: DEMO_PUBLISHED_AT, lesson: DEMO_PUBLISHED_AT },
     },
   } satisfies LessonPlayerResponse;
 };
@@ -170,6 +175,12 @@ const ROUTES: [method: string, pattern: RegExp, handler: DemoHandler][] = [
   ["POST", /^\/api\/lesson-progresses$/, write.completeLesson],
   ["GET", /^\/api\/quick-links$/, ({ params }) => list(quickLinks, params)],
   ["GET", /^\/api\/notifications$/, ({ data, params }) => list(data.notifications, params)],
+  // v0.28: the admin's platform-wide unread total (the demo has one recipient).
+  [
+    "GET",
+    /^\/api\/notifications\/unread-count$/,
+    ({ data }) => ({ count: data.notifications.filter((row) => !row.readAt).length }),
+  ],
   ["POST", /^\/api\/notifications\/mark-read$/, write.markNotificationsRead],
   ["POST", /^\/api\/notifications\/mark-all-read$/, write.markAllNotificationsRead],
   ["GET", /^\/api\/comments$/, ({ data, params }) => list(data.comments, params)],

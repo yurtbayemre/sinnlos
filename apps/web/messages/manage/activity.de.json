@@ -65,6 +65,8 @@
     "restore": "Wiederhergestellt",
     "schedulePublish": "Veröffentlichung geplant",
     "scheduleUnpublish": "Zurückziehen geplant",
-    "scheduleFailed": "Zeitplanung fehlgeschlagen"
+    "scheduleFailed": "Zeitplanung fehlgeschlagen",
+    "export": "Daten exportiert",
+    "anonymise": "Anonymisiert"
   }
 }

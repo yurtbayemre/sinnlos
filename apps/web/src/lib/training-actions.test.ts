@@ -17,7 +17,10 @@ import { StrapiError } from "@/lib/strapi-error";
  *   - an argument that is no documentId never reaches the cms;
  *   - a quiz lesson's passing answers go with the POST, and the cms's
  *     refusal of them ("Quiz not passed", issue #70) is "quizFailed";
- *     answers that are no list of option indexes never reach the cms.
+ *     answers that are no list of option indexes never reach the cms;
+ *   - the player's version goes with every POST (v0.28), a missing or
+ *     malformed one never reaches the cms, and the cms's 409 "changed"
+ *     (an author published again meanwhile) is "changed".
  */
 
 const strapiMock = vi.fn();
@@ -29,6 +32,7 @@ vi.mock("next/cache", () => ({ refresh: () => refreshMock() }));
 const { completeLesson, checkLesson } = await import("./training-actions");
 
 const LESSON = "k3m9x0000000000000000000";
+const VERSION = { course: "2026-10-01T08:00:00.000Z", lesson: "2026-10-02T09:30:00.000Z" };
 
 function signInRedirect(): unknown {
   try {
@@ -53,12 +57,12 @@ afterEach(() => {
 
 describe("completeLesson", () => {
   it("posts the lesson by documentId, then refreshes", async () => {
-    await expect(completeLesson(LESSON)).resolves.toEqual({ ok: true });
+    await expect(completeLesson(LESSON, null, VERSION)).resolves.toEqual({ ok: true });
     expect(strapiMock).toHaveBeenCalledTimes(1);
     const [path, init] = strapiMock.mock.calls[0] as [string, { method: string; body: string }];
     expect(path).toBe("/api/lesson-progresses");
     expect(init.method).toBe("POST");
-    expect(JSON.parse(init.body)).toEqual({ data: { targetDocumentId: LESSON } });
+    expect(JSON.parse(init.body)).toEqual({ data: { targetDocumentId: LESSON, version: VERSION } });
     expect(refreshMock).toHaveBeenCalledTimes(1);
   });
 
@@ -66,25 +70,31 @@ describe("completeLesson", () => {
     strapiMock.mockRejectedValue(
       new StrapiError(400, "Bad Request", '{"error":{"message":"Already completed"}}'),
     );
-    await expect(completeLesson(LESSON)).resolves.toEqual({ ok: false, code: "invalid" });
+    await expect(completeLesson(LESSON, null, VERSION)).resolves.toEqual({
+      ok: false,
+      code: "invalid",
+    });
     expect(refreshMock).not.toHaveBeenCalled();
   });
 
   it("lets strapi()'s 401 sign-in redirect propagate", async () => {
     const redirectError = signInRedirect();
     strapiMock.mockRejectedValue(redirectError);
-    await expect(completeLesson(LESSON)).rejects.toBe(redirectError);
+    await expect(completeLesson(LESSON, null, VERSION)).rejects.toBe(redirectError);
     expect(refreshMock).not.toHaveBeenCalled();
   });
 
   it("answers a network error as unavailable", async () => {
     strapiMock.mockRejectedValue(new TypeError("fetch failed"));
-    await expect(completeLesson(LESSON)).resolves.toEqual({ ok: false, code: "unavailable" });
+    await expect(completeLesson(LESSON, null, VERSION)).resolves.toEqual({
+      ok: false,
+      code: "unavailable",
+    });
     expect(refreshMock).not.toHaveBeenCalled();
   });
 
   it.each(["", 7, null])("refuses %j before any request", async (lesson) => {
-    await expect(completeLesson(lesson as unknown as string)).resolves.toEqual({
+    await expect(completeLesson(lesson as unknown as string, null, VERSION)).resolves.toEqual({
       ok: false,
       code: "invalid",
     });
@@ -92,10 +102,10 @@ describe("completeLesson", () => {
   });
 
   it("sends a quiz lesson's answers with the lesson", async () => {
-    await expect(completeLesson(LESSON, [2, 0])).resolves.toEqual({ ok: true });
+    await expect(completeLesson(LESSON, [2, 0], VERSION)).resolves.toEqual({ ok: true });
     const [, init] = strapiMock.mock.calls[0] as [string, { body: string }];
     expect(JSON.parse(init.body)).toEqual({
-      data: { targetDocumentId: LESSON, answers: [2, 0] },
+      data: { targetDocumentId: LESSON, answers: [2, 0], version: VERSION },
     });
   });
 
@@ -103,7 +113,7 @@ describe("completeLesson", () => {
     strapiMock.mockRejectedValue(
       new StrapiError(400, "Bad Request", '{"error":{"message":"Quiz not passed"}}'),
     );
-    await expect(completeLesson(LESSON, [0, 0])).resolves.toEqual({
+    await expect(completeLesson(LESSON, [0, 0], VERSION)).resolves.toEqual({
       ok: false,
       code: "quizFailed",
     });
@@ -120,7 +130,7 @@ describe("completeLesson", () => {
         }),
       ),
     );
-    await expect(completeLesson(LESSON, [0, 0])).resolves.toEqual({
+    await expect(completeLesson(LESSON, [0, 0], VERSION)).resolves.toEqual({
       ok: false,
       code: "quizContentInvalid",
     });
@@ -137,17 +147,48 @@ describe("completeLesson", () => {
         }),
       ),
     );
-    await expect(completeLesson(LESSON, [0, 0])).resolves.toEqual({
+    await expect(completeLesson(LESSON, [0, 0], VERSION)).resolves.toEqual({
       ok: false,
       code: "unavailable",
     });
     expect(refreshMock).not.toHaveBeenCalled();
   });
 
+  it("answers the cms's 409 changed as changed, without a refresh", async () => {
+    strapiMock.mockRejectedValue(
+      new StrapiError(
+        409,
+        "Conflict",
+        JSON.stringify({ error: { name: "ConflictError", details: { code: "changed" } } }),
+      ),
+    );
+    await expect(completeLesson(LESSON, null, VERSION)).resolves.toEqual({
+      ok: false,
+      code: "changed",
+    });
+    expect(refreshMock).not.toHaveBeenCalled();
+  });
+
+  it("never sends a missing or malformed version", async () => {
+    for (const version of [
+      undefined,
+      null,
+      {},
+      { course: "", lesson: "x" },
+      { course: 1, lesson: "x" },
+    ]) {
+      await expect(
+        completeLesson(LESSON, null, version as unknown as typeof VERSION),
+        JSON.stringify(version),
+      ).resolves.toEqual({ ok: false, code: "invalid" });
+    }
+    expect(strapiMock).not.toHaveBeenCalled();
+  });
+
   it("never sends answers that are no list of option indexes", async () => {
     for (const answers of [[-1], [1.5], ["1"], [null], "1,0", { 0: 1 }, Array(101).fill(0)]) {
       await expect(
-        completeLesson(LESSON, answers as unknown as number[]),
+        completeLesson(LESSON, answers as unknown as number[], VERSION),
         JSON.stringify(answers),
       ).resolves.toEqual({ ok: false, code: "invalid" });
     }
@@ -160,6 +201,15 @@ describe("completeLesson", () => {
       "utf8",
     );
     expect(controller).toContain('ctx.badRequest("Quiz not passed")');
+  });
+
+  it("pins the version check the cms controller makes (v0.28)", () => {
+    const controller = readFileSync(
+      join(__dirname, "../../../cms/src/api/lesson-progress/controllers/lesson-progress.ts"),
+      "utf8",
+    );
+    expect(controller).toContain("isSameVersion(data.version, version)");
+    expect(controller).toContain("details: { code: TRAINING_VERSION_CHANGED }");
   });
 });
 

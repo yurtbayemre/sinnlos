@@ -246,7 +246,7 @@ describe("summarizeRsvps", () => {
   const answer = (
     target: string,
     status: string,
-    user: { id: number; displayName?: string } | null,
+    user: { id: number; displayName?: string; blocked?: boolean } | null,
     respondedAt: string | null = null,
   ): RsvpRow => ({ id: nextId++, targetDocumentId: target, status, respondedAt, user });
 
@@ -277,6 +277,18 @@ describe("summarizeRsvps", () => {
       yesNames: [],
       myStatus: null,
     });
+  });
+
+  it("counts a blocked person's yes but no longer names them (v0.28)", () => {
+    const [summary] = summarizeRsvps(
+      [
+        answer(EVT_A, "yes", { id: 1, displayName: "Ada", blocked: true }),
+        answer(EVT_A, "yes", { id: 2, displayName: "Grace" }),
+      ],
+      [EVT_A],
+      null,
+    );
+    expect(summary).toMatchObject({ yesCount: 2, yesNames: ["Grace"] });
   });
 
   it("collapses a user's duplicate rows to the newest, a tie to the higher id", () => {

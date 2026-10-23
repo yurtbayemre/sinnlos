@@ -18,6 +18,12 @@ export interface DutyPlanView {
 export interface DutyPersonView {
   name: string | null;
   phone: string | null;
+  /**
+   * v0.28: the directory answered and does not list this id (a blocked or
+   * anonymised person, whom /api/users hides): the shift stays as stored and
+   * shows the neutral "former person" label.
+   */
+  former?: true;
 }
 
 export interface DutiesView {
@@ -76,6 +82,10 @@ export async function loadDuties(): Promise<DutiesView> {
         phone: user.phone || null,
       };
     }
+  }
+  // Only a complete answer says an id is gone; after a failed read it is unknown.
+  if (answers.every((users) => !users.failed && users.data && !users.data.truncated)) {
+    for (const id of ids) people[id] ??= { name: null, phone: null, former: true };
   }
   return { plans, people, failed: false, truncated: res.data.truncated };
 }

@@ -41,6 +41,7 @@ const course: CourseEditable = {
   mandatory: false,
   completionMode: "exam",
   validityMonths: null,
+  contact: null,
   departments: [],
   needsRetarget: false,
   coverImage: null,

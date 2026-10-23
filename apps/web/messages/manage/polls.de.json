@@ -30,7 +30,7 @@
     },
     "anonymous": {
       "label": "Anonyme Abstimmung",
-      "hint": "Niemand sieht, wer wie abgestimmt hat.",
+      "hint": "Im Intranet sieht niemand, wer wie abgestimmt hat. Gespeichert wird es nur gegen doppelte Stimmen und 30 Tage nach dem Ende gelöscht (ohne Enddatum: solange die Umfrage besteht).",
       "frozen": "Fest, sobald abgestimmt wurde."
     },
     "departments": {

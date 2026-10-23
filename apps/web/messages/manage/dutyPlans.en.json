@@ -45,6 +45,7 @@
       "remove": "Remove shift",
       "person": "Person",
       "choosePerson": "Choose a person",
+      "formerPerson": "Former person (#{id})",
       "day": "Day",
       "template": "Template",
       "custom": "Own times",

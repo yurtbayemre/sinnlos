@@ -168,6 +168,12 @@ export interface OwnRowsOptions {
   /** Roles that read every row, with the request untouched. */
   bypass: readonly RoleType[];
   /**
+   * While false, the bypass roles are held to their own rows like everyone
+   * else (v0.28: a switched-off report feature ends the admin read bypass).
+   * Asked per request; absent = always.
+   */
+  bypassWhile?: () => boolean;
+  /**
    * Runs for a non-bypass caller before the clause is added, with the real
    * request query; throw a ValidationError to refuse the request (400).
    */
@@ -194,7 +200,7 @@ export function ownRowsFilter(options: OwnRowsOptions): OwnRowsPolicy {
   return async (policyContext) => {
     const user = policyContext.state?.user;
     if (!user) return false;
-    if (hasRole(user, options.bypass)) return true;
+    if (hasRole(user, options.bypass) && (options.bypassWhile?.() ?? true)) return true;
 
     const caller = identifiedCaller(user);
     if (!caller) return false;

@@ -28,7 +28,7 @@ export interface RsvpRow {
   status?: unknown;
   respondedAt?: string | Date | null;
   targetDocumentId?: unknown;
-  user?: { id?: unknown; displayName?: unknown } | null;
+  user?: { id?: unknown; displayName?: unknown; blocked?: unknown } | null;
 }
 
 /** A caller as users-permissions puts it on ctx.state.user. */
@@ -264,7 +264,8 @@ export function summarizeRsvps(
     if (!summary || !isRsvpStatus(row.status)) continue;
     if (row.status === "yes") {
       summary.yesCount += 1;
-      const name = row.user?.displayName;
+      // A blocked person still counts as a seat but is no longer named (v0.28).
+      const name = row.user?.blocked === true ? null : row.user?.displayName;
       if (typeof name === "string" && name !== "") summary.yesNames.push(name);
     } else if (row.status === "maybe") summary.maybeCount += 1;
     else summary.noCount += 1;

@@ -7,6 +7,7 @@ import type { AnnouncementListItem } from "@/lib/api/announcements";
 import { isReadDenied } from "@/lib/roles";
 import { SKIPPED_READ, tryFetch } from "@/lib/safe-fetch";
 import { api } from "@/lib/strapi";
+import { isOff } from "@/lib/switches";
 import type { Acknowledgement } from "@/lib/types";
 
 /**
@@ -65,13 +66,16 @@ function receiptsByDocumentId(acks: Acknowledgement[]): Map<string, Acknowledgem
 /**
  * Everything /announcements renders. A role without the acknowledgement
  * read (SH02) skips the receipts walk: every mandatory post then counts as
- * open, which is what the CMS would answer too.
+ * open, which is what the CMS would answer too. With read confirmations
+ * switched off (FEATURES_OFF, v0.28) nothing is mandatory: no receipts, no
+ * open list and no buttons (the cms refuses a confirmation then).
  */
 export async function loadAnnouncements(role: Role): Promise<AnnouncementsView> {
-  const readsAcks = !isReadDenied(role, "acknowledgements");
+  const acksOn = !isOff("read-confirmations");
+  const readsAcks = acksOn && !isReadDenied(role, "acknowledgements");
   const [feed, mandatory, receipts] = await Promise.all([
     tryFetch(() => api.announcements.list(), "announcements"),
-    tryFetch(() => api.announcements.requiringAck(), "announcements"),
+    acksOn ? tryFetch(() => api.announcements.requiringAck(), "announcements") : SKIPPED_READ,
     readsAcks ? tryFetch(() => fetchMyAnnouncementAcks(), "acknowledgements") : SKIPPED_READ,
   ]);
   const items = feed.data?.data ?? [];
@@ -82,7 +86,7 @@ export async function loadAnnouncements(role: Role): Promise<AnnouncementsView> 
     const ack = item.documentId ? myAcks.get(item.documentId) : undefined;
     return {
       item,
-      ackRequired: !!item.requiresAck && !!item.documentId,
+      ackRequired: acksOn && !!item.requiresAck && !!item.documentId,
       acknowledgedAt: ack?.acknowledgedAt ?? ack?.createdAt ?? null,
     };
   };

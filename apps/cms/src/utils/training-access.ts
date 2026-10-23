@@ -16,6 +16,8 @@ interface PublishedLesson {
   order: number;
   videoUrl: string | null;
   quiz: unknown;
+  /** v0.28: the lesson's published version (utils/training-evidence.ts). */
+  publishedAt: unknown;
   course: {
     documentId: string;
     title: string;
@@ -40,7 +42,7 @@ export async function loadPublishedLesson(
   if (!isDocumentId(documentId) || !user) return null;
   const lesson = await strapi.db.query("api::lesson.lesson").findOne({
     where: { documentId, publishedAt: { $notNull: true } },
-    select: ["documentId", "title", "body", "order", "videoUrl", "quiz"],
+    select: ["documentId", "title", "body", "order", "videoUrl", "quiz", "publishedAt"],
     populate: {
       course: {
         select: [

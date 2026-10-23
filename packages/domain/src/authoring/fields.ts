@@ -222,6 +222,7 @@ export const TRAINING_FIELDS = {
       "mandatory",
       "completionMode",
       "validityMonths",
+      "contact",
       "departments",
       "coverImage",
       "publishAt",

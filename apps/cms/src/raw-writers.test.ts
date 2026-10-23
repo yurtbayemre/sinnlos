@@ -83,6 +83,14 @@ const GUARDED_RAW_WRITERS: Readonly<Record<string, { rule: GuardRule; writes: st
       "advance (lockDocument, advanceRevision) every announcement, event and document linking " +
       "the deleted row, ascending (§D rule 13)",
   },
+  // v0.28, lane A3.
+  "utils/poll-voter-retention.ts": {
+    rule: "under the lock with a revision advance",
+    writes:
+      "a closed poll's votes (each voter's later duplicates deleted, the voter links removed) and " +
+      "votersRemovedAt on every row of the poll, after lockDocument with the rule re-checked on a " +
+      "fresh read, then advanceRevision, in one transaction per poll",
+  },
   "seed-demo.ts": {
     rule: "boot seed of a fresh database",
     writes:
@@ -122,6 +130,11 @@ const OTHER_RAW_WRITERS: Readonly<Record<string, string>> = {
     "wiki revisions (not a guarded type): the after-image of a draft save, in its transaction",
   "bootstrap/sync-permissions.ts": "roles and permissions",
   "cron/prune-audit-events.ts": "audit events (the retention janitor)",
+  // v0.28, lane A3.
+  "cron/prune-acknowledgements.ts":
+    "acknowledgements of documents gone in every state (the retention janitor)",
+  "cron/prune-rsvps.ts":
+    "RSVPs (the retention janitor), re-checked under the event's document lock; the event itself is never written",
   "cron/prune-notifications.ts": "notifications",
   "cron/prune-search-logs.ts": "search logs",
   "cron/purge-expired-classifieds.ts": "classifieds through the Document Service",
@@ -153,6 +166,11 @@ const OTHER_RAW_WRITERS: Readonly<Record<string, string>> = {
   // v0.17.8.
   "utils/wiki-checks.ts":
     "wiki revisions (not a guarded type): a deleted page's revisions, in the delete's transaction",
+  // v0.28.
+  "utils/anonymise.ts":
+    "the anonymised user row, and the person's reactions, poll votes, RSVPs, kudos addressed to them, notifications and read confirmations (deleted), other people's notifications naming them (rewritten), classifieds through the Document Service; under the directory and row locks",
+  "utils/training-evidence.ts":
+    "lesson progress rows: the snapshot of a receipt without one (snapshot IS NULL re-checked in the write), and the receipts past their retention",
 };
 
 const SRC = __dirname;

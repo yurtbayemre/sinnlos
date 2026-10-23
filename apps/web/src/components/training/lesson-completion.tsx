@@ -5,6 +5,7 @@ import Link from "next/link";
 import type { Route } from "next";
 import { ArrowRight } from "lucide-react";
 import { useTranslations } from "next-intl";
+import type { TrainingVersion } from "@sinnlos/domain";
 
 import { CompleteLessonButton } from "@/components/training/complete-lesson-button";
 import { QuizBlock } from "@/components/training/quiz-block";
@@ -19,12 +20,14 @@ export function LessonCompletion({
   quiz,
   completionMode,
   lessonDocumentId,
+  version,
   completedAtLabel,
   nextHref,
 }: {
   quiz: LearnerQuizQuestion[];
   completionMode: CompletionMode;
   lessonDocumentId: string;
+  version: TrainingVersion;
   completedAtLabel: string | null;
   nextHref: Route | null;
 }) {
@@ -49,6 +52,7 @@ export function LessonCompletion({
         <div className="space-y-1.5">
           <CompleteLessonButton
             lessonDocumentId={lessonDocumentId}
+            version={version}
             completedAtLabel={completedAtLabel}
             answers={gated ? answers : null}
             disabled={locked}

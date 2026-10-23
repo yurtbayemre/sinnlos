@@ -41,7 +41,7 @@ const spec = (fn: CronTaskSpec["fn"]): CronTaskSpec => ({
 });
 
 describe("cronRegistry", () => {
-  it("lists the eight tasks with their rules, all in the given zone", () => {
+  it("lists the thirteen tasks with their rules, all in the given zone", () => {
     const table = cronRegistry("Pacific/Auckland").map(({ name, rule, tz }) => ({
       name,
       rule,
@@ -49,14 +49,27 @@ describe("cronRegistry", () => {
     }));
     expect(table).toEqual([
       { name: "scheduled-publisher", rule: "* * * * *", tz: "Pacific/Auckland" },
+      { name: "erasure-sweep", rule: "20 3 * * *", tz: "Pacific/Auckland" },
+      { name: "training-evidence-janitor", rule: "25 3 * * *", tz: "Pacific/Auckland" },
       { name: "uploads-janitor", rule: "30 3 * * *", tz: "Pacific/Auckland" },
       { name: "search-log-janitor", rule: "35 3 * * *", tz: "Pacific/Auckland" },
       { name: "notification-janitor", rule: "40 3 * * *", tz: "Pacific/Auckland" },
       { name: "classified-janitor", rule: "45 3 * * *", tz: "Pacific/Auckland" },
       { name: "audit-janitor", rule: "50 3 * * *", tz: "Pacific/Auckland" },
+      { name: "ack-janitor", rule: "52 3 * * *", tz: "Pacific/Auckland" },
+      { name: "rsvp-janitor", rule: "54 3 * * *", tz: "Pacific/Auckland" },
+      { name: "poll-voter-janitor", rule: "56 3 * * *", tz: "Pacific/Auckland" },
       { name: "training-reminders", rule: "45 6 * * *", tz: "Pacific/Auckland" },
       { name: "digest-mailer", rule: "30 7 * * *", tz: "Pacific/Auckland" },
     ]);
+  });
+
+  it("leaves the training reminders out while training is off (FEATURES_OFF, v0.28)", () => {
+    const names = (env: Record<string, string>) =>
+      cronRegistry("Europe/Berlin", env).map(({ name }) => name);
+    expect(names({ FEATURES_OFF: "training" })).not.toContain("training-reminders");
+    expect(names({ FEATURES_OFF: "training-reports" })).toContain("training-reminders");
+    expect(names({})).toContain("training-reminders");
   });
 
   it("runs the janitors in the 03:00 hour and every task but the scheduler once a day", () => {
@@ -253,11 +266,16 @@ describe("buildCronTasks", () => {
     const tasks = buildCronTasks(cronRegistry("Europe/Berlin"));
     expect(Object.keys(tasks)).toEqual([
       "scheduled-publisher",
+      "erasure-sweep",
+      "training-evidence-janitor",
       "uploads-janitor",
       "search-log-janitor",
       "notification-janitor",
       "classified-janitor",
       "audit-janitor",
+      "ack-janitor",
+      "rsvp-janitor",
+      "poll-voter-janitor",
       "training-reminders",
       "digest-mailer",
     ]);

@@ -30,6 +30,7 @@ import { AREA_PATH, type ManageArea } from "@/lib/manage/areas";
 import { manageGate } from "@/lib/manage/page-gate";
 import { countedFilters, countHref, loadManageLanding } from "@/lib/loaders/manage/landing";
 import { isAdmin } from "@/lib/roles";
+import { switchedOff } from "@/lib/switches";
 import { cn } from "@/lib/utils";
 import { FetchErrorBanner } from "@/components/fetch-error";
 import { NoDepartmentExplanation } from "@/components/manage/page-parts";
@@ -93,7 +94,9 @@ const QUICK_LINK_META = [
  */
 export default async function ManagePage() {
   const { viewer, capabilities } = await manageGate();
-  const areas = manageAreasFor(capabilities);
+  // FEATURES_OFF (v0.28): an off module's area and an off feature's report go.
+  const off = switchedOff();
+  const areas = manageAreasFor(capabilities, off);
   const admin = isAdmin(viewer.role);
   const departmentAuthor = areas.some(
     (area) => areaAccess(capabilities, area)?.scope === "ownDepartment",
@@ -158,18 +161,20 @@ export default async function ManagePage() {
       description: tAdmin("analyticsDesc"),
       href: "/manage/analytics" as const,
     },
-    capabilities.reports.acknowledgements && {
-      icon: ClipboardCheck,
-      label: tAdmin("ackReportLink"),
-      description: tAdmin("ackReportLinkDesc"),
-      href: "/manage/acknowledgements" as const,
-    },
-    capabilities.reports.training && {
-      icon: GraduationCap,
-      label: tAdmin("trainingReportLink"),
-      description: tAdmin("trainingReportLinkDesc"),
-      href: "/manage/training/report" as const,
-    },
+    capabilities.reports.acknowledgements &&
+      !off.has("read-confirmations") && {
+        icon: ClipboardCheck,
+        label: tAdmin("ackReportLink"),
+        description: tAdmin("ackReportLinkDesc"),
+        href: "/manage/acknowledgements" as const,
+      },
+    capabilities.reports.training &&
+      !off.has("training-reports") && {
+        icon: GraduationCap,
+        label: tAdmin("trainingReportLink"),
+        description: tAdmin("trainingReportLinkDesc"),
+        href: "/manage/training/report" as const,
+      },
     capabilities.reports.activity && {
       icon: Activity,
       label: tActivity("title"),

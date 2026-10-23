@@ -288,3 +288,12 @@ describe("searchFingerprint", () => {
     expect(searchFingerprint(await loadSearchDocuments(db(republished).strapi))).not.toBe(a);
   });
 });
+
+describe("loadSearchDocuments with a module off (FEATURES_OFF, v0.28)", () => {
+  it("leaves the kinds of an off module out, so the next rebuild drops them", async () => {
+    const kinds = async (env: Record<string, string>) =>
+      (await loadSearchDocuments(db(ROWS).strapi, env)).map((document) => document.kind);
+    expect(await kinds({})).toEqual(["announcement", "poll"]);
+    expect(await kinds({ FEATURES_OFF: "polls" })).toEqual(["announcement"]);
+  });
+});

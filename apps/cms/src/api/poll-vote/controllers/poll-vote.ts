@@ -126,7 +126,11 @@ export default factories.createCoreController("api::poll-vote.poll-vote", ({ str
     }
 
     // Closed iff now >= closesAt, the same rule as the web (utils/poll-close.ts).
-    if (isPollClosed(poll.closesAt)) return { kind: "badRequest", message: "Poll is closed" };
+    // A poll whose voters the retention removed (v0.28) stays closed whatever
+    // its closesAt says: "Already voted" could no longer match anybody.
+    if (isPollClosed(poll.closesAt) || poll.votersRemoved) {
+      return { kind: "badRequest", message: "Poll is closed" };
+    }
 
     // Check-then-insert without a DB unique constraint (voter is a
     // link-table relation, #16, DA04). The poll's lock serialises the votes

@@ -4,10 +4,24 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { CheckCircle2 } from "lucide-react";
-import { QUIZ_CONTENT_INVALID } from "@sinnlos/domain";
+import {
+  QUIZ_CONTENT_INVALID,
+  TRAINING_VERSION_CHANGED,
+  type TrainingVersion,
+} from "@sinnlos/domain";
 import { Button } from "@/components/ui/button";
 import { isSharedErrorCode, startCmsAction, type CommonCode } from "@/lib/action-result";
 import { completeLesson, type TrainingActionError } from "@/lib/training-actions";
+
+/**
+ * Whether a refused completion pulls the server's state at once. Not for
+ * "changed" (v0.28: an author published the lesson or course again): the
+ * new version remounts the lesson, which would wipe the warning and the
+ * quiz without a word, so the reader reloads with the button instead.
+ */
+export function refreshesAfterFailure(code: string): boolean {
+  return code !== TRAINING_VERSION_CHANGED;
+}
 
 /**
  * "Mark lesson as completed" control (ack-button clone, issue #29).
@@ -19,6 +33,7 @@ import { completeLesson, type TrainingActionError } from "@/lib/training-actions
  */
 export function CompleteLessonButton({
   lessonDocumentId,
+  version,
   completedAtLabel,
   answers = null,
   disabled = false,
@@ -26,6 +41,8 @@ export function CompleteLessonButton({
 }: {
   /** Strapi documentId of the lesson (stable across re-publishes). */
   lessonDocumentId: string;
+  /** The player's published versions (v0.28), sent back with the completion. */
+  version: TrainingVersion;
   /** Pre-formatted date of the caller's own completion, or null. */
   completedAtLabel: string | null;
   /** The passing answers of the lesson's quiz, or null for a lesson without one. */
@@ -48,7 +65,7 @@ export function CompleteLessonButton({
     if (completed || isPending || disabled) return;
     setError(null);
     startCmsAction(startTransition, {
-      action: () => completeLesson(lessonDocumentId, answers),
+      action: () => completeLesson(lessonDocumentId, answers, version),
       onSuccess: () => setJustCompleted(true),
       onFailure: (code) => {
         // Refused (already completed elsewhere, course unpublished, the
@@ -56,7 +73,7 @@ export function CompleteLessonButton({
         // authoritative state from the server.
         setError(code);
         if (code === "quizFailed") onQuizRefused?.();
-        router.refresh();
+        if (refreshesAfterFailure(code)) router.refresh();
       },
     });
   };
@@ -73,15 +90,22 @@ export function CompleteLessonButton({
           {isPending ? t("completing") : t("completeButton")}
         </Button>
       )}
+      {error === TRAINING_VERSION_CHANGED && (
+        <Button type="button" variant="outline" size="sm" onClick={() => router.refresh()}>
+          {t("reload")}
+        </Button>
+      )}
       {error && (
         <span role="alert" className="text-sm text-destructive">
           {error === "quizFailed"
             ? t("quizNotPassed")
             : error === QUIZ_CONTENT_INVALID
               ? t("quizContentInvalid")
-              : isSharedErrorCode(error)
-                ? tErrors(error)
-                : t("completeFailed")}
+              : error === TRAINING_VERSION_CHANGED
+                ? t("versionChanged")
+                : isSharedErrorCode(error)
+                  ? tErrors(error)
+                  : t("completeFailed")}
         </span>
       )}
     </div>

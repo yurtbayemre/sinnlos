@@ -1016,7 +1016,9 @@ describe("v2 rules: attribute coverage and field lists (§B1.7, §N6)", () => {
     expect(Object.keys(REFUSED_ATTRIBUTES[DOCUMENT]).sort()).toEqual(
       ["audience", "ownerDepartment", "scheduleError", "uploadedBy"].sort(),
     );
-    expect(Object.keys(REFUSED_ATTRIBUTES[POLL]).sort()).toEqual(["audience", "author"].sort());
+    expect(Object.keys(REFUSED_ATTRIBUTES[POLL]).sort()).toEqual(
+      ["audience", "author", "votersRemovedAt"].sort(),
+    );
   });
 
   it("carries exactly the @sinnlos/domain field lists per class, on create and update", () => {
@@ -1521,6 +1523,21 @@ describe("v2 cross checks over the stored draft and the payload", () => {
       codes: { ackDeadline: "ackDeadlineWithoutAck" },
     });
     await applyWriteRule({ ackDeadline: "2026-10-30", requiresAck: true }, announcement, v2Env());
+  });
+
+  it("refuses requiresAck: true while read-confirmations is off, and still takes false (v0.28)", async () => {
+    process.env.FEATURES_OFF = "read-confirmations";
+    try {
+      for (const uid of [ANNOUNCEMENT, DOCUMENT]) {
+        const error = await refusal(
+          applyWriteRule({ requiresAck: true }, rule(uid, "update", MODERATOR_CLASS), v2Env()),
+        );
+        expect(error.details).toEqual({ keys: ["requiresAck"], codes: { requiresAck: "invalid" } });
+        await applyWriteRule({ requiresAck: false }, rule(uid, "update", MODERATOR_CLASS), v2Env());
+      }
+    } finally {
+      delete process.env.FEATURES_OFF;
+    }
   });
 
   it("asks publish readiness early only when the payload schedules a publish", async () => {

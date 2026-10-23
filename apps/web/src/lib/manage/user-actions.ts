@@ -2,13 +2,23 @@
 
 import { refresh } from "next/cache";
 import {
+  ANONYMISE_CODES,
   isDocumentId,
   ROLE_PRIVILEGE_ORDER,
+  type AnonymisePreviewResponse,
+  type AnonymiseResponse,
   type RoleType,
   type UserAdminInvite,
 } from "@sinnlos/domain";
-import { actionFailure, runCmsAction, type ActionResult } from "@/lib/action-result";
 import {
+  actionFailure,
+  runCmsAction,
+  type ActionFailure,
+  type ActionResult,
+} from "@/lib/action-result";
+import {
+  fetchAnonymisePreview,
+  sendAnonymise,
   sendRoleToEntra,
   sendUserAdminUpdate,
   sendUserInvite,
@@ -24,7 +34,7 @@ export type UserActionResult = ActionResult<never, null>;
 const isUserId = (value: unknown): value is number =>
   Number.isSafeInteger(value) && Number(value) > 0;
 
-async function adminGate(id: unknown): Promise<UserActionResult | null> {
+async function adminGate(id: unknown): Promise<ActionFailure | null> {
   const viewer = await getViewer();
   if (viewer.id === null) return actionFailure("unavailable");
   if (!capabilitiesFor(viewer.role).users.manage) return actionFailure("forbidden");
@@ -161,5 +171,50 @@ export async function resetUserMfa(id: unknown): Promise<UserActionResult> {
     label: "[manage-users] reset-mfa",
     after: () => refresh(),
     data: () => null,
+  });
+}
+
+export type AnonymisePreview = AnonymisePreviewResponse["data"];
+
+/** admin_role only (v0.28): the anonymisation's advisory counts for the confirm dialog. */
+export async function previewAnonymisation(
+  id: unknown,
+): Promise<ActionResult<never, AnonymisePreview>> {
+  const refused = await adminGate(id);
+  if (refused) return refused;
+  return runCmsAction(() => fetchAnonymisePreview(id as number), {
+    label: "[manage-users] anonymise-preview",
+    data: (answer) => answer.data,
+  });
+}
+
+export type AnonymiseError = (typeof ANONYMISE_CODES)[keyof typeof ANONYMISE_CODES];
+export type AnonymiseOutcome = AnonymiseResponse["data"];
+
+/**
+ * admin_role only (v0.28, Art. 17): anonymises a blocked person for good.
+ * `confirm` is their current username as the admin typed it; the cms
+ * checks it against the locked row ("confirm"), refuses a person who is not
+ * blocked ("notBlocked") or already anonymised ("anonymised").
+ */
+export async function anonymiseUser(
+  id: unknown,
+  confirm: unknown,
+): Promise<ActionResult<AnonymiseError, AnonymiseOutcome>> {
+  const refused = await adminGate(id);
+  if (refused) return refused;
+  if (typeof confirm !== "string" || confirm.trim() === "" || confirm.length > 255) {
+    return actionFailure(ANONYMISE_CODES.confirm);
+  }
+  return runCmsAction(() => sendAnonymise(id as number, confirm.trim()), {
+    label: "[manage-users] anonymise",
+    mapError: (cms) => {
+      const code = cms.details?.code;
+      if (cms.status === 409 && (code === "notBlocked" || code === "anonymised")) return code;
+      if (cms.status === 400 && code === "confirm") return "confirm";
+      return undefined;
+    },
+    after: () => refresh(),
+    data: (answer) => answer.data,
   });
 }

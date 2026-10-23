@@ -148,6 +148,9 @@ services:
       # v0.27: the roles whose local accounts must use a second factor
       # (TOTP); empty = admin_role,editor (the default), `none` = nobody.
       MFA_REQUIRED_ROLES: ${MFA_REQUIRED_ROLES:-}
+      # v0.28: modules and features switched off (a comma list, empty = all
+      # on); the same value as the web. An unknown name refuses the boot.
+      FEATURES_OFF: ${FEATURES_OFF:-}
       SEED_DEMO_DATA: ${SEED_DEMO_DATA:-0}
       # Admin seed — auto-create first Strapi admin on fresh database.
       # Refused (error log, no admin) for template placeholders and
@@ -173,6 +176,15 @@ services:
       # Days the content activity trail (audit_events) is kept; the
       # 03:50 audit-janitor deletes older rows. Empty = 365.
       AUDIT_RETENTION_DAYS: ${AUDIT_RETENTION_DAYS:-}
+      # Days the search telemetry (search_logs) is kept; the 03:35
+      # search-log janitor deletes older rows. Empty = 90; 1 to 3650, any
+      # other value refuses the cms boot (v0.28).
+      SEARCH_LOG_RETENTION_DAYS: ${SEARCH_LOG_RETENTION_DAYS:-}
+      # v0.28: years a training receipt is kept after its deadline (the
+      # valid-until day, or the departure of an anonymised person); the
+      # 03:25 training-evidence-janitor deletes older ones. Empty = 3; a
+      # whole number from 1 to 30, anything else refuses the boot.
+      TRAINING_EVIDENCE_RETENTION_YEARS: ${TRAINING_EVIDENCE_RETENTION_YEARS:-}
       # No usage telemetry to Strapi; also spares a stop the telemetry
       # lookups that run into the DNS timeout on a host without DNS (B05).
       STRAPI_TELEMETRY_DISABLED: ${STRAPI_TELEMETRY_DISABLED:-true}
@@ -197,6 +209,9 @@ services:
       # Digest language for a user whose profile has none (en or de,
       # default en like the web's DEFAULT_LOCALE; AC04).
       DIGEST_DEFAULT_LOCALE: ${DIGEST_DEFAULT_LOCALE:-en}
+      # The web's UI language (below); the cms names an anonymised person
+      # in it ("Ehemalige Person" / "Former person", v0.28).
+      DEFAULT_LOCALE: ${DEFAULT_LOCALE:-en}
       # Optional search ranking (v0.21, docs/DEPLOYMENT.md "Meilisearch
       # (optional search)"): off unless MEILISEARCH_ENABLED=1. The cms keeps
       # the index sinnlos_search current with the write key; it never gets
@@ -314,6 +329,8 @@ services:
       MEILISEARCH_ENABLED: ${MEILISEARCH_ENABLED:-0}
       MEILISEARCH_URL: ${MEILISEARCH_URL:-http://sinnlos-meili:7700}
       MEILISEARCH_SEARCH_KEY: ${MEILISEARCH_SEARCH_KEY:-}
+      # v0.28: the same switch list as the cms (navigation, pages, search).
+      FEATURES_OFF: ${FEATURES_OFF:-}
       # Footer links and analytics (v0.26, infra/.env.example), all optional.
       SOURCE_URL: ${SOURCE_URL:-}
       PRIVACY_URL: ${PRIVACY_URL:-}

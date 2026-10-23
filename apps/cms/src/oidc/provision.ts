@@ -49,6 +49,7 @@ import {
 import type { EntraDefaultRole } from "../entra/config";
 import type { OidcConfig } from "./config";
 import { verifyOidcIdToken, type OidcClaims, type OidcTokenResult } from "./id-token";
+import { writeWhileUnblocked } from "../utils/unblocked-write";
 
 /** The header the web sends the shared secret in. */
 export const OIDC_EXCHANGE_SECRET_HEADER = "x-oidc-exchange-secret";
@@ -291,7 +292,10 @@ async function syncProfile(strapi: ExchangeHost, user: Row, claims: OidcClaims):
   }
   if (Object.keys(data).length === 0) return;
   try {
-    await users.update({ where: { id: user.id }, data });
+    const written = await writeWhileUnblocked(strapi as never, user.id, () =>
+      users.update({ where: { id: user.id }, data }),
+    );
+    if (!written) strapi.log.warn(`[oidc] user=${user.id}: blocked meanwhile; profile not synced`);
   } catch (err) {
     strapi.log.error(`[oidc] user=${user.id}: profile sync failed (${errorLabel(err)})`);
   }

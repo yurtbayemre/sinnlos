@@ -29,10 +29,19 @@
       "target": "plugin::users-permissions.user"
     },
     "visibleToGuests": { "type": "boolean", "default": false },
-    "guestsCanVote": { "type": "boolean", "default": false }
+    "guestsCanVote": { "type": "boolean", "default": false },
+    "votersRemovedAt": { "type": "datetime" }
   },
   "config": {
     "metadatas": {
+      "votersRemovedAt": {
+        "edit": {
+          "label": "Voters removed at",
+          "description": "Set by the nightly retention 30 days after the close: who voted is no longer stored, the results stay. The poll can no longer be reopened (Closes at is frozen).",
+          "editable": false
+        },
+        "list": { "label": "Voters removed at" }
+      },
       "visibleToGuests": {
         "edit": {
           "label": "Visible to guests",

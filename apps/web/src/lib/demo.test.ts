@@ -113,7 +113,7 @@ const DIRECT_READS: Record<string, () => Promise<unknown>> = {
   getNotifications: () => getNotifications(),
   "analytics countPage": () => analytics.countPage("wiki-spaces"),
   "analytics reactionsPage": () => analytics.reactionsPage(),
-  "analytics unreadNotificationsPage": () => analytics.unreadNotificationsPage(),
+  "analytics unreadNotificationCount": () => analytics.unreadNotificationCount(),
   "analytics recentComments": () => analytics.recentComments(),
   "analytics searchSummary": () => analytics.searchSummary(),
   "me (/api/me)": () => strapi("/api/me"),
