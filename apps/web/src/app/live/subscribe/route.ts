@@ -73,7 +73,8 @@ export async function POST(req: Request) {
     return Response.json({ error: "live events disabled" }, { status: 404 });
   }
   const jwt = await getStrapiToken();
-  const access = jwt ? await checkUploadAccess({ userId, jwt, strapiUrl: STRAPI_URL }) : "blocked";
+  if (!jwt) return Response.json({ error: "unauthorized" }, { status: 401 });
+  const access = await checkUploadAccess({ userId, jwt, strapiUrl: STRAPI_URL });
   if (access === "blocked") return Response.json({ error: "unauthorized" }, { status: 401 });
   if (access === "unavailable") {
     return Response.json({ error: "unavailable" }, { status: 503 });

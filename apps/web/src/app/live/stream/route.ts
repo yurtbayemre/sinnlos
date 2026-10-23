@@ -85,7 +85,8 @@ export async function GET(req: Request) {
   // invalid, second factor still to set up): 401, like a missing session.
   // A cms that cannot say: 503, never admitted.
   const jwt = await getStrapiToken();
-  const access = jwt ? await checkUploadAccess({ userId, jwt, strapiUrl: STRAPI_URL }) : "blocked";
+  if (!jwt) return Response.json({ error: "unauthorized" }, { status: 401 });
+  const access = await checkUploadAccess({ userId, jwt, strapiUrl: STRAPI_URL });
   if (access === "blocked") return Response.json({ error: "unauthorized" }, { status: 401 });
   if (access === "unavailable") {
     return Response.json({ error: "unavailable" }, { status: 503 });
