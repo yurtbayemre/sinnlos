@@ -16,7 +16,12 @@ import { passwordLengthProblem } from "@sinnlos/domain";
 import { LOCAL_ENABLED } from "@/lib/auth-config";
 import { STRAPI_URL } from "@/lib/config";
 import { getUserLocale } from "@/i18n/locale";
-import { clientIpFrom, normalizeIdentifier, passwordLinkRateLimiter } from "@/lib/login-rate-limit";
+import {
+  clientIpFrom,
+  normalizeIdentifier,
+  passwordLinkRateLimiter,
+  setPasswordRateLimiter,
+} from "@/lib/login-rate-limit";
 import { parseStrapiError } from "@/lib/strapi-error";
 
 /** Timeout of each cms request of these forms. */
@@ -91,13 +96,15 @@ export async function setPasswordFromLink(
   if (password !== String(formData.get("confirm") ?? "")) return { error: "passwordMismatch" };
   const length = passwordLengthProblem(password);
   if (length) return { error: length === "tooShort" ? "passwordTooShort" : "passwordTooLong" };
-  // Per client IP only. Never per link or user id: the id prefix is a
-  // small public number, so a per-id bucket would let anyone lock a
-  // person's valid link with garbage tokens for their id. The token's 256
+  // Per client IP only, in a limiter of its own (its identifier is the IP
+  // itself). Never per link or user id: the id prefix is a small public
+  // number, so a per-id bucket would let anyone lock a person's valid link
+  // with garbage tokens for their id; and never in the forgot limiter,
+  // whose identifiers are addresses anyone can submit. The token's 256
   // random bits make guessing infeasible anyway; a set password gives its
   // place back, so only refused attempts count.
   const clientIp = clientIpFrom(await headers());
-  const ticket = passwordLinkRateLimiter.tryAcquire(clientIp, `set-password@${clientIp}`);
+  const ticket = setPasswordRateLimiter.tryAcquire(clientIp, clientIp);
   if (ticket === "blocked") return { error: "tooManyRequests" };
   let res: Response | null = null;
   try {
@@ -105,7 +112,7 @@ export async function setPasswordFromLink(
   } catch (err) {
     console.error("[password] set-password did not reach the cms", err);
   }
-  passwordLinkRateLimiter.settle(ticket, res?.status === 204 ? "success" : "failure");
+  setPasswordRateLimiter.settle(ticket, res?.status === 204 ? "success" : "failure");
   if (res?.status === 204) redirect("/sign-in?passwordSet=1");
   if (res?.status === 400) {
     const code = parseStrapiError(await res.text().catch(() => "")).details?.code;

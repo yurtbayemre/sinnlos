@@ -20,8 +20,12 @@ const TOKEN = `42.${"a".repeat(43)}`;
 
 async function load(env: Record<string, string | undefined> = {}) {
   vi.resetModules();
-  delete (globalThis as { __sinnlosPasswordLinkRateLimiter?: unknown })
-    .__sinnlosPasswordLinkRateLimiter;
+  const g = globalThis as {
+    __sinnlosPasswordLinkRateLimiter?: unknown;
+    __sinnlosSetPasswordRateLimiter?: unknown;
+  };
+  delete g.__sinnlosPasswordLinkRateLimiter;
+  delete g.__sinnlosSetPasswordRateLimiter;
   for (const [key, value] of Object.entries({
     ENTRA_ENABLED: undefined,
     OIDC_ENABLED: undefined,
@@ -166,6 +170,22 @@ describe("setPasswordFromLink", () => {
     }
     // The person's own valid link, from a fresh IP, still goes through.
     clientIp = "192.0.2.50";
+    fetchMock.mockReset();
+    fetchMock.mockResolvedValue(new Response(null, { status: 204 }));
+    await expect(setPasswordFromLink({}, form(good))).rejects.toThrow();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the forgot requests apart: a flood for the address set-password@<ip> never limits <ip>", async () => {
+    const { requestPasswordReset, setPasswordFromLink } = await load();
+    for (let ip = 1; ip <= 30; ip++) {
+      clientIp = `198.51.100.${ip}`;
+      for (let i = 0; i < 3; i++) {
+        await requestPasswordReset({}, form({ email: "set-password@203.0.113.20" }));
+        await requestPasswordReset({}, form({ email: "203.0.113.20@example.test" }));
+      }
+    }
+    clientIp = "203.0.113.20";
     fetchMock.mockReset();
     fetchMock.mockResolvedValue(new Response(null, { status: 204 }));
     await expect(setPasswordFromLink({}, form(good))).rejects.toThrow();
