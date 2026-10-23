@@ -1445,6 +1445,15 @@ if [[ -n "${meili_invalid_keys}" ]]; then
   echo "       Or unset MEILISEARCH_ENABLED and COMPOSE_PROFILES." >&2
   preflight_failed=1
 fi
+# v0.27: E2E_AUTH_THROTTLE_OFF switches the cms sign-in throttle off; it is
+# for the disposable e2e stack (e2e/run.mjs) only. The compose file never
+# hands it to the cms, and infra/.env refuses it, whatever its value.
+if [[ -f "${INFRA_DIR}/.env" ]] &&
+  grep -Eq '^[[:space:]]*(export[[:space:]]+)?E2E_AUTH_THROTTLE_OFF[[:space:]]*=' "${INFRA_DIR}/.env"; then
+  echo "ERROR: infra/.env sets E2E_AUTH_THROTTLE_OFF. It switches the sign-in throttle off and is for" >&2
+  echo "       the disposable e2e stack only (e2e/run.mjs). Remove the line and re-run." >&2
+  preflight_failed=1
+fi
 # 5A-T1: the host the edge serves: with Traefik the host every router
 # matches (the rendered labels), with Caddy its site address DOMAIN.
 if [[ "${DEPLOY_EDGE}" == traefik ]]; then

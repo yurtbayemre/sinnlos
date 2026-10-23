@@ -37,6 +37,24 @@ describe("config/plugins.ts users-permissions JWTs", () => {
   });
 });
 
+describe("config/plugins.ts users-permissions sign-in throttle", () => {
+  it("keeps the plugin's throttle unless E2E_AUTH_THROTTLE_OFF is exactly 1 (e2e only)", () => {
+    const ratelimit = (store: EnvStore) =>
+      (
+        pluginsConfig({ env: makeEnv(store) })["users-permissions"].config as Record<
+          string,
+          unknown
+        >
+      ).ratelimit;
+    for (const value of [undefined, "", "0", "true", "yes"])
+      expect(
+        ratelimit(value === undefined ? {} : { E2E_AUTH_THROTTLE_OFF: value }),
+        value,
+      ).toBeUndefined();
+    expect(ratelimit({ E2E_AUTH_THROTTLE_OFF: "1" })).toEqual({ enabled: false });
+  });
+});
+
 describe("config/plugins.ts SMTP transport (B05)", () => {
   it("uses STARTTLS (requireTLS) on the default port 587", () => {
     expect(transportFor({})).toMatchObject({ port: 587, secure: false, requireTLS: true });

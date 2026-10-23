@@ -16,6 +16,12 @@
  * src/extensions/users-permissions/strapi-server.ts) works on these legacy
  * JWTs, and the web keeps one Strapi JWT per session (D-SESSION-01, no
  * refresh flow). "refresh" would change both; it is a decision of its own.
+ *
+ * E2E_AUTH_THROTTLE_OFF=1 switches the plugin's sign-in throttle off (5
+ * /auth/local per IP in 5 minutes, successes and mfa_required included):
+ * for the disposable e2e stack only (e2e/run.mjs), which signs in more
+ * often than that. The cms warns at every boot with it, production compose
+ * never hands it over, and infra/deploy.sh refuses it in infra/.env.
  */
 import { assertPasswordAllowed } from "../src/extensions/users-permissions/strapi-server";
 
@@ -52,6 +58,7 @@ export default ({ env }: { env: Env }) => ({
       },
       jwtManagement: "legacy-support",
       jwtSecret: env("JWT_SECRET"),
+      ...(env("E2E_AUTH_THROTTLE_OFF") === "1" ? { ratelimit: { enabled: false } } : {}),
       register: {
         allowedFields: ["displayName"],
       },
