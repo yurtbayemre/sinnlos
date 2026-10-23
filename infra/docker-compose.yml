@@ -277,8 +277,6 @@ services:
       # Local credentials next to an identity provider (break-glass); with
       # neither ENTRA_ENABLED nor OIDC_ENABLED 1, local sign-in is always on.
       AUTH_LOCAL_ENABLED: ${AUTH_LOCAL_ENABLED:-0}
-      # Standalone mode: enable the self-registration form (default off)
-      LOCAL_REGISTRATION: ${LOCAL_REGISTRATION:-0}
       # Microsoft Entra ID sign-in (D-ENTRA-01): off unless ENTRA_ENABLED=1,
       # then validated at start. The issuer is computed from the tenant GUID
       # (AUTH_MICROSOFT_ENTRA_ID_ISSUER is gone); ENTRA_EXCHANGE_SECRET must

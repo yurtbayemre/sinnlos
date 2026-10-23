@@ -85,12 +85,18 @@ Further reading:
   team leads write wiki pages in the wiki itself, with drafts and a page
   history; admins and editors manage the spaces at `/manage/wiki`. Admins
   also create, rename and delete departments and teams and set heads, team
-  leads and members, and manage users at `/manage/users` (role, department,
-  manager, block; accounts are still created in the admin panel or by the
-  Microsoft sign-in). Every change
+  leads and members, and manage users at `/manage/users` (invite by e-mail,
+  one or several at once; role, department, manager, block; send a
+  set-password link; reset a user's second factor). Every change
   advances a per-document revision and lands in an append-only activity
   trail that the admin panel lists.
 - **Global search (⌘K)** with anonymous search analytics.
+- **Accounts and sign-in security** for local accounts: invitations by
+  e-mail with a set-password link, forgot-password links, passwords of at
+  least 12 characters checked against a list of common passwords, and
+  two-factor sign-in with an authenticator app (TOTP) and recovery codes,
+  mandatory for admins and editors (`MFA_REQUIRED_ROLES`). Single sign-on
+  users get their second factor from their identity provider.
 
 ### Repository layout
 
@@ -444,7 +450,9 @@ server, no Docker, no Microsoft account.
 
 5. Open http://localhost:3000. You are sent to `/sign-in`; sign in with
    e-mail and password (with the demo data:
-   `alex.morgan@sinnlos.local` / `demo1234`, an `admin_role`; see
+   `alex.morgan@sinnlos.local` / `Demo-Passwort-2026!`, an `admin_role`,
+   who enrolls an authenticator app at the first sign-in unless
+   `MFA_REQUIRED_ROLES=none` is in `apps/cms/.env`; see
    [Standalone mode](#standalone-mode-no-microsoft)). The Strapi admin is
    at http://localhost:1337/admin.
 
@@ -478,24 +486,33 @@ password sign-in against Strapi; leftover `MS_*` or
 `AUTH_MICROSOFT_ENTRA_ID_*` values are ignored. This is how the owner's
 instance runs.
 
-- **Accounts:** create users in the Strapi admin (**Content Manager →
-  User**: e-mail, password, _confirmed_ on), or let people register on the
-  sign-in page with `LOCAL_REGISTRATION=1` in **both** `apps/cms/.env` and
-  `apps/web/.env.local`. New local users get the `member` role. Role,
-  department, manager and blocking are then managed in the web at
-  `/manage/users` (admins).
-- **Passwords:** users change their own on `/profile`, which signs that
-  account out of every other browser and device (the tab that changed it
-  stays signed in). There is no e-mail reset: the forgot/reset-password
-  endpoints are revoked, and an admin sets a new password in the Strapi
-  admin, which signs that user out everywhere
+- **Accounts:** admins invite people at `/manage/users`; the invitation
+  e-mail carries a set-password link that stays valid for 7 days (needs
+  SMTP). The first admin, and anyone without e-mail, is created in the
+  Strapi admin (**Content Manager → User**: e-mail, a password of at least
+  12 characters, _confirmed_ on). There is no self-registration any more
+  (v0.27). New local users get the `member` role; role, department,
+  manager and blocking are managed at `/manage/users`.
+- **Passwords:** at least 12 characters and not on a list of common
+  passwords; existing shorter passwords keep working until they are
+  changed. Users change their own on `/profile`, which signs that account
+  out of every other browser and device (the tab that changed it stays
+  signed in). A forgotten password: `/forgot-password` mails a reset link
+  that stays valid for 1 hour, and an admin can send one from
+  `/manage/users` (both need SMTP).
+- **Second factor:** password sign-ins of the roles in
+  `MFA_REQUIRED_ROLES` (default `admin_role`, `editor`) need an
+  authenticator app (TOTP); everyone else can turn it on at `/profile`.
+  Those users enroll at their next sign-in and get ten one-time recovery
+  codes. An admin resets a lost second factor at `/manage/users`; a locked-out
+  sole admin uses `infra/mfa-reset.sh <email>` on the host
   ([Local sign-in](./docs/security.md#local-sign-in)).
 - **Demo data:** `SEED_DEMO_DATA=1` in `apps/cms/.env` seeds a database
   that has no department and no user yet (`apps/cms/src/seed-demo.ts`;
   later boots skip it). It writes **12 of the 24 collection types**:
   departments, teams, announcements, events, wiki spaces and pages, kudos,
   polls, poll votes, documents, comments and reactions, plus ten users
-  (password `demo1234`): `alex.morgan@sinnlos.local` is `admin_role`;
+  (password `Demo-Passwort-2026!`): `alex.morgan@sinnlos.local` is `admin_role`;
   Sam Chen, Jordan Lee, Taylor Swift (`taylor.s@sinnlos.local`) and Riley
   Kim are `editor`; the other five are `member`. Publishing the seeded
   announcements and events, and the seeded kudos and comments, also writes
@@ -677,14 +694,13 @@ anything is deployed.
 
 ### Shared by cms and web
 
-| Variable                | Default         | Meaning                                                                                                                                                                                                                                                                                                            |
-| ----------------------- | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `REVALIDATE_SECRET`     | (unset)         | Authenticates the cms's live-event pings to the web (`POST /api/live/emit`); the name is historical. Same value on both. Unset: no pings, the web polls.                                                                                                                                                           |
-| `INTERNAL_UPLOAD_TOKEN` | (unset)         | The web's session-gated `/uploads` proxy presents it to the cms. Same value on both. Unset in production: every uploaded file answers 404; in development the gate is off.                                                                                                                                         |
-| `LIVE_EVENTS_DISABLED`  | `0`             | `1` is the kill switch for live updates (SSE): the cms sends no pings, the web polls. Same value on both.                                                                                                                                                                                                          |
-| `APP_TIME_ZONE`         | `Europe/Berlin` | IANA zone of every business date: "today", ad expiry, birthdays, digest days, the cron times, all-day events, poll deadlines. A UTC offset (`+02:00`) or unknown name stops the cms and makes the web answer every request with an error. See the [datetime contract](./docs/DEPLOYMENT.md#310-datetime-contract). |
-| `LOCAL_REGISTRATION`    | off             | `1` in both apps shows a self-registration form on the sign-in page (only while local sign-in is on). New users get `member`.                                                                                                                                                                                      |
-| `AUTH_LOCAL_ENABLED`    | off             | `1` keeps local sign-in next to Microsoft or OIDC (break-glass). Without `ENTRA_ENABLED=1` or `OIDC_ENABLED=1` local sign-in is always on.                                                                                                                                                                         |
+| Variable                | Default         | Meaning                                                                                                                                                                                                                                                                                                                  |
+| ----------------------- | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `REVALIDATE_SECRET`     | (unset)         | Authenticates the cms's live-event pings to the web (`POST /api/live/emit`); the name is historical. Same value on both. Unset: no pings, the web polls.                                                                                                                                                                 |
+| `INTERNAL_UPLOAD_TOKEN` | (unset)         | The cms-web internal secret: the web's session-gated `/uploads` proxy and its password-link pages (`/forgot-password`, `/set-password`) present it to the cms. Same value on both. Unset in production: every uploaded file answers 404; in development the uploads gate is off. Unset anywhere: no password link works. |
+| `LIVE_EVENTS_DISABLED`  | `0`             | `1` is the kill switch for live updates (SSE): the cms sends no pings, the web polls. Same value on both.                                                                                                                                                                                                                |
+| `APP_TIME_ZONE`         | `Europe/Berlin` | IANA zone of every business date: "today", ad expiry, birthdays, digest days, the cron times, all-day events, poll deadlines. A UTC offset (`+02:00`) or unknown name stops the cms and makes the web answer every request with an error. See the [datetime contract](./docs/DEPLOYMENT.md#310-datetime-contract).       |
+| `AUTH_LOCAL_ENABLED`    | off             | `1` keeps local sign-in next to Microsoft or OIDC (break-glass). Without `ENTRA_ENABLED=1` or `OIDC_ENABLED=1` local sign-in is always on.                                                                                                                                                                               |
 
 ### cms (`apps/cms/.env`)
 
@@ -693,6 +709,7 @@ anything is deployed.
 | `APP_KEYS`, `API_TOKEN_SALT`, `ADMIN_JWT_SECRET`, `TRANSFER_TOKEN_SALT`, `ENCRYPTION_KEY`                      | (none)                                                      | Strapi secrets, `openssl rand -base64 32` each (`APP_KEYS`: two, comma-separated).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | `JWT_SECRET`                                                                                                   | (none)                                                      | Signs the users' Strapi JWTs (7 days for local sign-ins, `ENTRA_SESSION_TTL` for Microsoft). Rotating it signs everyone out once. An instance upgraded from a release before 2026-09-24 must rotate it once ([runbook](./docs/DEPLOYMENT.md#upgrading-from-a-release-before-2026-09-24)); `infra/deploy.sh` enforces it. A rollback of the cms to a release before batch 13 must rotate it as well, so that no JWT a password change revoked works again ([batch 13 rollback](./docs/DEPLOYMENT.md#deploying-batch-13-2026-10-12)); the rollback commands `infra/deploy.sh` prints say so. So must every restore of a database dump or of `infra/.env`, before the cms starts ([restore](./docs/DEPLOYMENT.md#restoring-a-database-dump)). |
 | `HOST`, `PORT`                                                                                                 | `0.0.0.0`, `1337`                                           | Listen address and port. `HOST=127.0.0.1` keeps a dev cms off the network.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `MFA_REQUIRED_ROLES`                                                                                           | `admin_role,editor`                                         | The roles whose password sign-ins need a second factor (TOTP), a comma list of role types. Unset or empty means the default; `none` means nobody (tests only); an unknown role name refuses the boot. Single sign-on users get their second factor from their identity provider.                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | `PUBLIC_URL`                                                                                                   | `http://localhost:1337`                                     | Public URL of the cms (admin panel, upload URLs, CSP). Compose: `CMS_PUBLIC_URL`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | `CORS_ORIGIN`                                                                                                  | `http://localhost:3000`                                     | Browser origins that may call the cms API, comma-separated. Compose: `WEB_PUBLIC_URL`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | `WEB_INTERNAL_URL`                                                                                             | (unset; example `http://localhost:3000`)                    | Where the cms sends live-event pings. Unset: no pings. Compose: `http://sinnlos-web:3000`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
