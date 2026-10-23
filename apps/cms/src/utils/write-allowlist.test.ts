@@ -1523,6 +1523,21 @@ describe("v2 cross checks over the stored draft and the payload", () => {
     await applyWriteRule({ ackDeadline: "2026-10-30", requiresAck: true }, announcement, v2Env());
   });
 
+  it("refuses requiresAck: true while read-confirmations is off, and still takes false (v0.28)", async () => {
+    process.env.FEATURES_OFF = "read-confirmations";
+    try {
+      for (const uid of [ANNOUNCEMENT, DOCUMENT]) {
+        const error = await refusal(
+          applyWriteRule({ requiresAck: true }, rule(uid, "update", MODERATOR_CLASS), v2Env()),
+        );
+        expect(error.details).toEqual({ keys: ["requiresAck"], codes: { requiresAck: "invalid" } });
+        await applyWriteRule({ requiresAck: false }, rule(uid, "update", MODERATOR_CLASS), v2Env());
+      }
+    } finally {
+      delete process.env.FEATURES_OFF;
+    }
+  });
+
   it("asks publish readiness early only when the payload schedules a publish", async () => {
     const readiness = vi.fn(async () => ["title"]);
     const error = await refusal(
