@@ -12,8 +12,8 @@
 #
 # One transaction in the db container: exactly one account with that
 # e-mail address (case-insensitive) or nothing changes. Prints the account
-# it reset. Environment: COMPOSE_PROJECT (infra; infra/deploy.env as for
-# deploy.sh).
+# it reset, after the commit. Environment: COMPOSE_PROJECT (infra;
+# infra/deploy.env as for deploy.sh).
 set -Eeuo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -42,8 +42,6 @@ BEGIN
       (SELECT count(*) FROM mfa_target);
   END IF;
 END $$;
-\pset tuples_only on
-\pset format unaligned
 UPDATE up_users
    SET totp_secret = NULL,
        totp_enabled_at = NULL,
@@ -51,6 +49,7 @@ UPDATE up_users
        totp_recovery_codes = NULL,
        token_version = COALESCE(token_version, 0) + 1
  WHERE id = (SELECT id FROM mfa_target)
-RETURNING 'mfa-reset: second factor cleared for user ' || id || ' (' || username || '), token version now ' || token_version;
+RETURNING id AS reset_id, username AS reset_username, token_version AS reset_tv \gset
 COMMIT;
+\echo mfa-reset: second factor cleared for user :reset_id (:reset_username), token version now :reset_tv
 SQL
