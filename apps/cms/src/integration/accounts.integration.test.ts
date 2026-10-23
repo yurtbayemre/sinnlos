@@ -15,7 +15,13 @@ import {
   type Row,
   type TestStrapi,
 } from "./harness.test.helper";
-import { holdTransaction, qualified, settle, waitForLockWait } from "./pg-lock.test.helper";
+import {
+  holdTransaction,
+  qualified,
+  settle,
+  testSchema,
+  waitForLockWait,
+} from "./pg-lock.test.helper";
 
 const USER = "plugin::users-permissions.user";
 const TOKEN = "integration-internal-token-0123456789";
@@ -569,7 +575,7 @@ describe.each(testEngines())("accounts (v0.27) on %s", (engine) => {
   it("e-mail addresses are unique in the database, case-insensitively", async () => {
     const sql =
       engine === "postgres"
-        ? "SELECT indexname AS name FROM pg_indexes WHERE indexname = 'up_users_email_lower_uq'"
+        ? `SELECT indexname AS name FROM pg_indexes WHERE indexname = 'up_users_email_lower_uq' AND schemaname = '${testSchema(t)}'`
         : "SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'up_users_email_lower_uq'";
     const knex = t.strapi.db.connection as unknown as { raw(sql: string): Promise<unknown> };
     const result = await knex.raw(sql);
