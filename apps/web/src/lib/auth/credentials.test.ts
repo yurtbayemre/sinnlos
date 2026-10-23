@@ -3,6 +3,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   isRateLimitedSignIn,
   LoginBlockedSignIn,
+  MfaInvalidSignIn,
+  MfaRequiredSignIn,
   StrapiRateLimitedSignIn,
 } from "@/lib/auth-errors";
 import {
@@ -70,8 +72,12 @@ function harness() {
     now: () => clock,
     warn,
   };
-  const signIn = (identifier: unknown = EMAIL, password: unknown = "pw", clientIp = IP) =>
-    authorizeCredentials({ identifier, password, clientIp }, deps);
+  const signIn = (
+    identifier: unknown = EMAIL,
+    password: unknown = "pw",
+    clientIp = IP,
+    otp?: unknown,
+  ) => authorizeCredentials({ identifier, password, clientIp, otp }, deps);
   return {
     answers,
     calls,
@@ -142,6 +148,52 @@ describe("authorizeCredentials: the request and the user", () => {
     ["no JSON", undefined],
   ])("answers null for a 200 with %s", async (_label, body) => {
     h.answers.local = { status: 200, body };
+    await expect(h.signIn()).resolves.toBeNull();
+  });
+});
+
+describe("authorizeCredentials: the second factor (v0.27)", () => {
+  /** The cms's 401 for a verified password whose account has a second factor. */
+  const mfaAnswer = (code: string): Answer => ({
+    status: 401,
+    body: { data: null, error: { status: 401, name: "UnauthorizedError", details: { code } } },
+  });
+
+  it("sends the code along only when there is one", async () => {
+    await h.signIn(EMAIL, "pw", IP, " 123456 ");
+    expect(JSON.parse(String(h.calls[0]!.init.body))).toEqual({
+      identifier: EMAIL,
+      password: "pw",
+      otp: "123456",
+    });
+    h.calls.length = 0;
+    await h.signIn(EMAIL, "pw", IP, "");
+    expect(JSON.parse(String(h.calls[0]!.init.body))).toEqual({
+      identifier: EMAIL,
+      password: "pw",
+    });
+  });
+
+  it("asks for the code (mfa_required) without counting a failure", async () => {
+    h.answers.local = mfaAnswer("mfa_required");
+    for (let i = 0; i < IDENTIFIER_MAX_FAILURES + 2; i++) {
+      await expect(h.signIn()).rejects.toBeInstanceOf(MfaRequiredSignIn);
+    }
+    expect(h.limiter.isBlocked(IP, EMAIL, T0)).toBe(false);
+  });
+
+  it("counts a wrong code (mfa_invalid) like a wrong password", async () => {
+    h.answers.local = mfaAnswer("mfa_invalid");
+    for (let i = 0; i < IDENTIFIER_MAX_FAILURES; i++) {
+      await expect(h.signIn(EMAIL, "pw", `10.0.9.${i}`, "000000")).rejects.toBeInstanceOf(
+        MfaInvalidSignIn,
+      );
+    }
+    expect(h.limiter.isBlocked("192.0.2.9", EMAIL, T0)).toBe(true);
+  });
+
+  it("answers any other 401 like wrong credentials", async () => {
+    h.answers.local = { status: 401, body: { error: { name: "UnauthorizedError" } } };
     await expect(h.signIn()).resolves.toBeNull();
   });
 });

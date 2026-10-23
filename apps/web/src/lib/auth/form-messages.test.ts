@@ -22,7 +22,7 @@ type Exact<Union, List extends readonly unknown[]> = [Union] extends [List[numbe
     : false
   : false;
 
-const SIGN_IN_CODES = ["invalidCredentials", "rateLimited"] as const;
+const SIGN_IN_CODES = ["invalidCredentials", "rateLimited", "mfaInvalid"] as const;
 const PROFILE_CODES = ["profileSaved", "tooLong", "invalid", "profileSaveFailed"] as const;
 const PASSWORD_CODES = [
   "passwordChanged",

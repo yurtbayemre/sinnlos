@@ -379,5 +379,15 @@ export function createLoginRateLimiter(): LoginRateLimiter {
  */
 const g = globalThis as typeof globalThis & {
   __sinnlosLoginRateLimiter?: LoginRateLimiter;
+  __sinnlosPasswordLinkRateLimiter?: LoginRateLimiter;
 };
 export const loginRateLimiter = (g.__sinnlosLoginRateLimiter ??= createLoginRateLimiter());
+
+/**
+ * v0.27: the set-password requests (/forgot-password, /set-password,
+ * lib/password-actions.ts). Every submission counts. Its own buckets, so
+ * reset requests for someone's address can never lock that person's
+ * sign-in in loginRateLimiter. Pinned on globalThis like the one above.
+ */
+export const passwordLinkRateLimiter = (g.__sinnlosPasswordLinkRateLimiter ??=
+  createLoginRateLimiter());

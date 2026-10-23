@@ -29,6 +29,7 @@ export const PROFILE_TEXT_MAX = 255;
 export const AUTH_FORM_MESSAGES = {
   invalidCredentials: "error_invalidCredentials",
   rateLimited: "error_rateLimited",
+  mfaInvalid: "error_mfaInvalid",
 } as const satisfies Record<SignInErrorCode, keyof Messages["auth"]>;
 
 type ProfileCode = ProfileErrorCode | NonNullable<ProfileFormState["success"]>;

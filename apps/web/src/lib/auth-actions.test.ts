@@ -40,12 +40,15 @@ async function load(env: Record<string, string | undefined> = {}) {
   // The error classes of THIS module graph (resetModules re-evaluates
   // next-auth, and instanceof checks need the same class).
   const { CredentialsSignin } = await import("next-auth");
-  const { LoginBlockedSignIn, StrapiRateLimitedSignIn } = await import("./auth-errors");
+  const { LoginBlockedSignIn, MfaInvalidSignIn, MfaRequiredSignIn, StrapiRateLimitedSignIn } =
+    await import("./auth-errors");
   return {
     ...actions,
     loginRateLimiter,
     CredentialsSignin,
     LoginBlockedSignIn,
+    MfaInvalidSignIn,
+    MfaRequiredSignIn,
     StrapiRateLimitedSignIn,
   };
 }
@@ -116,6 +119,28 @@ describe("signInWithCredentials", () => {
       values: { identifier: "ada@example.test" },
     });
     expect(signInMock).toHaveBeenCalledTimes(1);
+    expect(console.error).not.toHaveBeenCalled();
+  });
+
+  it("asks for the second factor, and maps a wrong code to mfaInvalid (v0.27)", async () => {
+    const { signInWithCredentials, MfaRequiredSignIn, MfaInvalidSignIn } = await load();
+    signInMock.mockRejectedValueOnce(new MfaRequiredSignIn());
+    await expect(signInWithCredentials({}, signInForm())).resolves.toEqual({
+      mfa: true,
+      values: { identifier: "ada@example.test" },
+    });
+    signInMock.mockRejectedValueOnce(new MfaInvalidSignIn());
+    const form = signInForm();
+    form.set("otp", "123456");
+    await expect(signInWithCredentials({}, form)).resolves.toEqual({
+      error: "mfaInvalid",
+      mfa: true,
+      values: { identifier: "ada@example.test" },
+    });
+    expect(signInMock).toHaveBeenLastCalledWith(
+      "local",
+      expect.objectContaining({ otp: "123456" }),
+    );
     expect(console.error).not.toHaveBeenCalled();
   });
 

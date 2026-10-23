@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, useState } from "react";
 import { useTranslations } from "next-intl";
 import { signInWithCredentials, type SignInFormState } from "@/lib/auth-actions";
 import { AUTH_FORM_MESSAGES } from "@/lib/auth/form-messages";
@@ -14,6 +14,9 @@ export function LocalSignInForm({ from = "/" }: { from?: string }) {
     signInWithCredentials,
     {},
   );
+  // Controlled, so the password survives React 19's form reset when the
+  // cms asks for the second factor and the form sends all three again.
+  const [password, setPassword] = useState("");
 
   return (
     <form action={formAction} className="space-y-3">
@@ -46,9 +49,34 @@ export function LocalSignInForm({ from = "/" }: { from?: string }) {
           type="password"
           autoComplete="current-password"
           required
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
           className={inputClass}
         />
       </div>
+      {state.mfa && (
+        <div>
+          <p className="mb-2 text-sm text-muted-foreground">{t("mfaPrompt")}</p>
+          <label htmlFor="otp" className="mb-1 block text-sm font-medium">
+            {t("otp")}
+          </label>
+          <input
+            id="otp"
+            name="otp"
+            type="text"
+            inputMode="text"
+            autoComplete="one-time-code"
+            autoFocus
+            required
+            maxLength={32}
+            aria-describedby="otp-hint"
+            className={inputClass}
+          />
+          <p id="otp-hint" className="mt-1 text-xs text-muted-foreground">
+            {t("otpHint")}
+          </p>
+        </div>
+      )}
       {state.error && (
         <p role="alert" className="text-sm text-destructive">
           {t(AUTH_FORM_MESSAGES[state.error])}

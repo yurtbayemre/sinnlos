@@ -15,7 +15,11 @@ import type { Route } from "next";
 import { CredentialsSignin } from "next-auth";
 import { signIn, signOut } from "@/auth";
 import { ENTRA, entraLogoutUrl } from "@/lib/auth-config";
-import { isRateLimitedSignIn } from "@/lib/auth-errors";
+import {
+  isRateLimitedSignIn,
+  MFA_INVALID_SIGN_IN_CODE,
+  MFA_REQUIRED_SIGN_IN_CODE,
+} from "@/lib/auth-errors";
 import { clientIpFrom, loginRateLimiter } from "@/lib/login-rate-limit";
 import { getSession } from "@/lib/session";
 import { safeInternalPath } from "@/lib/utils";
@@ -36,10 +40,15 @@ export async function signInWithOidc(formData: FormData) {
 }
 
 /** What the sign-in form shows (auth.error_<code>). */
-export type SignInErrorCode = "invalidCredentials" | "rateLimited";
+export type SignInErrorCode = "invalidCredentials" | "rateLimited" | "mfaInvalid";
 
 export type SignInFormState = {
   error?: SignInErrorCode;
+  /**
+   * v0.27: the password was right and the account asks for its second
+   * factor; the form shows the code field and sends all three again.
+   */
+  mfa?: true;
   /**
    * The typed identifier, echoed on error: React 19 resets the form after
    * every settled action. The password is never echoed.
@@ -64,6 +73,7 @@ export async function signInWithCredentials(
     await signIn("local", {
       identifier: formData.get("identifier"),
       password: formData.get("password"),
+      otp: formData.get("otp") ?? "",
       redirectTo: safeInternalPath(formData.get("from")),
     });
   } catch (err) {
@@ -75,6 +85,13 @@ export async function signInWithCredentials(
     // the pre-check above passed (parallel attempts in flight took the last
     // places in between, FX39).
     if (isRateLimitedSignIn(err)) return { error: "rateLimited", values };
+    // The second factor (v0.27): asked for, or a wrong / used code.
+    if (err instanceof CredentialsSignin && err.code === MFA_REQUIRED_SIGN_IN_CODE) {
+      return { mfa: true, values };
+    }
+    if (err instanceof CredentialsSignin && err.code === MFA_INVALID_SIGN_IN_CODE) {
+      return { error: "mfaInvalid", mfa: true, values };
+    }
     // authorize() answered null (CredentialsSignin): wrong credentials or
     // Strapi unreachable — one answer, no oracle.
     if (!(err instanceof CredentialsSignin)) console.error("[auth] sign-in failed", err);

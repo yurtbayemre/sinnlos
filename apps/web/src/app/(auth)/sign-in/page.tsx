@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import type { Route } from "next";
 import { getTranslations } from "next-intl/server";
@@ -24,9 +25,14 @@ export const dynamic = "force-dynamic";
 export default async function SignInPage({
   searchParams,
 }: {
-  searchParams: Promise<{ from?: string; expired?: string; error?: string | string[] }>;
+  searchParams: Promise<{
+    from?: string;
+    expired?: string;
+    passwordSet?: string;
+    error?: string | string[];
+  }>;
 }) {
-  const { from: rawFrom, expired, error } = await searchParams;
+  const { from: rawFrom, expired, passwordSet, error } = await searchParams;
   const from = safeInternalPath(rawFrom);
   const errorKey = signInErrorKey(error);
 
@@ -72,6 +78,11 @@ export default async function SignInPage({
         </CardHeader>
         <CardContent className="space-y-4">
           {expired && <p className="text-center text-sm text-destructive">{t("sessionExpired")}</p>}
+          {passwordSet && (
+            <p role="status" className="text-center text-sm text-muted-foreground">
+              {t("passwordSet")}
+            </p>
+          )}
           {errorKey && (
             <p role="alert" className="text-center text-sm text-destructive">
               {t(errorKey)}
@@ -113,6 +124,14 @@ export default async function SignInPage({
           )}
 
           {LOCAL_ENABLED && <LocalSignInForm from={from} />}
+
+          {LOCAL_ENABLED && (
+            <p className="text-center text-sm">
+              <Link href="/forgot-password" className="text-primary hover:underline">
+                {t("forgotPassword")}
+              </Link>
+            </p>
+          )}
 
           <p className="text-center text-xs text-muted-foreground">{t("itPolicy")}</p>
         </CardContent>
