@@ -402,10 +402,11 @@ const CONTRACTS: Record<string, PolicyContract> = {
     anonymous: "deny",
     cases: [read(ADMIN_ONLY, false)],
   },
+  // v0.28: no bypass; admin_role counts through /notifications/unread-count.
   "notification-visibility": {
     kind: "read-filter",
     anonymous: "deny",
-    cases: [read(ADMIN_ONLY, false)],
+    cases: [read([], false)],
   },
   // FX21: raw RSVP rows are the caller's own (the summary route aggregates
   // everyone else's). A client user filter is refused with 400; its own

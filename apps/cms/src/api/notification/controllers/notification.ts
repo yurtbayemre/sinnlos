@@ -1,4 +1,5 @@
 import { factories } from "@strapi/strapi";
+import { ADMIN, hasRole } from "../../../bootstrap/roles";
 import { parseEntryRef, parseRowId } from "../../../utils/entry-id";
 import { emitLiveEvent } from "../../../utils/live-events";
 
@@ -34,6 +35,22 @@ export default factories.createCoreController("api::notification.notification", 
     // the recipient — it is the caller.
     if (count > 0) emitLiveEvent({ kind: "notification", recipientId: user.id });
     return ctx.send({ updated: count });
+  },
+
+  /**
+   * GET /api/notifications/unread-count (v0.28): `{ count }`, every
+   * recipient's unread rows together, for /manage/analytics. A number only:
+   * the notification reads lost their admin_role bypass, so nobody reads
+   * another person's notifications through the API any more.
+   */
+  async unreadCount(ctx) {
+    const user = ctx.state.user;
+    if (!user) return ctx.unauthorized();
+    if (!hasRole(user, [ADMIN])) return ctx.forbidden();
+    const count = await strapi.db
+      .query("api::notification.notification")
+      .count({ where: { readAt: null } });
+    return ctx.send({ count });
   },
 
   async markAllRead(ctx) {
