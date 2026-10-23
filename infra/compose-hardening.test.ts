@@ -149,6 +149,8 @@ describe("cms runtime switches (LF03, B05)", () => {
     "      SEARCH_LOG_RETENTION_DAYS: ${SEARCH_LOG_RETENTION_DAYS:-}",
     // v0.28: the training evidence retention, empty = 3 years.
     "      TRAINING_EVIDENCE_RETENTION_YEARS: ${TRAINING_EVIDENCE_RETENTION_YEARS:-}",
+    // v0.28: the UI language names an anonymised person.
+    "      DEFAULT_LOCALE: ${DEFAULT_LOCALE:-en}",
   ])("passes %s to the cms", (line) => {
     expect(block("  cms:")).toContain(line);
   });

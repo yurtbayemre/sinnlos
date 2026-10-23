@@ -78,7 +78,7 @@ Die Anonymisierung ist **endgültig**. Das Konto lässt sich danach weder entspe
 
 **Gelöscht:** Profil (Name, E-Mail, Benutzername, Stellenbezeichnung, Telefon, Büro, Eintrittsdatum, Geburtstag, Sprache, die Digest-Abos), Passwort, Zweiter Faktor und Links, Profilbild, Reaktionen, Umfragestimmen, Zusagen, Kudos **an** die Person, alle Benachrichtigungen der Person, ihre Lesebestätigungen, ihre Marktplatz-Anzeigen mit Bildern.
 
-- Das Konto heißt danach „Ehemalige Person“, Benutzername `former-<ID>`, E-Mail `former-<ID>@anonymised.invalid`.
+- Das Konto heißt danach „Ehemalige Person“ (bei `DEFAULT_LOCALE=en`: „Former person“), Benutzername `former-<ID>`, E-Mail `former-<ID>@anonymised.invalid`.
 - In Benachrichtigungen anderer, die die Person nannten, steht „Jemand“. Ausnahme: Benachrichtigungen aus der Zeit, bevor Titel für jede Sprache neu erzeugt wurden (vor v0.17.10), verlieren nur die Verknüpfung zum Konto und behalten ihren gespeicherten Titel, der den Namen enthalten kann, bis zu ihrer Löschfrist.
 - Das Profilbild wird entfernt, wenn keine andere Stelle es verwendet. Sonst meldet die Seite das, und ein technischer Admin löscht die Datei in der Medienbibliothek.
 

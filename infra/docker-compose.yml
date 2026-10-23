@@ -209,6 +209,9 @@ services:
       # Digest language for a user whose profile has none (en or de,
       # default en like the web's DEFAULT_LOCALE; AC04).
       DIGEST_DEFAULT_LOCALE: ${DIGEST_DEFAULT_LOCALE:-en}
+      # The web's UI language (below); the cms names an anonymised person
+      # in it ("Ehemalige Person" / "Former person", v0.28).
+      DEFAULT_LOCALE: ${DEFAULT_LOCALE:-en}
       # Optional search ranking (v0.21, docs/DEPLOYMENT.md "Meilisearch
       # (optional search)"): off unless MEILISEARCH_ENABLED=1. The cms keeps
       # the index sinnlos_search current with the write key; it never gets

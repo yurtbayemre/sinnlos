@@ -12,7 +12,6 @@ import {
 } from "@sinnlos/domain";
 import { errors } from "@strapi/utils";
 
-import { digestDefaultLocale } from "../digest/render-digest";
 import { recordAuditEvent, type AuditHost } from "./audit";
 import { runWithDeleteAudit } from "./delete-audit";
 import { lockUserRow, type MfaHost } from "./mfa-core";
@@ -56,7 +55,7 @@ import { assertActiveAdmin, lockDirectory, type UserAdminHost } from "./user-adm
  *      `former-<documentId>@anonymised.invalid` (documentIds are unique; a
  *      unique violation fails the whole run and overwrites nothing), the
  *      display name "Ehemalige Person" / "Former person"
- *      (DIGEST_DEFAULT_LOCALE), every profile field, the password, tokens
+ *      (DEFAULT_LOCALE, the instance's UI language), every profile field, the password, tokens
  *      and the second factor cleared, the avatar unlinked, `anonymisedAt`.
  *      KEPT on purpose: the identity-provider ids (an SSO sign-in finds the
  *      blocked row and is refused before any profile sync, instead of
@@ -286,7 +285,8 @@ function tombstoneData(documentId: string, at: Date, avatarUnlinked: boolean): R
   return {
     username: `former-${documentId}`,
     email: `former-${documentId}@anonymised.invalid`,
-    displayName: formerPersonLabel(digestDefaultLocale()),
+    // The UI language of the instance: the name is read in the web, not in a digest.
+    displayName: formerPersonLabel(process.env.DEFAULT_LOCALE?.trim().toLowerCase()),
     jobTitle: null,
     phone: null,
     officeLocation: null,
