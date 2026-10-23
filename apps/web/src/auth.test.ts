@@ -133,14 +133,16 @@ const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit): Pr
       user: { id: 7, username: "ada", email: "ada@example.test" },
     });
   }
-  if (url.startsWith(`${STRAPI}/api/users/me`)) {
+  if (url.startsWith(`${STRAPI}/api/me`)) {
     return json({
-      id: 7,
-      username: "ada",
-      displayName: "Ada",
-      email: "ada@example.test",
-      role: { type: "admin_role" },
-      department: { id: 3, name: "Engineering", slug: "engineering" },
+      data: {
+        id: 7,
+        username: "ada",
+        displayName: "Ada",
+        email: "ada@example.test",
+        role: { type: "admin_role" },
+        department: { id: 3, name: "Engineering", slug: "engineering" },
+      },
     });
   }
   if (url === `${LOGIN}/${TENANT}/v2.0/.well-known/openid-configuration`) {
