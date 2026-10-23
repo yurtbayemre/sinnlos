@@ -37,7 +37,33 @@ export function parseInviteLines(text: string): InviteLine[] {
     });
 }
 
-type Row = InviteLine & { outcome?: InviteOutcome };
+export type InviteRow = InviteLine & { outcome?: InviteOutcome };
+type Row = InviteRow;
+
+/** A row still to send: valid and not yet answered, or failed in transit. */
+export const isOpen = (row: InviteRow) => row.valid && (!row.outcome || row.outcome === "failed");
+
+/**
+ * Sends the open rows one after the other. A call that throws (the action
+ * never answered) marks its row failed, so it stays open for the next try,
+ * and the rest still go out.
+ */
+export async function sendOpenInvites(
+  rows: readonly InviteRow[],
+  invite: (row: InviteRow) => Promise<InviteOutcome>,
+  onResult: (index: number, outcome: InviteOutcome) => void,
+): Promise<void> {
+  for (const [index, row] of rows.entries()) {
+    if (!isOpen(row)) continue;
+    let outcome: InviteOutcome;
+    try {
+      outcome = await invite(row);
+    } catch {
+      outcome = "failed";
+    }
+    onResult(index, outcome);
+  }
+}
 
 /**
  * /manage/users/invite (v0.27): addresses, one role and one department for
@@ -50,28 +76,33 @@ export function UserInviteForm({ options }: { options: OrgOptionsView }) {
   const [department, setDepartment] = useState("");
   const [rows, setRows] = useState<Row[] | null>(null);
   const [sending, setSending] = useState(false);
-  const done = rows !== null && rows.every((row) => !row.valid || row.outcome);
+  const openCount = rows?.filter(isOpen).length ?? 0;
+  const done = rows !== null && openCount === 0;
 
   const send = async () => {
     if (!rows) return;
     setSending(true);
-    for (const [index, row] of rows.entries()) {
-      if (!row.valid) continue;
-      const outcome = await inviteUser({
-        email: row.email,
-        displayName: row.name,
-        role,
-        department: department || null,
-      });
-      setRows((current) =>
-        current ? current.map((r, i) => (i === index ? { ...r, outcome } : r)) : current,
+    try {
+      await sendOpenInvites(
+        rows,
+        (row) =>
+          inviteUser({
+            email: row.email,
+            displayName: row.name,
+            role,
+            department: department || null,
+          }),
+        (index, outcome) =>
+          setRows((current) =>
+            current ? current.map((r, i) => (i === index ? { ...r, outcome } : r)) : current,
+          ),
       );
+    } finally {
+      setSending(false);
     }
-    setSending(false);
   };
 
   if (rows) {
-    const validCount = rows.filter((row) => row.valid).length;
     return (
       <div className="space-y-4">
         <ul className="divide-y rounded-xl border text-sm">
@@ -115,8 +146,8 @@ export function UserInviteForm({ options }: { options: OrgOptionsView }) {
             </>
           ) : (
             <>
-              <Button type="button" disabled={sending || validCount === 0} onClick={send}>
-                {t("invite.send", { count: validCount })}
+              <Button type="button" disabled={sending || openCount === 0} onClick={send}>
+                {t("invite.send", { count: openCount })}
               </Button>
               <Button
                 type="button"

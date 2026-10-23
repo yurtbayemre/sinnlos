@@ -13,7 +13,7 @@ vi.mock("next/cache", () => ({ refresh: () => refresh() }));
 vi.mock("@/lib/viewer", () => ({ getViewer: async () => viewer }));
 const { saveUser, handRoleToEntra, inviteUser, sendLink, resetUserMfa } =
   await import("./user-actions");
-const { parseInviteLines } = await import("@/components/manage/user-invite-form");
+const { parseInviteLines, sendOpenInvites } = await import("@/components/manage/user-invite-form");
 
 const DEPT = "dept00000000000000000001";
 const user: UserAdminDetail = {
@@ -225,5 +225,48 @@ describe("invitations, links and the 2FA reset (v0.27)", () => {
     ]);
     const many = Array.from({ length: 150 }, (_, i) => `u${i}@x.test`).join("\n");
     expect(parseInviteLines(many)).toHaveLength(100);
+  });
+});
+
+describe("the bulk invitation loop and a stale session (v0.27)", () => {
+  const row = (email: string, extra = {}) => ({ email, name: "", valid: true, ...extra });
+
+  it("keeps going after a call that throws, and a retry sends only the open rows", async () => {
+    const rows = [row("a@x.test"), row("b@x.test"), row("c@x.test"), row("bad", { valid: false })];
+    const results: [number, string][] = [];
+    const invite = vi.fn(async (r: { email: string }) => {
+      if (r.email === "b@x.test") throw new TypeError("fetch failed");
+      return "sent" as const;
+    });
+    await sendOpenInvites(rows, invite, (index, outcome) => results.push([index, outcome]));
+    expect(results).toEqual([
+      [0, "sent"],
+      [1, "failed"],
+      [2, "sent"],
+    ]);
+    invite.mockClear();
+    const after = rows.map((r, i) => ({ ...r, outcome: results.find(([j]) => j === i)?.[1] }));
+    await sendOpenInvites(after as never, invite, () => undefined);
+    expect(invite.mock.calls.map(([r]) => r.email)).toEqual(["b@x.test"]);
+  });
+
+  it("lets a stale session's redirect through instead of a form error (session_outdated)", async () => {
+    // strapi() turns the cms's 401 session_outdated into the sign-in redirect.
+    const { redirect } = await vi.importActual<typeof import("next/navigation")>("next/navigation");
+    let signInRedirect: unknown;
+    try {
+      redirect("/sign-in?expired=1");
+    } catch (error) {
+      signInRedirect = error;
+    }
+    strapi.mockRejectedValue(signInRedirect);
+    await expect(saveUser(12, { ...initial, role: "editor" }, initial)).rejects.toBe(
+      signInRedirect,
+    );
+    await expect(
+      inviteUser({ email: "ada@example.test", role: "member", department: null }),
+    ).rejects.toBe(signInRedirect);
+    await expect(sendLink(12)).rejects.toBe(signInRedirect);
+    await expect(resetUserMfa(12)).rejects.toBe(signInRedirect);
   });
 });
