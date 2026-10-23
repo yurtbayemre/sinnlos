@@ -17,6 +17,7 @@ import { setTimeout as delay } from "node:timers/promises";
  * connection?: {client?: {pool?: {numUsed(): number, numPendingAcquires(): number}}}},
  * plugin(name: string): {service(name: string): {add(data: Record<string, unknown>): Promise<Row>}},
  * log: {level: string}, cron: {stop(): void}, load(): Promise<unknown>, destroy(): Promise<void>,
+ * config: {set(key: string, value: unknown): void},
  * server: {httpServer: import("node:http").Server, listen(port: number, host: string, callback: () => void): unknown}
  * }} Cms
  */
@@ -193,6 +194,10 @@ async function start() {
   cms.log.level = "error";
   await cms.load();
   cms.cron.stop();
+  // The specs sign in more often than the users-permissions throttle allows
+  // (per IP). Off in this disposable container only, like the integration
+  // harness; the plugin reads it per request.
+  cms.config.set("plugin::users-permissions.ratelimit", { enabled: false });
   if (stopping) return;
 
   phase = "fixture creation";

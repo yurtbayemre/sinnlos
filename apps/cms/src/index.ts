@@ -112,11 +112,6 @@ export default {
     // does any users-permissions JWT mode but legacy-support (refresh mode
     // would bypass the token version and the second-factor claims).
     parseMfaRequiredRoles(process.env.MFA_REQUIRED_ROLES);
-    if (process.env.E2E_AUTH_THROTTLE_OFF === "1") {
-      strapi.log.warn(
-        "[auth] E2E_AUTH_THROTTLE_OFF=1: the users-permissions sign-in throttle is OFF. Test-only (the e2e stack); never on a real instance (config/plugins.ts).",
-      );
-    }
     const jwtMode =
       strapi.config?.get?.("plugin::users-permissions.jwtManagement", "legacy-support") ??
       "legacy-support";

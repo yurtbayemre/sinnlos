@@ -216,9 +216,6 @@ export async function main(args) {
       // (editor, lead, member) sign in as before while mfa.spec.ts and
       // invite.spec.ts go through the mandatory enrollment.
       MFA_REQUIRED_ROLES: "admin_role",
-      // The specs sign in more often than the plugin's throttle allows (5
-      // /auth/local per IP in 5 minutes). Test-only: never set elsewhere.
-      E2E_AUTH_THROTTLE_OFF: "1",
       // Invitation mail into the run's mailpit (STARTTLS with mailpit's own
       // self-signed certificate, trusted only inside this disposable stack).
       SMTP_HOST: "mailpit",

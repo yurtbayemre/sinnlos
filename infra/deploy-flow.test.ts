@@ -172,7 +172,6 @@ function deploys(steps: readonly Step[], mode?: ShellMode): StepReport[] {
     COMPOSE_JSON,
     "COMPOSE_JSON",
     // The same instance with the example DOMAIN of infra/.env.example.
-    'cp "$T/compose.json" "$T/compose-ok.json"',
     "cat > \"$T/compose-example.json\" <<'COMPOSE_JSON'",
     composeJson("intranet.example.com"),
     "COMPOSE_JSON",
@@ -907,12 +906,6 @@ describe.skipIf(!RUN_SEQUENCES)("deploy.sh: checks, dry run and parameters (FX35
         before: 'cp "$T/compose-example.json" "$T/compose.json"',
         args: ["--check"],
       },
-      // v0.27: the e2e-only throttle switch in infra/.env: --check refuses it.
-      /* 22 */ {
-        before:
-          'cp "$T/compose-ok.json" "$T/compose.json"; echo "E2E_AUTH_THROTTLE_OFF=0" >> "$REPO/infra/.env"',
-        args: ["--check"],
-      },
     ]);
   }, SEQUENCE_BUDGET);
 
@@ -945,15 +938,6 @@ describe.skipIf(!RUN_SEQUENCES)("deploy.sh: checks, dry run and parameters (FX35
     );
     expect(run.stderr).toContain("Preflight failed. Nothing was changed.");
     expect(run.stdout).not.toContain("--check: nothing deployed.");
-    expect(called(run, /^curl |^docker (tag|image rm)|compose .* (build|up)/)).toEqual([]);
-  });
-
-  it("refuses E2E_AUTH_THROTTLE_OFF in infra/.env, whatever its value (e2e only, v0.27)", () => {
-    const run = r[22];
-    expect(run.status).toBe(1);
-    expect(run.stderr).toContain("ERROR: infra/.env sets E2E_AUTH_THROTTLE_OFF.");
-    expect(run.stderr).not.toContain("DOMAIN in infra/.env does not fit");
-    expect(run.stderr).toContain("Preflight failed. Nothing was changed.");
     expect(called(run, /^curl |^docker (tag|image rm)|compose .* (build|up)/)).toEqual([]);
   });
 
