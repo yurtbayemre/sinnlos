@@ -1,9 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { useActionState, useEffect, useSyncExternalStore } from "react";
+import { useActionState, useSyncExternalStore } from "react";
 import { useTranslations } from "next-intl";
 import { PASSWORD_MIN_LENGTH } from "@sinnlos/domain";
+import { linkTokenStore } from "@/lib/link-token";
 import {
   requestPasswordReset,
   setPasswordFromLink,
@@ -58,32 +59,26 @@ export function ForgotPasswordForm() {
   );
 }
 
-/** The link token of this page load, taken from the URL fragment once. */
-let linkToken: string | undefined;
-const readLinkToken = () => (linkToken ??= window.location.hash.slice(1));
-const noSubscription = () => () => {};
-
 /**
- * /set-password: the token lives in the URL fragment of the mail link, so
- * the browser never sends it to a server on its own. It is read once,
- * removed from the address bar and the history entry, and posted with the
- * new password.
+ * /set-password: the token comes from the mail link's URL fragment
+ * (lib/link-token.ts takes it and scrubs the address bar). A second link
+ * opened in the same tab starts the form afresh (the key), with no error of
+ * the first one left over.
  */
 export function SetPasswordForm() {
-  const t = useTranslations("auth");
   // null on the server and during hydration; the fragment's token after.
-  const token = useSyncExternalStore(noSubscription, readLinkToken, () => null);
+  const token = useSyncExternalStore(linkTokenStore.subscribe, linkTokenStore.read, () => null);
+  if (token === null) return null;
+  return <LinkPasswordForm key={token} token={token} />;
+}
+
+function LinkPasswordForm({ token }: { token: string }) {
+  const t = useTranslations("auth");
   const [state, action, isPending] = useActionState<SetPasswordState, FormData>(
     setPasswordFromLink,
     {},
   );
-  useEffect(() => {
-    if (window.location.hash) {
-      window.history.replaceState(null, "", window.location.pathname + window.location.search);
-    }
-  }, []);
 
-  if (token === null) return null;
   if (token === "" || state.error === "tokenInvalid") {
     return (
       <div className="space-y-3 text-sm">
