@@ -46,6 +46,7 @@ Then edit `infra/.env`. The comments in the file explain every key.
 - **Second factor:** `MFA_REQUIRED_ROLES` stays empty for the default: admins and editors sign in with an authenticator app as well (section 6). `ENCRYPTION_KEY` encrypts those app secrets, so it belongs in your `.env` backup.
 - **Language and time:** `DEFAULT_LOCALE` (`de` or `en`) and `APP_TIME_ZONE`.
 - **Your links:** `PRIVACY_URL`, `IMPRINT_URL` and, optionally, `WHISTLEBLOWING_URL`. If you change the code, also set `SOURCE_URL` to the source of the version you run (AGPL-3.0, §13).
+- **Modules and data protection:** `FEATURES_OFF` switches off modules you do not use (`events`, `training`, `marketplace`, `kudos`, `celebrations`, `polls`, `duty-plans`, `kpis`) and the features `read-confirmations`, `training-reports` and `search-logging`; empty keeps everything on. `TRAINING_EVIDENCE_RETENTION_YEARS` (3) and `SEARCH_LOG_RETENTION_DAYS` (90) set two retention periods. Hand [data-protection.md](data-protection.md) (German) to your data-protection officer and works council: it lists every data class, who sees it, when it is deleted, and how export and anonymisation work.
 
 `infra/deploy.sh --check` validates the file and changes nothing.
 
@@ -184,5 +185,6 @@ On the machine with the private key:
    3. Run `infra/restore-db.sh prepare sinnlos.dump`, then `apply`, `rotate-jwt` and `start`. Each step says what it did. The rotation signs everyone out.
 2. **Uploads:** untar the uploads artifact into the `infra_cms_uploads` volume with cms and web stopped.
 3. **Configuration:** the `.env` artifact holds the `infra/.env` of that day.
+4. **Anonymisations:** a backup from before an anonymisation brings the person back. Repeat every anonymisation newer than the backup before you let people in again ([data-protection.md](data-protection.md), section 5).
 
 [DEPLOYMENT.md](DEPLOYMENT.md), "Backup & Restore", has the details.
