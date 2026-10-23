@@ -1405,6 +1405,24 @@ describe("the Document Service guard of the user type (admin-panel passwords, to
     expect(h.logs.filter((line) => line.includes("tokenVersion dropped"))).toHaveLength(4);
   });
 
+  it("v0.28: anonymisedAt never reaches a write; an anonymised user is not updated, deleted or cloned", async () => {
+    const h = guardHarness();
+    h.users.set(1, { ...h.users.get(1)!, anonymisedAt: "2026-10-23T10:00:00.000Z" } as never);
+    for (const action of ["update", "delete", "clone"]) {
+      await expect(
+        h.run(action, { documentId: "doc-1", data: { blocked: false } }),
+        action,
+      ).rejects.toThrow("anonymised");
+    }
+    expect(h.writes()).toEqual([]);
+    await h.run("update", { documentId: "doc-2", data: { displayName: "x", anonymisedAt: null } });
+    await h.run("create", { data: { username: "y", anonymisedAt: "2026-01-01T00:00:00.000Z" } });
+    expect(h.writes()).toEqual([
+      `save ${JSON.stringify({ displayName: "x" })}`,
+      `save ${JSON.stringify({ username: "y" })}`,
+    ]);
+  });
+
   it("leaves other content types and the reading actions alone", async () => {
     const h = guardHarness();
     const seen: unknown[] = [];

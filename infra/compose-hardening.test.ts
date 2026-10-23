@@ -145,6 +145,8 @@ describe("cms runtime switches (LF03, B05)", () => {
     "      STRAPI_TELEMETRY_DISABLED: ${STRAPI_TELEMETRY_DISABLED:-true}",
     // Decision 06 §H: the audit janitor's retention, empty = 365 days.
     "      AUDIT_RETENTION_DAYS: ${AUDIT_RETENTION_DAYS:-}",
+    // v0.28: the training evidence retention, empty = 3 years.
+    "      TRAINING_EVIDENCE_RETENTION_YEARS: ${TRAINING_EVIDENCE_RETENTION_YEARS:-}",
   ])("passes %s to the cms", (line) => {
     expect(block("  cms:")).toContain(line);
   });
