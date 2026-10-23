@@ -59,6 +59,14 @@ describe("cronRegistry", () => {
     ]);
   });
 
+  it("leaves the training reminders out while training is off (FEATURES_OFF, v0.28)", () => {
+    const names = (env: Record<string, string>) =>
+      cronRegistry("Europe/Berlin", env).map(({ name }) => name);
+    expect(names({ FEATURES_OFF: "training" })).not.toContain("training-reminders");
+    expect(names({ FEATURES_OFF: "training-reports" })).toContain("training-reminders");
+    expect(names({})).toContain("training-reminders");
+  });
+
   it("runs the janitors in the 03:00 hour and every task but the scheduler once a day", () => {
     for (const { name, rule } of cronRegistry("Europe/Berlin")) {
       if (name === "scheduled-publisher") {

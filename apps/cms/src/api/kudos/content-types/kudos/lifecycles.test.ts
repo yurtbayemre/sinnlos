@@ -63,6 +63,23 @@ describe("kudos afterCreate", () => {
     expect(notificationRows(strapi)).toEqual([]);
   });
 
+  it("notifies no blocked recipient, and nobody while kudos is off (v0.28)", async () => {
+    const strapi = setup();
+    const bob = strapi.tables[USER_UID].find((user) => user.id === USER.bob)!;
+    bob.blocked = true;
+    await lifecycles.afterCreate({ result: await kudos(strapi, { from: USER.alice, to: USER.bob }) });
+    bob.blocked = false;
+    process.env.FEATURES_OFF = "kudos";
+    try {
+      await lifecycles.afterCreate({
+        result: await kudos(strapi, { from: USER.alice, to: USER.bob }),
+      });
+    } finally {
+      delete process.env.FEATURES_OFF;
+    }
+    expect(notificationRows(strapi)).toEqual([]);
+  });
+
   it("falls back to 'Someone' and truncates a long name (FX18)", async () => {
     const strapi = setup();
     renameUser(strapi, USER.alice, null);

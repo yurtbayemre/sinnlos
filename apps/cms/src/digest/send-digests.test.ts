@@ -503,6 +503,39 @@ describe("sendDigests orchestrator", () => {
     expect(withoutGrant.strapi.calls.some((call) => call.uid === KUDOS_UID)).toBe(false);
   });
 
+  it("drops the kudos and the training reminders of a switched-off module (FEATURES_OFF, v0.28)", async () => {
+    process.env.FEATURES_OFF = "kudos,training";
+    try {
+      const { strapi, mails } = digestStub({
+        users: { [USER.alice]: optIn({ digestAnnouncements: false, digestKudos: true }) },
+        kudos: [
+          {
+            id: 1,
+            message: "Thanks!",
+            to: { id: USER.alice },
+            from: { id: USER.bob },
+            createdAt: minutesAfter(MONDAY_RUN, 3),
+          },
+        ],
+        notifications: [
+          {
+            id: 1,
+            type: "trainingDue",
+            title: "stored",
+            titleParams: { subject: "Stapler" },
+            createdAt: minutesAfter(MONDAY_RUN, 75),
+            recipient: { id: USER.alice },
+          },
+        ],
+      });
+      await sendDigests(strapi, NOW);
+      expect(mails()).toEqual([]);
+      expect(strapi.calls.some((call) => call.uid === KUDOS_UID)).toBe(false);
+    } finally {
+      delete process.env.FEATURES_OFF;
+    }
+  });
+
   it("a republished announcement appears once: not again after the fan-out told the user", async () => {
     // Published last week (the fan-out notified alice then), republished
     // yesterday after a typo fix: new row, new publishedAt, same documentId.

@@ -69,6 +69,7 @@
 import { GUEST, hasRole, type RoleType } from "../bootstrap/roles";
 import { isAnnouncementVisible, type AnnouncementTargeting } from "../utils/announcement-audience";
 import { notExpiredWhere } from "../utils/announcement-expiry";
+import { isOff } from "../utils/module-switches";
 import { instantMsOrNull } from "../utils/time";
 import {
   ANNOUNCEMENT_FIND,
@@ -437,8 +438,9 @@ async function collectMentionsAndKudos(
     }));
   }
 
-  // The kudos section needs the kudos read grant (guest never had it).
-  if (user.digestKudos && holdsGrant(scope, kudosReaders)) {
+  // The kudos section needs the kudos read grant (guest never had it), and
+  // the kudos module on (FEATURES_OFF, v0.28).
+  if (user.digestKudos && !isOff("kudos") && holdsGrant(scope, kudosReaders)) {
     const rows = listOf<{
       message?: string | null;
       value?: string | null;
@@ -547,7 +549,9 @@ export async function sendDigests(strapi: DigestStrapi, now = new Date()): Promi
 
     let training: Map<number, TrainingReminderRow[]> | null = null;
     try {
-      training = await loadTrainingReminders(strapi, due, now);
+      // FEATURES_OFF (v0.28): with `training` off the reminders already
+      // stored are not mailed either.
+      training = isOff("training") ? new Map() : await loadTrainingReminders(strapi, due, now);
     } catch (err) {
       // Every recipient gets the section: without it every digest would be
       // incomplete, so nobody gets one this run and lastDigestAt stays.
