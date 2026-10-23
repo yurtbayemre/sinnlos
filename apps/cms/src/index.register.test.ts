@@ -85,6 +85,8 @@ function datetimeHost() {
   const hooks = new Map<string, Array<(context: unknown) => Promise<void>>>();
   return {
     hooks,
+    // No API routers: nothing for the FEATURES_OFF decoration to walk.
+    apis: {},
     log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
     db: { dialect: { client: "sqlite" } },
     documents: { use: vi.fn() },

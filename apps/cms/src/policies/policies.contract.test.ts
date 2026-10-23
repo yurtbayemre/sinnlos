@@ -321,7 +321,8 @@ type Kind =
   | "org-write-gate"
   | "moderator-write-gate"
   | "department-author-write-gate"
-  | "row-write-gate";
+  | "row-write-gate"
+  | "switch-gate";
 
 /** Kinds whose payload refusal is the allowlist's 400 (a ValidationError). */
 const WRITE_GATE_KINDS: readonly Kind[] = [
@@ -467,6 +468,27 @@ const CONTRACTS: Record<string, PolicyContract> = {
     kind: "role-gate",
     anonymous: "deny",
     cases: [{ bypass: ADMIN_EDITOR, injectsFilter: false, pinsStatus: false }],
+  },
+  // FEATURES_OFF (v0.28): a switch, not a caller check. On (the sweep's env)
+  // every caller passes untouched and nothing is read; off is a thrown 404
+  // for every caller (utils/module-switches.test.ts). No bypass table: the
+  // answer does not depend on the role.
+  "module-enabled": {
+    kind: "switch-gate",
+    anonymous: "filter",
+    cases: [{ config: { module: "events" }, bypass: [], injectsFilter: false, pinsStatus: false }],
+  },
+  "feature-enabled": {
+    kind: "switch-gate",
+    anonymous: "filter",
+    cases: [
+      {
+        config: { feature: "read-confirmations" },
+        bypass: [],
+        injectsFilter: false,
+        pinsStatus: false,
+      },
+    ],
   },
   "is-classified-author": {
     kind: "ownership",
@@ -870,7 +892,9 @@ describe.each(Object.keys(CONTRACTS).sort())("policy contract: %s", (name) => {
     });
   }
 
-  it.each(contract.cases.map((c) => [JSON.stringify(c.config ?? null), c] as const))(
+  it.skipIf(contract.kind === "switch-gate").each(
+    contract.cases.map((c) => [JSON.stringify(c.config ?? null), c] as const),
+  )(
     "bypasses exactly its table roles, untouched and without reading data (config %s)",
     async (_config, contractCase) => {
       const { ids } = fixture();

@@ -30,6 +30,7 @@ import { seedAdminUser } from "./utils/admin-seed";
 import { backfillDepartmentAudience } from "./utils/department-audience-backfill";
 import { ensureDraftTwins } from "./utils/draft-twins";
 import { enforceSecretGuard } from "./utils/env-guard";
+import { decorateSwitchedRoutes, switchesStatusLine } from "./utils/module-switches";
 import { parseMeiliConfig, searchStatusLine } from "./search/meili-index";
 import { registerLiveEventSubscriber } from "./utils/live-events";
 import { registerMediaTombstoneGuard } from "./utils/media-tombstone-guard";
@@ -112,6 +113,11 @@ export default {
     // does any users-permissions JWT mode but legacy-support (refresh mode
     // would bypass the token version and the second-factor claims).
     parseMfaRequiredRoles(process.env.MFA_REQUIRED_ROLES);
+    // v0.28: an unknown FEATURES_OFF value refuses the boot, and every route
+    // of a module (and each feature route) gets its switch policy in front,
+    // before bootstrap() registers the routes (utils/module-switches.ts).
+    strapi.log.info(switchesStatusLine(process.env));
+    decorateSwitchedRoutes(strapi);
     const jwtMode =
       strapi.config?.get?.("plugin::users-permissions.jwtManagement", "legacy-support") ??
       "legacy-support";
