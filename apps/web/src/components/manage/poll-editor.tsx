@@ -79,6 +79,9 @@ export function PollEditor({
   const format = useFormatter();
   const flash = useManageFlash();
   const hasVotes = editable?.hasVotes ?? false;
+  // v0.28: the voter links are gone (30 days after the close), so the end
+  // can no longer move: the cms refuses it (votersRemoved).
+  const votersRemoved = editable?.votersRemoved === true;
   const toValues = useCallback(
     (source: PollEditable) => pollValuesFromEditable(source, timeZone),
     [timeZone],
@@ -252,11 +255,11 @@ export function PollEditor({
           <DayField
             id={id("closesAt")}
             label={t("fields.closesAt.label")}
-            hint={t("fields.closesAt.hint")}
+            hint={votersRemoved ? tc("errors.votersRemoved") : t("fields.closesAt.hint")}
             error={error("closesAt")}
             value={values.closesDay}
             min={today}
-            disabled={disabled}
+            disabled={disabled || votersRemoved}
             onChange={(closesDay) => setValue("closesDay", closesDay)}
           />
           <CheckboxField
