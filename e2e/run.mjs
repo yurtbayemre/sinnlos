@@ -329,6 +329,29 @@ export async function main(args) {
       assert.equal(profile.status, 200, "Fixture profile unavailable");
       assert.equal((await profile.json()).data.role.type, key === "lead" ? "team_lead" : "member");
     }
+    // v0.27: the second-factor gate of the built cms image. The admin's role
+    // needs a second factor in this run and it has none yet, so its password
+    // session reaches its own profile (restricted) and nothing else.
+    {
+      const admin = fixtures.users.admin;
+      const signal = () => AbortSignal.any([controller.signal, AbortSignal.timeout(10_000)]);
+      const login = await fetch(`http://${cmsAddress}/api/auth/local`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ identifier: admin.email, password: admin.password }),
+        signal: signal(),
+      });
+      assert.equal(login.status, 200, "Fixture login failed for admin");
+      const headers = { authorization: `Bearer ${(await login.json()).jwt}` };
+      const refused = await fetch(`http://${cmsAddress}/api/users/me`, {
+        headers,
+        signal: signal(),
+      });
+      assert.equal(refused.status, 403, "The second-factor gate let a restricted session through");
+      assert.equal((await refused.json()).error?.name, "MfaSetupRequired");
+      const own = await fetch(`http://${cmsAddress}/api/me`, { headers, signal: signal() });
+      assert.equal((await own.json()).data?.mfa?.restricted, true, "Admin session not restricted");
+    }
 
     console.log("[e2e] Fresh fixtures and local sign-in are ready");
     if (!checkOnly) {
