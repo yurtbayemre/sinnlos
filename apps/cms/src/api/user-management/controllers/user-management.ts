@@ -1,9 +1,14 @@
 import { errors } from "@strapi/utils";
 
+import { anonymisePreview, anonymiseUser, type AnonymiseHost } from "../../../utils/anonymise";
+import { trainingEvidenceRows } from "../../../utils/training-evidence";
+import { exportUser, type ExportHost } from "../../../utils/user-export";
+
 import { ADMIN, hasRole } from "../../../bootstrap/roles";
 import { parseRowId } from "../../../utils/entry-id";
 import { answerRefusals } from "../../../utils/refusal";
 import {
+  assertActiveAdmin,
   handRoleToEntra,
   inviteUser,
   listUsers,
@@ -28,6 +33,8 @@ interface Context {
 }
 
 const host = () => strapi as unknown as UserAdminHost;
+const anonymiseHost = () => strapi as unknown as AnonymiseHost;
+const USER_UID = "plugin::users-permissions.user";
 
 /** The admin caller's id; 401/403 otherwise (the grant alone is not trusted). */
 function adminId(ctx: Context): number {
@@ -110,6 +117,54 @@ export default {
     const id = targetId(ctx);
     await answerRefusals(ctx, async () => {
       answer(ctx, { data: await resetUserMfa(host(), callerId, tvOf(ctx), id) });
+    });
+  },
+
+  // v0.28 (utils/training-evidence.ts, utils/user-export.ts, utils/anonymise.ts).
+  async trainingEvidence(ctx: Context) {
+    adminId(ctx);
+    noQuery(ctx);
+    const id = targetId(ctx);
+    const user = (await strapi.db.query(USER_UID).findOne({
+      where: { id },
+      select: ["id", "displayName", "username"],
+    })) as { displayName?: unknown; username?: unknown } | null;
+    if (!user) throw new errors.NotFoundError("Not Found");
+    const displayName = [user.displayName, user.username].find(
+      (value): value is string => typeof value === "string" && value !== "",
+    );
+    answer(ctx, {
+      data: {
+        user: { id, displayName: displayName ?? "" },
+        rows: await trainingEvidenceRows(strapi, id),
+      },
+    });
+  },
+  async export(ctx: Context) {
+    const callerId = adminId(ctx);
+    noQuery(ctx);
+    const id = targetId(ctx);
+    await answerRefusals(ctx, async () => {
+      // The caller check of every user administration write (the export records an audit row).
+      await host().db.transaction(({ trx }) => assertActiveAdmin(host(), trx, callerId, tvOf(ctx)));
+      const instance = process.env.PUBLIC_WEB_URL?.trim() || null;
+      answer(ctx, await exportUser(strapi as unknown as ExportHost, id, callerId, instance));
+    });
+  },
+  async anonymisePreview(ctx: Context) {
+    adminId(ctx);
+    noQuery(ctx);
+    answer(ctx, { data: await anonymisePreview(anonymiseHost(), targetId(ctx)) });
+  },
+  async anonymise(ctx: Context) {
+    const callerId = adminId(ctx);
+    noQuery(ctx);
+    const id = targetId(ctx);
+    const body = ctx.request.body as
+      { data?: { confirm?: unknown }; confirm?: unknown } | undefined;
+    const confirm = body?.data?.confirm ?? body?.confirm;
+    await answerRefusals(ctx, async () => {
+      answer(ctx, { data: await anonymiseUser(anonymiseHost(), callerId, tvOf(ctx), id, confirm) });
     });
   },
 };

@@ -171,6 +171,10 @@ function stubStrapi(opts: { manager?: Row | null; self?: Row } = {}) {
 
   const strapi = {
     db: {
+      // v0.28: the write runs under the row lock (a no-op on SQLite) and re-reads blocked.
+      dialect: { client: "sqlite" },
+      transaction: async <T>(callback: (scope: { trx: unknown }) => Promise<T>) =>
+        callback({ trx: {} }),
       query: (uid: string) => {
         expect(uid).toBe("plugin::users-permissions.user");
         return {

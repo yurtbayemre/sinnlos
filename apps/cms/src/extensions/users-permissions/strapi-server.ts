@@ -752,8 +752,14 @@ export const TOKEN_VERSION_ATTRIBUTE = "tokenVersion";
  */
 export const MFA_ATTRIBUTES = ["totpSecret", "totpEnabledAt", "totpLastStep", "totpRecoveryCodes"];
 
+/**
+ * The anonymisation's tombstone (v0.28): written once by utils/anonymise.ts
+ * through the query engine, never by a Document Service write.
+ */
+export const ANONYMISED_ATTRIBUTE = "anonymisedAt";
+
 /** What the guard drops from every user write. */
-const GUARDED_ATTRIBUTES = [TOKEN_VERSION_ATTRIBUTE, ...MFA_ATTRIBUTES];
+const GUARDED_ATTRIBUTES = [TOKEN_VERSION_ATTRIBUTE, ...MFA_ATTRIBUTES, ANONYMISED_ATTRIBUTE];
 
 /**
  * The password baseline (v0.27, utils/password-rule.ts) for every Document
@@ -771,6 +777,9 @@ export function assertPasswordAllowed(password: unknown): void {
 
 /** Document Service actions that write a user's attributes from `params.data`. */
 const USER_WRITE_ACTIONS: readonly string[] = ["create", "update", "clone"];
+
+/** Document Service actions refused on an anonymised user (v0.28). */
+const TOMBSTONE_REFUSED_ACTIONS: readonly string[] = ["update", "delete", "clone"];
 
 /**
  * What @strapi/core 5.55.1 hands a Document Service middleware
@@ -800,15 +809,23 @@ export type DocumentMiddleware = (
  *    and runs the write in one transaction (saveAfterBump), unless the
  *    user service's edit() is saving that user's password inside its own
  *    (passwordSave): that is how a password the admin panel sets revokes
- *    the older JWTs.
- * In refresh mode only the drop applies.
+ *    the older JWTs;
+ *  - v0.28: `anonymisedAt` is dropped like them, and an update, delete or
+ *    clone of an ANONYMISED user is refused (400 `anonymised`): the Content
+ *    Manager and PUT /api/users/:id cannot unblock, refill or remove the
+ *    tombstone (its kept identity-provider ids refuse a returning sign-in,
+ *    utils/anonymise.ts). The anonymisation itself, the seed and the
+ *    intranet's own writers go through the query engine.
+ * In refresh mode only the drop and the tombstone refusal apply.
  */
 export function createUserWriteGuard(strapi: TokenVersionStrapi): DocumentMiddleware {
   return async (context, next) => {
-    if (context.uid !== USER_UID || !USER_WRITE_ACTIONS.includes(context.action ?? "")) {
-      return next();
-    }
+    if (context.uid !== USER_UID) return next();
     const params = isRecord(context.params) ? context.params : {};
+    if (TOMBSTONE_REFUSED_ACTIONS.includes(context.action ?? "")) {
+      await refuseTombstone(strapi, params.documentId);
+    }
+    if (!USER_WRITE_ACTIONS.includes(context.action ?? "")) return next();
     let data = isRecord(params.data) ? params.data : undefined;
     const guarded = data
       ? GUARDED_ATTRIBUTES.filter((key) => Object.prototype.hasOwnProperty.call(data, key))
@@ -840,6 +857,17 @@ export function createUserWriteGuard(strapi: TokenVersionStrapi): DocumentMiddle
     if (passwordSave.getStore()?.userId === id) return next();
     return saveAfterBump(strapi, id, next);
   };
+}
+
+/** Throws when `documentId` names an anonymised user (see createUserWriteGuard). */
+async function refuseTombstone(strapi: TokenVersionStrapi, documentId: unknown): Promise<void> {
+  if (typeof documentId !== "string" || documentId === "") return;
+  const row = await strapi.db
+    .query(USER_UID)
+    .findOne({ where: { documentId }, select: ["id", ANONYMISED_ATTRIBUTE] });
+  if (isRecord(row) && row[ANONYMISED_ATTRIBUTE] != null) {
+    throw new errors.ApplicationError("anonymised", { code: "anonymised" });
+  }
 }
 
 /** register() needs `strapi.documents.use` as well. */

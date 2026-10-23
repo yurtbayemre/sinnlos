@@ -467,7 +467,10 @@ export type ActivityAction =
   | "restore"
   | "schedulePublish"
   | "scheduleUnpublish"
-  | "scheduleFailed";
+  | "scheduleFailed"
+  // v0.28: an export or anonymisation of a user (targetUid users-permissions user).
+  | "export"
+  | "anonymise";
 
 export type ActivityActorKind = "user" | "admin" | "system";
 export type ActivitySource = "content-api" | "admin" | "cron" | "system";

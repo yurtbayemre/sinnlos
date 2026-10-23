@@ -91,6 +91,11 @@ const REVIEWED_CONSUMERS: Readonly<Record<string, string>> = {
     "the results count (FX20), called by the results handler after canSeePoll; counts only, no voter",
   "utils/poll-department-delete.ts": "department delete hook, writes `audience` only",
   "utils/restricted-relations.ts": "FX05 guard: no source is trusted into polls",
+  // v0.28, admin_role only: the anonymisation counts and deletes the person's votes and the
+  // polls they wrote; the export lists their votes and polls to themselves through an admin.
+  "utils/anonymise.ts": "admin/editor only: admin_role's anonymisation, counts only in its answer",
+  "utils/user-export.ts":
+    "admin/editor only: admin_role's export of one person's own votes and polls",
   "utils/write-allowlist.ts":
     "the poll write rule of the moderator class: checks payloads, serves no row",
   "utils/write-gate.ts":

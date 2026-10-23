@@ -65,6 +65,8 @@
     "restore": "Restored",
     "schedulePublish": "Publication scheduled",
     "scheduleUnpublish": "Unpublication scheduled",
-    "scheduleFailed": "Schedule failed"
+    "scheduleFailed": "Schedule failed",
+    "export": "Data exported",
+    "anonymise": "Anonymised"
   }
 }

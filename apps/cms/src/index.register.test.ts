@@ -653,6 +653,8 @@ describe("Document Service middlewares in register() (decision 06 §K)", () => {
         // No rows and no ballots (the poll guard's vote freeze counts them).
         query: () => ({
           findMany: async () => [],
+          // v0.28: the user guard looks for an anonymised row (none here).
+          findOne: async () => null,
           updateMany: async () => ({ count: 0 }),
           count: async () => 0,
         }),

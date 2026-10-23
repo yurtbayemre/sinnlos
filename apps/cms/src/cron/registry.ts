@@ -5,13 +5,16 @@
  * own: the overlap flag lives in the closure `buildCronTasks` returns.
  *
  * Order: the scheduled publisher runs every minute (decision 06 §D); the
- * janitors run from 03:30 to 03:50 APP_TIME_ZONE; the training expiry
+ * janitors run from 03:20 to 03:50 APP_TIME_ZONE; the training expiry
  * reminders at 06:45, so the digest that mails at 07:30 carries them. When the host's nightly backup runs (infra/backup/pg-backup.sh,
  * or the host's backup-run at 04:00; docs/DEPLOYMENT.md §7.3) does not
  * matter for the janitors: they remove only old rows and files (orphaned
  * uploads after 24 hours, search logs, read notifications and expired ads
- * after 90 days, audit events after AUDIT_RETENTION_DAYS), so everything
- * they remove is already in the earlier nightly backups. The scheduled
+ * after 90 days, audit events after AUDIT_RETENTION_DAYS, training receipts
+ * years after their deadline), so everything they remove is already in the
+ * earlier nightly backups. The v0.28 erasure sweep removes only rows that
+ * name people an admin already anonymised (written in the moments around
+ * that run). The scheduled
  * publisher is the one task that changes current content; each run does
  * what a moderator's publish or unpublish in the same minute would do
  * (decision 06 §D rule 12), and pg_dump takes a consistent snapshot.
@@ -42,6 +45,8 @@ import { parseEnvFlag, sendDigests, type DigestStrapi } from "../digest/send-dig
 import { pruneAuditEvents, type AuditJanitorStrapi } from "./prune-audit-events";
 import { pruneNotifications, type NotificationJanitorStrapi } from "./prune-notifications";
 import { pruneSearchLogs } from "./prune-search-logs";
+import { sweepAnonymised, type AnonymiseHost } from "../utils/anonymise";
+import { pruneTrainingEvidence } from "../utils/training-evidence";
 import { purgeExpiredClassifieds, type ClassifiedJanitorStrapi } from "./purge-expired-classifieds";
 import { runScheduledPublishing, type ScheduledPublishStrapi } from "./scheduled-publish";
 import { sweepOrphanedUploads } from "./sweep-orphaned-uploads";
@@ -92,6 +97,26 @@ export function cronRegistry(
       tz: timeZone,
       fn: async (strapi) => {
         await runScheduledPublishing(strapi);
+      },
+    },
+    // v0.28: re-applies the anonymisation's deletions and notification
+    // rewrite to every anonymised person (utils/anonymise.ts).
+    {
+      name: "erasure-sweep",
+      rule: "20 3 * * *",
+      tz: timeZone,
+      fn: async (strapi) => {
+        await sweepAnonymised(strapi as unknown as AnonymiseHost);
+      },
+    },
+    // v0.28: snapshots for receipts without one, then the receipts past
+    // TRAINING_EVIDENCE_RETENTION_YEARS (utils/training-evidence.ts).
+    {
+      name: "training-evidence-janitor",
+      rule: "25 3 * * *",
+      tz: timeZone,
+      fn: async (strapi) => {
+        await pruneTrainingEvidence(strapi as never, env);
       },
     },
     // Nightly orphan sweep of stamped marketplace uploads (issue #13).

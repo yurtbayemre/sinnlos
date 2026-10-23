@@ -49,6 +49,7 @@ import {
   shouldSanitizeForRole,
 } from "../../../utils/sanitize-user-contact";
 import { tryParsePlainDate } from "../../../utils/time";
+import { writeWhileUnblocked } from "../../../utils/unblocked-write";
 
 const EDITABLE_FIELDS = [
   "displayName",
@@ -428,10 +429,11 @@ export default {
       return ctx.badRequest("digestFrequency must be daily or weekly");
     }
 
-    await strapi.db.query(USER_UID).update({
-      where: { id: user.id },
-      data,
-    });
+    // v0.28 (utils/unblocked-write.ts): never after a block or anonymisation.
+    const written = await writeWhileUnblocked(strapi as never, user.id, () =>
+      strapi.db.query(USER_UID).update({ where: { id: user.id }, data }),
+    );
+    if (!written) return ctx.unauthorized();
 
     // Same allowlisted shape as GET (FX02): own record + manager summary.
     const profile = await loadProfile(user.id, user.role?.type);

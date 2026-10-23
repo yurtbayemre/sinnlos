@@ -111,6 +111,8 @@ export const AUTHORING_FORM_CODES = [
   "spaceNotEmpty",
   /** User administration: handing a role back to Entra for an account Entra does not sign in. */
   "notEntraBound",
+  /** User administration (v0.28): the account is anonymised and stays as it is. */
+  "anonymised",
 ] as const;
 
 export type AuthoringFormCode = (typeof AUTHORING_FORM_CODES)[number];
