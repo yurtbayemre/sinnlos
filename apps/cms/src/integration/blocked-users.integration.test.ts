@@ -227,6 +227,11 @@ describe.each(testEngines())("blocked people hidden on %s", (engine) => {
     await empty(
       `/api/departments?filters[members][id][$eq]=${member.id}&filters[head][id][$eq]=${gone.id}`,
     );
+    // An unchanged relation's own $and cannot replace the narrowed one
+    // (Codex re-check 2): the platform team belongs to Engineering.
+    await empty(
+      `/api/departments?filters[$and][0][members][id][$eq]=${gone.id}&filters[teams][$and][0][id][$eq]=${t.fixtures.teams.platform.id}`,
+    );
     // The id shorthand still answers instead of failing.
     for (const path of [
       `/api/departments?filters[head]=${head}`,

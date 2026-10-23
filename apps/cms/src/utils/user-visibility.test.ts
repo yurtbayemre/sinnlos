@@ -246,6 +246,24 @@ describe("hideBlockedUsers: probes through withheld fields (Codex review)", () =
         $and: [{ members: { $and: [{ id: 9 }, ACTIVE] } }, { head: { $and: [{ id: 3 }, ACTIVE] } }],
       },
     });
+    // An unchanged relation beside a changed level moves out too: its own
+    // filter brings up an $and that would replace the narrowed one.
+    expect(
+      hide(
+        { filters: { $and: [{ members: { id: 9 } }], pages: { $and: [{ id: 2 }] } } },
+        DEPARTMENT,
+      ),
+    ).toEqual({
+      filters: {
+        $and: [
+          { $and: [{ members: { $and: [{ id: 9 }, ACTIVE] } }] },
+          { pages: { $and: [{ id: 2 }] } },
+        ],
+      },
+    });
+    // A level without a narrowing stays as it came.
+    const untouched = { filters: { $and: [{ name: "x" }], pages: { $and: [{ id: 2 }] } } };
+    expect(hide(untouched, DEPARTMENT)).toBe(untouched);
     // A nested change isolates every relation on its path.
     expect(
       hide({ filters: { title: "x", department: { name: "y", head: { id: 3 } } } }, ANNOUNCEMENT),

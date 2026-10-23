@@ -283,12 +283,15 @@ function relationPredicate(value: unknown): unknown {
  * or names a withheld field, narrowed to active users. Operators walk on the
  * same model, like the core's.
  *
- * Each relation key whose filter changed moves into its own `$and` operand
- * (whole-release Codex re-check): the core merges a relation's processed
- * filter into its parent with Object.assign, so an `$and` it brings up would
- * replace a sibling `$and` or another relation's. Alone in its operand it
- * has nothing to collide with; the rest of the level stays one operand.
- * Returns the same reference when nothing changes.
+ * A level that changed puts each of its relation keys, changed or not, into
+ * its own `$and` operand (whole-release Codex re-checks): the core merges a
+ * relation's processed filter into its parent with Object.assign, and a
+ * relation brings up an `$and`/`$or` from any depth of its filter, which
+ * would replace a sibling `$and` that holds the narrowing (or another
+ * relation's). Alone in its operand a relation has nothing to collide with;
+ * operators and plain fields stay together in one operand (their keys
+ * cannot collide). An unchanged level is returned as it came (same
+ * reference), as the core would read it.
  */
 function constrainFilters(
   filters: unknown,
@@ -301,7 +304,8 @@ function constrainFilters(
   }
   if (!isPlainObject(filters)) return filters;
   const rest: Row = {};
-  const isolated: Row[] = [];
+  const joined: Row[] = [];
+  let changed = false;
   for (const [key, value] of Object.entries(filters)) {
     const attr = model?.attributes?.[key];
     let next: unknown;
@@ -318,13 +322,12 @@ function constrainFilters(
       const nested = nestedModel(attr, getModel);
       next = nested ? constrainFilters(value, nested, getModel) : value;
     }
-    if (next !== value && attr?.type === "relation") isolated.push({ [key]: next });
+    if (next !== value) changed = true;
+    if (attr !== undefined && POPULATABLE.has(attr.type ?? "")) joined.push({ [key]: next });
     else rest[key] = next;
   }
-  if (isolated.length === 0) {
-    return Object.keys(rest).some((key) => rest[key] !== filters[key]) ? rest : filters;
-  }
-  const operands = Object.keys(rest).length > 0 ? [rest, ...isolated] : isolated;
+  if (!changed) return filters;
+  const operands = Object.keys(rest).length > 0 ? [rest, ...joined] : joined;
   return operands.length === 1 ? operands[0] : { $and: operands };
 }
 
