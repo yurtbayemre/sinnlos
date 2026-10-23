@@ -123,6 +123,9 @@ admin_role|api::poll.poll.find
 admin_role|api::poll.poll.findOne
 admin_role|api::poll.poll.update
 admin_role|api::profile.profile.me
+admin_role|api::profile.profile.mfaActivate
+admin_role|api::profile.profile.mfaDisable
+admin_role|api::profile.profile.mfaSetup
 admin_role|api::profile.profile.updateMe
 admin_role|api::quick-link.quick-link.authoringList
 admin_role|api::quick-link.quick-link.create
@@ -147,8 +150,11 @@ admin_role|api::team.team.find
 admin_role|api::team.team.findOne
 admin_role|api::team.team.update
 admin_role|api::user-management.user-management.findOne
+admin_role|api::user-management.user-management.invite
 admin_role|api::user-management.user-management.list
+admin_role|api::user-management.user-management.resetMfa
 admin_role|api::user-management.user-management.roleToEntra
+admin_role|api::user-management.user-management.sendLink
 admin_role|api::user-management.user-management.update
 admin_role|api::wiki-page.wiki-page.authoringList
 admin_role|api::wiki-page.wiki-page.create
@@ -227,6 +233,9 @@ authenticated|api::poll.poll.batchResults
 authenticated|api::poll.poll.find
 authenticated|api::poll.poll.findOne
 authenticated|api::profile.profile.me
+authenticated|api::profile.profile.mfaActivate
+authenticated|api::profile.profile.mfaDisable
+authenticated|api::profile.profile.mfaSetup
 authenticated|api::profile.profile.updateMe
 authenticated|api::quick-link.quick-link.find
 authenticated|api::quick-link.quick-link.findOne
@@ -338,6 +347,9 @@ department_head|api::poll.poll.batchResults
 department_head|api::poll.poll.find
 department_head|api::poll.poll.findOne
 department_head|api::profile.profile.me
+department_head|api::profile.profile.mfaActivate
+department_head|api::profile.profile.mfaDisable
+department_head|api::profile.profile.mfaSetup
 department_head|api::profile.profile.updateMe
 department_head|api::quick-link.quick-link.find
 department_head|api::quick-link.quick-link.findOne
@@ -485,6 +497,9 @@ editor|api::poll.poll.find
 editor|api::poll.poll.findOne
 editor|api::poll.poll.update
 editor|api::profile.profile.me
+editor|api::profile.profile.mfaActivate
+editor|api::profile.profile.mfaDisable
+editor|api::profile.profile.mfaSetup
 editor|api::profile.profile.updateMe
 editor|api::quick-link.quick-link.authoringList
 editor|api::quick-link.quick-link.create
@@ -548,6 +563,9 @@ guest|api::poll.poll.batchResults
 guest|api::poll.poll.find
 guest|api::poll.poll.findOne
 guest|api::profile.profile.me
+guest|api::profile.profile.mfaActivate
+guest|api::profile.profile.mfaDisable
+guest|api::profile.profile.mfaSetup
 guest|api::profile.profile.updateMe
 guest|api::quick-link.quick-link.find
 guest|api::quick-link.quick-link.findOne
@@ -617,6 +635,9 @@ member|api::poll.poll.batchResults
 member|api::poll.poll.find
 member|api::poll.poll.findOne
 member|api::profile.profile.me
+member|api::profile.profile.mfaActivate
+member|api::profile.profile.mfaDisable
+member|api::profile.profile.mfaSetup
 member|api::profile.profile.updateMe
 member|api::quick-link.quick-link.find
 member|api::quick-link.quick-link.findOne
@@ -709,6 +730,9 @@ team_lead|api::poll.poll.batchResults
 team_lead|api::poll.poll.find
 team_lead|api::poll.poll.findOne
 team_lead|api::profile.profile.me
+team_lead|api::profile.profile.mfaActivate
+team_lead|api::profile.profile.mfaDisable
+team_lead|api::profile.profile.mfaSetup
 team_lead|api::profile.profile.updateMe
 team_lead|api::quick-link.quick-link.find
 team_lead|api::quick-link.quick-link.findOne

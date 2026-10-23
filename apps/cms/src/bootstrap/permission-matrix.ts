@@ -439,6 +439,10 @@ export const CUSTOM_ACTION_GRANTS: Record<string, readonly MatrixRoleType[] | "*
   "api::user-management.user-management.findOne": [ADMIN],
   "api::user-management.user-management.update": [ADMIN],
   "api::user-management.user-management.roleToEntra": [ADMIN],
+  // v0.27: invitations, set-password links, second-factor resets.
+  "api::user-management.user-management.invite": [ADMIN],
+  "api::user-management.user-management.sendLink": [ADMIN],
+  "api::user-management.user-management.resetMfa": [ADMIN],
   // Same readers as lessons; these actions enforce published lesson and parent.
   "api::lesson.lesson.player": [...STAFF_ROLES, AUTHENTICATED],
   "api::lesson.lesson.check": [...STAFF_ROLES, AUTHENTICATED],
@@ -477,6 +481,10 @@ export const CUSTOM_ACTION_GRANTS: Record<string, readonly MatrixRoleType[] | "*
   // Self-service profile (added in this feature)
   "api::profile.profile.me": "*",
   "api::profile.profile.updateMe": "*",
+  // v0.27: the caller's own second factor (utils/mfa.ts).
+  "api::profile.profile.mfaSetup": "*",
+  "api::profile.profile.mfaActivate": "*",
+  "api::profile.profile.mfaDisable": "*",
   // Built-in auth action local users need to change their password
   "plugin::users-permissions.auth.changePassword": "*",
   // The admin ack report populates announcement.audienceRoles to restrict
@@ -641,12 +649,20 @@ export const PUBLIC = "public";
  * these two on its first boot (DEFAULT_PERMISSIONS), and neither checks the
  * account's provider: with them, the e-mail reset flow would hand an
  * Entra-only account a local password around the single sign-on
- * (D-ENTRA-01). The web has no UI for either; an admin sets passwords in
- * the admin panel. Pinned by routes.matrix.test.ts and prod-perm-diff.sql.
+ * (D-ENTRA-01). Since v0.27 the controller answers 404 for both anyway;
+ * links go through POST /api/auth/password/*. Also revoked since v0.27:
+ * self-registration (gone; admins invite), the plugin's e-mail
+ * confirmation flow (unused; invited accounts are confirmed) and the
+ * provider connect (every provider but email is off). Pinned by
+ * routes.matrix.test.ts and prod-perm-diff.sql.
  */
 const PUBLIC_REVOKED_PERMISSIONS = [
   "plugin::users-permissions.auth.forgotPassword",
   "plugin::users-permissions.auth.resetPassword",
+  "plugin::users-permissions.auth.register",
+  "plugin::users-permissions.auth.sendEmailConfirmation",
+  "plugin::users-permissions.auth.emailConfirmation",
+  "plugin::users-permissions.auth.connect",
   ...USER_WRITE_ACTIONS,
 ];
 

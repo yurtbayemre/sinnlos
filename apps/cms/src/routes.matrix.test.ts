@@ -376,6 +376,10 @@ const GOLDEN: Record<string, PolicySpec[]> = {
   "api::entra-auth.entra-auth.exchange": [],
   // v0.25.0: the OIDC exchange, the same way (404 while OIDC_ENABLED is not '1').
   "api::oidc-auth.oidc-auth.exchange": [],
+  // v0.27: set-password links, auth:false, only for the web server (the
+  // shared secret INTERNAL_UPLOAD_TOKEN), 404 without it.
+  "api::password-auth.password-auth.forgot": [],
+  "api::password-auth.password-auth.set": [],
 
   "api::document.document.find": ["global::document-visibility"],
   "api::document.document.findOne": ["global::document-visibility"],
@@ -459,8 +463,16 @@ const GOLDEN: Record<string, PolicySpec[]> = {
   "api::user-management.user-management.findOne": [],
   "api::user-management.user-management.update": [],
   "api::user-management.user-management.roleToEntra": [],
+  // v0.27: invitations, links, second-factor resets (admin_role, checked again).
+  "api::user-management.user-management.invite": [],
+  "api::user-management.user-management.sendLink": [],
+  "api::user-management.user-management.resetMfa": [],
   "api::profile.profile.me": [],
   "api::profile.profile.updateMe": [],
+  // v0.27: the caller's own second factor.
+  "api::profile.profile.mfaSetup": [],
+  "api::profile.profile.mfaActivate": [],
+  "api::profile.profile.mfaDisable": [],
 
   "api::quick-link.quick-link.find": ["global::quick-link-visibility"],
   "api::quick-link.quick-link.findOne": ["global::quick-link-visibility"],
@@ -779,10 +791,11 @@ describe("route → policy matrix (S01)", async () => {
     expect(actual).toEqual(GOLDEN);
   });
 
-  it("only the Entra and OIDC exchanges disable authentication (auth: false)", () => {
+  it("only the exchanges and the set-password links disable authentication (auth: false)", () => {
     // An exchange authenticates its caller itself (shared secret + the
     // cms's own ID-token verification, src/entra/provision.ts and
-    // src/oidc/provision.ts); a caller has no Strapi JWT before it. Any
+    // src/oidc/provision.ts); a caller has no Strapi JWT before it. The
+    // v0.27 link routes take only the web server (shared secret). Any
     // other auth:false route is a hole.
     const publicRoutes = [...routes.values()].filter((e) => e.config.auth === false);
     expect(publicRoutes.map((e) => ({ action: e.action, method: e.method, path: e.path }))).toEqual(
@@ -796,6 +809,16 @@ describe("route → policy matrix (S01)", async () => {
           action: "api::oidc-auth.oidc-auth.exchange",
           method: "POST",
           path: "/auth/oidc/exchange",
+        },
+        {
+          action: "api::password-auth.password-auth.forgot",
+          method: "POST",
+          path: "/auth/password/forgot",
+        },
+        {
+          action: "api::password-auth.password-auth.set",
+          method: "POST",
+          path: "/auth/password/set",
         },
       ],
     );
@@ -850,6 +873,8 @@ describe("route → policy matrix (S01)", async () => {
       expect(customActions.filter(isPublicRoute)).toEqual([
         "api::entra-auth.entra-auth.exchange",
         "api::oidc-auth.oidc-auth.exchange",
+        "api::password-auth.password-auth.forgot",
+        "api::password-auth.password-auth.set",
       ]);
     });
 
@@ -961,6 +986,11 @@ describe("route → policy matrix (S01)", async () => {
       expect(REVOKED_PERMISSIONS.public).toEqual([
         "plugin::users-permissions.auth.forgotPassword",
         "plugin::users-permissions.auth.resetPassword",
+        // v0.27: no self-registration, no plugin e-mail confirmation, no provider connect.
+        "plugin::users-permissions.auth.register",
+        "plugin::users-permissions.auth.sendEmailConfirmation",
+        "plugin::users-permissions.auth.emailConfirmation",
+        "plugin::users-permissions.auth.connect",
         // The plugin's generic user writes (v0.23): no field allowlist, revoked everywhere.
         "plugin::users-permissions.user.create",
         "plugin::users-permissions.user.update",

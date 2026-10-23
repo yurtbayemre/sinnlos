@@ -215,6 +215,11 @@ describe("role vocabulary of the permission constants (S02)", () => {
     expect(REVOKED_PERMISSIONS.public).toEqual([
       "plugin::users-permissions.auth.forgotPassword",
       "plugin::users-permissions.auth.resetPassword",
+      // v0.27: no self-registration, no plugin e-mail confirmation, no provider connect.
+      "plugin::users-permissions.auth.register",
+      "plugin::users-permissions.auth.sendEmailConfirmation",
+      "plugin::users-permissions.auth.emailConfirmation",
+      "plugin::users-permissions.auth.connect",
       // The plugin's generic user writes (v0.23): no field allowlist, revoked everywhere.
       "plugin::users-permissions.user.create",
       "plugin::users-permissions.user.update",
@@ -248,7 +253,7 @@ describe("syncAdvancedSettings (S02)", () => {
           },
         };
       },
-      log: { info: vi.fn() },
+      log: { info: vi.fn(), warn: vi.fn() },
     };
     return { strapi, sets, keys, state };
   }
@@ -271,16 +276,13 @@ describe("syncAdvancedSettings (S02)", () => {
     );
   });
 
-  it("opens local registration only for LOCAL_REGISTRATION=1", async () => {
-    for (const [value, allow] of [
-      ["1", true],
-      ["0", false],
-      ["", false],
-    ] as const) {
+  it("never opens self-registration (v0.27), and warns while LOCAL_REGISTRATION=1 is set", async () => {
+    for (const value of ["1", "0", ""]) {
       vi.stubEnv("LOCAL_REGISTRATION", value);
       const { strapi, sets } = advancedStore(null);
       await syncAdvancedSettings(strapi);
-      expect(sets[0]?.allow_register, `LOCAL_REGISTRATION=${value}`).toBe(allow);
+      expect(sets[0]?.allow_register, `LOCAL_REGISTRATION=${value}`).toBe(false);
+      expect(strapi.log.warn).toHaveBeenCalledTimes(value === "1" ? 1 : 0);
     }
   });
 
@@ -303,8 +305,8 @@ describe("syncAdvancedSettings (S02)", () => {
   });
 
   it("writes nothing when the store already matches", async () => {
-    vi.stubEnv("LOCAL_REGISTRATION", "1");
-    const { strapi, sets } = advancedStore({ extra: 1, ...MANAGED, allow_register: true });
+    vi.stubEnv("LOCAL_REGISTRATION", undefined);
+    const { strapi, sets } = advancedStore({ extra: 1, ...MANAGED });
     await syncAdvancedSettings(strapi);
     expect(sets).toEqual([]);
     expect(strapi.log.info).not.toHaveBeenCalled();
@@ -313,14 +315,13 @@ describe("syncAdvancedSettings (S02)", () => {
 
 describe("nextAdvancedSettings (B01)", () => {
   it("applies the four managed keys over the stored ones", () => {
-    expect(nextAdvancedSettings({ a: 1, allow_register: true }, {})).toEqual({
+    expect(nextAdvancedSettings({ a: 1, allow_register: true })).toEqual({
       a: 1,
       unique_email: true,
       allow_register: false,
       email_confirmation: false,
       default_role: "member",
     });
-    expect(nextAdvancedSettings(null, { LOCAL_REGISTRATION: "1" }).allow_register).toBe(true);
   });
 });
 

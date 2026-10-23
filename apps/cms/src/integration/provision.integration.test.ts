@@ -773,37 +773,22 @@ describe.each(testEngines())("Entra off (the owner instance) on %s", (engine) =>
     expect(reset.status).toBe(403);
   });
 
-  it("refuses microsoftOid (and jobTitle) on self-registration, takes displayName (FX14)", async () => {
-    const register = (extra: Record<string, unknown>) =>
-      t.api<{ user?: { id: number }; error?: { message?: string } }>(
-        null,
-        "/api/auth/local/register",
-        {
-          json: {
-            username: "it-register-probe",
-            email: "register.probe@integration.test",
-            password: "Secret123!",
-            displayName: "Probe",
-            ...extra,
-          },
+  it("self-registration is gone (v0.27): 403, whatever LOCAL_REGISTRATION says, nothing created", async () => {
+    for (const extra of [{}, { microsoftOid: oid(99) }]) {
+      const res = await t.api(null, "/api/auth/local/register", {
+        json: {
+          username: "it-register-probe",
+          email: "register.probe@integration.test",
+          password: "Register-Probe-27",
+          displayName: "Probe",
+          ...extra,
         },
-      );
-    // users-permissions refuses every key outside register.allowedFields.
-    const withOid = await register({ microsoftOid: oid(99) });
-    expect(withOid.status).toBe(400);
-    expect(withOid.body.error?.message).toMatch(/microsoftOid/);
-    const withTitle = await register({ jobTitle: "Self-promoted" });
-    expect(withTitle.status).toBe(400);
-    expect(await t.strapi.db.query(USER).count({ where: { microsoftOid: oid(99) } })).toBe(0);
-
-    const plain = await register({});
-    expect(plain.status).toBe(200);
-    expect(await userRow(t, { id: plain.body.user?.id })).toMatchObject({
-      displayName: "Probe",
-      microsoftOid: null,
-      entraTenantId: null,
-      roleSource: null,
-    });
+      });
+      expect(res.status).toBe(403);
+    }
+    expect(
+      await t.strapi.db.query(USER).count({ where: { email: "register.probe@integration.test" } }),
+    ).toBe(0);
   });
 
   it("still ensures the identity index", async () => {
