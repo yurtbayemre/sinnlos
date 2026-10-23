@@ -26,6 +26,8 @@ const LESSON = "api::lesson.lesson";
 const PROGRESS = "api::lesson-progress.lesson-progress";
 const NOTIFICATION = "api::notification.notification";
 const AUDIT = "api::audit-event.audit-event";
+const CLASSIFIED = "api::classified.classified";
+const FILE = "plugin::upload.file";
 
 interface Person {
   id: number;
@@ -464,6 +466,53 @@ describe.each(testEngines())("data protection (v0.28, lane A2) on %s", (engine) 
       .query(NOTIFICATION)
       .findMany({ where: { recipient: { id: member.id }, link: "/x" } })) as Row[];
     expect(left.map((n) => n.title)).toEqual(['Someone commented on "Plan"']);
+  });
+
+  it("the erasure sweep removes an ad that committed after the run, its photo after the commit", async () => {
+    const fritz = await person("Fritz Late");
+    expect((await block(fritz.id)).status).toBe(200);
+    expect((await anonymise(fritz.id, fritz.username)).status).toBe(200);
+    // An ad create authenticated before the block that committed after the
+    // run (whole-release Codex review), with its stamped marketplace photo.
+    const photo = (await t.strapi.db.query(FILE).create({
+      data: {
+        name: "late.png",
+        hash: `it_dp_late_${engine}`,
+        ext: ".png",
+        mime: "image/png",
+        size: 1,
+        url: `/uploads/it_dp_late_${engine}.png`,
+        provider: "local",
+        provider_metadata: { uploadedBy: fritz.id },
+      },
+    })) as Row;
+    const ad = (await t.strapi.documents(CLASSIFIED).create({
+      data: {
+        title: "IT late ad",
+        description: "written after the anonymisation",
+        category: "sale",
+        expiresAt: "2099-12-31",
+        author: fritz.id,
+        images: [photo.id],
+      },
+    })) as Row;
+    const sweep = await t.requireBuilt<Anonymise>("src/utils/anonymise").sweepAnonymised(t.strapi);
+    expect(sweep.deleted).toBeGreaterThanOrEqual(1);
+    expect(
+      await t.strapi.db.query(CLASSIFIED).count({ where: { documentId: ad.documentId } }),
+    ).toBe(0);
+    // The classified lifecycle removes the image after the delete's commit.
+    await expect
+      .poll(async () => t.strapi.db.query(FILE).count({ where: { id: photo.id } }), {
+        timeout: 10_000,
+      })
+      .toBe(0);
+    // Recorded like the classified-janitor's deletes.
+    expect(
+      await t.strapi.db.query(AUDIT).count({
+        where: { action: "delete", targetDocumentId: ad.documentId, source: "cron" },
+      }),
+    ).toBe(1);
   });
 
   it("the evidence job keeps current proof, deletes past retention, and fills missing snapshots", async () => {

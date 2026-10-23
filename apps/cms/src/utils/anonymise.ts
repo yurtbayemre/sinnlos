@@ -75,10 +75,14 @@ import { assertActiveAdmin, lockDirectory, type UserAdminHost } from "./user-adm
  * linked file, or a failure, keeps it: the answer says so, the audit row
  * holds its id, and the admin deletes it in the Media Library.
  *
- * THE ERASURE SWEEP (sweepAnonymised, nightly) repeats steps 2 (without the
- * ads) and 3 for every anonymised person: a fan-out batch or a comment
- * callback that read the person before the commit and wrote after it is
- * gone by the next night (rev3 R3, rev3.1).
+ * THE ERASURE SWEEP (sweepAnonymised, nightly) repeats steps 2 and 3 for
+ * every anonymised person: a fan-out batch or a comment callback that read
+ * the person before the commit and wrote after it is gone by the next night
+ * (rev3 R3, rev3.1), and so is an ad whose create was authenticated before
+ * the block and committed after the run (whole-release Codex review): the
+ * ads go through the Document Service there too, so their images follow
+ * after the commit. Each person runs in its own transaction; one that fails
+ * is logged and the others still run, the next night retries it.
  *
  * The anonymisation and the sweep run whatever FEATURES_OFF says.
  */
@@ -187,14 +191,14 @@ async function idsLinking(strapi: AnonymiseHost, uid: string, where: Row): Promi
 }
 
 /**
- * Step 2 (see the module comment). `withClassifieds`: the run deletes the
- * ads too, the nightly sweep does not. The link rows go with each row
- * (ON DELETE CASCADE, as prune-notifications.ts relies on).
+ * Step 2 (see the module comment). The link rows go with each row (ON
+ * DELETE CASCADE, as prune-notifications.ts relies on); the ads go through
+ * the Document Service, which joins the ambient transaction and leaves their
+ * images to the classified lifecycle after the commit.
  */
 export async function deletePersonalRows(
   strapi: AnonymiseHost,
   id: number,
-  withClassifieds: boolean,
 ): Promise<Record<AnonymiseDeletedClass, number>> {
   const deleted = zeroes(ANONYMISE_DELETED);
   for (const [key, { uid, field }] of Object.entries(DELETED_BY_RELATION)) {
@@ -206,20 +210,18 @@ export async function deletePersonalRows(
     }
     deleted[key as AnonymiseDeletedClass] = ids.length;
   }
-  if (withClassifieds) {
-    const ads = rows(
-      await strapi.db.query(CLASSIFIED_UID).findMany({
-        where: { author: { id } },
-        select: ["id", "documentId"],
-        orderBy: [{ id: "asc" }],
-      }),
-    );
-    for (const ad of ads) {
-      const documentId = text(ad.documentId);
-      if (documentId) await strapi.documents(CLASSIFIED_UID).delete({ documentId });
-    }
-    deleted.classifieds = ads.length;
+  const ads = rows(
+    await strapi.db.query(CLASSIFIED_UID).findMany({
+      where: { author: { id } },
+      select: ["id", "documentId"],
+      orderBy: [{ id: "asc" }],
+    }),
+  );
+  for (const ad of ads) {
+    const documentId = text(ad.documentId);
+    if (documentId) await strapi.documents(CLASSIFIED_UID).delete({ documentId });
   }
+  deleted.classifieds = ads.length;
   return deleted;
 }
 
@@ -349,7 +351,7 @@ export async function anonymiseUser(
 
     await fillMissingSnapshots(strapi as never, { userId: id });
     const before = await countAll(strapi, id);
-    const deleted = await deletePersonalRows(strapi, id, true);
+    const deleted = await deletePersonalRows(strapi, id);
     const rewritten = await rewriteActorNotifications(strapi, id);
     await strapi.db
       .query(USER_UID)
@@ -408,11 +410,25 @@ export async function sweepAnonymised(
   let rewritten = 0;
   const people = await idsLinking(strapi, USER_UID, { anonymisedAt: { $notNull: true } });
   for (const id of people) {
-    await strapi.db.transaction(async () => {
-      const removed = await deletePersonalRows(strapi, id, false);
-      deleted += Object.values(removed).reduce((sum, count) => sum + count, 0);
-      rewritten += await rewriteActorNotifications(strapi, id);
-    });
+    try {
+      // The ads' delete audit rows carry the source `cron`, as the
+      // classified-janitor's (cron/purge-expired-classifieds.ts).
+      const done = await runWithDeleteAudit({ source: "cron" }, () =>
+        strapi.db.transaction(async () => {
+          const removed = await deletePersonalRows(strapi, id);
+          return {
+            deleted: Object.values(removed).reduce((sum, count) => sum + count, 0),
+            rewritten: await rewriteActorNotifications(strapi, id),
+          };
+        }),
+      );
+      deleted += done.deleted;
+      rewritten += done.rewritten;
+    } catch (err) {
+      strapi.log.error(
+        `[erasure-sweep] user=${id} failed (${(err as Error).message}); the next night retries it`,
+      );
+    }
   }
   strapi.log.info(
     `[erasure-sweep] ${people.length} anonymised account(s): removed ${deleted} row(s), rewrote ${rewritten} notification(s)`,

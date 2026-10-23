@@ -1320,7 +1320,7 @@ Since v0.28 ([data-protection.md](data-protection.md) describes the result in Ge
   an anonymised row under its row lock (Content Manager and
   `PUT /api/users/:id` alike); user administration refuses it with
   `anonymised`. A nightly erasure sweep (03:20) repeats the row deletions
-  (not the ads, not the avatar) and the notification rewrite for every
+  (the ads too, through the Document Service; not the avatar) and the notification rewrite for every
   anonymised account.
 - **Export** (`GET /api/user-management/:id/export`, `admin_role`):
   explicit projections, never a secret; `export-coverage.test.ts` fails on
