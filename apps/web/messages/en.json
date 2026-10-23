@@ -122,7 +122,7 @@
     "whatsNew": "What's new",
     "latestNews": "Latest news",
     "noAnnouncementsYet": "No announcements yet",
-    "noAnnouncementsHint": "Editors and admins can post company news from the Strapi admin panel.",
+    "noAnnouncementsHint": "Editors and admins can post company news under Manage.",
     "pinned": "Pinned",
     "featured": "Featured",
     "openAcksTitle": "Pending acknowledgements",
@@ -161,7 +161,7 @@
     "emptyTitle": "No people yet",
     "emptyHint": "Users will appear here once they sign in.",
     "filterByDepartment": "Filter by department",
-    "orgChartIssues": "{count, plural, one {# person is} other {# people are}} shown at the top level because a manager assignment is inconsistent (a loop, or someone set as their own manager). An admin can fix the Manager field in the admin panel.",
+    "orgChartIssues": "{count, plural, one {# person is} other {# people are}} shown at the top level because a manager assignment is inconsistent (a loop, or someone set as their own manager). An admin can fix the manager under Manage → Users.",
     "orgCycle": "Manager chain loops back here",
     "orgSelfManager": "Set as their own manager"
   },
@@ -225,7 +225,7 @@
     "noMembersYet": "No members yet.",
     "noTeamsYet": "No teams yet.",
     "emptyTitle": "No departments yet",
-    "emptyHint": "Create your first department in the Strapi admin and it will show up here.",
+    "emptyHint": "Admins create departments under Manage; they then show up here.",
     "noDescriptionYet": "No description yet."
   },
   "teams": {
@@ -236,7 +236,7 @@
     "noLeadAssigned": "No lead assigned.",
     "noMembersYet": "No members yet.",
     "emptyTitle": "No teams yet",
-    "emptyHint": "Teams belong to departments — add them in the Strapi admin."
+    "emptyHint": "Teams belong to departments; admins create them under Manage."
   },
   "announcements": {
     "title": "Announcements",
@@ -438,18 +438,16 @@
   },
   "admin": {
     "title": "Manage",
-    "openStrapi": "Open Strapi admin",
+    "openStrapi": "Open the Strapi admin (allowed networks or the SSH tunnel)",
     "analyticsDashboard": "Analytics dashboard",
     "analyticsDesc": "Content counts, engagement metrics, and recent activity.",
     "ackReportLink": "Read confirmations",
     "ackReportLinkDesc": "Confirmation rate and outstanding users per mandatory announcement and document.",
     "rolesSection": "Roles",
-    "rolesDesc": "Sinnlos ships with six roles. Admins assign them in the Strapi admin panel; with Microsoft sign-in, the Entra app roles Intranet.Admin, Intranet.Editor, Intranet.DepartmentHead, Intranet.TeamLead, Intranet.Member and Intranet.Guest assign them at every sign-in.",
+    "rolesDesc": "Sinnlos ships with six roles. Admins assign them under Manage → Users; with Microsoft or single sign-on, the identity provider's roles assign them at every sign-in.",
     "roleChangeHint": "Need to change who gets which role?",
-    "roleChangeInstruction": "Change the role in the Strapi admin panel (Content Manager, User). With Microsoft sign-in, assign the Intranet app roles in Entra instead; a role changed in the admin panel stays as set.",
+    "roleChangeInstruction": "Change the role under Manage → Users. With Microsoft or single sign-on, assign the intranet roles in the identity provider instead; a role set by hand stays as set.",
     "readHandbook": "Read the handbook",
-    "contentManager": "Content Manager",
-    "contentManagerDesc": "Edit wiki pages, departments, teams and announcements.",
     "rolesPermissions": "Roles & permissions",
     "rolesPermissionsDesc": "Configure what each role can read or write.",
     "roleAdmin": "Full CRUD on everything. Manages users, roles and departments.",
@@ -570,7 +568,7 @@
     "eyebrow": "Learning & development",
     "description": "Internal training courses and mandatory instructions. Courses consist of lessons — completed lessons are tracked per person.",
     "emptyTitle": "No courses yet",
-    "emptyHint": "Admins and editors can create courses in the Strapi admin panel. Published courses will appear here.",
+    "emptyHint": "Admins and editors create courses under Manage. Published courses appear here.",
     "mandatory": "Mandatory",
     "lessonCount": "{count} lessons",
     "statusDone": "Completed",

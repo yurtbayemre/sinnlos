@@ -122,7 +122,7 @@
     "whatsNew": "Aktuelles",
     "latestNews": "Neueste Meldungen",
     "noAnnouncementsYet": "Noch keine Neuigkeiten",
-    "noAnnouncementsHint": "Redakteure und Admins können Unternehmensneuigkeiten im Strapi-Admin-Panel veröffentlichen.",
+    "noAnnouncementsHint": "Redakteure und Admins können Unternehmensneuigkeiten unter „Verwaltung“ veröffentlichen.",
     "pinned": "Angepinnt",
     "featured": "Hervorgehoben",
     "openAcksTitle": "Offene Bestätigungen",
@@ -161,7 +161,7 @@
     "emptyTitle": "Noch keine Personen",
     "emptyHint": "Personen erscheinen hier, sobald sie sich anmelden.",
     "filterByDepartment": "Nach Abteilung filtern",
-    "orgChartIssues": "{count, plural, one {# Person steht} other {# Personen stehen}} ganz oben, weil eine Manager-Zuordnung nicht stimmt (ein Kreis, oder jemand ist sich selbst als Manager zugeordnet). Ein Admin kann das Feld „Manager“ im Admin-Panel korrigieren.",
+    "orgChartIssues": "{count, plural, one {# Person steht} other {# Personen stehen}} ganz oben, weil eine Manager-Zuordnung nicht stimmt (ein Kreis, oder jemand ist sich selbst als Manager zugeordnet). Ein Admin kann die vorgesetzte Person unter „Verwaltung“ → „Benutzer“ korrigieren.",
     "orgCycle": "Manager-Kette führt hierher zurück",
     "orgSelfManager": "Sich selbst als Manager zugeordnet"
   },
@@ -225,7 +225,7 @@
     "noMembersYet": "Noch keine Mitglieder.",
     "noTeamsYet": "Noch keine Teams.",
     "emptyTitle": "Noch keine Abteilungen",
-    "emptyHint": "Erstellen Sie Ihre erste Abteilung im Strapi-Admin – sie erscheint dann hier.",
+    "emptyHint": "Admins legen Abteilungen unter „Verwaltung“ an; sie erscheinen dann hier.",
     "noDescriptionYet": "Noch keine Beschreibung."
   },
   "teams": {
@@ -236,7 +236,7 @@
     "noLeadAssigned": "Keine Leitung zugewiesen.",
     "noMembersYet": "Noch keine Mitglieder.",
     "emptyTitle": "Noch keine Teams",
-    "emptyHint": "Teams gehören zu Abteilungen – legen Sie sie im Strapi-Admin an."
+    "emptyHint": "Teams gehören zu Abteilungen; Admins legen sie unter „Verwaltung“ an."
   },
   "announcements": {
     "title": "Neuigkeiten",
@@ -438,18 +438,16 @@
   },
   "admin": {
     "title": "Verwaltung",
-    "openStrapi": "Strapi-Admin öffnen",
+    "openStrapi": "Strapi-Admin öffnen (erlaubte Netze oder SSH-Tunnel)",
     "analyticsDashboard": "Analyse-Dashboard",
     "analyticsDesc": "Inhaltsstatistiken, Engagement-Metriken und aktuelle Aktivitäten.",
     "ackReportLink": "Lesebestätigungen",
     "ackReportLinkDesc": "Bestätigungsquote und offene Nutzer je Pflichtmeldung und Pflichtdokument.",
     "rolesSection": "Rollen",
-    "rolesDesc": "Sinnlos enthält sechs Rollen. Admins vergeben sie im Strapi-Adminbereich; mit Microsoft-Anmeldung vergeben die Entra-App-Rollen Intranet.Admin, Intranet.Editor, Intranet.DepartmentHead, Intranet.TeamLead, Intranet.Member und Intranet.Guest sie bei jeder Anmeldung.",
+    "rolesDesc": "Sinnlos enthält sechs Rollen. Admins vergeben sie unter „Verwaltung“ → „Benutzer“; mit Microsoft-Anmeldung oder Single Sign-On vergeben die Rollen des Identity-Providers sie bei jeder Anmeldung.",
     "roleChangeHint": "Möchten Sie ändern, wer welche Rolle hat?",
-    "roleChangeInstruction": "Ändern Sie die Rolle im Strapi-Adminbereich (Content Manager, User). Mit Microsoft-Anmeldung vergeben Sie stattdessen die Intranet-App-Rollen in Entra; eine im Adminbereich geänderte Rolle bleibt so, wie sie gesetzt wurde.",
+    "roleChangeInstruction": "Ändern Sie die Rolle unter „Verwaltung“ → „Benutzer“. Mit Microsoft-Anmeldung oder Single Sign-On vergeben Sie stattdessen die Intranet-Rollen im Identity-Provider; eine von Hand gesetzte Rolle bleibt so, wie sie gesetzt wurde.",
     "readHandbook": "Handbuch lesen",
-    "contentManager": "Inhaltsverwaltung",
-    "contentManagerDesc": "Wiki-Seiten, Abteilungen, Teams und Neuigkeiten bearbeiten.",
     "rolesPermissions": "Rollen & Berechtigungen",
     "rolesPermissionsDesc": "Konfigurieren Sie Lese- und Schreibrechte pro Rolle.",
     "roleAdmin": "Voller CRUD-Zugriff. Verwaltet Benutzer, Rollen und Abteilungen.",
@@ -570,7 +568,7 @@
     "eyebrow": "Weiterbildung",
     "description": "Interne Schulungen und Pflichtunterweisungen. Kurse bestehen aus Lektionen — abgeschlossene Lektionen werden pro Person nachgehalten.",
     "emptyTitle": "Noch keine Schulungen",
-    "emptyHint": "Admins und Redakteure können Kurse im Strapi-Admin-Panel anlegen. Veröffentlichte Kurse erscheinen hier.",
+    "emptyHint": "Admins und Redakteure legen Kurse unter „Verwaltung“ an. Veröffentlichte Kurse erscheinen hier.",
     "mandatory": "Pflicht",
     "lessonCount": "{count} Lektionen",
     "statusDone": "Abgeschlossen",
