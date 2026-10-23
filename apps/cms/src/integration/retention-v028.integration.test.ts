@@ -90,9 +90,7 @@ describe.each(testEngines())("v0.28 retention janitors on %s", (engine) => {
     const orphan = await ack(gone.documentId);
     const orphanDocument = await ack("itdocgone00000000000000a", "document");
 
-    const { pruneAcknowledgements } = t.requireBuilt<AckJanitor>(
-      "src/cron/prune-acknowledgements",
-    );
+    const { pruneAcknowledgements } = t.requireBuilt<AckJanitor>("src/cron/prune-acknowledgements");
     await expect(pruneAcknowledgements(t.strapi)).resolves.toBe(2);
     const left = await t.strapi.db.query(ACK).findMany({ select: ["id"] });
     expect(left.map((row) => row.id).sort((a, b) => a - b)).toEqual(
@@ -100,7 +98,9 @@ describe.each(testEngines())("v0.28 retention janitors on %s", (engine) => {
     );
     for (const id of [orphan.id, orphanDocument.id]) {
       expect(
-        await t.strapi.db.query("acknowledgements_user_lnk").count({ where: { acknowledgement_id: id } }),
+        await t.strapi.db
+          .query("acknowledgements_user_lnk")
+          .count({ where: { acknowledgement_id: id } }),
       ).toBe(0);
     }
     await expect(pruneAcknowledgements(t.strapi)).resolves.toBe(0);
@@ -132,7 +132,11 @@ describe.each(testEngines())("v0.28 retention janitors on %s", (engine) => {
       t.strapi.db.query(RSVP).create({
         data: { user: member, targetDocumentId, status: "yes", respondedAt: ago(500) },
       });
-    const dropped = [await rsvp(longPast.documentId), await rsvp(noEnd.documentId), await rsvp(gone.documentId)];
+    const dropped = [
+      await rsvp(longPast.documentId),
+      await rsvp(noEnd.documentId),
+      await rsvp(gone.documentId),
+    ];
     const kept = [
       await rsvp(recent.documentId),
       await rsvp(upcoming.documentId),
@@ -226,6 +230,39 @@ describe.each(testEngines())("v0.28 retention janitors on %s", (engine) => {
       await expect(unlinkPollVoters(t.strapi)).resolves.toBe(0);
     });
 
+    it("deletes the votes of a deleted poll, which still said who voted (Codex review)", async () => {
+      const doomed = await t.strapi.documents(POLL).create({
+        data: { question: "IT voters deleted poll", options: ["A", "B"] },
+        status: "published",
+      });
+      const row = await t.strapi.db
+        .query(POLL)
+        .findOne({ where: { documentId: doomed.documentId, publishedAt: { $notNull: true } } });
+      const ballots = [
+        await t.strapi.db.query(VOTE).create({
+          data: { poll: row?.id, optionIndex: 0, voter: t.fixtures.users.member.id },
+        }),
+        await t.strapi.db.query(VOTE).create({
+          data: { poll: row?.id, optionIndex: 1, voter: t.fixtures.users.editor.id },
+        }),
+      ].map((vote) => vote.id as number);
+      await t.strapi.documents(POLL).delete({ documentId: doomed.documentId });
+      // The delete cascades the poll links only: the ballots and their voters stay.
+      expect(await t.strapi.db.query(VOTE).count({ where: { id: { $in: ballots } } })).toBe(2);
+      const kept = await t.strapi.db
+        .query(VOTE)
+        .count({ where: { poll: { documentId: poll.documentId } } });
+
+      const { unlinkPollVoters } = t.requireBuilt<PollVoterRetention>(
+        "src/utils/poll-voter-retention",
+      );
+      await unlinkPollVoters(t.strapi);
+      expect(await t.strapi.db.query(VOTE).count({ where: { id: { $in: ballots } } })).toBe(0);
+      expect(
+        await t.strapi.db.query(VOTE).count({ where: { poll: { documentId: poll.documentId } } }),
+      ).toBe(kept);
+    });
+
     it("can never reopen: Document Service, authoring route, vote and form all say so", async () => {
       await expect(
         t.strapi.documents(POLL).update({
@@ -302,10 +339,14 @@ describe.each(testEngines())("v0.28 retention janitors on %s", (engine) => {
         });
       expect(await mine()).toHaveLength(1);
       // Old enough for both age rules, read and unread.
-      await t.strapi.db.query(NOTIFICATION).updateMany({
-        where: { sourceDocumentId: documentId },
-        data: { createdAt: ago(400), readAt: ago(300) },
-      });
+      for (const row of await t.strapi.db
+        .query(NOTIFICATION)
+        .findMany({ where: { sourceDocumentId: documentId }, select: ["id"] })) {
+        await t.strapi.db.query(NOTIFICATION).update({
+          where: { id: row.id },
+          data: { createdAt: ago(400), readAt: ago(300) },
+        });
+      }
 
       await t.strapi.db.query(USER).update({ where: { id: member }, data: { blocked: true } });
       try {
@@ -344,7 +385,9 @@ describe.each(testEngines())("v0.28 retention janitors on %s", (engine) => {
             sourceDocumentId,
           },
         });
-        await t.strapi.db.query(NOTIFICATION).update({ where: { id: row.id }, data: { createdAt } });
+        await t.strapi.db
+          .query(NOTIFICATION)
+          .update({ where: { id: row.id }, data: { createdAt } });
         return row;
       };
       const old = await anchor("itgonecourse000000000000@2025-01-01:soon", ago(400));

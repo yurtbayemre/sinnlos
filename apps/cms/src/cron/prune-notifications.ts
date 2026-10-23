@@ -28,7 +28,9 @@
  * Deletion of the un-anchored rows: id pages of NOTIFICATION_PRUNE_BATCH
  * through an id cursor, the rows re-checked with the pure rule
  * (isPrunableNotification) before their ids are deleted, one `deleteMany`
- * per page. The link rows of `recipient` and `actor` go with them: Strapi's
+ * per page whose `where` repeats the rule next to the ids: an unread row
+ * read (markRead, markAllRead) between the page read and the delete has
+ * its 90 days again and stays. The link rows of `recipient` and `actor` go with them: Strapi's
  * link tables reference the row with ON DELETE CASCADE (@strapi/database
  * 5.55.1 metadata/relations.js; SQLite runs with foreign_keys on), pinned
  * for both engines in integration/retention.integration.test.ts. No live
@@ -249,7 +251,9 @@ export async function pruneNotifications(
     afterId = rows[rows.length - 1].id;
     const ids = rows.filter((row) => isPrunableNotification(row, cutoffs)).map((row) => row.id);
     if (ids.length > 0) {
-      deleted += countOf(await notifications.deleteMany({ where: { id: { $in: ids } } }));
+      deleted += countOf(
+        await notifications.deleteMany({ where: { $and: [{ id: { $in: ids } }, where] } }),
+      );
     }
     if (rows.length < NOTIFICATION_PRUNE_BATCH) break;
   }

@@ -34,20 +34,31 @@ import { instantMsOrNull } from "./time";
  * form open on the poll sees the change. One failing poll is logged and
  * skipped (its transaction rolls back); the next night retries it.
  *
+ * DELETED POLLS. A poll's delete removes its rows and, by cascade, the
+ * votes' poll links, but not the vote rows or their voter links: such a
+ * ballot counts nowhere any more and only still says who voted. The same
+ * run deletes those orphaned votes (`deleteOrphanedVotes`), one entity
+ * manager delete per row; nothing can link them again (the vote handler
+ * re-reads the poll under its lock).
+ *
  * The `poll-voter-janitor` runs it at 03:56 APP_TIME_ZONE (cron/registry.ts);
  * the links it removes are more than 30 days old, so the earlier nightly
- * backups hold them. At most POLL_VOTER_MAX_PER_RUN polls per run. It lives
- * here with the other poll rules, not under cron/: it serves no row and
- * sends nothing (poll-exposure.test.ts, the poll consumers inventory).
+ * backups hold them. The rule is applied to every candidate BEFORE the cap,
+ * and every poll it admits is stamped, so a poll the rule keeps (a draft
+ * still open) never crowds out a due one: at most POLL_VOTER_MAX_PER_RUN
+ * due polls and ORPHANED_VOTE_MAX_PER_RUN orphaned votes per run, the rest
+ * the next night. It lives here with the other poll rules, not under
+ * cron/: it serves no row and sends nothing (poll-exposure.test.ts, the
+ * poll consumers inventory).
  */
 
 /** Days after `closesAt` before the voter links go (owner decision). */
 export const POLL_VOTER_RETENTION_DAYS = 30;
-/** Polls per run; the rest follows the next night. */
+/** Due polls per run; the rest follows the next night. */
 export const POLL_VOTER_MAX_PER_RUN = 50;
-/** Candidates read per run: a poll the rule keeps (a draft not closed) never starves the others. */
-const POLL_CANDIDATE_CAP = 10 * POLL_VOTER_MAX_PER_RUN;
-/** Poll rows per candidate read. */
+/** Orphaned votes (their poll deleted) per run. */
+export const ORPHANED_VOTE_MAX_PER_RUN = 1000;
+/** Poll rows per candidate read, and documentIds per rule read. */
 const POLL_PAGE = 200;
 
 export const POLL_VOTER_JANITOR_LOG = "[poll-voter-janitor]";
@@ -134,14 +145,15 @@ const ballotRows = (value: unknown): BallotRow[] =>
       voterId: isRecord(row.voter) && typeof row.voter.id === "number" ? row.voter.id : null,
     }));
 
-/** The poll documents whose rows look due (the rule decides again under the lock). */
-async function candidates(strapi: PollVoterJanitorStrapi, now: Date): Promise<string[]> {
+/** The poll documents due now: a row looks due, and the rule holds over all their rows. */
+export async function duePolls(strapi: PollVoterJanitorStrapi, now: Date): Promise<string[]> {
   const cutoff = new Date(now.getTime() - POLL_VOTER_RETENTION_DAYS * DAY_MS).toISOString();
-  const documentIds = new Set<string>();
+  const polls = strapi.db.query(POLL_UID);
+  const candidates = new Set<string>();
   let afterId = 0;
   for (;;) {
     const rows = listOf(
-      await strapi.db.query(POLL_UID).findMany({
+      await polls.findMany({
         where: {
           id: { $gt: afterId },
           closesAt: { $notNull: true, $lt: cutoff },
@@ -154,13 +166,31 @@ async function candidates(strapi: PollVoterJanitorStrapi, now: Date): Promise<st
     );
     for (const row of rows) {
       if (typeof row.documentId === "string" && row.documentId !== "") {
-        documentIds.add(row.documentId);
+        candidates.add(row.documentId);
       }
     }
-    if (rows.length < POLL_PAGE || documentIds.size >= POLL_CANDIDATE_CAP) break;
+    if (rows.length < POLL_PAGE) break;
     afterId = rows[rows.length - 1].id as number;
   }
-  return [...documentIds].slice(0, POLL_CANDIDATE_CAP);
+  const ids = [...candidates];
+  const due: string[] = [];
+  for (let start = 0; start < ids.length; start += POLL_PAGE) {
+    const chunk = ids.slice(start, start + POLL_PAGE);
+    const byDocument = new Map<string, Record<string, unknown>[]>();
+    for (const row of listOf(
+      await polls.findMany({
+        where: { documentId: { $in: chunk } },
+        select: ["documentId", "closesAt", "votersRemovedAt"],
+      }),
+    )) {
+      const documentId = row.documentId as string;
+      byDocument.set(documentId, [...(byDocument.get(documentId) ?? []), row]);
+    }
+    for (const documentId of chunk) {
+      if (votersRemovable(byDocument.get(documentId) ?? [], now)) due.push(documentId);
+    }
+  }
+  return due;
 }
 
 /** Removes one poll's voter links (see LOCKING); null when the rule no longer holds. */
@@ -202,13 +232,31 @@ export async function removePollVoters(
   });
 }
 
-/** The nightly run; returns how many polls lost their voter links. */
+/** Deletes the votes whose poll was deleted (see DELETED POLLS); returns how many went. */
+export async function deleteOrphanedVotes(
+  strapi: PollVoterJanitorStrapi,
+  limit: number = ORPHANED_VOTE_MAX_PER_RUN,
+): Promise<number> {
+  const votes = strapi.db.query(VOTE_UID);
+  const rows = listOf(
+    await votes.findMany({
+      where: { poll: { id: { $null: true } } },
+      select: ["id"],
+      orderBy: { id: "asc" },
+      limit,
+    }),
+  );
+  for (const row of rows) await votes.delete({ where: { id: row.id } });
+  return rows.length;
+}
+
+/** The nightly run: due polls, then orphaned votes; returns how many polls lost their voter links. */
 export async function unlinkPollVoters(
   strapi: PollVoterJanitorStrapi,
   now: Date = new Date(),
 ): Promise<number> {
   let polls = 0;
-  for (const documentId of await candidates(strapi, now)) {
+  for (const documentId of await duePolls(strapi, now)) {
     if (polls >= POLL_VOTER_MAX_PER_RUN) break;
     try {
       const done = await removePollVoters(strapi, documentId, now);
@@ -224,6 +272,10 @@ export async function unlinkPollVoters(
           (err instanceof Error ? err.message : String(err)),
       );
     }
+  }
+  const orphans = await deleteOrphanedVotes(strapi);
+  if (orphans > 0) {
+    strapi.log.info(`${POLL_VOTER_JANITOR_LOG} deleted ${orphans} vote(s) of deleted polls`);
   }
   return polls;
 }

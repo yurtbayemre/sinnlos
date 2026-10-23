@@ -1,5 +1,6 @@
 import { EVENT_UID } from "../utils/authoring-uids";
 import { lockDocument, type DocumentLockHost } from "../utils/document-lock";
+import { EXISTING_DOCUMENTS_CHUNK } from "../utils/existing-documents";
 import { instantMsOrNull } from "../utils/time";
 
 /**
@@ -23,9 +24,12 @@ import { instantMsOrNull } from "../utils/time";
  * by the re-read, one that comes after waits for the delete. The delete
  * writes RSVP rows only (not a guarded type), so no revision advance.
  *
- * Paging: RSVP id pages of RSVP_PRUNE_BATCH, each event decided once per
- * run, at most RSVP_PRUNE_MAX_EVENTS events a run (the rest follows the
- * next night). The user link rows go with the RSVPs (ON DELETE CASCADE,
+ * The run reads the DISTINCT events the RSVPs answer (one row per event,
+ * however many people answered), judges every one with the rule, and then
+ * deletes the RSVPs of at most RSVP_PRUNE_MAX_EVENTS due events (the rest
+ * follows the next night). Events the rule keeps are never counted against
+ * that cap, so however many there are, they cannot hide a due one. The user
+ * link rows go with the RSVPs (ON DELETE CASCADE,
  * integration/retention-v028.integration.test.ts). Runs at 03:54
  * APP_TIME_ZONE (cron/registry.ts); one failing event is logged and
  * skipped, the next night retries it.
@@ -33,9 +37,7 @@ import { instantMsOrNull } from "../utils/time";
 
 /** Days after an event's end before its RSVPs go. */
 export const RSVP_RETENTION_DAYS = 180;
-/** RSVP rows per read. */
-export const RSVP_PRUNE_BATCH = 500;
-/** Events decided per run. */
+/** Due events whose RSVPs one run deletes. */
 export const RSVP_PRUNE_MAX_EVENTS = 500;
 
 export const RSVP_JANITOR_LOG = "[rsvp-janitor]";
@@ -51,6 +53,10 @@ export interface RsvpJanitorStrapi {
       deleteMany(params: Record<string, unknown>): Promise<{ count?: number } | unknown>;
     };
     transaction<T>(callback: () => Promise<T>): Promise<T>;
+    getConnection(table: string): { distinct(...columns: string[]): PromiseLike<unknown[]> };
+    metadata: {
+      get(uid: string): { tableName: string; attributes: Record<string, { columnName?: string }> };
+    };
   };
   log: { info(message: string): void; error(message: string): void };
 }
@@ -96,14 +102,17 @@ async function eventRows(
   documentIds: readonly string[],
 ): Promise<Map<string, Record<string, unknown>[]>> {
   const grouped = new Map<string, Record<string, unknown>[]>();
-  for (const row of listOf(
-    await strapi.db.query(EVENT_UID).findMany({
-      where: { documentId: { $in: [...documentIds] } },
-      select: ["id", "documentId", "start", "end"],
-    }),
-  )) {
-    const documentId = row.documentId as string;
-    grouped.set(documentId, [...(grouped.get(documentId) ?? []), row]);
+  for (let start = 0; start < documentIds.length; start += EXISTING_DOCUMENTS_CHUNK) {
+    const rows = listOf(
+      await strapi.db.query(EVENT_UID).findMany({
+        where: { documentId: { $in: documentIds.slice(start, start + EXISTING_DOCUMENTS_CHUNK) } },
+        select: ["id", "documentId", "start", "end"],
+      }),
+    );
+    for (const row of rows) {
+      const documentId = row.documentId as string;
+      grouped.set(documentId, [...(grouped.get(documentId) ?? []), row]);
+    }
   }
   return grouped;
 }
@@ -131,42 +140,28 @@ export async function pruneRsvps(
   strapi: RsvpJanitorStrapi,
   now: Date = new Date(),
 ): Promise<number> {
-  const decided = new Set<string>();
+  const meta = strapi.db.metadata.get(RSVP_UID);
+  const column = meta.attributes.targetDocumentId?.columnName ?? "target_document_id";
+  const answered = (
+    (await strapi.db
+      .getConnection(meta.tableName)
+      .distinct(`${column} as targetDocumentId`)) as Array<{ targetDocumentId?: unknown }>
+  )
+    .map((row) => row.targetDocumentId)
+    .filter((id): id is string => typeof id === "string" && id !== "");
+  const rows = await eventRows(strapi, answered);
+  const due = answered.filter((documentId) => rsvpsExpired(rows.get(documentId) ?? [], now));
+
   let deleted = 0;
-  let afterId = 0;
-  while (decided.size < RSVP_PRUNE_MAX_EVENTS) {
-    const page = listOf(
-      await strapi.db.query(RSVP_UID).findMany({
-        where: { id: { $gt: afterId } },
-        select: ["id", "targetDocumentId"],
-        orderBy: { id: "asc" },
-        limit: RSVP_PRUNE_BATCH,
-      }),
-    );
-    if (page.length === 0) break;
-    afterId = page[page.length - 1].id as number;
-    const fresh = [
-      ...new Set(
-        page
-          .map((row) => row.targetDocumentId)
-          .filter((id): id is string => typeof id === "string" && id !== "" && !decided.has(id)),
-      ),
-    ].slice(0, RSVP_PRUNE_MAX_EVENTS - decided.size);
-    const rows = await eventRows(strapi, fresh);
-    for (const documentId of fresh) {
-      decided.add(documentId);
-      const own = rows.get(documentId) ?? [];
-      if (!rsvpsExpired(own, now)) continue;
-      try {
-        deleted += await pruneEvent(strapi, documentId, own.length > 0, now);
-      } catch (err) {
-        strapi.log.error(
-          `${RSVP_JANITOR_LOG} event ${documentId} failed, retried next night: ` +
-            (err instanceof Error ? err.message : String(err)),
-        );
-      }
+  for (const documentId of due.slice(0, RSVP_PRUNE_MAX_EVENTS)) {
+    try {
+      deleted += await pruneEvent(strapi, documentId, rows.has(documentId), now);
+    } catch (err) {
+      strapi.log.error(
+        `${RSVP_JANITOR_LOG} event ${documentId} failed, retried next night: ` +
+          (err instanceof Error ? err.message : String(err)),
+      );
     }
-    if (page.length < RSVP_PRUNE_BATCH) break;
   }
   if (deleted > 0) {
     strapi.log.info(

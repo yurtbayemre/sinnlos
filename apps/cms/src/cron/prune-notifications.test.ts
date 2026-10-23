@@ -79,6 +79,10 @@ function stub(rows: Array<Omit<Row, "id">> = Object.values(ROWS)) {
   return strapi;
 }
 
+/** The ids a pass-1 `deleteMany` names: `{ $and: [{ id: { $in } }, rule] }`. */
+const idsOf = (params: Record<string, unknown>): number[] =>
+  (params.where as { $and: Array<{ id?: { $in: number[] } }> }).$and[0].id?.$in ?? [];
+
 const labelsLeft = (strapi: ReturnType<typeof stub>) => {
   const labels = Object.keys(ROWS);
   return strapi.tables[NOTIFICATION].map((row) => labels[row.id - 1]);
@@ -180,9 +184,28 @@ describe("pruneNotifications", () => {
     const deletes = strapi.calls.filter((call) => call.method === "deleteMany");
     expect(deletes.length).toBeGreaterThan(1);
     for (const call of deletes) {
-      const ids = (call.params as { where: { id: { $in: number[] } } }).where.id.$in;
+      const ids = idsOf(call.params as Record<string, unknown>);
       expect(ids.length).toBeLessThanOrEqual(NOTIFICATION_PRUNE_BATCH);
     }
+  });
+
+  it("re-checks the rule in the delete: a row read meanwhile keeps its 90 days", async () => {
+    const strapi = stub([ROWS.unreadAncient, ROWS.readLongAgo]);
+    const query = strapi.db.query.bind(strapi.db);
+    strapi.db.query = ((uid: string) => {
+      const inner = query(uid);
+      return {
+        ...inner,
+        findMany: async (params: Parameters<typeof inner.findMany>[0]) => {
+          const rows = await inner.findMany(params);
+          // markAllRead lands between the page read and its delete.
+          strapi.tables[NOTIFICATION][0].readAt = NOW.toISOString();
+          return rows;
+        },
+      };
+    }) as typeof strapi.db.query;
+    await expect(pruneNotifications(strapi as NotificationJanitorStrapi, NOW)).resolves.toBe(1);
+    expect(strapi.tables[NOTIFICATION].map((row) => row.id)).toEqual([1]);
   });
 
   it("stops after NOTIFICATION_PRUNE_MAX_BATCHES pages; the rest waits for the next night", async () => {
@@ -198,8 +221,8 @@ describe("pruneNotifications", () => {
               ...ROWS.readLongAgo,
             }));
           },
-          deleteMany: async ({ where }: Record<string, unknown>) => ({
-            count: (where as { id: { $in: number[] } }).id.$in.length,
+          deleteMany: async (params: Record<string, unknown>) => ({
+            count: idsOf(params).length,
           }),
         }),
       },
@@ -222,8 +245,8 @@ describe("pruneNotifications", () => {
             { id: 3, ...ROWS.unreadRecent },
             { id: 4, ...ROWS.halfAnchored },
           ],
-          deleteMany: async ({ where }: Record<string, unknown>) => {
-            const ids = (where as { id: { $in: number[] } }).id.$in;
+          deleteMany: async (params: Record<string, unknown>) => {
+            const ids = idsOf(params);
             deleted.push(ids);
             return { count: ids.length };
           },

@@ -1,5 +1,9 @@
 import { ANNOUNCEMENT_UID, DOCUMENT_UID } from "../utils/authoring-uids";
-import { existingDocumentIds, type ExistingDocumentsHost } from "../utils/existing-documents";
+import {
+  EXISTING_DOCUMENTS_CHUNK,
+  existingDocumentIds,
+  type ExistingDocumentsHost,
+} from "../utils/existing-documents";
 
 /**
  * Nightly retention of read confirmations (v0.28, M11; owner decision
@@ -16,17 +20,15 @@ import { existingDocumentIds, type ExistingDocumentsHost } from "../utils/existi
  * (Strapi never reuses a documentId), so a confirmation found orphaned
  * stays orphaned and no lock is needed.
  *
- * Deletion: id pages of ACK_PRUNE_BATCH, one `deleteMany` per page for the
- * orphans in it (the user link rows go with them, ON DELETE CASCADE,
- * integration/retention-v028.integration.test.ts). At most
- * ACK_PRUNE_MAX_BATCHES pages per run. Runs at 03:52 APP_TIME_ZONE
+ * The run reads the DISTINCT targets (one row per confirmed document,
+ * however many people confirmed it), looks their documents up per type,
+ * and deletes the confirmations of the gone ones with one `deleteMany` per
+ * type and chunk (the user link rows go with them, ON DELETE CASCADE,
+ * integration/retention-v028.integration.test.ts). Confirmations of live
+ * documents are never paged through, so however many there are, they
+ * cannot hide an orphan from the run. Runs at 03:52 APP_TIME_ZONE
  * (cron/registry.ts); errors propagate to the cron wrapper.
  */
-
-/** Rows per read and per `deleteMany`. */
-export const ACK_PRUNE_BATCH = 500;
-/** Pages per run: at most 100 000 rows read a night. */
-export const ACK_PRUNE_MAX_BATCHES = 200;
 
 export const ACK_JANITOR_LOG = "[ack-janitor]";
 
@@ -45,72 +47,65 @@ export interface AckJanitorStrapi {
       findMany(params: Record<string, unknown>): Promise<unknown>;
       deleteMany(params: Record<string, unknown>): Promise<{ count?: number } | unknown>;
     };
+    getConnection(table: string): { distinct(...columns: string[]): PromiseLike<unknown[]> };
+    metadata: {
+      get(uid: string): { tableName: string; attributes: Record<string, { columnName?: string }> };
+    };
   };
   log: { info(message: string): void };
 }
 
-interface AckRow {
-  id: number;
+/** One distinct target of the stored confirmations. */
+export interface AckTarget {
   targetType?: unknown;
   targetDocumentId?: unknown;
 }
-
-const rowsOf = (value: unknown): AckRow[] =>
-  (Array.isArray(value) ? value : []).filter(
-    (row: unknown): row is AckRow =>
-      typeof row === "object" && row !== null && typeof (row as { id?: unknown }).id === "number",
-  );
 
 const countOf = (result: unknown): number => {
   const count = (result as { count?: unknown } | null)?.count;
   return typeof count === "number" ? count : 0;
 };
 
-/** The ids of `rows` whose target is gone, given the existing documentIds per uid (pure). */
-export function orphanedAcknowledgements(
-  rows: readonly AckRow[],
-  existing: ReadonlyMap<string, ReadonlySet<string>>,
-): number[] {
-  return rows
-    .filter((row) => {
-      const uid = typeof row.targetType === "string" ? ACK_TARGET_UIDS[row.targetType] : undefined;
-      const documentId = typeof row.targetDocumentId === "string" ? row.targetDocumentId : "";
-      if (!uid || documentId === "") return false;
-      const found = existing.get(uid);
-      return found !== undefined && !found.has(documentId);
-    })
-    .map((row) => row.id);
+/** The checkable targets by `targetType` (pure): unknown types and blank ids drop out. */
+export function targetsByType(targets: readonly AckTarget[]): Map<string, string[]> {
+  const byType = new Map<string, string[]>();
+  for (const target of targets) {
+    const type = typeof target.targetType === "string" ? target.targetType : "";
+    const documentId = typeof target.targetDocumentId === "string" ? target.targetDocumentId : "";
+    if (!ACK_TARGET_UIDS[type] || documentId === "") continue;
+    byType.set(type, [...(byType.get(type) ?? []), documentId]);
+  }
+  return byType;
 }
 
 /** Deletes the acknowledgements of documents gone in every state; returns how many went. */
 export async function pruneAcknowledgements(strapi: AckJanitorStrapi): Promise<number> {
+  const meta = strapi.db.metadata.get(ACKNOWLEDGEMENT_UID);
+  const typeColumn = meta.attributes.targetType?.columnName ?? "target_type";
+  const idColumn = meta.attributes.targetDocumentId?.columnName ?? "target_document_id";
+  const targets = (await strapi.db
+    .getConnection(meta.tableName)
+    .distinct(`${typeColumn} as targetType`, `${idColumn} as targetDocumentId`)) as AckTarget[];
+
   const acks = strapi.db.query(ACKNOWLEDGEMENT_UID);
   let deleted = 0;
-  let afterId = 0;
-  for (let batch = 0; batch < ACK_PRUNE_MAX_BATCHES; batch += 1) {
-    const rows = rowsOf(
-      await acks.findMany({
-        where: { id: { $gt: afterId } },
-        select: ["id", "targetType", "targetDocumentId"],
-        orderBy: { id: "asc" },
-        limit: ACK_PRUNE_BATCH,
-      }),
+  for (const [type, documentIds] of targetsByType(targets)) {
+    const existing = await existingDocumentIds(
+      strapi as unknown as ExistingDocumentsHost,
+      ACK_TARGET_UIDS[type],
+      documentIds,
     );
-    if (rows.length === 0) break;
-    afterId = rows[rows.length - 1].id;
-    const existing = new Map<string, Set<string>>();
-    for (const [type, uid] of Object.entries(ACK_TARGET_UIDS)) {
-      const ids = rows
-        .filter((row) => row.targetType === type && typeof row.targetDocumentId === "string")
-        .map((row) => row.targetDocumentId as string);
-      existing.set(
-        uid,
-        await existingDocumentIds(strapi as unknown as ExistingDocumentsHost, uid, ids),
+    const gone = documentIds.filter((documentId) => !existing.has(documentId));
+    for (let start = 0; start < gone.length; start += EXISTING_DOCUMENTS_CHUNK) {
+      deleted += countOf(
+        await acks.deleteMany({
+          where: {
+            targetType: type,
+            targetDocumentId: { $in: gone.slice(start, start + EXISTING_DOCUMENTS_CHUNK) },
+          },
+        }),
       );
     }
-    const ids = orphanedAcknowledgements(rows, existing);
-    if (ids.length > 0) deleted += countOf(await acks.deleteMany({ where: { id: { $in: ids } } }));
-    if (rows.length < ACK_PRUNE_BATCH) break;
   }
   if (deleted > 0) {
     strapi.log.info(

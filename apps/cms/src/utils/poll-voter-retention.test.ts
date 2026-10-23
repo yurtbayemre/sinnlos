@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 
-import { POLL_VOTER_RETENTION_DAYS, ballotPlan, votersRemovable } from "./poll-voter-retention";
+import { createStrapiStub, type Row } from "../test/strapi-stub.test.helper";
+import {
+  POLL_VOTER_RETENTION_DAYS,
+  ballotPlan,
+  duePolls,
+  votersRemovable,
+  type PollVoterJanitorStrapi,
+} from "./poll-voter-retention";
 
 /**
  * Poll voter links (v0.28, owner decision 2026-10-23): 30 days after the
@@ -66,5 +73,29 @@ describe("ballotPlan (pure)", () => {
 
   it("does nothing for no votes", () => {
     expect(ballotPlan([])).toEqual({ deleteIds: [], unlinkIds: [] });
+  });
+});
+
+describe("duePolls: the rule before the cap (Codex review of lane A3)", () => {
+  it("finds a due poll behind more kept polls than any cap, and never a kept one", async () => {
+    const POLL = "api::poll.poll";
+    const rows: Row[] = [];
+    let id = 0;
+    // 600 polls whose published row closed long ago but whose draft is still open.
+    for (let i = 0; i < 600; i += 1) {
+      rows.push({
+        id: ++id,
+        documentId: `kept${i}`,
+        publishedAt: daysAgo(90),
+        closesAt: daysAgo(40),
+      });
+      rows.push({ id: ++id, documentId: `kept${i}`, publishedAt: null, closesAt: null });
+    }
+    rows.push({ id: ++id, documentId: "due", publishedAt: daysAgo(90), closesAt: daysAgo(40) });
+    rows.push({ id: ++id, documentId: "due", publishedAt: null, closesAt: daysAgo(40) });
+    const strapi = createStrapiStub({ tables: { [POLL]: rows } });
+    await expect(duePolls(strapi as unknown as PollVoterJanitorStrapi, NOW)).resolves.toEqual([
+      "due",
+    ]);
   });
 });

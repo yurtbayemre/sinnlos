@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import { createStrapiStub } from "../test/strapi-stub.test.helper";
+import { withDistinct } from "./distinct-stub.test.helper";
 import {
-  ACK_PRUNE_BATCH,
-  orphanedAcknowledgements,
   pruneAcknowledgements,
+  targetsByType,
   type AckJanitorStrapi,
 } from "./prune-acknowledgements";
 
@@ -18,65 +18,47 @@ const ACK = "api::acknowledgement.acknowledgement";
 const ANNOUNCEMENT = "api::announcement.announcement";
 const DOCUMENT = "api::document.document";
 
-describe("orphanedAcknowledgements (pure)", () => {
-  const existing = new Map([
-    [ANNOUNCEMENT, new Set(["ann-live"])],
-    [DOCUMENT, new Set(["doc-live"])],
-  ]);
-
-  it("names the confirmations whose document is gone", () => {
+describe("targetsByType (pure)", () => {
+  it("groups the checkable targets and drops what names no checkable document", () => {
     expect(
-      orphanedAcknowledgements(
-        [
-          { id: 1, targetType: "announcement", targetDocumentId: "ann-live" },
-          { id: 2, targetType: "announcement", targetDocumentId: "ann-gone" },
-          { id: 3, targetType: "document", targetDocumentId: "doc-live" },
-          { id: 4, targetType: "document", targetDocumentId: "doc-gone" },
-        ],
-        existing,
-      ),
-    ).toEqual([2, 4]);
-  });
-
-  it("keeps what names no checkable document", () => {
-    expect(
-      orphanedAcknowledgements(
-        [
-          { id: 1, targetType: "wiki", targetDocumentId: "w1" },
-          { id: 2, targetType: "announcement", targetDocumentId: "" },
-          { id: 3, targetType: null, targetDocumentId: "ann-gone" },
-          { id: 4, targetType: "announcement" },
-        ],
-        existing,
-      ),
-    ).toEqual([]);
-    // No lookup for the type: nothing is known, nothing goes.
-    expect(
-      orphanedAcknowledgements(
-        [{ id: 1, targetType: "document", targetDocumentId: "d" }],
-        new Map(),
-      ),
-    ).toEqual([]);
+      targetsByType([
+        { targetType: "announcement", targetDocumentId: "a1" },
+        { targetType: "document", targetDocumentId: "d1" },
+        { targetType: "announcement", targetDocumentId: "a2" },
+        { targetType: "wiki", targetDocumentId: "w1" },
+        { targetType: "announcement", targetDocumentId: "" },
+        { targetType: null, targetDocumentId: "a3" },
+        { targetType: "document" },
+      ]),
+    ).toEqual(
+      new Map([
+        ["announcement", ["a1", "a2"]],
+        ["document", ["d1"]],
+      ]),
+    );
   });
 });
 
 describe("pruneAcknowledgements", () => {
   function stub(acks: number, live: boolean) {
-    return createStrapiStub({
-      tables: {
-        [ACK]: Array.from({ length: acks }, (_, i) => ({
-          id: i + 1,
-          targetType: i % 2 === 0 ? "announcement" : "document",
-          targetDocumentId: i % 2 === 0 ? "ann1" : `doc${i}`,
-        })),
-        [ANNOUNCEMENT]: live ? [{ id: 1, documentId: "ann1", publishedAt: null }] : [],
-        [DOCUMENT]: [],
-      },
-    });
+    return withDistinct(
+      createStrapiStub({
+        tables: {
+          [ACK]: Array.from({ length: acks }, (_, i) => ({
+            id: i + 1,
+            targetType: i % 2 === 0 ? "announcement" : "document",
+            targetDocumentId: i % 2 === 0 ? "ann1" : `doc${i}`,
+          })),
+          [ANNOUNCEMENT]: live ? [{ id: 1, documentId: "ann1", publishedAt: null }] : [],
+          [DOCUMENT]: [],
+        },
+      }),
+      { [ACK]: "acknowledgements" },
+    );
   }
 
-  it("deletes the orphans page by page, logs once, and finds nothing the next night", async () => {
-    const total = ACK_PRUNE_BATCH * 2 + 3;
+  it("deletes the orphans, logs once, and finds nothing the next night", async () => {
+    const total = 1203;
     const strapi = stub(total, true);
     const orphans = Math.floor(total / 2);
     await expect(pruneAcknowledgements(strapi as unknown as AckJanitorStrapi)).resolves.toBe(

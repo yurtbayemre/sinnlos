@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { createStrapiStub } from "../test/strapi-stub.test.helper";
+import { createStrapiStub, type Row } from "../test/strapi-stub.test.helper";
+import { withDistinct } from "./distinct-stub.test.helper";
 import {
   RSVP_RETENTION_DAYS,
   pruneRsvps,
@@ -59,20 +60,23 @@ describe("rsvpsExpired (pure)", () => {
 
 describe("pruneRsvps, events gone in every state", () => {
   it("deletes the RSVPs of gone events only, logs once, and finds nothing the next night", async () => {
-    const strapi = createStrapiStub({
-      tables: {
-        [RSVP]: [
-          { id: 1, targetDocumentId: "gone1", status: "yes" },
-          { id: 2, targetDocumentId: "live1", status: "no" },
-          { id: 3, targetDocumentId: "gone1", status: "maybe" },
-          { id: 4, targetDocumentId: "gone2", status: "yes" },
-        ],
-        [EVENT]: [
-          // Upcoming: its answers stay (and the lock path is never entered).
-          { id: 10, documentId: "live1", start: daysAgo(-5), end: null, publishedAt: null },
-        ],
-      },
-    });
+    const strapi = withDistinct(
+      createStrapiStub({
+        tables: {
+          [RSVP]: [
+            { id: 1, targetDocumentId: "gone1", status: "yes" },
+            { id: 2, targetDocumentId: "live1", status: "no" },
+            { id: 3, targetDocumentId: "gone1", status: "maybe" },
+            { id: 4, targetDocumentId: "gone2", status: "yes" },
+          ],
+          [EVENT]: [
+            // Upcoming: its answers stay (and the lock path is never entered).
+            { id: 10, documentId: "live1", start: daysAgo(-5), end: null, publishedAt: null },
+          ],
+        },
+      }),
+      { [RSVP]: "event_rsvps" },
+    );
     await expect(pruneRsvps(strapi as unknown as RsvpJanitorStrapi, NOW)).resolves.toBe(3);
     expect(strapi.tables[RSVP].map((row) => row.id)).toEqual([2]);
     expect(strapi.log.info.mock.calls).toEqual([
@@ -83,5 +87,28 @@ describe("pruneRsvps, events gone in every state", () => {
     strapi.log.info.mockClear();
     await expect(pruneRsvps(strapi as unknown as RsvpJanitorStrapi, NOW)).resolves.toBe(0);
     expect(strapi.log.info).not.toHaveBeenCalled();
+  });
+});
+
+describe("pruneRsvps: kept events never hide a due one (Codex review of lane A3)", () => {
+  it("deletes the RSVPs of a gone event behind more kept events than the cap", async () => {
+    const events: Row[] = [];
+    const rsvps: Row[] = [];
+    for (let i = 0; i < 600; i += 1) {
+      events.push({
+        id: i + 1,
+        documentId: `up${i}`,
+        start: daysAgo(-5),
+        end: null,
+        publishedAt: null,
+      });
+      rsvps.push({ id: i + 1, targetDocumentId: `up${i}`, status: "yes" });
+    }
+    rsvps.push({ id: 1000, targetDocumentId: "gone", status: "yes" });
+    const strapi = withDistinct(createStrapiStub({ tables: { [RSVP]: rsvps, [EVENT]: events } }), {
+      [RSVP]: "event_rsvps",
+    });
+    await expect(pruneRsvps(strapi as unknown as RsvpJanitorStrapi, NOW)).resolves.toBe(1);
+    expect(strapi.tables[RSVP]).toHaveLength(600);
   });
 });
