@@ -17,6 +17,7 @@
  *   - issueSession: the Strapi JWT and its exp.
  */
 import { createHash, timingSafeEqual } from "node:crypto";
+import { withIssueClaims } from "../extensions/users-permissions/strapi-server";
 import type { RoleType } from "../bootstrap/roles";
 // The profile rules were written for Entra and are pure; every provider shares them.
 import { pickDepartment } from "../entra/profile";
@@ -143,7 +144,10 @@ export async function issueSession(
   const jwtService = strapi.plugin("users-permissions").service("jwt") as {
     issue(payload: { id: number }, options: { expiresIn: string }): string | Promise<string>;
   };
-  const jwt = await jwtService.issue({ id: userId }, { expiresIn: ttl });
+  // v0.27: an identity-provider session (am "idp"): the provider owns MFA.
+  const jwt = await withIssueClaims({ userId, am: "idp" }, () =>
+    jwtService.issue({ id: userId }, { expiresIn: ttl }),
+  );
   return { jwt, expiresAt: jwtExp(jwt) ?? Math.floor(Date.now() / 1000) + ttlSeconds };
 }
 

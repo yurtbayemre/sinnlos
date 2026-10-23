@@ -29,5 +29,24 @@ export default {
       handler: "api::user-management.user-management.roleToEntra",
       config: { policies: [] },
     },
+    // v0.27: invitations, set-password links and second-factor resets.
+    {
+      method: "POST",
+      path: "/user-management/invite",
+      handler: "api::user-management.user-management.invite",
+      config: { policies: [] },
+    },
+    {
+      method: "POST",
+      path: "/user-management/:id/send-link",
+      handler: "api::user-management.user-management.sendLink",
+      config: { policies: [] },
+    },
+    {
+      method: "POST",
+      path: "/user-management/:id/reset-mfa",
+      handler: "api::user-management.user-management.resetMfa",
+      config: { policies: [] },
+    },
   ],
 };

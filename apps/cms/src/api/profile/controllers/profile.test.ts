@@ -231,6 +231,8 @@ const ALLOWED_TOP_LEVEL = new Set<string>([
   // Computed (D-ENTRA-01): which fields the form must not offer, and (v0.25.0) by whom.
   "entraManagedFields",
   "managedBy",
+  // v0.27: the second-factor status (required, enrolled, restricted), no secret.
+  "mfa",
 ]);
 
 describe("GET /api/me (FX02 allowlist)", () => {

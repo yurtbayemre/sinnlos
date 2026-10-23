@@ -143,3 +143,69 @@ export async function ensureOidcIdentityIndex(
     return false;
   }
 }
+
+/**
+ * v0.27 (rev3 #5): e-mail addresses unique in the database, case-insensitive:
+ *   CREATE UNIQUE INDEX IF NOT EXISTS up_users_email_lower_uq ON up_users (lower(email))
+ * so an invitation, the admin panel and a first identity-provider sign-in
+ * cannot create a second account for one address, whichever runs first. On
+ * a database that already holds such duplicates the index cannot exist:
+ * the boot logs how many addresses are affected, skips it, and invitations
+ * are refused (409 email_duplicates_exist) until an admin resolves them.
+ */
+export const EMAIL_INDEX = "up_users_email_lower_uq";
+
+let emailIndexState: boolean | null = null;
+
+/** Whether the e-mail index exists (null before the boot looked). */
+export function emailIndexReady(): boolean | null {
+  return emailIndexState;
+}
+
+function countOf(result: unknown): number {
+  const rows = Array.isArray(result)
+    ? result
+    : typeof result === "object" &&
+        result !== null &&
+        Array.isArray((result as { rows?: unknown }).rows)
+      ? (result as { rows: unknown[] }).rows
+      : [];
+  const value = (rows[0] as { count?: unknown } | undefined)?.count;
+  return Number(value ?? 0);
+}
+
+export async function ensureEmailIndex(strapi: IdentityIndexHost): Promise<boolean> {
+  const meta = strapi.db.metadata.get(USER_UID);
+  const email = quote(meta.attributes.email?.columnName ?? "email");
+  const client = strapi.db.dialect.client;
+  const table =
+    client === "postgres"
+      ? `${quote(strapi.db.getSchemaName() || "public")}.${quote(meta.tableName)}`
+      : quote(meta.tableName);
+  try {
+    const duplicates = countOf(
+      await strapi.db.connection.raw(
+        `SELECT count(*) AS count FROM (SELECT lower(${email}) FROM ${table} WHERE ${email} IS NOT NULL GROUP BY lower(${email}) HAVING count(*) > 1) AS duplicates`,
+      ),
+    );
+    if (duplicates > 0) {
+      strapi.log.error(
+        `[auth] ${duplicates} e-mail address(es) belong to more than one account (case-insensitive): ` +
+          `the unique index ${EMAIL_INDEX} is not created and invitations are refused until an admin resolves them`,
+      );
+      emailIndexState = false;
+      return false;
+    }
+    await strapi.db.connection.raw(
+      `CREATE UNIQUE INDEX IF NOT EXISTS ${quote(EMAIL_INDEX)} ON ${table} (lower(${email}))`,
+    );
+    emailIndexState = true;
+    return true;
+  } catch (err) {
+    strapi.log.error(
+      `[auth] could not ensure the unique index ${EMAIL_INDEX}: ${(err as Error).message}`,
+    );
+    emailIndexState = false;
+    return false;
+  }
+}

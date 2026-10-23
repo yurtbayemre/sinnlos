@@ -300,6 +300,9 @@ Custom actions and plugin routes (`✓` = granted, `—` = not granted):
 | `api::profile.profile.me`                       | `GET /api/me`                                   | ✓            | ✓        | ✓                 | ✓           | ✓        | ✓       | ✓               |
 | `api::profile.profile.updateMe`                 | `PUT /api/me`                                   | ✓            | ✓        | ✓                 | ✓           | ✓        | ✓       | ✓               |
 | `plugin::users-permissions.auth.changePassword` | `POST /api/auth/change-password`                | ✓            | ✓        | ✓                 | ✓           | ✓        | ✓       | ✓               |
+| `api::profile.profile.mfaSetup`                 | `POST /api/me/mfa/setup`                        | ✓            | ✓        | ✓                 | ✓           | ✓        | ✓       | ✓               |
+| `api::profile.profile.mfaActivate`              | `POST /api/me/mfa/activate`                     | ✓            | ✓        | ✓                 | ✓           | ✓        | ✓       | ✓               |
+| `api::profile.profile.mfaDisable`               | `POST /api/me/mfa/disable`                      | ✓            | ✓        | ✓                 | ✓           | ✓        | ✓       | ✓               |
 | `plugin::users-permissions.role.find`           | `GET /api/users-permissions/roles`              | ✓            | —        | —                 | —           | —        | —       | —               |
 | `plugin::upload.content-api.upload`             | `POST /api/upload`                              | ✓            | ✓        | ✓                 | ✓           | ✓        | —       | —               |
 | `api::classified.classified.cleanupUploads`     | `POST /api/classifieds/cleanup-uploads`         | ✓            | ✓        | ✓                 | ✓           | ✓        | —       | —               |
@@ -329,6 +332,9 @@ Custom actions and plugin routes (`✓` = granted, `—` = not granted):
 | `api::user-management.user-management.findOne` | `GET /api/user-management/:id` | ✓ | — | — | — | — | — | — |
 | `api::user-management.user-management.update` | `PUT /api/user-management/:id` | ✓ | — | — | — | — | — | — |
 | `api::user-management.user-management.roleToEntra` | `POST /api/user-management/:id/role-to-entra` | ✓ | — | — | — | — | — | — |
+| `api::user-management.user-management.invite` | `POST /api/user-management/invite` | ✓ | — | — | — | — | — | — |
+| `api::user-management.user-management.sendLink` | `POST /api/user-management/:id/send-link` | ✓ | — | — | — | — | — | — |
+| `api::user-management.user-management.resetMfa` | `POST /api/user-management/:id/reset-mfa` | ✓ | — | — | — | — | — | — |
 <!-- custom-action-grants:end -->
 
 The anonymous `public` role holds none of these, and the cms revokes the

@@ -278,6 +278,7 @@ function harness(
   const plugin: UsersPermissionsPlugin = {
     services: { jwt: realJwtFactory, user: fakeUserFactory() },
     controllers: { auth: authFactory },
+    register: async () => undefined,
   };
   createUsersPermissionsExtension()(plugin);
   services.jwt = (plugin.services.jwt as Factory)({ strapi });
@@ -421,12 +422,15 @@ describe("auth controller", () => {
     expect(h.queries.filter((q) => q.startsWith("update"))).toEqual([]);
   });
 
-  it("a password reset revokes the older JWTs of the user it names", async () => {
+  it("the plugin's own reset flow and provider connect answer 404 (v0.27)", async () => {
     const h = harness();
-    const ctx = { request: { body: { id: 1 } } } as AuthContext & { body?: { jwt?: unknown } };
-    await h.auth.resetPassword(ctx);
-    expect(h.users.get(1)?.tokenVersion).toBe(1);
-    expect(claims(ctx.body?.jwt as string)).toMatchObject({ id: 1, tv: 1 });
+    for (const action of ["forgotPassword", "resetPassword", "connect"]) {
+      const ctx = { request: { body: { id: 1 } } } as AuthContext;
+      await expect(
+        (h.auth as unknown as Record<string, (ctx: AuthContext) => Promise<unknown>>)[action](ctx),
+      ).rejects.toThrow("Not Found");
+    }
+    expect(h.users.get(1)?.tokenVersion).toBe(0);
   });
 
   it("leaves actions without a JWT alone", async () => {
@@ -637,6 +641,7 @@ describe("the plugin's real auth controller: sign-in reads the version before th
     const plugin: UsersPermissionsPlugin = {
       services: { jwt: realJwtFactory, user: userFactory },
       controllers: { auth: realAuthFactory },
+      register: async () => undefined,
     };
     createUsersPermissionsExtension()(plugin);
     services.jwt = (plugin.services.jwt as Factory)({ strapi });
@@ -793,25 +798,9 @@ describe("the plugin's real auth controller: sign-in reads the version before th
     ]);
   });
 
-  it("resetPassword: the version is raised before the plugin saves, and the answer carries it", async () => {
+  it("resetPassword: the plugin's code flow is gone (404), nothing is saved (v0.27)", async () => {
     const h = signInHarness();
-    const before = (await h.jwt.issue({ id: 5 })) as string;
-    const jwt = await h.resetPassword("new-password-2");
-    expect(h.saves).toEqual([
-      {
-        id: 5,
-        params: { resetPasswordToken: null, password: "new-password-2" },
-        versionAtSave: 3,
-      },
-    ]);
-    expect(claims(jwt)).toMatchObject({ id: 5, tv: 3 });
-    await expect(h.jwt.verify(before)).rejects.toThrow("Invalid token.");
-  });
-
-  it("resetPassword: a failed bump saves nothing, so the code still works for another try", async () => {
-    const h = signInHarness();
-    h.faults.bump = true;
-    await expect(h.resetPassword("new-password-2")).rejects.toThrow("connection lost");
+    await expect(h.resetPassword("new-password-2")).rejects.toThrow("Not Found");
     expect(h.saves).toEqual([]);
     expect(h.users.get(5)).toMatchObject({
       tokenVersion: 2,
@@ -1035,6 +1024,7 @@ async function raceHarness(engines: SqliteEngine[], hooks: RaceHook[]): Promise<
   const plugin: UsersPermissionsPlugin = {
     services: { jwt: realJwtFactory, user: fakeUserFactory() },
     controllers: { auth: fakeAuthFactory() },
+    register: async () => undefined,
   };
   createUsersPermissionsExtension()(plugin);
   services.jwt = (plugin.services.jwt as Factory)({ strapi });
@@ -1362,13 +1352,13 @@ describe("the Document Service guard of the user type (admin-panel passwords, to
     const reentrant = patchUserService(
       {
         edit: async () => {
-          inner = Promise.resolve(h.userService.edit(2, { password: "inner" }));
+          inner = Promise.resolve(h.userService.edit(2, { password: "inner-long-pass" }));
           await inner;
         },
       },
       h.strapi,
     );
-    await expect(reentrant.edit(2, { password: "outer" })).rejects.toThrow(
+    await expect(reentrant.edit(2, { password: "outer-long-pass" })).rejects.toThrow(
       "a second password change of user 2 inside the same transaction",
     );
     await expect(inner).rejects.toThrow("is refused (FX40)");
@@ -1381,17 +1371,18 @@ describe("the Document Service guard of the user type (admin-panel passwords, to
     // A save inside user 2's edit() that writes user 1's password.
     const nested = patchUserService(
       {
-        edit: async () => h.documents.update({ documentId: "doc-1", data: { password: "other" } }),
+        edit: async () =>
+          h.documents.update({ documentId: "doc-1", data: { password: "other-long-pass" } }),
       },
       h.strapi,
     );
-    await nested.edit(2, { password: "own" });
+    await nested.edit(2, { password: "own-long-password" });
     // The nested write joins the outer transaction and still bumps user 1.
     expect(h.writes()).toEqual([
       "begin",
       "bump 2",
       "bump 1",
-      `save ${JSON.stringify({ password: "other" })}`,
+      `save ${JSON.stringify({ password: "other-long-pass" })}`,
       "commit",
     ]);
   });
@@ -1408,7 +1399,7 @@ describe("the Document Service guard of the user type (admin-panel passwords, to
     // A password write that tries to set the version back: raised, not reset.
     await h.documents.update({
       documentId: "doc-2",
-      data: { password: "p", tokenVersion: 0 },
+      data: { password: "p-long-enough-1", tokenVersion: 0 },
     });
     expect(h.users.get(2)?.tokenVersion).toBe(4);
     expect(h.logs.filter((line) => line.includes("tokenVersion dropped"))).toHaveLength(4);
@@ -1417,7 +1408,7 @@ describe("the Document Service guard of the user type (admin-panel passwords, to
   it("leaves other content types and the reading actions alone", async () => {
     const h = guardHarness();
     const seen: unknown[] = [];
-    const params = { documentId: "a", data: { password: "p", tokenVersion: 9 } };
+    const params = { documentId: "a", data: { password: "p-long-enough-1", tokenVersion: 9 } };
     await h.guard({ uid: "api::poll.poll", action: "update", params }, async () =>
       seen.push(params),
     );
@@ -1432,7 +1423,7 @@ describe("the Document Service guard of the user type (admin-panel passwords, to
       throw new Error("connection lost");
     };
     await expect(
-      h.documents.update({ documentId: "doc-2", data: { password: "p" } }),
+      h.documents.update({ documentId: "doc-2", data: { password: "p-long-enough-1" } }),
     ).rejects.toThrow("connection lost");
     expect(h.writes()).toEqual(["begin", "rollback"]);
     expect(h.users.get(2)).toMatchObject({ tokenVersion: 3 });
@@ -1443,7 +1434,7 @@ describe("the Document Service guard of the user type (admin-panel passwords, to
     const before = (await h.jwt.issue({ id: 2 })) as string;
     h.failWrites();
     await expect(
-      h.documents.update({ documentId: "doc-2", data: { password: "p" } }),
+      h.documents.update({ documentId: "doc-2", data: { password: "p-long-enough-1" } }),
     ).rejects.toThrow("the Document Service failed");
     expect(h.writes()).toEqual(["begin", "bump 2", "rollback"]);
     expect(h.users.get(2)).toMatchObject({ tokenVersion: 3 });
@@ -1457,15 +1448,18 @@ describe("the Document Service guard of the user type (admin-panel passwords, to
   it("refuses a password write for a user it cannot find, before writing", async () => {
     const h = guardHarness();
     await expect(
-      h.documents.update({ documentId: "doc-99", data: { password: "p" } }),
+      h.documents.update({ documentId: "doc-99", data: { password: "p-long-enough-1" } }),
     ).rejects.toThrow("cannot be found is refused");
     expect(h.writes()).toEqual([]);
   });
 
   it("in refresh mode only keeps tokenVersion out", async () => {
     const h = guardHarness("refresh");
-    await h.documents.update({ documentId: "doc-2", data: { password: "p", tokenVersion: 0 } });
-    expect(h.writes()).toEqual([`save ${JSON.stringify({ password: "p" })}`]);
+    await h.documents.update({
+      documentId: "doc-2",
+      data: { password: "p-long-enough-1", tokenVersion: 0 },
+    });
+    expect(h.writes()).toEqual([`save ${JSON.stringify({ password: "p-long-enough-1" })}`]);
   });
 
   it("registerUserWriteGuard hangs it onto the Document Service, or refuses to boot", () => {
@@ -1537,6 +1531,7 @@ describe("jwtManagement 'refresh': the plugin's own session revocation applies",
     const plugin: UsersPermissionsPlugin = {
       services: { jwt: () => ({ issue, verify }), user: fakeUserFactory() },
       controllers: { auth: fakeAuthFactory() },
+      register: async () => undefined,
     };
     createUsersPermissionsExtension()(plugin);
     const service = (plugin.services.jwt as Factory)({ strapi: h.strapi }) as JwtService;
@@ -1566,6 +1561,7 @@ describe("the extension itself", () => {
     const plugin: UsersPermissionsPlugin = {
       services: { jwt: realJwtFactory, user: fakeUserFactory() },
       controllers: { auth: fakeAuthFactory() },
+      register: async () => undefined,
     };
     const extend = createUsersPermissionsExtension();
     extend(plugin);
@@ -1594,6 +1590,7 @@ describe("the extension itself", () => {
     const noVerify: UsersPermissionsPlugin = {
       services: { jwt: () => ({ issue: () => "" }), user: () => ({ add: () => undefined }) },
       controllers: { auth: () => ({ changePassword: async () => undefined }) },
+      register: async () => undefined,
     };
     extend(noVerify);
     expect(() => (noVerify.services.jwt as Factory)({ strapi })).toThrow(
@@ -1603,7 +1600,7 @@ describe("the extension itself", () => {
       "no longer exposes edit()",
     );
     expect(() => (noVerify.controllers.auth as Factory)({ strapi })).toThrow(
-      "no longer exposes resetPassword",
+      "no longer exposes callback",
     );
   });
 });
