@@ -66,6 +66,11 @@ export const AUTHORING_FIELD_CODES = [
   "quizInvalid",
   /** A poll's options or anonymity after its first vote. */
   "frozenAfterVotes",
+  /**
+   * A poll's `closesAt` once the retention removed its voter links (v0.28,
+   * 30 days after the close): the poll cannot be reopened.
+   */
+  "votersRemoved",
   /** A wiki space's visibility without its target (batch 16). */
   "visibilityTarget",
   /** Fewer than MIN_POLL_OPTIONS or more than MAX_POLL_OPTIONS poll options. */

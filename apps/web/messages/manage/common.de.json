@@ -201,6 +201,7 @@
     "videoUrlNotYoutube": "Geben Sie die Adresse eines YouTube-Videos ein.",
     "quizInvalid": "Das Quiz ist nicht gültig.",
     "frozenAfterVotes": "Es wurde bereits abgestimmt, daher lässt sich das nicht mehr ändern.",
+    "votersRemoved": "Die Umfrage ist seit über 30 Tagen beendet und die Zuordnung der Stimmen wurde gelöscht, daher lässt sie sich nicht wieder öffnen.",
     "visibilityTarget": "Wählen Sie, wer es sehen darf.",
     "taken": "Dieser Name ist schon vergeben.",
     "optionCount": "Eine Umfrage braucht 2 bis 20 Antworten.",
