@@ -35,7 +35,13 @@
  * a user that names anything beyond the attribution (email, phone, job
  * title, department, …) matches active users only: `filters[author][email]
  * [$startsWith]=a` no longer selects a blocked author's rows, at the root
- * and inside populate filters, at any depth. A root sort through a relation
+ * and inside populate filters, at any depth. A filter through a DIRECTORY
+ * relation matches active users only whatever it names, ids included
+ * (whole-release Codex review): `/api/departments?filters[members][id]
+ * [$eq]=<a blocked id>`, or `/api/users?filters[manager][id][$eq]=…`,
+ * would otherwise give back the organisation links the directory hides
+ * (anonymisation keeps them). Attribution filters on every other user
+ * relation stay as they are. A root sort through a relation
  * onto such a field is refused with the core's `Invalid key` 400 (the web
  * sends none; a sort inside a populate may follow no relation at all,
  * utils/restricted-relations.ts).
@@ -256,8 +262,9 @@ function namesWithheld(filters: unknown): boolean {
 }
 
 /**
- * Filters with every user-level clause that names a withheld field narrowed
- * to active users. Operators walk on the same model, like the core's.
+ * Filters with every user-level clause that follows a directory relation,
+ * or names a withheld field, narrowed to active users. Operators walk on the
+ * same model, like the core's.
  * Returns the same reference when nothing changes.
  */
 function constrainFilters(
@@ -279,7 +286,11 @@ function constrainFilters(
     } else {
       const nested = nestedModel(attr, getModel);
       next = nested ? constrainFilters(value, nested, getModel) : value;
-      if (attr.type === "relation" && attr.target === USER_UID && namesWithheld(value)) {
+      if (
+        attr.type === "relation" &&
+        attr.target === USER_UID &&
+        (isDirectory(model, key) || namesWithheld(value))
+      ) {
         next = { $and: [next, ACTIVE_USER_FILTER] };
       }
     }

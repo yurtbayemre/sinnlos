@@ -210,6 +210,28 @@ describe("hideBlockedUsers: probes through withheld fields (Codex review)", () =
     });
   });
 
+  it("narrows every filter through a directory relation, ids included (whole-release review)", () => {
+    expect(hide({ filters: { members: { id: { $eq: 7 } } } }, DEPARTMENT)).toEqual({
+      filters: { members: { $and: [{ id: { $eq: 7 } }, ACTIVE] } },
+    });
+    expect(hide({ filters: { lead: { documentId: "d" } } }, TEAM)).toEqual({
+      filters: { lead: { $and: [{ documentId: "d" }, ACTIVE] } },
+    });
+    expect(hide({ filters: { directReports: { id: 7 } } }, USER_UID)).toEqual({
+      filters: { $and: [{ directReports: { $and: [{ id: 7 }, ACTIVE] } }, ACTIVE] },
+    });
+    // Nested: through an announcement's department to its head.
+    expect(hide({ filters: { department: { head: { id: { $eq: 7 } } } } }, ANNOUNCEMENT)).toEqual({
+      filters: { department: { head: { $and: [{ id: { $eq: 7 } }, ACTIVE] } } },
+    });
+    // Inside a populate filter.
+    expect(
+      hide({ populate: { department: { filters: { members: { id: 7 } } } } }, ANNOUNCEMENT),
+    ).toEqual({
+      populate: { department: { filters: { members: { $and: [{ id: 7 }, ACTIVE] } } } },
+    });
+  });
+
   it("leaves attribution filters alone (a blocked author's content stays findable)", () => {
     const query = { filters: { author: { id: { $eq: 42 }, displayName: { $eq: "Ada" } } } };
     expect(hide(query, ANNOUNCEMENT)).toBe(query);

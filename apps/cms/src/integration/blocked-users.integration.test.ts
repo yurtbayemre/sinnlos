@@ -181,6 +181,44 @@ describe.each(testEngines())("blocked people hidden on %s", (engine) => {
     }
   });
 
+  it("directory links cannot be read back through filters, ids included (whole-release review)", async () => {
+    // An anonymised account keeps its organisation links (plan rev2 §4):
+    // a department and team member who manages the editor.
+    const former = await t.strapi.db.query(USER).create({
+      data: {
+        username: "former-it",
+        email: "former-it@anonymised.invalid",
+        displayName: "Ehemalige Person",
+        provider: "local",
+        confirmed: true,
+        blocked: true,
+        anonymisedAt: new Date().toISOString(),
+        department: t.fixtures.departments.engineering.id,
+        teams: [t.fixtures.teams.platform.id],
+        manager: t.fixtures.users.member.id,
+      },
+    });
+    const { member } = t.fixtures.users;
+    const empty = async (path: string) => {
+      const res = await t.api<{ data?: Row[] } | Row[]>("member", path);
+      expect(res.status, path).toBe(200);
+      expect(Array.isArray(res.body) ? res.body : res.body.data, path).toEqual([]);
+    };
+    for (const person of [gone, former]) {
+      await empty(`/api/departments?filters[members][id][$eq]=${person.id}`);
+      await empty(`/api/teams?filters[members][id][$eq]=${person.id}`);
+      await empty(`/api/users?filters[directReports][id][$eq]=${person.id}`);
+    }
+    await empty(`/api/teams?filters[lead][id][$eq]=${gone.id}`);
+    await empty(`/api/users?filters[manager][id][$eq]=${gone.id}`);
+    // The same filters still find an active person.
+    const active = await t.api<{ data: Row[] }>(
+      "member",
+      `/api/departments?filters[members][id][$eq]=${member.id}`,
+    );
+    expect(active.body.data.map((row) => row.slug)).toContain("it-engineering");
+  });
+
   it("refuses kudos to a blocked person, and /api/me names no blocked manager", async () => {
     const kudos = await t.api<{ error?: { details?: { code?: string } } }>(
       "member",
