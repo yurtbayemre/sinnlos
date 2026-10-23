@@ -20,7 +20,7 @@ Every command below runs on the host as the **deploy user**, the user that owns 
 ## 2. The code
 
 ```sh
-git clone --branch v0.26.0 https://github.com/yurtbayemre/sinnlos.git
+git clone --branch v0.27.0 https://github.com/yurtbayemre/sinnlos.git
 cd sinnlos
 ```
 
@@ -42,7 +42,7 @@ Then edit `infra/.env`. The comments in the file explain every key.
 - **Domain:** `DOMAIN` (your host name), `WEB_PUBLIC_URL` and `CMS_PUBLIC_URL` (both `https://<DOMAIN>`).
 - **`ADMIN_ALLOW_CIDRS`:** the networks allowed to reach the Strapi admin panel, for example your office or VPN range (`203.0.113.0/24`). Set it **before** you open `/admin`. Empty keeps the panel closed from outside; you then reach it through the SSH tunnel in section 8.
 - **First Strapi super-admin:** `STRAPI_ADMIN_EMAIL` and `STRAPI_ADMIN_PASSWORD` create it on the first boot. Remove both values afterwards.
-- **E-mail:** `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, and `DIGEST_FROM` as a sender address your mail server accepts. Invitations and password-reset links need it.
+- **E-mail:** `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, and `DIGEST_FROM` as a sender address your mail server accepts. Invitations and password-reset links need it. The server needs a certificate the cms trusts (a publicly signed one); with a self-signed STARTTLS certificate every mail fails (`ESOCKET` in the cms log).
 - **Second factor:** `MFA_REQUIRED_ROLES` stays empty for the default: admins and editors sign in with an authenticator app as well (section 6). `ENCRYPTION_KEY` encrypts those app secrets, so it belongs in your `.env` backup.
 - **Language and time:** `DEFAULT_LOCALE` (`de` or `en`) and `APP_TIME_ZONE`.
 - **Your links:** `PRIVACY_URL`, `IMPRINT_URL` and, optionally, `WHISTLEBLOWING_URL`. If you change the code, also set `SOURCE_URL` to the source of the version you run (AGPL-3.0, §13).
