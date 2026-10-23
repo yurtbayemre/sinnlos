@@ -232,6 +232,52 @@ describe("hideBlockedUsers: probes through withheld fields (Codex review)", () =
     });
   });
 
+  it("keeps each changed relation in its own $and operand, so no sibling is overwritten (re-check)", () => {
+    // The core merges a relation's filter into its parent with Object.assign.
+    expect(
+      hide({ filters: { $and: [{ name: "Engineering" }], members: { id: 9 } } }, DEPARTMENT),
+    ).toEqual({
+      filters: {
+        $and: [{ $and: [{ name: "Engineering" }] }, { members: { $and: [{ id: 9 }, ACTIVE] } }],
+      },
+    });
+    expect(hide({ filters: { members: { id: 9 }, head: { id: 3 } } }, DEPARTMENT)).toEqual({
+      filters: {
+        $and: [{ members: { $and: [{ id: 9 }, ACTIVE] } }, { head: { $and: [{ id: 3 }, ACTIVE] } }],
+      },
+    });
+    // A nested change isolates every relation on its path.
+    expect(
+      hide({ filters: { title: "x", department: { name: "y", head: { id: 3 } } } }, ANNOUNCEMENT),
+    ).toEqual({
+      filters: {
+        $and: [
+          { title: "x" },
+          { department: { $and: [{ name: "y" }, { head: { $and: [{ id: 3 }, ACTIVE] } }] } },
+        ],
+      },
+    });
+  });
+
+  it("spells out the id shorthand of a relation filter before narrowing it (re-check)", () => {
+    expect(hide({ filters: { head: 8 } }, DEPARTMENT)).toEqual({
+      filters: { head: { $and: [{ id: 8 }, ACTIVE] } },
+    });
+    expect(hide({ filters: { head: { $eq: 8 } } }, DEPARTMENT)).toEqual({
+      filters: { head: { $and: [{ id: { $eq: 8 } }, ACTIVE] } },
+    });
+    expect(hide({ filters: { lead: { $null: true } } }, TEAM)).toEqual({
+      filters: { lead: { $and: [{ id: { $null: true } }, ACTIVE] } },
+    });
+    expect(hide({ filters: { members: { $in: [1, 2] } } }, TEAM)).toEqual({
+      filters: { members: { $and: [{ id: { $in: [1, 2] } }, ACTIVE] } },
+    });
+    // A group operator stays a predicate on the user's fields.
+    expect(hide({ filters: { members: { $or: [{ id: 1 }, { id: 2 }] } } }, TEAM)).toEqual({
+      filters: { members: { $and: [{ $or: [{ id: 1 }, { id: 2 }] }, ACTIVE] } },
+    });
+  });
+
   it("leaves attribution filters alone (a blocked author's content stays findable)", () => {
     const query = { filters: { author: { id: { $eq: 42 }, displayName: { $eq: "Ada" } } } };
     expect(hide(query, ANNOUNCEMENT)).toBe(query);

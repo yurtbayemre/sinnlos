@@ -217,6 +217,36 @@ describe.each(testEngines())("blocked people hidden on %s", (engine) => {
       `/api/departments?filters[members][id][$eq]=${member.id}`,
     );
     expect(active.body.data.map((row) => row.slug)).toContain("it-engineering");
+
+    // Sibling predicates survive (Codex re-check): the member is in
+    // Engineering, so Sales with them as member is nobody.
+    await empty(
+      `/api/departments?filters[$and][0][slug][$eq]=it-sales&filters[members][id][$eq]=${member.id}`,
+    );
+    const head = t.fixtures.users.department_head.id;
+    await empty(
+      `/api/departments?filters[members][id][$eq]=${member.id}&filters[head][id][$eq]=${gone.id}`,
+    );
+    // The id shorthand still answers instead of failing.
+    for (const path of [
+      `/api/departments?filters[head]=${head}`,
+      `/api/departments?filters[head][$eq]=${head}`,
+    ]) {
+      const res = await t.api<{ data: Row[] }>("member", path);
+      expect(res.status, path).toBe(200);
+      expect(
+        res.body.data.map((row) => row.slug),
+        path,
+      ).toEqual(["it-engineering"]);
+    }
+    const headless = await t.api<{ data: Row[] }>(
+      "member",
+      "/api/departments?filters[head][$null]=true",
+    );
+    expect(headless.status).toBe(200);
+    expect(headless.body.data.map((row) => row.slug)).toContain("it-sales");
+    await empty(`/api/teams?filters[lead]=${gone.id}`);
+    await empty(`/api/teams?filters[lead][$eq]=${gone.id}`);
   });
 
   it("refuses kudos to a blocked person, and /api/me names no blocked manager", async () => {

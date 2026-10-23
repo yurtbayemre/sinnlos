@@ -261,10 +261,33 @@ function namesWithheld(filters: unknown): boolean {
   );
 }
 
+/** The core's group operators (@strapi/utils operators.js). */
+const GROUP = new Set(["$and", "$or"]);
+
+/**
+ * A relation filter's value as a predicate on its target: the core reads a
+ * scalar (`filters[head]=8`) and a single non-group operator
+ * (`[$eq]=8`, `[$null]=true`, `[$in][0]=8`) as a condition on the target's
+ * id (@strapi/database 5.58 query/helpers/where.js processRelationWhere);
+ * spelled out as `{ id: … }`, it can stand inside an `$and`.
+ */
+function relationPredicate(value: unknown): unknown {
+  if (!isPlainObject(value)) return { id: value };
+  const keys = Object.keys(value);
+  const idOperator = keys.length === 1 && keys[0].startsWith("$") && !GROUP.has(keys[0]);
+  return idOperator ? { id: value } : value;
+}
+
 /**
  * Filters with every user-level clause that follows a directory relation,
  * or names a withheld field, narrowed to active users. Operators walk on the
  * same model, like the core's.
+ *
+ * Each relation key whose filter changed moves into its own `$and` operand
+ * (whole-release Codex re-check): the core merges a relation's processed
+ * filter into its parent with Object.assign, so an `$and` it brings up would
+ * replace a sibling `$and` or another relation's. Alone in its operand it
+ * has nothing to collide with; the rest of the level stays one operand.
  * Returns the same reference when nothing changes.
  */
 function constrainFilters(
@@ -277,29 +300,32 @@ function constrainFilters(
     return items.some((item, index) => item !== filters[index]) ? items : filters;
   }
   if (!isPlainObject(filters)) return filters;
-  let out: Row | null = null;
+  const rest: Row = {};
+  const isolated: Row[] = [];
   for (const [key, value] of Object.entries(filters)) {
     const attr = model?.attributes?.[key];
     let next: unknown;
     if (!attr) {
       next = constrainFilters(value, model, getModel);
+    } else if (
+      attr.type === "relation" &&
+      attr.target === USER_UID &&
+      (isDirectory(model, key) || namesWithheld(value))
+    ) {
+      const predicate = constrainFilters(relationPredicate(value), getModel(USER_UID), getModel);
+      next = { $and: [predicate, ACTIVE_USER_FILTER] };
     } else {
       const nested = nestedModel(attr, getModel);
       next = nested ? constrainFilters(value, nested, getModel) : value;
-      if (
-        attr.type === "relation" &&
-        attr.target === USER_UID &&
-        (isDirectory(model, key) || namesWithheld(value))
-      ) {
-        next = { $and: [next, ACTIVE_USER_FILTER] };
-      }
     }
-    if (next !== value) {
-      out ??= { ...filters };
-      out[key] = next;
-    }
+    if (next !== value && attr?.type === "relation") isolated.push({ [key]: next });
+    else rest[key] = next;
   }
-  return out ?? filters;
+  if (isolated.length === 0) {
+    return Object.keys(rest).some((key) => rest[key] !== filters[key]) ? rest : filters;
+  }
+  const operands = Object.keys(rest).length > 0 ? [rest, ...isolated] : isolated;
+  return operands.length === 1 ? operands[0] : { $and: operands };
 }
 
 /** Populate filters (object form) constrained like the root's, at any depth. */
