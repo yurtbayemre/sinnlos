@@ -17,3 +17,8 @@ declare class URL {
 declare class URLSearchParams {
   get(name: string): string | null;
 }
+
+/** UTF-8 encoding for the password byte limit (password.ts); a global in Node and every browser. */
+declare class TextEncoder {
+  encode(input?: string): Uint8Array;
+}
