@@ -32,14 +32,17 @@
  * counts as degraded, and its owners poll at the short intervals.
  *
  * Admission needs more than the Auth.js cookie: the session's Strapi JWT
- * must still be accepted by the cms (the cached /api/users/me check of
- * /uploads, lib/upload-block-cache.ts, 60 s per JWT). A password change
- * (FX40), a block or a deleted account makes the cms refuse that JWT, so
+ * must still be accepted by the cms (the cached /api/me check of /uploads,
+ * lib/upload-block-cache.ts, 60 s per JWT). A password change (FX40), a
+ * block, a deleted account or (v0.27) a session that must set up its
+ * second factor first makes the check refuse that JWT, so
  * the stream answers 401 and the client's instant-close stop ends the
  * retries; without that check the same cookie kept receiving the user's
  * notification and channel pings until the JWT's exp. A cms that cannot
- * say (an outage) does not keep a stream from opening: `emitFresh` already
- * reports that leg as degraded.
+ * say (an outage) gets 503 since v0.27: admission needs a positive answer,
+ * or a revoked or second-factor-restricted session would get its stream
+ * exactly while the cms is down. The client counts it as an instant close
+ * and polls meanwhile.
  */
 import { STRAPI_URL } from "@/lib/config";
 import { getSession, getStrapiToken } from "@/lib/session";
@@ -79,10 +82,14 @@ export async function GET(req: Request) {
     return Response.json({ error: "live events disabled" }, { status: 404 });
   }
   // No Strapi JWT, or one the cms refuses (revoked, blocked, deleted,
-  // invalid): 401, like a missing session. "unavailable" admits.
+  // invalid, second factor still to set up): 401, like a missing session.
+  // A cms that cannot say: 503, never admitted.
   const jwt = await getStrapiToken();
-  if (!jwt || (await checkUploadAccess({ userId, jwt, strapiUrl: STRAPI_URL })) === "blocked") {
-    return Response.json({ error: "unauthorized" }, { status: 401 });
+  if (!jwt) return Response.json({ error: "unauthorized" }, { status: 401 });
+  const access = await checkUploadAccess({ userId, jwt, strapiUrl: STRAPI_URL });
+  if (access === "blocked") return Response.json({ error: "unauthorized" }, { status: 401 });
+  if (access === "unavailable") {
+    return Response.json({ error: "unavailable" }, { status: 503 });
   }
 
   const bus = getLiveBus();

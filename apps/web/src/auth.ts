@@ -163,6 +163,8 @@ if (LOCAL_ENABLED) {
       credentials: {
         identifier: { label: "Email", type: "email" },
         password: { label: "Password", type: "password" },
+        // v0.27: the second factor (TOTP or recovery code), when enrolled.
+        otp: { label: "Code", type: "text" },
       },
       async authorize(credentials, request) {
         // Pure core with the real dependencies (WD09). The global fetch is
@@ -172,6 +174,7 @@ if (LOCAL_ENABLED) {
           {
             identifier: credentials?.identifier,
             password: credentials?.password,
+            otp: credentials?.otp,
             clientIp: await clientIpForSignIn(request),
           },
           {

@@ -6,7 +6,9 @@
 import {
   USER_ADMIN_PATH,
   type UserAdminDetailResponse,
+  type UserAdminInvite,
   type UserAdminListQuery,
+  type UserAdminMailResponse,
   type UserAdminListResponse,
   type UserAdminUpdate,
 } from "@sinnlos/domain";
@@ -34,6 +36,24 @@ export function sendUserAdminUpdate(
     method: "PUT",
     body: JSON.stringify({ data }),
   });
+}
+
+/** v0.27: a new local account, invited by mail to set its password. */
+export function sendUserInvite(data: UserAdminInvite): Promise<UserAdminMailResponse> {
+  return strapi(`/api/${USER_ADMIN_PATH}/invite`, {
+    method: "POST",
+    body: JSON.stringify({ data }),
+  });
+}
+
+/** v0.27: a new invitation (no password yet) or reset link by mail. */
+export function sendUserLink(id: number): Promise<UserAdminMailResponse> {
+  return strapi(`/api/${USER_ADMIN_PATH}/${id}/send-link`, { method: "POST" });
+}
+
+/** v0.27: clears the user's second factor; they set it up again at the next sign-in. */
+export function sendUserMfaReset(id: number): Promise<UserAdminDetailResponse> {
+  return strapi(`/api/${USER_ADMIN_PATH}/${id}/reset-mfa`, { method: "POST" });
 }
 
 /** Hands the role back to Entra: the next sign-in applies Entra's role. */

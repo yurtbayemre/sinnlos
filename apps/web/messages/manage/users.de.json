@@ -1,6 +1,6 @@
 {
   "title": "Benutzer",
-  "description": "Rolle, Abteilung, vorgesetzte Person und Sperre festlegen. Konten anlegen und löschen bleibt im Strapi-Admin.",
+  "description": "Personen einladen, Rolle, Abteilung, vorgesetzte Person und Sperre festlegen. Konten löschen bleibt im Strapi-Admin (über den SSH-Tunnel).",
   "tile": "Rollen, Abteilungen und Vorgesetzte festlegen, Konten sperren.",
   "editTitle": "Benutzer bearbeiten",
   "email": "E-Mail",
@@ -26,7 +26,9 @@
     "entra": "aus Entra",
     "manual": "von Hand",
     "blocked": "Gesperrt",
-    "noDepartment": "Keine Abteilung"
+    "noDepartment": "Keine Abteilung",
+    "invited": "Eingeladen",
+    "mfa": "2FA"
   },
   "roles": {
     "admin_role": "Admin",
@@ -81,5 +83,63 @@
     "label": "Teams",
     "none": "In keinem Team.",
     "hint": "Mitglieder werden im jeweiligen Team gepflegt."
+  },
+  "invite": {
+    "title": "Personen einladen",
+    "description": "Jede Person bekommt eine E-Mail mit einem Link, um ihr Passwort festzulegen (7 Tage gültig). Das Konto besteht sofort und kann sich anmelden, sobald das Passwort gesetzt ist.",
+    "lines": "E-Mail-Adressen",
+    "linesHint": "Eine Person pro Zeile: eine Adresse, oder Adresse und Name durch ein Semikolon getrennt. Bis zu 100 Zeilen.",
+    "linesPlaceholder": "ada@example.com;Ada Lovelace",
+    "preview": "Liste prüfen",
+    "send": "{count} einladen",
+    "edit": "Liste ändern",
+    "more": "Weitere Personen einladen",
+    "toList": "Zur Benutzerliste",
+    "pending": "Bereit",
+    "lineInvalid": "Keine gültige Adresse (oder doppelt)",
+    "outcome": {
+      "sent": "Einladung verschickt",
+      "mailFailed": "Konto angelegt, aber die E-Mail ging nicht raus: Link auf der Seite der Person erneut senden",
+      "taken": "Für diese Adresse gibt es schon ein Konto",
+      "invalid": "Nicht akzeptiert",
+      "localSignInOff": "Die lokale Anmeldung ist ausgeschaltet",
+      "mailNotConfigured": "Der E-Mail-Versand ist auf dem Server nicht eingerichtet (SMTP)",
+      "emailDuplicates": "Bestehende Konten teilen sich eine Adresse in anderer Schreibweise; Einladungen sind gesperrt, bis eine Administration das behebt",
+      "failed": "Fehlgeschlagen, bitte erneut versuchen"
+    }
+  },
+  "account": {
+    "title": "Konto",
+    "invited": "Eingeladen: noch kein Passwort gesetzt.",
+    "password": "Meldet sich mit Passwort an.",
+    "mfaOn": "Die Zwei-Faktor-Anmeldung ist eingeschaltet.",
+    "mfaOff": "Die Zwei-Faktor-Anmeldung ist ausgeschaltet."
+  },
+  "link": {
+    "invitationButton": "Einladung erneut senden",
+    "resetButton": "Link zum Zurücksetzen senden",
+    "invitationTitle": "Einladung erneut senden?",
+    "resetTitle": "Link zum Zurücksetzen senden?",
+    "invitationBody": "Die Person bekommt eine neue Einladung (7 Tage gültig). Ein früherer Link gilt dann nicht mehr.",
+    "resetBody": "Die Person bekommt eine E-Mail mit einem Link, um ein neues Passwort festzulegen (eine Stunde gültig). Das bisherige Passwort gilt bis dahin weiter.",
+    "confirm": "Senden",
+    "invitationSent": "Einladung verschickt.",
+    "resetSent": "Link zum Zurücksetzen verschickt.",
+    "error": {
+      "notLocal": "Dieses Konto meldet sich über den Identity-Provider an und hat hier kein Passwort.",
+      "blocked": "Das Konto ist gesperrt.",
+      "localSignInOff": "Die lokale Anmeldung ist ausgeschaltet.",
+      "mailNotConfigured": "Der E-Mail-Versand ist auf dem Server nicht eingerichtet (SMTP).",
+      "mailFailed": "Die E-Mail konnte nicht verschickt werden. Bitte später erneut versuchen.",
+      "failed": "Das hat nicht geklappt. Bitte erneut versuchen."
+    }
+  },
+  "mfaReset": {
+    "button": "Zwei-Faktor-Anmeldung zurücksetzen",
+    "title": "Zwei-Faktor-Anmeldung zurücksetzen?",
+    "body": "Für den Fall, dass die Person Gerät und Wiederherstellungscodes verloren hat. Ihre Sitzungen enden, und bei der nächsten Anmeldung richtet sie eine neue Authenticator-App ein.",
+    "confirm": "Zurücksetzen",
+    "done": "Zwei-Faktor-Anmeldung zurückgesetzt.",
+    "failed": "Das Zurücksetzen hat nicht geklappt. Bitte erneut versuchen."
   }
 }

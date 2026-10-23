@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import de from "../../../messages/de.json";
 import en from "../../../messages/en.json";
-import type { RegisterErrorCode, SignInErrorCode } from "@/lib/auth-actions";
+import type { SignInErrorCode } from "@/lib/auth-actions";
 import type { PasswordErrorCode, ProfileErrorCode } from "@/lib/profile-actions";
 import { AUTH_FORM_MESSAGES, PROFILE_FORM_MESSAGES } from "./form-messages";
 
@@ -22,20 +22,13 @@ type Exact<Union, List extends readonly unknown[]> = [Union] extends [List[numbe
     : false
   : false;
 
-const SIGN_IN_CODES = ["invalidCredentials", "rateLimited"] as const;
-const REGISTER_CODES = [
-  "registrationDisabled",
-  "missingFields",
-  "passwordTooShort",
-  "rateLimited",
-  "emailTaken",
-  "registrationFailed",
-  "accountCreatedSignInManually",
-] as const;
+const SIGN_IN_CODES = ["invalidCredentials", "rateLimited", "mfaInvalid"] as const;
 const PROFILE_CODES = ["profileSaved", "tooLong", "invalid", "profileSaveFailed"] as const;
 const PASSWORD_CODES = [
   "passwordChanged",
   "passwordTooShort",
+  "passwordTooLong",
+  "passwordCommon",
   "passwordMismatch",
   "passwordWrongOrThrottled",
   "passwordRateLimited",
@@ -44,10 +37,9 @@ const PASSWORD_CODES = [
 
 const exhaustive: [
   Exact<SignInErrorCode, typeof SIGN_IN_CODES>,
-  Exact<RegisterErrorCode, typeof REGISTER_CODES>,
   Exact<ProfileErrorCode | "profileSaved", typeof PROFILE_CODES>,
   Exact<PasswordErrorCode | "passwordChanged", typeof PASSWORD_CODES>,
-] = [true, true, true, true];
+] = [true, true, true];
 
 function text(catalog: Catalog, namespace: string, key: string): unknown {
   return catalog[namespace]?.[key];
@@ -55,10 +47,10 @@ function text(catalog: Catalog, namespace: string, key: string): unknown {
 
 describe("auth and profile form codes (AC02)", () => {
   it("lists every code of the actions", () => {
-    expect(exhaustive).toEqual([true, true, true, true]);
+    expect(exhaustive).toEqual([true, true, true]);
   });
 
-  it.each([...SIGN_IN_CODES, ...REGISTER_CODES])("auth code %s has en and de texts", (code) => {
+  it.each(SIGN_IN_CODES)("auth code %s has en and de texts", (code) => {
     const key = AUTH_FORM_MESSAGES[code];
     for (const catalog of [en, de] as Catalog[]) {
       expect(text(catalog, "auth", key), key).toEqual(expect.any(String));
@@ -80,7 +72,6 @@ describe("auth and profile form codes (AC02)", () => {
 
   it("gives the messages with a limit their argument in both languages", () => {
     for (const catalog of [en, de]) {
-      expect(catalog.auth.error_passwordTooShort).toContain("{min}");
       expect(catalog.profile.passwordTooShort).toContain("{min}");
       expect(catalog.profile.error_tooLong).toContain("{field}");
       expect(catalog.profile.error_tooLong).toContain("{max}");

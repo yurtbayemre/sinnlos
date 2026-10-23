@@ -8,8 +8,9 @@ import { uploadBlockCache } from "@/lib/upload-block-cache";
  * The per-tab SSE stream (/live/stream) on the real in-memory bus. Pinned:
  *   1. no session → 401, LIVE_EVENTS_DISABLED=1 → 404, both before a
  *      connection exists; a session whose Strapi JWT is missing or refused
- *      by the cms (revoked by a password change, blocked, deleted) → 401,
- *      while a cms that cannot say (an outage) still gets its stream;
+ *      by the cms (revoked by a password change, blocked, deleted,
+ *      second factor to set up) → 401, and a cms that cannot say (an
+ *      outage) → 503: admission needs a positive answer (v0.27);
  *   2. the stream opens with `retry` and the hello naming the connection,
  *      and carries the headers the edge relies on;
  *   3. every close the server decides on ends with a terminal
@@ -22,7 +23,7 @@ import { uploadBlockCache } from "@/lib/upload-block-cache";
  *      (`emitFresh`, LF05), and a recovering cms leg is announced at once.
  *
  * `@/lib/session` is mocked (the real module pulls in next-auth), as are
- * `@/lib/config` and global fetch (the cms's /api/users/me); the JWT check's
+ * `@/lib/config` and global fetch (the cms's /api/me); the JWT check's
  * status map is the real one.
  */
 const session = vi.hoisted(() => ({
@@ -35,10 +36,12 @@ vi.mock("@/lib/session", () => ({
 }));
 vi.mock("@/lib/config", () => ({ STRAPI_URL: "http://cms.test" }));
 
-/** What the cms answers the JWT check (GET /api/users/me) with. */
-const cms = vi.hoisted(() => ({ me: (): Response => Response.json({ id: 1, blocked: false }) }));
+/** What the cms answers the JWT check (GET /api/me) with. */
+const cms = vi.hoisted(() => ({
+  me: (): Response => Response.json({ data: { id: 1, blocked: false } }),
+}));
 const fetchMock = vi.fn(async (url: string) => {
-  if (url === "http://cms.test/api/users/me?fields[0]=blocked") return cms.me();
+  if (url === "http://cms.test/api/me") return cms.me();
   throw new Error(`unexpected fetch ${url}`);
 });
 vi.stubGlobal("fetch", fetchMock);
@@ -94,7 +97,7 @@ beforeEach(() => {
   vi.spyOn(Math, "random").mockReturnValue(0);
   session.current = signedIn(1);
   session.jwt = strapiJwt(1);
-  cms.me = () => Response.json({ id: 1, blocked: false });
+  cms.me = () => Response.json({ data: { id: 1, blocked: false } });
   fetchMock.mockClear();
   uploadBlockCache.clear();
   delete process.env.LIVE_EVENTS_DISABLED;
@@ -127,18 +130,30 @@ describe("GET /live/stream", () => {
     cms.me = () => new Response("Unauthorized", { status: 401 });
     expect((await GET(new Request("http://web.test/live/stream"))).status).toBe(401);
     expect(fetchMock).toHaveBeenCalledWith(
-      "http://cms.test/api/users/me?fields[0]=blocked",
+      "http://cms.test/api/me",
       expect.objectContaining({ headers: { Authorization: `Bearer ${session.jwt}` } }),
     );
     expect(getLiveBus().connectionCount()).toBe(0);
   });
 
-  it("opens while the cms cannot say (an outage is emitFresh's business, not a refusal)", async () => {
-    cms.me = () => new Response("Bad Gateway", { status: 502 });
-    const stream = await open();
-    expect(stream.res.status).toBe(200);
-    expect(await stream.read()).toMatch(/^retry: 3000\nevent: hello\n/);
-    expect(getLiveBus().connectionCount()).toBe(1);
+  it("answers 503 while the cms cannot say: no stream without a positive answer (v0.27)", async () => {
+    // A revoked or restricted session must not slip in during an outage.
+    for (const answer of [
+      () => new Response("Bad Gateway", { status: 502 }),
+      (): Response => {
+        throw new TypeError("fetch failed");
+      },
+    ]) {
+      cms.me = answer;
+      expect((await GET(new Request("http://web.test/live/stream"))).status).toBe(503);
+    }
+    expect(getLiveBus().connectionCount()).toBe(0);
+  });
+
+  it("refuses a session that must set up its second factor (401)", async () => {
+    cms.me = () => Response.json({ data: { id: 1, blocked: false, mfa: { restricted: true } } });
+    expect((await GET(new Request("http://web.test/live/stream"))).status).toBe(401);
+    expect(getLiveBus().connectionCount()).toBe(0);
   });
 
   it("asks the cms once per JWT and minute, not per stream", async () => {

@@ -14,12 +14,31 @@ import type { LiveFrame } from "@/lib/live-contract";
  *   3. only the session's own connection can be changed (404 otherwise),
  *      and a malformed body is a 400;
  *   4. the add/remove body of the previous client still works, for tabs
- *      that run the old bundle after a deploy.
+ *      that run the old bundle after a deploy;
+ *   5. v0.27: the session's JWT must be usable at the cms (the cached
+ *      /api/me check): refused or second-factor-restricted → 401, an
+ *      outage → 503.
  *
- * `@/lib/session` is mocked (the real module pulls in next-auth).
+ * `@/lib/session` is mocked (the real module pulls in next-auth); the cms
+ * answer of the /api/me check is a stubbed global fetch.
  */
-const session = vi.hoisted(() => ({ current: null as Session | null }));
-vi.mock("@/lib/session", () => ({ getSession: async () => session.current }));
+const session = vi.hoisted(() => ({ current: null as Session | null, jwt: "jwt-1" }));
+vi.mock("@/lib/session", () => ({
+  getSession: async () => session.current,
+  getStrapiToken: async () => (session.current ? session.jwt : null),
+}));
+vi.mock("@/lib/config", () => ({ STRAPI_URL: "http://cms.test" }));
+const cms = vi.hoisted(() => ({
+  me: (): Response =>
+    Response.json({ data: { id: 1, blocked: false, mfa: { restricted: false } } }),
+}));
+vi.stubGlobal(
+  "fetch",
+  vi.fn(async (url: string) => {
+    if (url === "http://cms.test/api/me") return cms.me();
+    throw new Error(`unexpected fetch ${url}`);
+  }),
+);
 
 const { POST } = await import("./route");
 
@@ -67,6 +86,9 @@ function connection(userId: number) {
 
 beforeEach(() => {
   session.current = signedIn(1);
+  // A fresh JWT per test: the /api/me check's 60 s cache is keyed by it.
+  session.jwt = `jwt-${crypto.randomUUID()}`;
+  cms.me = () => Response.json({ data: { id: 1, blocked: false, mfa: { restricted: false } } });
   delete process.env.LIVE_EVENTS_DISABLED;
 });
 
@@ -83,6 +105,19 @@ describe("POST /live/subscribe", () => {
     session.current = signedIn(1);
     process.env.LIVE_EVENTS_DISABLED = "1";
     expect((await post({ connId: "c", rev: 1, channels: [] })).status).toBe(404);
+  });
+
+  it("refuses a session the cms refuses or that must set up its second factor (v0.27)", async () => {
+    const { id } = connection(1);
+    cms.me = () => new Response("Unauthorized", { status: 401 });
+    expect((await post({ connId: id, rev: 1, channels: [] })).status).toBe(401);
+    session.jwt = `jwt-${crypto.randomUUID()}`;
+    cms.me = () => Response.json({ data: { id: 1, blocked: false, mfa: { restricted: true } } });
+    expect((await post({ connId: id, rev: 1, channels: [] })).status).toBe(401);
+    // An outage is no positive answer: 503, never admitted.
+    session.jwt = `jwt-${crypto.randomUUID()}`;
+    cms.me = () => new Response("down", { status: 503 });
+    expect((await post({ connId: id, rev: 1, channels: [] })).status).toBe(503);
   });
 
   it("sets the full set per revision and ignores a stale one", async () => {

@@ -11,6 +11,19 @@ services:
       timeout: 3s
       retries: 30
 
+  # v0.27: catches the invitation and reset mails (invite.spec.ts reads them
+  # through its API); STARTTLS with a self-signed certificate of its own.
+  mailpit:
+    image: axllent/mailpit:v1.29.2
+    environment:
+      MP_SMTP_BIND_ADDR: 0.0.0.0:587
+      MP_SMTP_TLS_CERT: sans:mailpit
+      MP_SMTP_TLS_KEY: sans:mailpit
+      MP_SMTP_REQUIRE_STARTTLS: "true"
+      MP_SMTP_AUTH_ACCEPT_ANY: "true"
+    ports:
+      - "127.0.0.1::8025"
+
   cms:
     image: ${E2E_RUN_ID:?}-cms
     build:
@@ -30,6 +43,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      mailpit:
+        condition: service_started
     healthcheck:
       test:
         [

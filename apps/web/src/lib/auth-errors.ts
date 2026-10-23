@@ -32,6 +32,24 @@ export class LoginBlockedSignIn extends CredentialsSignin {
   code = RATE_LIMITED_SIGN_IN_CODE;
 }
 
+/**
+ * v0.27: the password was right, the account has a second factor, and the
+ * attempt carried no code (MfaRequiredSignIn: the form asks for one; not a
+ * failure) or a wrong, used or replayed one (MfaInvalidSignIn: counted).
+ * Both follow a verified password only, so they name nothing about an
+ * account the caller does not hold the password of.
+ */
+export const MFA_REQUIRED_SIGN_IN_CODE = "mfa_required";
+export const MFA_INVALID_SIGN_IN_CODE = "mfa_invalid";
+
+export class MfaRequiredSignIn extends CredentialsSignin {
+  code = MFA_REQUIRED_SIGN_IN_CODE;
+}
+
+export class MfaInvalidSignIn extends CredentialsSignin {
+  code = MFA_INVALID_SIGN_IN_CODE;
+}
+
 /** Whether a signIn() rejection is one of the throttled cases above. */
 export function isRateLimitedSignIn(error: unknown): boolean {
   return error instanceof CredentialsSignin && error.code === RATE_LIMITED_SIGN_IN_CODE;

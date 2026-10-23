@@ -12,6 +12,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { ProfileForm, type ProfileInitial } from "@/components/profile/profile-form";
 import { ChangePasswordForm } from "@/components/profile/change-password-form";
+import { MfaSection } from "@/components/profile/mfa-section";
 
 /** The slice of the GET /api/me self profile (FX02 allowlist) this page reads. */
 type MeProfile = ProfileInitial & {
@@ -22,6 +23,8 @@ type MeProfile = ProfileInitial & {
   entraManagedFields?: string[] | null;
   /** The identity provider the account is bound to (v0.25.0). */
   managedBy?: "entra" | "oidc" | null;
+  /** The second factor (v0.27). */
+  mfa?: { enrolled?: boolean } | null;
 };
 
 export async function generateMetadata() {
@@ -111,6 +114,19 @@ export default async function ProfilePage() {
                   ? t("passwordManagedBySso")
                   : t("passwordManagedByMicrosoft")}
               </p>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle as="h2">{t("mfaSection")}</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {isLocal ? (
+              <MfaSection enrolled={me?.mfa?.enrolled === true} />
+            ) : (
+              <p className="text-sm text-muted-foreground">{t("mfaManagedBySso")}</p>
             )}
           </CardContent>
         </Card>
