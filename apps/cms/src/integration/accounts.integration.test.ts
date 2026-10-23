@@ -15,6 +15,7 @@ import {
   type Row,
   type TestStrapi,
 } from "./harness.test.helper";
+import { holdTransaction, qualified, settle, waitForLockWait } from "./pg-lock.test.helper";
 
 const USER = "plugin::users-permissions.user";
 const TOKEN = "integration-internal-token-0123456789";
@@ -506,6 +507,41 @@ describe.each(testEngines())("accounts (v0.27) on %s", (engine) => {
       (await t.api(null, "/api/auth/github/callback?access_token=x")).status,
     );
   });
+
+  it.skipIf(engine !== "postgres")(
+    "an admin reset waits for a concurrent sign-out of the admin and is then refused",
+    async () => {
+      const caller = t.fixtures.users.admin_role;
+      const target = t.fixtures.users.department_head;
+      const jwt = await admin();
+      await enroll((await signIn(target.username, target.password)).body.jwt!, target.password);
+      // The admin's password changes in another transaction, not committed yet: it holds the row.
+      const held = await holdTransaction(t);
+      await held.raw(
+        `UPDATE ${qualified(t, "up_users")} SET token_version = COALESCE(token_version, 0) + 1 WHERE id = ?`,
+        [caller.id],
+      );
+      const reset = settle(
+        t.api(bearer(jwt), `/api/user-management/${target.id}/reset-mfa`, {
+          method: "POST",
+        }) as Promise<Answer>,
+      );
+      try {
+        // Without the caller's row lock the reset would pass on the old version and never wait.
+        await waitForLockWait(t);
+      } finally {
+        await held.commit();
+      }
+      const res = await reset;
+      if ("error" in res) throw res.error;
+      expect(res.value.status, res.value.text).toBe(401);
+      expect(errorCode(res.value)).toBe("session_outdated");
+      expect((await row(target.id)).totpEnabledAt).not.toBeNull();
+      later(2);
+      adminJwt = (await signIn(caller.username, caller.password, code(await secretOf(caller.id))))
+        .body.jwt!;
+    },
+  );
 
   it("has the columns infra/mfa-reset.sh writes", async () => {
     const knex = t.strapi.db.connection as unknown as { raw(sql: string): Promise<unknown> };

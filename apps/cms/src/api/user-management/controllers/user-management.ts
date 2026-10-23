@@ -37,6 +37,9 @@ function adminId(ctx: Context): number {
   return user.id;
 }
 
+/** The token version the caller's JWT was verified at (every write re-checks it under lock). */
+const tvOf = (ctx: Context) => ctx.state.assurance?.tv;
+
 function targetId(ctx: Context): number {
   const id = parseRowId(ctx.params.id);
   if (id === null) throw new errors.NotFoundError("Not Found");
@@ -72,33 +75,41 @@ export default {
     noQuery(ctx);
     const id = targetId(ctx);
     const update = parseUserAdminUpdate(ctx.request.body);
-    answer(ctx, { data: await updateUser(host(), callerId, id, update) });
+    await answerRefusals(ctx, async () => {
+      answer(ctx, { data: await updateUser(host(), callerId, tvOf(ctx), id, update) });
+    });
   },
   async roleToEntra(ctx: Context) {
     const callerId = adminId(ctx);
     noQuery(ctx);
-    answer(ctx, { data: await handRoleToEntra(host(), callerId, targetId(ctx)) });
+    const id = targetId(ctx);
+    await answerRefusals(ctx, async () => {
+      answer(ctx, { data: await handRoleToEntra(host(), callerId, tvOf(ctx), id) });
+    });
   },
   async invite(ctx: Context) {
     const callerId = adminId(ctx);
     noQuery(ctx);
     const invite = parseUserAdminInvite(ctx.request.body);
     await answerRefusals(ctx, async () => {
-      answer(ctx, { data: await inviteUser(host(), callerId, invite) });
+      answer(ctx, { data: await inviteUser(host(), callerId, tvOf(ctx), invite) });
       ctx.status = 201;
     });
   },
   async sendLink(ctx: Context) {
     const callerId = adminId(ctx);
     noQuery(ctx);
-    answer(ctx, { data: await sendLink(host(), callerId, targetId(ctx)) });
+    const id = targetId(ctx);
+    await answerRefusals(ctx, async () => {
+      answer(ctx, { data: await sendLink(host(), callerId, tvOf(ctx), id) });
+    });
   },
   async resetMfa(ctx: Context) {
     const callerId = adminId(ctx);
     noQuery(ctx);
     const id = targetId(ctx);
     await answerRefusals(ctx, async () => {
-      answer(ctx, { data: await resetUserMfa(host(), callerId, ctx.state.assurance?.tv, id) });
+      answer(ctx, { data: await resetUserMfa(host(), callerId, tvOf(ctx), id) });
     });
   },
 };

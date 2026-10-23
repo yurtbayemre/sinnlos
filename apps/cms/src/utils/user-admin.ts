@@ -12,7 +12,9 @@
  * version row, like the wiki structure lock; the Entra sign-in's role write
  * takes it too), so two admins, or an admin and a sign-in, cannot race the
  * invariants:
- *   - the caller is read again under the lock: still an unblocked admin_role;
+ *   - the caller is read again under the lock, with their row locked to the
+ *     commit: still an unblocked admin_role at the token version the request
+ *     was verified at (else 401 session_outdated);
  *   - nobody changes their own role or blocked state (`selfChange`);
  *   - so at least one unblocked admin_role always remains: a write needs
  *     an unblocked admin caller, and the caller is never the target;
@@ -329,19 +331,37 @@ async function lockDirectory(strapi: UserAdminHost): Promise<void> {
 
 const roleTypeOf = (row: Row): string | null => (isRecord(row.role) ? text(row.role.type) : null);
 
+type Trx = { raw(sql: string, bindings: unknown[]): unknown };
+
 /**
- * The caller is still an unblocked admin_role, read under the directory
- * lock: the request's own check ran on a snapshot, and an admin demoted or
- * blocked meanwhile must not finish a queued write (Codex review).
+ * The caller is still an unblocked admin_role at the token version their
+ * request was verified at, read under the directory lock with the caller's
+ * row locked until the commit (Codex reviews): the request's own check ran
+ * on a snapshot, and an admin demoted, blocked or signed out meanwhile (a
+ * password change, a set-password link, infra/mfa-reset.sh: writers without
+ * the directory lock) must not finish a queued write. Such a write now
+ * either commits before this read or waits for this transaction.
+ * Lock order: the directory, then the caller's row, then the target's. Every
+ * transaction that locks two user rows holds the directory lock first, and
+ * none takes the directory lock after a row (the IdP role write: directory,
+ * then its row), so the order cannot deadlock.
  */
-async function assertActiveAdmin(strapi: UserAdminHost, callerId: number): Promise<void> {
+async function assertActiveAdmin(
+  strapi: UserAdminHost,
+  trx: Trx,
+  callerId: number,
+  callerTv: number | undefined,
+): Promise<void> {
+  await lockUserRow(strapi as unknown as MfaHost, trx, callerId);
   const caller = await strapi.db.query(USER_UID).findOne({
     where: { id: callerId },
-    select: ["id", "blocked"],
+    select: ["id", "blocked", "tokenVersion"],
     populate: { role: { select: ["type"] } },
   });
   if (!isRecord(caller) || caller.blocked === true || roleTypeOf(caller) !== ADMIN_ROLE)
     throw new errors.ForbiddenError("Forbidden");
+  if (callerTv === undefined || versionOf(caller.tokenVersion) !== callerTv)
+    refuse(401, "session_outdated", "The session is out of date; sign in again");
 }
 
 /** Whether `managerId`'s chain of managers reaches `userId` (or runs too long). */
@@ -385,12 +405,13 @@ async function audit(
 export async function updateUser(
   strapi: UserAdminHost,
   callerId: number,
+  callerTv: number | undefined,
   id: number,
   update: UserAdminUpdate,
 ): Promise<UserAdminDetail> {
-  await strapi.db.transaction(async () => {
+  await strapi.db.transaction(async ({ trx }) => {
     await lockDirectory(strapi);
-    await assertActiveAdmin(strapi, callerId);
+    await assertActiveAdmin(strapi, trx, callerId, callerTv);
     const user = await loadUser(strapi, id);
     if (!user) throw new errors.NotFoundError("Not Found");
     const codes: Record<string, string> = {};
@@ -453,11 +474,12 @@ export async function updateUser(
 export async function handRoleToEntra(
   strapi: UserAdminHost,
   callerId: number,
+  callerTv: number | undefined,
   id: number,
 ): Promise<UserAdminDetail> {
-  await strapi.db.transaction(async () => {
+  await strapi.db.transaction(async ({ trx }) => {
     await lockDirectory(strapi);
-    await assertActiveAdmin(strapi, callerId);
+    await assertActiveAdmin(strapi, trx, callerId, callerTv);
     const user = await loadUser(strapi, id);
     if (!user) throw new errors.NotFoundError("Not Found");
     // The provider may demote at the next sign-in: never one's own role (the last admin stays reachable).
@@ -568,6 +590,7 @@ const mailHost = (strapi: UserAdminHost) => strapi as unknown as AccountMailHost
 export async function inviteUser(
   strapi: UserAdminHost,
   callerId: number,
+  callerTv: number | undefined,
   invite: UserAdminInvite,
 ): Promise<{ id: number; mail: "sent" | "failed" }> {
   assertLinksPossible();
@@ -576,9 +599,9 @@ export async function inviteUser(
   let mail: { to: string; token: string; name: string } | null = null;
   let id = 0;
   try {
-    await strapi.db.transaction(async () => {
+    await strapi.db.transaction(async ({ trx }) => {
       await lockDirectory(strapi);
-      await assertActiveAdmin(strapi, callerId);
+      await assertActiveAdmin(strapi, trx, callerId, callerTv);
       const users = strapi.db.query(USER_UID);
       const taken = await users.findOne({
         where: { email: { $eqi: invite.email } },
@@ -641,6 +664,7 @@ export async function inviteUser(
 export async function sendLink(
   strapi: UserAdminHost,
   callerId: number,
+  callerTv: number | undefined,
   id: number,
 ): Promise<{ id: number; mail: "sent" | "failed" }> {
   assertLinksPossible();
@@ -653,7 +677,7 @@ export async function sendLink(
   } | null = null;
   await strapi.db.transaction(async ({ trx }) => {
     await lockDirectory(strapi);
-    await assertActiveAdmin(strapi, callerId);
+    await assertActiveAdmin(strapi, trx, callerId, callerTv);
     // rev3 #7: the link is stamped with the version read under the row lock.
     await lockUserRow(strapi as unknown as MfaHost, trx, id);
     const row = await strapi.db.query(USER_UID).findOne({ where: { id }, select: LINK_SELECT });
@@ -690,16 +714,7 @@ export async function resetUserMfa(
 ): Promise<UserAdminDetail> {
   await strapi.db.transaction(async ({ trx }) => {
     await lockDirectory(strapi);
-    await assertActiveAdmin(strapi, callerId);
-    const caller = await strapi.db
-      .query(USER_UID)
-      .findOne({ where: { id: callerId }, select: ["id", "tokenVersion"] });
-    if (
-      callerTv === undefined ||
-      versionOf(isRecord(caller) ? caller.tokenVersion : 0) !== callerTv
-    ) {
-      refuse(401, "session_outdated", "The session is out of date; sign in again");
-    }
+    await assertActiveAdmin(strapi, trx, callerId, callerTv);
     const user = await loadUser(strapi, id);
     if (!user) throw new errors.NotFoundError("Not Found");
     if (user.id === callerId) refuseKeys([FORM_KEY], { [FORM_KEY]: "selfChange" });
