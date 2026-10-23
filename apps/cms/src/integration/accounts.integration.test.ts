@@ -403,6 +403,47 @@ describe.each(testEngines())("accounts (v0.27) on %s", (engine) => {
     expect(taken.text).toContain("taken");
   });
 
+  it("a link is void once the account's e-mail address changes (invitation and reset)", async () => {
+    const set = (token: string, password: string) =>
+      t.api(null, "/api/auth/password/set", {
+        json: { token, password },
+        headers: { "x-internal-token": TOKEN },
+      }) as Promise<Answer>;
+    const lastLink = () =>
+      /set-password#(\S+)/.exec(mails[mails.length - 1]?.text ?? "")?.[1] ?? "";
+    const jwt = await admin();
+    const sendLink = (id: number) =>
+      t.api(bearer(jwt), `/api/user-management/${id}/send-link`, { method: "POST" });
+    mails.length = 0;
+    const invite = (await t.api(bearer(jwt), "/api/user-management/invite", {
+      json: { data: { email: "mistyped@integration.test" } },
+    })) as Answer<{ id: number }>;
+    expect(invite.status, invite.text).toBe(201);
+    const id = invite.body.data!.id;
+    const invitation = lastLink();
+    // The admin corrects the address through the Document Service (the Content Manager's path).
+    await t.strapi.documents(USER).update({
+      documentId: (await row(id)).documentId as string,
+      data: { email: "corrected@integration.test" },
+    });
+    expect(errorCode(await set(invitation, "Strong-Password-27"))).toBe("token_invalid");
+    expect((await row(id)).password ?? null).toBeNull();
+
+    // Without an edit a link still works: a new invitation to the corrected address.
+    expect((await sendLink(id)).status).toBe(200);
+    expect((await set(lastLink(), "Strong-Password-27")).status).toBe(204);
+
+    // A reset link, then the address changes by a direct query (no hooks at all).
+    expect((await sendLink(id)).status).toBe(200);
+    const reset = lastLink();
+    expect(mails[mails.length - 1]?.subject).not.toBe(mails[mails.length - 2]?.subject);
+    await t.strapi.db
+      .query(USER)
+      .update({ where: { id }, data: { email: "moved@integration.test" } });
+    expect(errorCode(await set(reset, "Another-Password-27"))).toBe("token_invalid");
+    expect((await signIn("moved@integration.test", "Strong-Password-27")).status).toBe(200);
+  });
+
   it("no link for an account bound to an identity provider", async () => {
     const user = t.fixtures.users.department_head;
     await t.strapi.db.query(USER).update({

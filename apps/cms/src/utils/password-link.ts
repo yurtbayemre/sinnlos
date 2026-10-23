@@ -5,9 +5,14 @@
  *
  *  - The link carries `<userId>.<43 base64url chars>` (32 random bytes).
  *    The account row stores only `<purpose>:<expires epoch s>:<token
- *    version>:<sha256 hex of the random part>` in users-permissions'
- *    private `resetPasswordToken` column (the plugin's own reset routes
- *    answer 404). A new link replaces the old one.
+ *    version>:<sha256 hex of the random part and the recipient>` in
+ *    users-permissions' private `resetPasswordToken` column (the plugin's
+ *    own reset routes answer 404). A new link replaces the old one.
+ *  - The digest binds the link to the address it was mailed to (trimmed,
+ *    lower case): once the account's e-mail changes, by any write path (an
+ *    admin correcting a mistyped invitation in the Content Manager, a
+ *    direct query), the link no longer matches (Codex whole-release
+ *    review).
  *  - A link is valid only while its stored string is exactly the row's,
  *    unexpired, issued at the row's current token version (a block, a
  *    password change, an MFA reset raise it), for a local account bound to
@@ -46,6 +51,10 @@ const isRecord = (value: unknown): value is Row =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
 const sha256 = (value: string) => createHash("sha256").update(value, "utf8").digest("hex");
+
+/** The stored digest of a link's random part, bound to the account's current e-mail address. */
+const linkDigest = (secret: string, email: unknown) =>
+  sha256(`${secret}:${typeof email === "string" ? email.trim().toLowerCase() : ""}`);
 
 const set = (value: unknown) => typeof value === "string" && value.trim() !== "";
 
@@ -95,7 +104,7 @@ export async function issueLink(
 ): Promise<string> {
   const secret = randomBytes(32).toString("base64url");
   const expires = Math.floor(now / 1000) + LINK_TTL_SECONDS[purpose];
-  const stored = `${purpose}:${expires}:${versionOf(row.tokenVersion)}:${sha256(secret)}`;
+  const stored = `${purpose}:${expires}:${versionOf(row.tokenVersion)}:${linkDigest(secret, row.email)}`;
   await strapi.db
     .query(USER_UID)
     .update({ where: { id: row.id }, data: { resetPasswordToken: stored } });
@@ -108,7 +117,7 @@ export function linkMatches(row: Row, token: string, now: number = Date.now()): 
   const stored =
     typeof row.resetPasswordToken === "string" ? STORED.exec(row.resetPasswordToken) : null;
   if (!link || !stored || Number(link[1]) !== row.id) return false;
-  const given = Buffer.from(sha256(link[2]), "hex");
+  const given = Buffer.from(linkDigest(link[2], row.email), "hex");
   const expected = Buffer.from(stored[4], "hex");
   return (
     timingSafeEqual(given, expected) &&

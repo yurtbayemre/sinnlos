@@ -48,9 +48,10 @@ describe("recovery codes", () => {
 
 describe("set-password links", () => {
   const secret = "A".repeat(43);
-  const hash = createHash("sha256").update(secret, "utf8").digest("hex");
+  const hash = createHash("sha256").update(`${secret}:anna@example.com`, "utf8").digest("hex");
   const row = (over: Record<string, unknown> = {}) => ({
     id: 7,
+    email: "anna@example.com",
     provider: "local",
     password: "$2a$10$hash",
     blocked: false,
@@ -70,6 +71,10 @@ describe("set-password links", () => {
     expect(linkMatches(row({ resetPasswordToken: "legacy-plugin-code" }), token)).toBe(false);
     expect(linkMatches(row(), `8.${secret}`)).toBe(false);
     expect(linkMatches(row(), `7.${"B".repeat(43)}`)).toBe(false);
+    // Bound to the recipient: the same address in other spelling still matches, another does not.
+    expect(linkMatches(row({ email: " Anna@Example.COM " }), token)).toBe(true);
+    expect(linkMatches(row({ email: "anna@example.org" }), token)).toBe(false);
+    expect(linkMatches(row({ email: null }), token)).toBe(false);
     expect(linkUserId("7.short")).toBeNull();
     expect(linkPurpose(row({ password: null }))).toBe("invite");
     expect(isLocalUnbound(row({ provider: "oidc" }))).toBe(false);
