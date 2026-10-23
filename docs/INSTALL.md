@@ -98,7 +98,7 @@ The Strapi super-admin from section 3 can use the admin panel, but it is not an 
 
 3. Sign in to `https://<DOMAIN>` with that e-mail address. As an admin you set up the second factor right away: scan the QR code with an authenticator app (Aegis, 2FAS, Google or Microsoft Authenticator), enter the current password and a code, and keep the ten recovery codes somewhere safe. Departments, teams and users are managed at **/manage**.
 
-Everyone else gets an invitation: **/manage/users → Einladen** (Invite) (one person, or several at once). The e-mail carries a link to set a password, valid for 7 days. Accounts can also come from your identity provider (Microsoft Entra ID or OIDC, see [DEPLOYMENT.md](DEPLOYMENT.md)). Do not grant the content-API roles the generic user permissions.
+Everyone else gets an invitation: **/manage/users → Einladen** (Invite), for one person or several at once. The e-mail carries a link to set a password, valid for 7 days. Accounts can also come from your identity provider (Microsoft Entra ID or OIDC, see [DEPLOYMENT.md](DEPLOYMENT.md)). Do not grant the content-API roles the generic user permissions.
 
 ### Passwords and the second factor
 
