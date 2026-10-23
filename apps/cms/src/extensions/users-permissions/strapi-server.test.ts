@@ -172,13 +172,16 @@ type PasswordBody = { currentPassword?: string; password?: string };
  * password actions persist the new password through the user service's
  * edit(), then answer with issue()'s result, unawaited.
  */
-/** The plugin's user controller: findOne sets the body like the plugin (null when not found). */
-function fakeUserControllerFactory(rows: Record<string, unknown> = {}): Factory {
-  return () => ({
+/**
+ * The plugin's user controller, a plain object like the plugin's: findOne
+ * sets the body (null when not found).
+ */
+function fakeUserController(rows: Record<string, unknown> = {}) {
+  return {
     findOne: async (ctx: { params?: { id?: string }; body?: unknown }) => {
       ctx.body = rows[String(ctx.params?.id)] ?? null;
     },
-  });
+  };
 }
 
 function fakeAuthFactory(): Factory {
@@ -287,7 +290,7 @@ function harness(
   };
   const plugin: UsersPermissionsPlugin = {
     services: { jwt: realJwtFactory, user: fakeUserFactory() },
-    controllers: { auth: authFactory, user: fakeUserControllerFactory() },
+    controllers: { auth: authFactory, user: fakeUserController() },
     register: async () => undefined,
   };
   createUsersPermissionsExtension()(plugin);
@@ -650,7 +653,7 @@ describe("the plugin's real auth controller: sign-in reads the version before th
     };
     const plugin: UsersPermissionsPlugin = {
       services: { jwt: realJwtFactory, user: userFactory },
-      controllers: { auth: realAuthFactory, user: fakeUserControllerFactory() },
+      controllers: { auth: realAuthFactory, user: fakeUserController() },
       register: async () => undefined,
     };
     createUsersPermissionsExtension()(plugin);
@@ -1033,7 +1036,7 @@ async function raceHarness(engines: SqliteEngine[], hooks: RaceHook[]): Promise<
   };
   const plugin: UsersPermissionsPlugin = {
     services: { jwt: realJwtFactory, user: fakeUserFactory() },
-    controllers: { auth: fakeAuthFactory(), user: fakeUserControllerFactory() },
+    controllers: { auth: fakeAuthFactory(), user: fakeUserController() },
     register: async () => undefined,
   };
   createUsersPermissionsExtension()(plugin);
@@ -1540,7 +1543,7 @@ describe("jwtManagement 'refresh': the plugin's own session revocation applies",
     const verify = vi.fn(async () => ({ id: 2, sessionId: "s" }));
     const plugin: UsersPermissionsPlugin = {
       services: { jwt: () => ({ issue, verify }), user: fakeUserFactory() },
-      controllers: { auth: fakeAuthFactory(), user: fakeUserControllerFactory() },
+      controllers: { auth: fakeAuthFactory(), user: fakeUserController() },
       register: async () => undefined,
     };
     createUsersPermissionsExtension()(plugin);
@@ -1570,7 +1573,7 @@ describe("the extension itself", () => {
   it("wraps each factory once, also when the plugin module is loaded again (a second boot)", () => {
     const plugin: UsersPermissionsPlugin = {
       services: { jwt: realJwtFactory, user: fakeUserFactory() },
-      controllers: { auth: fakeAuthFactory(), user: fakeUserControllerFactory() },
+      controllers: { auth: fakeAuthFactory(), user: fakeUserController() },
       register: async () => undefined,
     };
     const extend = createUsersPermissionsExtension();
@@ -1585,13 +1588,17 @@ describe("the extension itself", () => {
   it("answers 404 for GET /api/users/:id of a hidden or missing user (v0.28)", async () => {
     const plugin: UsersPermissionsPlugin = {
       services: { jwt: realJwtFactory, user: fakeUserFactory() },
-      controllers: { auth: fakeAuthFactory(), user: fakeUserControllerFactory({ "7": { id: 7 } }) },
+      controllers: { auth: fakeAuthFactory(), user: fakeUserController({ "7": { id: 7 } }) },
       register: async () => undefined,
     };
     createUsersPermissionsExtension()(plugin);
-    const controller = (plugin.controllers.user as Factory)({ strapi: harness().strapi }) as {
+    const controller = plugin.controllers.user as {
       findOne(ctx: { params: { id: string }; body?: unknown }): Promise<unknown>;
     };
+    // A second load of the extension (a second boot) wraps it once.
+    const wrapped = controller.findOne;
+    createUsersPermissionsExtension()(plugin);
+    expect(controller.findOne).toBe(wrapped);
     const found = { params: { id: "7" }, body: undefined as unknown };
     await controller.findOne(found);
     expect(found.body).toEqual({ id: 7 });
@@ -1605,7 +1612,7 @@ describe("the extension itself", () => {
     expect(() =>
       extend({
         services: { jwt: {}, user: fakeUserFactory() },
-        controllers: { auth: fakeAuthFactory(), user: fakeUserControllerFactory() },
+        controllers: { auth: fakeAuthFactory(), user: fakeUserController() },
       }),
     ).toThrow("services.jwt is not a factory");
     expect(() =>
@@ -1619,13 +1626,13 @@ describe("the extension itself", () => {
         services: { jwt: realJwtFactory, user: fakeUserFactory() },
         controllers: { auth: fakeAuthFactory() },
       }),
-    ).toThrow("controllers.user is not a factory");
+    ).toThrow("the user controller no longer exposes findOne()");
     const strapi = harness().strapi;
     const noVerify: UsersPermissionsPlugin = {
       services: { jwt: () => ({ issue: () => "" }), user: () => ({ add: () => undefined }) },
       controllers: {
         auth: () => ({ changePassword: async () => undefined }),
-        user: fakeUserControllerFactory(),
+        user: fakeUserController(),
       },
       register: async () => undefined,
     };

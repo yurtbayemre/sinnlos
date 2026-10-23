@@ -1,11 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { USER_UID } from "./sanitize-user-contact";
-import {
-  ACTIVE_USER_FILTER,
-  hideBlockedUsers,
-  type VisibilityModel,
-} from "./user-visibility";
+import { ACTIVE_USER_FILTER, hideBlockedUsers, type VisibilityModel } from "./user-visibility";
 
 /**
  * Blocked people hidden from the directory (v0.28): the pure query rewrite
@@ -148,7 +144,10 @@ describe("hideBlockedUsers: the directory relations", () => {
       populate: { author: { populate: { directReports: { filters: ACTIVE } } } },
     });
     expect(
-      hide({ populate: { department: { populate: { members: { count: "true" } } } } }, ANNOUNCEMENT),
+      hide(
+        { populate: { department: { populate: { members: { count: "true" } } } } },
+        ANNOUNCEMENT,
+      ),
     ).toEqual({
       populate: {
         department: { populate: { members: { count: "true", filters: ACTIVE } } },
@@ -162,19 +161,26 @@ describe("hideBlockedUsers: explicit user fields", () => {
     expect(hide({ populate: { author: { fields: ["displayName"] } } }, ANNOUNCEMENT)).toEqual({
       populate: { author: { fields: ["displayName", "blocked"] } },
     });
-    expect(hide({ populate: { author: { fields: "displayName,username" } } }, ANNOUNCEMENT)).toEqual(
-      { populate: { author: { fields: ["displayName", "username", "blocked"] } } },
-    );
+    expect(
+      hide({ populate: { author: { fields: "displayName,username" } } }, ANNOUNCEMENT),
+    ).toEqual({ populate: { author: { fields: ["displayName", "username", "blocked"] } } });
     const star = { populate: { author: { fields: "*" } } };
     expect(hide(star, ANNOUNCEMENT)).toEqual(star);
   });
 
   it("does both on a directory relation with fields", () => {
     expect(
-      hide({ populate: { members: { fields: ["displayName"], populate: { avatar: true } } } }, TEAM),
+      hide(
+        { populate: { members: { fields: ["displayName"], populate: { avatar: true } } } },
+        TEAM,
+      ),
     ).toEqual({
       populate: {
-        members: { fields: ["displayName", "blocked"], filters: ACTIVE, populate: { avatar: true } },
+        members: {
+          fields: ["displayName", "blocked"],
+          filters: ACTIVE,
+          populate: { avatar: true },
+        },
       },
     });
   });

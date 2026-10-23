@@ -60,7 +60,9 @@ const tsModules = (dir: string) =>
     : [];
 
 /** `strapi.apis` as Strapi holds it: api name → router name → router. */
-async function loadApis(): Promise<Record<string, { routes: Record<string, { routes: Route[] }> }>> {
+async function loadApis(): Promise<
+  Record<string, { routes: Record<string, { routes: Route[] }> }>
+> {
   const apis: Record<string, { routes: Record<string, { routes: Route[] }> }> = {};
   for (const api of readdirSync(API_DIR)) {
     const routesDir = join(API_DIR, api, "routes");
@@ -140,7 +142,9 @@ describe("decorateSwitchedRoutes over every router of src/api", () => {
     decorateSwitchedRoutes({ apis });
     const byHandler = new Map(
       Object.values(apis).flatMap(({ routes }) =>
-        Object.values(routes).flatMap((router) => router.routes.map((route) => [route.handler, route])),
+        Object.values(routes).flatMap((router) =>
+          router.routes.map((route) => [route.handler, route]),
+        ),
       ),
     );
     const moduleOf = (handler: string) => switchSpecs(byHandler.get(handler)!)[0]?.config;
@@ -170,14 +174,16 @@ describe("decorateSwitchedRoutes over every router of src/api", () => {
     const apis = await loadApis();
     decorateSwitchedRoutes({ apis });
     decorateSwitchedRoutes({ apis });
-    const route = apis.event.routes.event.routes.find((r) => r.handler === "api::event.event.find")!;
+    const route = apis.event.routes.event.routes.find(
+      (r) => r.handler === "api::event.event.find",
+    )!;
     expect(switchSpecs(route)).toHaveLength(1);
   });
 
   it("refuses a router it cannot walk, and a host without apis", () => {
-    expect(() => decorateSwitchedRoutes({ apis: { event: { routes: { x: () => ({}) } } } })).toThrow(
-      /\[switches\] api::event router x/,
-    );
+    expect(() =>
+      decorateSwitchedRoutes({ apis: { event: { routes: { x: () => ({}) } } } }),
+    ).toThrow(/\[switches\] api::event router x/);
     expect(() =>
       decorateSwitchedRoutes({ apis: undefined as unknown as Record<string, never> }),
     ).toThrow(/strapi\.apis not found/);

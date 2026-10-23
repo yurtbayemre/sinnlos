@@ -31,7 +31,10 @@ interface Ctx {
 }
 
 /** The recipients' rows the create looks up (v0.28: a blocked one is refused). */
-const users: Record<number, { id: number; blocked?: boolean }> = { 9: { id: 9 }, 11: { id: 11, blocked: true } };
+const users: Record<number, { id: number; blocked?: boolean }> = {
+  9: { id: 9 },
+  11: { id: 11, blocked: true },
+};
 
 function setup(body: unknown) {
   const strapi = {

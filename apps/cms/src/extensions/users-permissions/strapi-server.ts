@@ -1195,25 +1195,26 @@ export function patchAuthController(
  * The plugin's user controller (v0.28): GET /api/users/:id of a user the
  * directory hides (blocked, utils/user-visibility.ts adds the filter to the
  * sanitized query) or of no user at all answers 404 like a missing
- * document, instead of the plugin's empty 204.
+ * document, instead of the plugin's empty 204. The plugin exports this
+ * controller as a plain object (not a factory like auth); its findOne is
+ * replaced in place, once.
  */
 function patchUserController(controller: unknown): unknown {
-  const methods = controller as Record<string, unknown> | null;
+  const methods = isRecord(controller) ? controller : null;
   const findOne = methods?.findOne;
-  if (typeof findOne !== "function") {
+  if (!methods || typeof findOne !== "function") {
     throw new Error(
       "[users-permissions-extension] the user controller no longer exposes findOne(); the hidden-user 404 cannot be applied (v0.28 tripwire).",
     );
   }
-  (methods as Record<string, unknown>).findOne = async function (
-    this: unknown,
-    ctx: { body?: unknown },
-    ...rest: unknown[]
-  ) {
+  if ((findOne as { [WRAPPED]?: boolean })[WRAPPED]) return controller;
+  const hiddenIs404 = async function (this: unknown, ctx: { body?: unknown }, ...rest: unknown[]) {
     const result = await findOne.call(this, ctx, ...rest);
     if (ctx.body === null || ctx.body === undefined) throw new errors.NotFoundError("Not Found");
     return result;
   };
+  (hiddenIs404 as { [WRAPPED]?: boolean })[WRAPPED] = true;
+  methods.findOne = hiddenIs404;
   return controller;
 }
 
@@ -1261,11 +1262,7 @@ export function createUsersPermissionsExtension() {
         return patchAuthController(controller, strapi);
       },
     );
-    plugin.controllers.user = wrapFactory(
-      plugin?.controllers?.user,
-      "controllers.user",
-      patchUserController,
-    );
+    plugin.controllers.user = patchUserController(plugin?.controllers?.user);
     plugin.register = wrapPluginRegister(plugin.register);
     return plugin;
   };

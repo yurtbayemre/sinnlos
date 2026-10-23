@@ -66,7 +66,7 @@ const API_MODULE = new Map<string, ModuleName>(
 /** The module a content type belongs to (`api::event.event` → events), or null for the base. */
 export function moduleOfUid(uid: string): ModuleName | null {
   const match = /^api::([^.]+)\./.exec(uid);
-  return (match && API_MODULE.get(match[1])) ?? null;
+  return match ? (API_MODULE.get(match[1]) ?? null) : null;
 }
 
 /** Whether `name` is switched off (process.env by default). */

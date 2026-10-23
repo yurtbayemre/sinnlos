@@ -128,7 +128,10 @@ function pathNeeds(path: string, model: VisibilityModel | undefined, getModel: G
 function needs(value: unknown, model: VisibilityModel | undefined, getModel: GetModel): boolean {
   if (typeof value === "string" || Array.isArray(value)) {
     if (pathTokens(value).some((path) => pathNeeds(path, model, getModel))) return true;
-    return Array.isArray(value) && value.some((item) => isPlainObject(item) && needs(item, model, getModel));
+    return (
+      Array.isArray(value) &&
+      value.some((item) => isPlainObject(item) && needs(item, model, getModel))
+    );
   }
   if (!isPlainObject(value)) return false;
   for (const [key, sub] of Object.entries(value)) {

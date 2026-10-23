@@ -893,9 +893,9 @@ describe.each(Object.keys(CONTRACTS).sort())("policy contract: %s", (name) => {
     });
   }
 
-  it.skipIf(contract.kind === "switch-gate").each(
-    contract.cases.map((c) => [JSON.stringify(c.config ?? null), c] as const),
-  )(
+  it
+    .skipIf(contract.kind === "switch-gate")
+    .each(contract.cases.map((c) => [JSON.stringify(c.config ?? null), c] as const))(
     "bypasses exactly its table roles, untouched and without reading data (config %s)",
     async (_config, contractCase) => {
       const { ids } = fixture();

@@ -320,7 +320,9 @@ describe("stripSensitiveUserFields — a BLOCKED user keeps its attribution only
 
   it("cuts a populated author for a member and for staff (contact: false)", () => {
     const announcement = { id: 1, title: "Hi", author: blocked() };
-    expect(strip(announcement, models["api::announcement.announcement"]).author).toEqual(ATTRIBUTION);
+    expect(strip(announcement, models["api::announcement.announcement"]).author).toEqual(
+      ATTRIBUTION,
+    );
     const staff = stripSensitiveUserFields(
       { id: 1, title: "Hi", author: blocked() },
       models["api::announcement.announcement"],

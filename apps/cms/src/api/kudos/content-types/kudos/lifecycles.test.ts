@@ -67,7 +67,9 @@ describe("kudos afterCreate", () => {
     const strapi = setup();
     const bob = strapi.tables[USER_UID].find((user) => user.id === USER.bob)!;
     bob.blocked = true;
-    await lifecycles.afterCreate({ result: await kudos(strapi, { from: USER.alice, to: USER.bob }) });
+    await lifecycles.afterCreate({
+      result: await kudos(strapi, { from: USER.alice, to: USER.bob }),
+    });
     bob.blocked = false;
     process.env.FEATURES_OFF = "kudos";
     try {
