@@ -63,7 +63,8 @@ test("invite-set-password-sign-in", async ({ page }) => {
       await page.getByRole("button", { name: "Set password", exact: true }).click();
     };
     await fill("qwerty123456");
-    await expect(page.getByRole("alert")).toHaveText(
+    // Not Next's route announcer, which is a role="alert" region too.
+    await expect(page.getByRole("alert").filter({ hasText: /\S/ })).toHaveText(
       "This password is too common. Choose another one.",
     );
     await fill(password);
