@@ -48,7 +48,8 @@ export type ForgotPasswordState = { done?: true; error?: "tooManyRequests" };
 /**
  * Asks the cms for a reset link. Always the same answer (`done`), whether
  * or not an account exists; the cms answers 202 before it looks anything
- * up. Only a flood from one IP or for one address is refused.
+ * up. Only a flood from one IP or for one address is refused: every request
+ * the cms accepted counts; one it never got (an outage) does not.
  */
 export async function requestPasswordReset(
   _prev: ForgotPasswordState,
@@ -58,12 +59,18 @@ export async function requestPasswordReset(
   if (!LOCAL_ENABLED || !email.includes("@")) return { done: true };
   const ticket = passwordLinkRateLimiter.tryAcquire(clientIpFrom(await headers()), email);
   if (ticket === "blocked") return { error: "tooManyRequests" };
-  passwordLinkRateLimiter.settle(ticket, "failure");
+  let accepted = false;
   try {
-    await internalPost("/api/auth/password/forgot", { email, locale: await getUserLocale() });
+    const res = await internalPost("/api/auth/password/forgot", {
+      email,
+      locale: await getUserLocale(),
+    });
+    accepted = res.ok;
+    if (!accepted) console.error(`[password] reset request refused by the cms: ${res.status}`);
   } catch (err) {
     console.error("[password] reset request did not reach the cms", err);
   }
+  passwordLinkRateLimiter.settle(ticket, accepted ? "failure" : "neutral");
   return { done: true };
 }
 
@@ -102,7 +109,8 @@ export async function setPasswordFromLink(
   // with garbage tokens for their id; and never in the forgot limiter,
   // whose identifiers are addresses anyone can submit. The token's 256
   // random bits make guessing infeasible anyway; a set password gives its
-  // place back, so only refused attempts count.
+  // place back, and only the cms's refusals of the token or the password
+  // count: an outage, a throttle or a timeout never blocks a valid link.
   const clientIp = clientIpFrom(await headers());
   const ticket = setPasswordRateLimiter.tryAcquire(clientIp, clientIp);
   if (ticket === "blocked") return { error: "tooManyRequests" };
@@ -112,11 +120,15 @@ export async function setPasswordFromLink(
   } catch (err) {
     console.error("[password] set-password did not reach the cms", err);
   }
-  setPasswordRateLimiter.settle(ticket, res?.status === 204 ? "success" : "failure");
+  const code =
+    res?.status === 400
+      ? parseStrapiError(await res.text().catch(() => "")).details?.code
+      : undefined;
+  const refusal = typeof code === "string" ? CMS_CODES[code] : undefined;
+  setPasswordRateLimiter.settle(
+    ticket,
+    res?.status === 204 ? "success" : refusal ? "failure" : "neutral",
+  );
   if (res?.status === 204) redirect("/sign-in?passwordSet=1");
-  if (res?.status === 400) {
-    const code = parseStrapiError(await res.text().catch(() => "")).details?.code;
-    if (typeof code === "string" && CMS_CODES[code]) return { error: CMS_CODES[code] };
-  }
-  return { error: "setPasswordFailed" };
+  return { error: refusal ?? "setPasswordFailed" };
 }

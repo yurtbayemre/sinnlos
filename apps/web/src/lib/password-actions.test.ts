@@ -106,6 +106,19 @@ describe("requestPasswordReset", () => {
     });
     expect(fetchMock).not.toHaveBeenCalled();
   });
+
+  it("does not count requests the cms never accepted (an outage)", async () => {
+    const { requestPasswordReset } = await load();
+    fetchMock.mockImplementation(async () => new Response("down", { status: 503 }));
+    for (let i = 0; i < 15; i++)
+      await requestPasswordReset({}, form({ email: "ada@example.test" }));
+    fetchMock.mockReset();
+    fetchMock.mockResolvedValue(new Response(null, { status: 202 }));
+    await expect(requestPasswordReset({}, form({ email: "ada@example.test" }))).resolves.toEqual({
+      done: true,
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("setPasswordFromLink", () => {
@@ -209,5 +222,27 @@ describe("setPasswordFromLink", () => {
     await expect(setPasswordFromLink({}, form(good))).resolves.toEqual({
       error: "setPasswordFailed",
     });
+  });
+
+  it("never counts an outage, a throttle or a timeout: a valid link works right after", async () => {
+    const { setPasswordFromLink } = await load();
+    const answers = [
+      () => new Response("", { status: 503 }),
+      () => new Response("", { status: 429 }),
+      (): Response => {
+        throw new DOMException("timed out", "TimeoutError");
+      },
+    ];
+    for (let i = 0; i < 15; i++) {
+      const answer = answers[i % answers.length]!;
+      fetchMock.mockImplementationOnce(async () => answer());
+      await expect(setPasswordFromLink({}, form(good))).resolves.toEqual({
+        error: "setPasswordFailed",
+      });
+    }
+    fetchMock.mockReset();
+    fetchMock.mockResolvedValue(new Response(null, { status: 204 }));
+    await expect(setPasswordFromLink({}, form(good))).rejects.toThrow();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });
