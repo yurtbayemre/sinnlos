@@ -48,5 +48,30 @@ export default {
       handler: "api::user-management.user-management.resetMfa",
       config: { policies: [] },
     },
+    // v0.28: training evidence, data export (Art. 15), anonymisation (Art. 17).
+    {
+      method: "GET",
+      path: "/user-management/:id/training-evidence",
+      handler: "api::user-management.user-management.trainingEvidence",
+      config: { policies: [] },
+    },
+    {
+      method: "GET",
+      path: "/user-management/:id/export",
+      handler: "api::user-management.user-management.export",
+      config: { policies: [] },
+    },
+    {
+      method: "GET",
+      path: "/user-management/:id/anonymise",
+      handler: "api::user-management.user-management.anonymisePreview",
+      config: { policies: [] },
+    },
+    {
+      method: "POST",
+      path: "/user-management/:id/anonymise",
+      handler: "api::user-management.user-management.anonymise",
+      config: { policies: [] },
+    },
   ],
 };

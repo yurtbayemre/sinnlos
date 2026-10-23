@@ -26,6 +26,7 @@ const user: UserAdminDetail = {
   idp: null,
   invited: false,
   mfa: false,
+  anonymisedAt: null,
   blocked: false,
   department: { documentId: DEPT, name: "Design" },
   manager: { id: 3, displayName: "Riley Kim" },

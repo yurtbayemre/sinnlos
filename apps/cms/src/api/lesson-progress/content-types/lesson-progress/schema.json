@@ -22,6 +22,10 @@
     },
     "completedAt": {
       "type": "datetime"
+    },
+    "snapshot": {
+      "type": "json",
+      "private": true
     }
   }
 }

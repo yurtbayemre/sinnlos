@@ -59,6 +59,11 @@
       "default": false,
       "configurable": false
     },
+    "anonymisedAt": {
+      "type": "datetime",
+      "private": true,
+      "configurable": false
+    },
     "role": {
       "type": "relation",
       "relation": "manyToOne",

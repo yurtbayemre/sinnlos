@@ -4,6 +4,7 @@ import type {
   EditableBase,
   EditableMedia,
 } from "./authoring/dto.js";
+import type { TrainingVersion } from "./data-protection.js";
 import { addMonthsToKey, daysBetweenKeys, instantEpochMs, zonedDateKey } from "./plain-date.js";
 
 /**
@@ -208,6 +209,8 @@ export interface LessonPlayerResponse {
     videoUrl: string | null;
     course: TrainingCourseRef & { completionMode: TrainingCompletionMode };
     quiz: LearnerQuizQuestion[];
+    /** v0.28: the published versions shown, sent back with the completion. */
+    version: TrainingVersion;
   };
 }
 
@@ -273,6 +276,8 @@ export interface LessonCompletionRequest {
     targetDocumentId: string;
     /** One option index per question; omitted for a legitimate no-quiz lesson. */
     answers?: number[];
+    /** v0.28: the player's `version`; required (absent or different: 409 `changed`). */
+    version?: TrainingVersion;
   };
 }
 
@@ -285,6 +290,8 @@ export interface CourseEditable extends EditableBase {
   completionMode: TrainingCompletionMode;
   /** Months a completion stays valid; null = once is enough. */
   validityMonths: number | null;
+  /** v0.28: who answers questions about the course ("Fragen an"), free text. */
+  contact: string | null;
   /** Department documentIds; empty = every staff member. */
   departments: string[];
   needsRetarget: boolean;
@@ -506,5 +513,14 @@ export interface TrainingReportCourseResponse {
     course: TrainingReportCourse;
     lessons: { documentId: string; title: string }[];
     people: TrainingReportPerson[];
+    /**
+     * v0.28, admin_role with `?leavers=1` only: blocked and anonymised people
+     * with receipts for this course, named from their receipts' snapshot.
+     */
+    leavers?: TrainingReportLeaver[];
   };
+}
+
+export interface TrainingReportLeaver extends TrainingReportPerson {
+  left: "blocked" | "anonymised";
 }

@@ -341,6 +341,10 @@ Custom actions and plugin routes (`✓` = granted, `—` = not granted):
 | `api::user-management.user-management.invite` | `POST /api/user-management/invite` | ✓ | — | — | — | — | — | — |
 | `api::user-management.user-management.sendLink` | `POST /api/user-management/:id/send-link` | ✓ | — | — | — | — | — | — |
 | `api::user-management.user-management.resetMfa` | `POST /api/user-management/:id/reset-mfa` | ✓ | — | — | — | — | — | — |
+| `api::user-management.user-management.trainingEvidence` | `GET /api/user-management/:id/training-evidence` | ✓ | — | — | — | — | — | — |
+| `api::user-management.user-management.export` | `GET /api/user-management/:id/export` | ✓ | — | — | — | — | — | — |
+| `api::user-management.user-management.anonymisePreview` | `GET /api/user-management/:id/anonymise` | ✓ | — | — | — | — | — | — |
+| `api::user-management.user-management.anonymise` | `POST /api/user-management/:id/anonymise` | ✓ | — | — | — | — | — | — |
 <!-- custom-action-grants:end -->
 
 The anonymous `public` role holds none of these, and the cms revokes the

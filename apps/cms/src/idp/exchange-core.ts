@@ -23,6 +23,7 @@ import type { RoleType } from "../bootstrap/roles";
 import { pickDepartment } from "../entra/profile";
 import { lockDocument, type DocumentLockHost } from "../utils/document-lock";
 import { USER_DIRECTORY_LOCK_DOCUMENT_ID, USER_DIRECTORY_LOCK_UID } from "../utils/user-admin";
+import { writeWhileUnblocked } from "../utils/unblocked-write";
 
 export const USER_UID = "plugin::users-permissions.user";
 export const ROLE_UID = "plugin::users-permissions.role";
@@ -487,7 +488,11 @@ export async function syncDepartment(
     const documentId = stringOf(user.documentId);
     if (documentId === null) throw new Error("the user has no documentId");
     // By documentId, like the admin panel: the link targets the document.
-    await strapi.documents(USER_UID).update({ documentId, data: { department: next } });
+    // v0.28: never after a block or anonymisation (utils/unblocked-write.ts).
+    const written = await writeWhileUnblocked(strapi as never, user.id as number, () =>
+      strapi.documents(USER_UID).update({ documentId, data: { department: next } }),
+    );
+    if (!written) return "blocked";
     return verb === "set" ? "set" : "cleared";
   } catch (err) {
     strapi.log.error(`${log} user=${user.id}: department sync failed (${errorLabel(err)})`);

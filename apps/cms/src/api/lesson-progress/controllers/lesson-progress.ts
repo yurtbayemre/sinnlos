@@ -1,6 +1,7 @@
 import { factories } from "@strapi/strapi";
 import {
   QUIZ_CONTENT_INVALID,
+  TRAINING_VERSION_CHANGED,
   QUIZ_MAX_OPTIONS,
   QUIZ_MAX_QUESTIONS,
   lessonReceiptState,
@@ -10,6 +11,11 @@ import {
 
 import { appTimeZone, todayIn } from "../../../utils/time";
 import { loadPublishedLesson } from "../../../utils/training-access";
+import {
+  isSameVersion,
+  snapshotAtCompletion,
+  trainingVersionOf,
+} from "../../../utils/training-evidence";
 import { toIso } from "../../../utils/training-roster";
 import { validateStoredQuiz } from "../../../utils/training-validation";
 
@@ -35,8 +41,15 @@ import { validateStoredQuiz } from "../../../utils/training-validation";
  * the newest one is due within RENEWAL_WINDOW_DAYS or overdue
  * (lessonReceiptState); receipts are never edited, the old ones stay as the
  * proof history.
+ *
+ * Evidence (v0.28, utils/training-evidence.ts): the completion carries the
+ * published versions the player showed (`data.version`); a lesson or course
+ * published again meanwhile, or no version at all, answers 409 `changed`
+ * (reload, then complete), so the receipt's snapshot names what the learner
+ * saw: course, lesson, versions, quiz outcome, validity and the learner.
  */
 const PROGRESS_UID = "api::lesson-progress.lesson-progress";
+const USER_UID = "plugin::users-permissions.user";
 
 export default factories.createCoreController(PROGRESS_UID, ({ strapi }) => ({
   async create(ctx) {
@@ -61,7 +74,21 @@ export default factories.createCoreController(PROGRESS_UID, ({ strapi }) => ({
       return ctx.badRequest("Invalid quiz content", { code: QUIZ_CONTENT_INVALID });
     }
 
-    // shortcut: no displayed-version binding; add version tokens if exam snapshots become required.
+    const version = trainingVersionOf(lesson);
+    if (!version || !isSameVersion(data.version, version)) {
+      ctx.status = 409;
+      ctx.body = {
+        data: null,
+        error: {
+          status: 409,
+          name: "ConflictError",
+          message: "The lesson was published again; reload it",
+          details: { code: TRAINING_VERSION_CHANGED },
+        },
+      };
+      return;
+    }
+
     const answers = data.answers;
     const bounded =
       answers === undefined ||
@@ -102,13 +129,28 @@ export default factories.createCoreController(PROGRESS_UID, ({ strapi }) => ({
 
     // Single-row db.query create — attaches the user relation correctly
     // (createMany would NOT link relations).
+    const completedAt = new Date().toISOString();
+    const learner = await strapi.db.query(USER_UID).findOne({
+      where: { id: user.id },
+      select: ["id", "username", "displayName", "email", "anonymisedAt"],
+    });
     const progress = await strapi.db.query(PROGRESS_UID).create({
       data: {
         user: user.id,
         targetDocumentId,
-        completedAt: new Date().toISOString(),
+        completedAt,
+        snapshot: snapshotAtCompletion({
+          lesson,
+          version,
+          quizPassed: validated.quiz.length > 0,
+          learner,
+          completedAt,
+          timeZone: appTimeZone(),
+        }),
       },
     });
+    // The snapshot is the evidence's, not the learner's answer (schema-private).
+    delete (progress as { snapshot?: unknown }).snapshot;
     return ctx.send({ data: progress });
   },
 }));

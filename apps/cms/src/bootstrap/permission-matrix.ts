@@ -443,6 +443,11 @@ export const CUSTOM_ACTION_GRANTS: Record<string, readonly MatrixRoleType[] | "*
   "api::user-management.user-management.invite": [ADMIN],
   "api::user-management.user-management.sendLink": [ADMIN],
   "api::user-management.user-management.resetMfa": [ADMIN],
+  // v0.28: training evidence, data export (Art. 15) and anonymisation (Art. 17).
+  "api::user-management.user-management.trainingEvidence": [ADMIN],
+  "api::user-management.user-management.export": [ADMIN],
+  "api::user-management.user-management.anonymisePreview": [ADMIN],
+  "api::user-management.user-management.anonymise": [ADMIN],
   // Same readers as lessons; these actions enforce published lesson and parent.
   "api::lesson.lesson.player": [...STAFF_ROLES, AUTHENTICATED],
   "api::lesson.lesson.check": [...STAFF_ROLES, AUTHENTICATED],

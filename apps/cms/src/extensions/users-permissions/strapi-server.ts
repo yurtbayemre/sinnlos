@@ -752,8 +752,14 @@ export const TOKEN_VERSION_ATTRIBUTE = "tokenVersion";
  */
 export const MFA_ATTRIBUTES = ["totpSecret", "totpEnabledAt", "totpLastStep", "totpRecoveryCodes"];
 
+/**
+ * The anonymisation's tombstone (v0.28): written once by utils/anonymise.ts
+ * through the query engine, never by a Document Service write.
+ */
+export const ANONYMISED_ATTRIBUTE = "anonymisedAt";
+
 /** What the guard drops from every user write. */
-const GUARDED_ATTRIBUTES = [TOKEN_VERSION_ATTRIBUTE, ...MFA_ATTRIBUTES];
+const GUARDED_ATTRIBUTES = [TOKEN_VERSION_ATTRIBUTE, ...MFA_ATTRIBUTES, ANONYMISED_ATTRIBUTE];
 
 /**
  * The password baseline (v0.27, utils/password-rule.ts) for every Document
@@ -771,6 +777,9 @@ export function assertPasswordAllowed(password: unknown): void {
 
 /** Document Service actions that write a user's attributes from `params.data`. */
 const USER_WRITE_ACTIONS: readonly string[] = ["create", "update", "clone"];
+
+/** Document Service actions refused on an anonymised user (v0.28). */
+const TOMBSTONE_REFUSED_ACTIONS: readonly string[] = ["update", "delete", "clone"];
 
 /**
  * What @strapi/core 5.55.1 hands a Document Service middleware
@@ -800,15 +809,24 @@ export type DocumentMiddleware = (
  *    and runs the write in one transaction (saveAfterBump), unless the
  *    user service's edit() is saving that user's password inside its own
  *    (passwordSave): that is how a password the admin panel sets revokes
- *    the older JWTs.
- * In refresh mode only the drop applies.
+ *    the older JWTs;
+ *  - v0.28: `anonymisedAt` is dropped like them, and an update, delete or
+ *    clone of an ANONYMISED user is refused (400 `anonymised`): the Content
+ *    Manager and PUT /api/users/:id cannot unblock, refill or remove the
+ *    tombstone (its kept identity-provider ids refuse a returning sign-in,
+ *    utils/anonymise.ts). The check and the write run in one transaction
+ *    holding the user's row lock (`FOR UPDATE` on Postgres; SQLite has one
+ *    writer), the same lock the anonymisation holds, so a panel save that
+ *    waited for a running anonymisation re-reads the tombstone and is
+ *    refused instead of restoring the row (Codex lane review). The
+ *    anonymisation itself, the seed and the intranet's own writers go
+ *    through the query engine.
+ * In refresh mode only the drop and the tombstone refusal apply.
  */
 export function createUserWriteGuard(strapi: TokenVersionStrapi): DocumentMiddleware {
-  return async (context, next) => {
-    if (context.uid !== USER_UID || !USER_WRITE_ACTIONS.includes(context.action ?? "")) {
-      return next();
-    }
+  const guardWrite = async (context: DocumentMiddlewareContext, next: () => Promise<unknown>) => {
     const params = isRecord(context.params) ? context.params : {};
+    if (!USER_WRITE_ACTIONS.includes(context.action ?? "")) return next();
     let data = isRecord(params.data) ? params.data : undefined;
     const guarded = data
       ? GUARDED_ATTRIBUTES.filter((key) => Object.prototype.hasOwnProperty.call(data, key))
@@ -840,6 +858,48 @@ export function createUserWriteGuard(strapi: TokenVersionStrapi): DocumentMiddle
     if (passwordSave.getStore()?.userId === id) return next();
     return saveAfterBump(strapi, id, next);
   };
+  return async (context, next) => {
+    if (context.uid !== USER_UID) return next();
+    const params = isRecord(context.params) ? context.params : {};
+    const documentId = params.documentId;
+    if (
+      !TOMBSTONE_REFUSED_ACTIONS.includes(context.action ?? "") ||
+      typeof documentId !== "string" ||
+      documentId === ""
+    ) {
+      return guardWrite(context, next);
+    }
+    return strapi.db.transaction(async ({ trx }) => {
+      await refuseTombstone(strapi, trx, documentId);
+      return guardWrite(context, next);
+    });
+  };
+}
+
+/**
+ * Locks the user `documentId` names (Postgres) and throws when it is
+ * anonymised, re-read under that lock (see createUserWriteGuard).
+ */
+async function refuseTombstone(
+  strapi: TokenVersionStrapi,
+  trx: RawRunner,
+  documentId: string,
+): Promise<void> {
+  const users = strapi.db.query(USER_UID);
+  const found = await users.findOne({ where: { documentId }, select: ["id"] });
+  const id = isRecord(found) ? userIdOf(found.id) : null;
+  if (id === null) return;
+  const target = tokenVersionTarget(strapi);
+  if (target.client === "postgres") {
+    await trx.raw(
+      `SELECT 1 FROM ${quote(target.schema)}.${quote(target.table)} WHERE ${quote(target.idColumn)} = ? FOR UPDATE`,
+      [id],
+    );
+  }
+  const row = await users.findOne({ where: { id }, select: ["id", ANONYMISED_ATTRIBUTE] });
+  if (isRecord(row) && row[ANONYMISED_ATTRIBUTE] != null) {
+    throw new errors.ApplicationError("anonymised", { code: "anonymised" });
+  }
 }
 
 /** register() needs `strapi.documents.use` as well. */

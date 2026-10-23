@@ -177,6 +177,11 @@ services:
       # search-log janitor deletes older rows. Empty = 90; 1 to 3650, any
       # other value refuses the cms boot (v0.28).
       SEARCH_LOG_RETENTION_DAYS: ${SEARCH_LOG_RETENTION_DAYS:-}
+      # v0.28: years a training receipt is kept after its deadline (the
+      # valid-until day, or the departure of an anonymised person); the
+      # 03:25 training-evidence-janitor deletes older ones. Empty = 3; a
+      # whole number from 1 to 30, anything else refuses the boot.
+      TRAINING_EVIDENCE_RETENTION_YEARS: ${TRAINING_EVIDENCE_RETENTION_YEARS:-}
       # No usage telemetry to Strapi; also spares a stop the telemetry
       # lookups that run into the DNS timeout on a host without DNS (B05).
       STRAPI_TELEMETRY_DISABLED: ${STRAPI_TELEMETRY_DISABLED:-true}

@@ -644,7 +644,10 @@ describe("org draft guard in register() (decision 05)", () => {
 describe("Document Service middlewares in register() (decision 06 §K)", () => {
   function guardHost(documents: unknown) {
     const stub = datetimeHost();
-    const transaction = vi.fn(async (callback: () => Promise<unknown>) => callback());
+    // Strapi passes the transaction scope (the user guard's tombstone lock reads `trx`).
+    const transaction = vi.fn(async (callback: (scope: { trx: unknown }) => Promise<unknown>) =>
+      callback({ trx: { raw: async () => [] } }),
+    );
     return {
       ...stub,
       db: {
@@ -653,6 +656,8 @@ describe("Document Service middlewares in register() (decision 06 §K)", () => {
         // No rows and no ballots (the poll guard's vote freeze counts them).
         query: () => ({
           findMany: async () => [],
+          // v0.28: the user guard looks for an anonymised row (none here).
+          findOne: async () => null,
           updateMany: async () => ({ count: 0 }),
           count: async () => 0,
         }),

@@ -147,6 +147,8 @@ describe("cms runtime switches (LF03, B05)", () => {
     "      AUDIT_RETENTION_DAYS: ${AUDIT_RETENTION_DAYS:-}",
     // v0.28: the search-log janitor's retention, empty = 90 days.
     "      SEARCH_LOG_RETENTION_DAYS: ${SEARCH_LOG_RETENTION_DAYS:-}",
+    // v0.28: the training evidence retention, empty = 3 years.
+    "      TRAINING_EVIDENCE_RETENTION_YEARS: ${TRAINING_EVIDENCE_RETENTION_YEARS:-}",
   ])("passes %s to the cms", (line) => {
     expect(block("  cms:")).toContain(line);
   });

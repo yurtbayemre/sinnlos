@@ -216,7 +216,8 @@
     "selfChange": "Die eigene Rolle und Sperre kann nur ein anderer Admin ändern.",
     "entraManaged": "Dieses Feld kommt für dieses Konto aus dem Anmeldedienst (Microsoft Entra oder Single Sign-On).",
     "managerCycle": "Diese Person berichtet schon (auch indirekt) an den Benutzer.",
-    "notEntraBound": "Dieses Konto meldet sich nicht über einen Anmeldedienst (Microsoft Entra oder Single Sign-On) an."
+    "notEntraBound": "Dieses Konto meldet sich nicht über einen Anmeldedienst (Microsoft Entra oder Single Sign-On) an.",
+    "anonymised": "Dieses Konto ist anonymisiert und kann nicht mehr geändert werden."
   },
   "fields": {
     "required": "Pflichtfeld",

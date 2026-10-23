@@ -89,6 +89,7 @@ import {
   syncedEmail,
 } from "./profile";
 import { decideRoleWrite, resolveEntraRole, type RoleResolution } from "./roles";
+import { writeWhileUnblocked } from "../utils/unblocked-write";
 
 export { DEPARTMENT_UID } from "../idp/exchange-core";
 
@@ -361,7 +362,10 @@ async function syncProfile(strapi: ExchangeHost, user: Row, me: GraphMe): Promis
     strapi.log.error(`[entra] user=${user.id}: e-mail check failed (${errorLabel(err)})`);
   }
   try {
-    await users.update({ where: { id: user.id }, data });
+    const written = await writeWhileUnblocked(strapi as never, user.id, () =>
+      users.update({ where: { id: user.id }, data }),
+    );
+    if (!written) strapi.log.warn(`[entra] user=${user.id}: blocked meanwhile; profile not synced`);
   } catch (err) {
     strapi.log.error(`[entra] user=${user.id}: profile sync failed (${errorLabel(err)})`);
   }
@@ -385,11 +389,13 @@ async function syncManager(
       if (!hasManager) outcome = "unchanged";
       else if (!mayWrite) outcome = "would clear";
       else {
-        await users.update({
-          where: { id: user.id },
-          data: { manager: null, entraManagerOid: null },
-        });
-        outcome = "cleared";
+        const written = await writeWhileUnblocked(strapi as never, user.id, () =>
+          users.update({
+            where: { id: user.id },
+            data: { manager: null, entraManagerOid: null },
+          }),
+        );
+        outcome = written ? "cleared" : "blocked";
       }
     } else if (decision.kind === "set") {
       const boss = await users.findOne({
@@ -403,11 +409,13 @@ async function syncManager(
       if (unchanged) outcome = bossId === null ? "pending" : "unchanged";
       else if (!mayWrite) outcome = bossId === null ? "would pend" : "would set";
       else {
-        await users.update({
-          where: { id: user.id },
-          data: { entraManagerOid: decision.managerOid, manager: bossId },
-        });
-        outcome = bossId === null ? "pending" : "set";
+        const written = await writeWhileUnblocked(strapi as never, user.id, () =>
+          users.update({
+            where: { id: user.id },
+            data: { entraManagerOid: decision.managerOid, manager: bossId },
+          }),
+        );
+        outcome = !written ? "blocked" : bossId === null ? "pending" : "set";
       }
     }
   } catch (err) {

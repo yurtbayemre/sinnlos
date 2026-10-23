@@ -41,7 +41,7 @@ const spec = (fn: CronTaskSpec["fn"]): CronTaskSpec => ({
 });
 
 describe("cronRegistry", () => {
-  it("lists the eleven tasks with their rules, all in the given zone", () => {
+  it("lists the thirteen tasks with their rules, all in the given zone", () => {
     const table = cronRegistry("Pacific/Auckland").map(({ name, rule, tz }) => ({
       name,
       rule,
@@ -49,6 +49,8 @@ describe("cronRegistry", () => {
     }));
     expect(table).toEqual([
       { name: "scheduled-publisher", rule: "* * * * *", tz: "Pacific/Auckland" },
+      { name: "erasure-sweep", rule: "20 3 * * *", tz: "Pacific/Auckland" },
+      { name: "training-evidence-janitor", rule: "25 3 * * *", tz: "Pacific/Auckland" },
       { name: "uploads-janitor", rule: "30 3 * * *", tz: "Pacific/Auckland" },
       { name: "search-log-janitor", rule: "35 3 * * *", tz: "Pacific/Auckland" },
       { name: "notification-janitor", rule: "40 3 * * *", tz: "Pacific/Auckland" },
@@ -256,6 +258,8 @@ describe("buildCronTasks", () => {
     const tasks = buildCronTasks(cronRegistry("Europe/Berlin"));
     expect(Object.keys(tasks)).toEqual([
       "scheduled-publisher",
+      "erasure-sweep",
+      "training-evidence-janitor",
       "uploads-janitor",
       "search-log-janitor",
       "notification-janitor",

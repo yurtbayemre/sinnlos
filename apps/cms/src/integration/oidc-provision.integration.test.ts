@@ -269,6 +269,26 @@ describe.each(testEngines())("OIDC exchange (OIDC_ENABLED=1) on %s", (engine) =>
       .update({ where: { id: first.body.user?.id }, data: { blocked: true } });
     const blocked = await signIn(t, { sub: "s-blocked", roles: ["Intranet.Member"] });
     expect([blocked.status, blocked.body]).toEqual([403, { error: "blocked" }]);
+
+    // v0.28: an anonymised row keeps its identity, so the identity provider's
+    // next sign-in still finds it and is refused, with no new account.
+    const id = first.body.user!.id;
+    const username = (
+      (await t.strapi.db.query(USER).findOne({ where: { id }, select: ["username"] })) as Row
+    ).username;
+    const anonymise = await t.api("admin_role", `/api/user-management/${id}/anonymise`, {
+      json: { data: { confirm: username } },
+    });
+    expect(anonymise.status, anonymise.text).toBe(200);
+    const before = await t.strapi.db.query(USER).count();
+    const again = await signIn(t, { sub: "s-blocked", roles: ["Intranet.Member"] });
+    expect([again.status, again.body]).toEqual([403, { error: "blocked" }]);
+    expect(await t.strapi.db.query(USER).count()).toBe(before);
+    expect(await t.strapi.db.query(USER).findOne({ where: { id } })).toMatchObject({
+      oidcSubject: "s-blocked",
+      displayName: "Former person",
+      anonymisedAt: expect.anything(),
+    });
   });
 
   it("the provider's role admits: a hand-set role keeps its type but needs an Intranet.* role; the hand-back returns it", async () => {

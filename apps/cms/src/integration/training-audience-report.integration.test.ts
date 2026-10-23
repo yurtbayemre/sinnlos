@@ -27,10 +27,16 @@ describe.each(testEngines())("course audience and the named report on %s", (engi
   const courses = {} as Record<"all" | "engineering" | "sales", Row>;
   const lessons = {} as Record<"all" | "engineering" | "sales", Row>;
 
-  const complete = (caller: Parameters<TestStrapi["api"]>[0], lesson: Row) =>
-    t.api<ErrorBody>(caller, "/api/lesson-progresses", {
-      json: { data: { targetDocumentId: lesson.documentId } },
+  // v0.28: the completion sends back the player's version (absent where the player refuses).
+  const complete = async (caller: Parameters<TestStrapi["api"]>[0], lesson: Row) => {
+    const player = await t.api<{ data?: { version?: unknown } }>(
+      caller,
+      `/api/lessons/${lesson.documentId}/player`,
+    );
+    return t.api<ErrorBody>(caller, "/api/lesson-progresses", {
+      json: { data: { targetDocumentId: lesson.documentId, version: player.body?.data?.version } },
     });
+  };
 
   beforeAll(async () => {
     t = await createTestStrapi({ engine });

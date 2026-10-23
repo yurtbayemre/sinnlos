@@ -22,7 +22,9 @@
         "restore",
         "schedulePublish",
         "scheduleUnpublish",
-        "scheduleFailed"
+        "scheduleFailed",
+        "export",
+        "anonymise"
       ],
       "required": true
     },

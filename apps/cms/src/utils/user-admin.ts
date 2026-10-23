@@ -41,6 +41,10 @@
  *   - reset-mfa: clears another user's second factor and raises their
  *     token version (they enroll again at the next sign-in).
  *
+ * v0.28: an anonymised account (`anonymisedAt`, utils/anonymise.ts) stays as
+ * it is: update, role hand-over and reset-mfa refuse it (`_form:
+ * anonymised`); send-link refuses it as blocked (it can never be unblocked).
+ *
  * NOT COVERED: panel and Entra writes to users keep their own paths (the
  * panel's `user` form, the `[entra]` sign-in log line).
  */
@@ -113,6 +117,8 @@ export interface UserAdminHost {
 const isRecord = (value: unknown): value is Row =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 const text = (value: unknown): string | null => (typeof value === "string" ? value : null);
+const isoOf = (value: unknown): string | null =>
+  value instanceof Date ? value.toISOString() : text(value);
 const idOf = (value: unknown): number | null =>
   isRecord(value) && typeof value.id === "number" ? value.id : null;
 
@@ -133,6 +139,8 @@ const ROW_SELECT = [
   "microsoftOid",
   "oidcSubject",
   "totpEnabledAt",
+  // v0.28:
+  "anonymisedAt",
 ];
 const ROW_POPULATE = {
   role: { select: ["type"] },
@@ -181,6 +189,7 @@ function toRow(row: Row): UserAdminRow {
         : null,
     invited: isLocalUnbound(row) && !text(row.password),
     mfa: isEnrolled(row),
+    anonymisedAt: isoOf(row.anonymisedAt),
   };
 }
 
@@ -269,8 +278,7 @@ function toDetail(row: Row, callerId: number): UserAdminDetail {
       .filter((team) => typeof team.documentId === "string")
       .map((team) => ({ documentId: team.documentId as string, name: text(team.name) ?? "" }))
       .sort((a, b) => a.name.localeCompare(b.name, "de")),
-    createdAt:
-      row.createdAt instanceof Date ? row.createdAt.toISOString() : (text(row.createdAt) ?? null),
+    createdAt: isoOf(row.createdAt),
     self: row.id === callerId,
     locked: lockedFields(row),
   };
@@ -321,7 +329,7 @@ export function parseUserAdminUpdate(body: unknown): UserAdminUpdate {
   return update;
 }
 
-async function lockDirectory(strapi: UserAdminHost): Promise<void> {
+export async function lockDirectory(strapi: UserAdminHost): Promise<void> {
   await lockDocument(
     strapi as unknown as DocumentLockHost,
     USER_DIRECTORY_LOCK_UID,
@@ -329,9 +337,14 @@ async function lockDirectory(strapi: UserAdminHost): Promise<void> {
   );
 }
 
+/** v0.28: nothing of an anonymised account changes any more. */
+function refuseAnonymised(row: Row): void {
+  if (row.anonymisedAt != null) refuseKeys([FORM_KEY], { [FORM_KEY]: "anonymised" });
+}
+
 const roleTypeOf = (row: Row): string | null => (isRecord(row.role) ? text(row.role.type) : null);
 
-type Trx = { raw(sql: string, bindings: unknown[]): unknown };
+export type Trx = { raw(sql: string, bindings: unknown[]): unknown };
 
 /**
  * The caller is still an unblocked admin_role at the token version their
@@ -346,7 +359,7 @@ type Trx = { raw(sql: string, bindings: unknown[]): unknown };
  * none takes the directory lock after a row (the IdP role write: directory,
  * then its row), so the order cannot deadlock.
  */
-async function assertActiveAdmin(
+export async function assertActiveAdmin(
   strapi: UserAdminHost,
   trx: Trx,
   callerId: number,
@@ -414,6 +427,7 @@ export async function updateUser(
     await assertActiveAdmin(strapi, trx, callerId, callerTv);
     const user = await loadUser(strapi, id);
     if (!user) throw new errors.NotFoundError("Not Found");
+    refuseAnonymised(user);
     const codes: Record<string, string> = {};
     if (user.id === callerId) {
       if (update.role !== undefined) codes.role = "selfChange";
@@ -482,6 +496,7 @@ export async function handRoleToEntra(
     await assertActiveAdmin(strapi, trx, callerId, callerTv);
     const user = await loadUser(strapi, id);
     if (!user) throw new errors.NotFoundError("Not Found");
+    refuseAnonymised(user);
     // The provider may demote at the next sign-in: never one's own role (the last admin stays reachable).
     if (user.id === callerId) refuseKeys(["role"], { role: "selfChange" });
     const idp = idpOf(user);
@@ -717,6 +732,7 @@ export async function resetUserMfa(
     await assertActiveAdmin(strapi, trx, callerId, callerTv);
     const user = await loadUser(strapi, id);
     if (!user) throw new errors.NotFoundError("Not Found");
+    refuseAnonymised(user);
     if (user.id === callerId) refuseKeys([FORM_KEY], { [FORM_KEY]: "selfChange" });
     await clearMfa(strapi as never, trx, id);
     await audit(strapi, user, callerId, ["mfa"]);

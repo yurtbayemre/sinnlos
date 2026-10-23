@@ -724,6 +724,8 @@ const COURSE_MODERATOR: WriteRule = {
         ? null
         : "invalid",
     ),
+    // v0.28: who answers questions about the course ("Fragen an"), free text.
+    contact: value(checkNullableString),
     departments: toMany("departments"),
     coverImage: media("ownUpload"),
     publishAt: value(checkNullableInstant),

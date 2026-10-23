@@ -81,6 +81,9 @@ export const AUDIT_ACTIONS = [
   "schedulePublish",
   "scheduleUnpublish",
   "scheduleFailed",
+  // v0.28: a user's export and anonymisation (utils/user-export.ts, utils/anonymise.ts).
+  "export",
+  "anonymise",
 ] as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];

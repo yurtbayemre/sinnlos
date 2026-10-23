@@ -467,6 +467,11 @@ const GOLDEN: Record<string, PolicySpec[]> = {
   "api::user-management.user-management.invite": [],
   "api::user-management.user-management.sendLink": [],
   "api::user-management.user-management.resetMfa": [],
+  // v0.28: training evidence, export, anonymisation (admin_role; the controller checks again).
+  "api::user-management.user-management.trainingEvidence": [],
+  "api::user-management.user-management.export": [],
+  "api::user-management.user-management.anonymisePreview": [],
+  "api::user-management.user-management.anonymise": [],
   "api::profile.profile.me": [],
   "api::profile.profile.updateMe": [],
   // v0.27: the caller's own second factor.

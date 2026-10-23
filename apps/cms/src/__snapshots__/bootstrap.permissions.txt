@@ -149,12 +149,16 @@ admin_role|api::team.team.editable
 admin_role|api::team.team.find
 admin_role|api::team.team.findOne
 admin_role|api::team.team.update
+admin_role|api::user-management.user-management.anonymise
+admin_role|api::user-management.user-management.anonymisePreview
+admin_role|api::user-management.user-management.export
 admin_role|api::user-management.user-management.findOne
 admin_role|api::user-management.user-management.invite
 admin_role|api::user-management.user-management.list
 admin_role|api::user-management.user-management.resetMfa
 admin_role|api::user-management.user-management.roleToEntra
 admin_role|api::user-management.user-management.sendLink
+admin_role|api::user-management.user-management.trainingEvidence
 admin_role|api::user-management.user-management.update
 admin_role|api::wiki-page.wiki-page.authoringList
 admin_role|api::wiki-page.wiki-page.create

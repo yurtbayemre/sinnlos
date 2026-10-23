@@ -3,6 +3,7 @@ import { authoringActions } from "../../../utils/authoring-controller";
 import { QUIZ_CONTENT_INVALID, type LessonPlayerResponse } from "@sinnlos/domain";
 
 import { loadPublishedLesson } from "../../../utils/training-access";
+import { trainingVersionOf } from "../../../utils/training-evidence";
 import { checkStoredQuiz, validateStoredQuiz } from "../../../utils/training-validation";
 
 export default factories.createCoreController("api::lesson.lesson", ({ strapi }) => ({
@@ -17,6 +18,9 @@ export default factories.createCoreController("api::lesson.lesson", ({ strapi })
     if ("error" in validated) {
       return ctx.badRequest("Invalid quiz content", { code: QUIZ_CONTENT_INVALID });
     }
+    // v0.28: the published versions shown; the completion sends them back.
+    const version = trainingVersionOf(lesson);
+    if (!version) return ctx.notFound("Lesson not available");
     const response: LessonPlayerResponse = {
       data: {
         documentId: lesson.documentId,
@@ -31,6 +35,7 @@ export default factories.createCoreController("api::lesson.lesson", ({ strapi })
           completionMode: lesson.course.completionMode ?? "confirm",
         },
         quiz: validated.quiz.map(({ question, options }) => ({ question, options })),
+        version,
       },
     };
     return ctx.send(response);

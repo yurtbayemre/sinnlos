@@ -1310,7 +1310,12 @@ describe("the Document Service guard of the user type (admin-panel passwords, to
     const h = guardHarness();
     const before = (await h.jwt.issue({ id: 2 })) as string;
     await h.documents.update({ documentId: "doc-2", data: { displayName: "Renamed" } });
-    expect(h.writes()).toEqual([`save ${JSON.stringify({ displayName: "Renamed" })}`]);
+    // v0.28: every update of a stored user runs under its row lock (the tombstone check).
+    expect(h.writes()).toEqual([
+      "begin",
+      `save ${JSON.stringify({ displayName: "Renamed" })}`,
+      "commit",
+    ]);
     expect(h.users.get(2)?.tokenVersion).toBe(3);
     await expect(h.jwt.verify(before)).resolves.toMatchObject({ id: 2 });
     expect(h.logs).toEqual([]);
@@ -1392,9 +1397,9 @@ describe("the Document Service guard of the user type (admin-panel passwords, to
     for (const action of ["create", "update", "clone"]) {
       await h.run(action, { documentId: "doc-1", data: { username: "x", tokenVersion: 0 } });
     }
-    expect(h.writes()).toEqual(
-      Array.from({ length: 3 }, () => `save ${JSON.stringify({ username: "x" })}`),
-    );
+    // Create has no stored row; update and clone run under the row lock (v0.28).
+    const save = `save ${JSON.stringify({ username: "x" })}`;
+    expect(h.writes()).toEqual([save, "begin", save, "commit", "begin", save, "commit"]);
     h.queries.length = 0;
     // A password write that tries to set the version back: raised, not reset.
     await h.documents.update({
@@ -1403,6 +1408,28 @@ describe("the Document Service guard of the user type (admin-panel passwords, to
     });
     expect(h.users.get(2)?.tokenVersion).toBe(4);
     expect(h.logs.filter((line) => line.includes("tokenVersion dropped"))).toHaveLength(4);
+  });
+
+  it("v0.28: anonymisedAt never reaches a write; an anonymised user is not updated, deleted or cloned", async () => {
+    const h = guardHarness();
+    h.users.set(1, { ...h.users.get(1)!, anonymisedAt: "2026-10-23T10:00:00.000Z" } as never);
+    for (const action of ["update", "delete", "clone"]) {
+      await expect(
+        h.run(action, { documentId: "doc-1", data: { blocked: false } }),
+        action,
+      ).rejects.toThrow("anonymised");
+    }
+    // Refused under the lock, before any write.
+    expect(h.writes()).toEqual(["begin", "rollback", "begin", "rollback", "begin", "rollback"]);
+    h.queries.length = 0;
+    await h.run("update", { documentId: "doc-2", data: { displayName: "x", anonymisedAt: null } });
+    await h.run("create", { data: { username: "y", anonymisedAt: "2026-01-01T00:00:00.000Z" } });
+    expect(h.writes()).toEqual([
+      "begin",
+      `save ${JSON.stringify({ displayName: "x" })}`,
+      "commit",
+      `save ${JSON.stringify({ username: "y" })}`,
+    ]);
   });
 
   it("leaves other content types and the reading actions alone", async () => {
@@ -1450,7 +1477,7 @@ describe("the Document Service guard of the user type (admin-panel passwords, to
     await expect(
       h.documents.update({ documentId: "doc-99", data: { password: "p-long-enough-1" } }),
     ).rejects.toThrow("cannot be found is refused");
-    expect(h.writes()).toEqual([]);
+    expect(h.writes()).toEqual(["begin", "rollback"]);
   });
 
   it("in refresh mode only keeps tokenVersion out", async () => {
@@ -1459,7 +1486,11 @@ describe("the Document Service guard of the user type (admin-panel passwords, to
       documentId: "doc-2",
       data: { password: "p-long-enough-1", tokenVersion: 0 },
     });
-    expect(h.writes()).toEqual([`save ${JSON.stringify({ password: "p-long-enough-1" })}`]);
+    expect(h.writes()).toEqual([
+      "begin",
+      `save ${JSON.stringify({ password: "p-long-enough-1" })}`,
+      "commit",
+    ]);
   });
 
   it("registerUserWriteGuard hangs it onto the Document Service, or refuses to boot", () => {
