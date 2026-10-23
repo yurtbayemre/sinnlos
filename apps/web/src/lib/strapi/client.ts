@@ -110,7 +110,12 @@ export async function strapi<T>(path: string, init: StrapiInit = {}): Promise<T>
     const error = new StrapiError(res.status, res.statusText, await res.text());
     // v0.27: the session must set up its second factor before anything
     // else (the cms allows it /api/me and the setup routes only).
-    if (res.status === 403 && token && error.strapiName === MFA_SETUP_REQUIRED) {
+    if (
+      res.status === 403 &&
+      token &&
+      (error.strapiName === MFA_SETUP_REQUIRED ||
+        error.strapiDetails?.code === "mfa_setup_required")
+    ) {
       redirect("/mfa/setup");
     }
     throw error;
