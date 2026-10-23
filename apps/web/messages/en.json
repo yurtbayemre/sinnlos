@@ -642,7 +642,15 @@
     "lessonsOf": "{done}/{total}",
     "noPeople": "Nobody in this selection.",
     "downloadStatus": "Status (CSV)",
-    "downloadReceipts": "Proof (CSV)"
+    "downloadReceipts": "Proof (CSV)",
+    "leaversTitle": "People who left",
+    "leaversHint": "Blocked and anonymised people with receipts for this course, named from their receipts. They do not count above. Admins only.",
+    "leaversShow": "Show",
+    "leaversHide": "Hide",
+    "leaversNone": "No people who left have receipts for this course.",
+    "columnLeft": "Left",
+    "leftBlocked": "blocked",
+    "leftAnonymised": "anonymised"
   },
   "duties": {
     "title": "Responsibilities",

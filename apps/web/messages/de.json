@@ -642,7 +642,15 @@
     "lessonsOf": "{done}/{total}",
     "noPeople": "Niemand in dieser Auswahl.",
     "downloadStatus": "Status (CSV)",
-    "downloadReceipts": "Nachweis (CSV)"
+    "downloadReceipts": "Nachweis (CSV)",
+    "leaversTitle": "Ausgeschiedene Personen",
+    "leaversHint": "Gesperrte und anonymisierte Personen mit Nachweisen für diesen Kurs, benannt nach ihren Nachweisen. Sie zählen oben nicht mit. Nur für Admins.",
+    "leaversShow": "Einblenden",
+    "leaversHide": "Ausblenden",
+    "leaversNone": "Keine ausgeschiedenen Personen mit Nachweisen für diesen Kurs.",
+    "columnLeft": "Ausgeschieden",
+    "leftBlocked": "gesperrt",
+    "leftAnonymised": "anonymisiert"
   },
   "duties": {
     "title": "Zuständigkeiten",
