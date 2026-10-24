@@ -282,7 +282,8 @@
     "customerFocus": "Kundenorientierung",
     "excellence": "Exzellenz",
     "sendFailed": "Kudos konnten nicht gesendet werden – bitte erneut versuchen.",
-    "removeRecipient": "Auswahl entfernen"
+    "removeRecipient": "Auswahl entfernen",
+    "searchResults": "{count, plural, =0 {Niemand gefunden} one {# Person gefunden} other {# Personen gefunden}}"
   },
   "marketplace": {
     "title": "Kleinanzeigen",
