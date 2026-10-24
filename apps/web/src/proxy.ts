@@ -51,6 +51,8 @@ export function isPublicPath(pathname: string): boolean {
     // Without this entry the CMS POST gets a redirect and live updates die
     // silently (issue #17 plan, WP2).
     pathname === "/api/live/emit" ||
+    // v0.29: the readiness check for monitors (app/healthz/route.ts).
+    pathname === "/healthz" ||
     pathname.startsWith("/_next") ||
     pathname.startsWith("/favicon") ||
     // Known static files served from /public. Exact allowlist (see

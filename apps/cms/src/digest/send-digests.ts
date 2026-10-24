@@ -91,6 +91,7 @@ import {
   type DigestUserFlags,
 } from "./digest-plan";
 import { renderDigest, totalItems, type DigestContent } from "./render-digest";
+import { reportRunFailure } from "../cron/run-context";
 
 const USER_UID = "plugin::users-permissions.user";
 const ANNOUNCEMENT_UID = "api::announcement.announcement";
@@ -465,8 +466,10 @@ async function collectMentionsAndKudos(
 export async function sendDigests(strapi: DigestStrapi, now = new Date()): Promise<void> {
   const gate = digestsEnabled();
   if (gate.kind !== "send") {
-    if (gate.kind === "misconfigured") strapi.log.error(`[digest] skipped: ${gate.reason}`);
-    else strapi.log.info(`[digest] skipped: ${gate.reason}`);
+    if (gate.kind === "misconfigured") {
+      reportRunFailure(null, `misconfigured: ${gate.reason}`);
+      strapi.log.error(`[digest] skipped: ${gate.reason}`);
+    } else strapi.log.info(`[digest] skipped: ${gate.reason}`);
     return;
   }
 
@@ -615,4 +618,5 @@ export async function sendDigests(strapi: DigestStrapi, now = new Date()): Promi
   strapi.log.info(
     `[digest] run complete: sent=${sent} empty=${empty} skipped=${skipped} failed=${failed} of ${candidates.length} candidate(s)`,
   );
+  if (failed > 0) reportRunFailure(null, `${failed} digest(s) not sent`);
 }

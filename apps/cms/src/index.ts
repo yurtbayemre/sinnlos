@@ -22,7 +22,9 @@ import {
   prepareDatetimeContract,
   registerTimestamptzGuard,
 } from "./database/ensure-timestamptz";
+import { recordExpectedCronTasks } from "./cron/cron-status";
 import { assertSearchLogRetention } from "./cron/prune-search-logs";
+import { cronEnabled, cronRegistry } from "./cron/registry";
 import { reportDigestConfig } from "./digest/send-digests";
 import { parseEntraConfig } from "./entra/config";
 import { parseOidcConfig } from "./oidc/config";
@@ -244,6 +246,17 @@ export default {
     // FX13 review: SMTP set without DIGEST_FROM / PUBLIC_WEB_URL (the owner
     // defaults are gone) → say so at boot, not only at the 07:30 run.
     reportDigestConfig(strapi.log);
+    // v0.29 (S8): the tasks this process schedules, for infra/ops-check.sh
+    // (cron/cron-status.ts); a failed write never fails the boot.
+    try {
+      await recordExpectedCronTasks(
+        strapi,
+        cronRegistry("UTC", process.env),
+        cronEnabled(process.env.CRON_ENABLED),
+      );
+    } catch (err) {
+      strapi.log.error(`[cron] recording the expected tasks failed: ${(err as Error).message}`);
+    }
 
     const { seedDemoData } = await import("./seed-demo");
     await seedDemoData(strapi);

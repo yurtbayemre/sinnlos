@@ -41,6 +41,7 @@ import {
   type NotificationSourceType,
   type SourceRow,
 } from "./notification-source";
+import { reportRunFailure } from "../cron/run-context";
 
 export const NOTIFICATION_UID = "api::notification.notification";
 
@@ -208,6 +209,10 @@ export async function writeNotifications(
       written += 1;
     } catch (err) {
       failed += 1;
+      reportRunFailure(
+        err,
+        `notification for user ${row.recipient} (${label}): ${(err as Error).message}`,
+      );
       strapi.log.error(
         `[notifications] could not create the notification for user ${row.recipient} (${label}): ${(err as Error).message}`,
       );
@@ -302,6 +307,7 @@ export async function runSourceFanout<TSource extends SourceRow>(
       `${sourceType} ${row.id} (source ${anchor?.sourceDocumentId ?? "unanchored"})`,
     );
   } catch (err) {
+    reportRunFailure(err, `notifications for ${sourceType}: ${(err as Error).message}`);
     strapi.log.error(
       `[notifications] failed to create notifications for ${sourceType}: ${(err as Error).message}`,
     );

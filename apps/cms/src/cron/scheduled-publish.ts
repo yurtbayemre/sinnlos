@@ -31,6 +31,7 @@ import {
   windowExpired,
   type ScheduleErrorCode,
 } from "../utils/schedule";
+import { reportRunFailure } from "./run-context";
 
 /**
  * Scheduled publishing on Strapi CE (decision 06 §D rules 2-13; batch 15
@@ -808,7 +809,10 @@ export async function runScheduledDocument(
     if (retry) {
       if (!attempts.fail(uid, documentId, r, pass)) {
         // A known lock or connection code is routine; anything else is worth a look.
+        // Cron health (v0.29): an unexpected error fails the run at once; a
+        // known transient one only once its retries are exhausted (failed).
         const kind = isKnownTransient(error) ? "transient" : "unexpected";
+        if (kind === "unexpected") reportRunFailure(error, `${key} ${pass}: ${failure.detail}`);
         strapi.log.warn(
           `${SCHEDULER_LOG} ${key} ${pass} will be retried (${kind} failure: ${failure.detail})`,
         );
@@ -855,6 +859,7 @@ export async function runScheduledDocument(
       result.failed.push(key);
     } catch (recordError) {
       // The next run retries the document (its schedule is untouched).
+      reportRunFailure(recordError, `${key}: recording its failure failed`);
       strapi.log.error(
         `${SCHEDULER_LOG} ${key} failed: ${code}, and recording it failed too: ` +
           describeFailure(recordError),

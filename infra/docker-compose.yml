@@ -400,11 +400,22 @@ services:
     depends_on:
       - web
       - cms
+    # v0.29: the image's own command, after turning SITE_ALLOW_CIDRS (comma-
+    # separated, unset = everyone) into the space-separated
+    # SITE_ALLOW_RANGES the Caddyfile's gate reads.
+    command:
+      - sh
+      - -c
+      - >-
+        export SITE_ALLOW_RANGES="$$(printf '%s' "$${SITE_ALLOW_CIDRS:-0.0.0.0/0,::/0}" | tr ',' ' ')";
+        exec caddy run --config /etc/caddy/Caddyfile --adapter caddyfile
     environment:
       # The site address of infra/Caddyfile: a real host name gets a Let's
       # Encrypt certificate (and HSTS), unset means localhost with Caddy's
       # internal CA, http://localhost plain HTTP.
       DOMAIN: ${DOMAIN:-localhost}
+      # v0.29: closes the site to every other source network (see command).
+      SITE_ALLOW_CIDRS: ${SITE_ALLOW_CIDRS:-}
     ports:
       - "80:80"
       - "443:443"

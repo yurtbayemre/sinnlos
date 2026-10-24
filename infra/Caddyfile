@@ -9,6 +9,16 @@
 {$DOMAIN:localhost} {
     encode zstd gzip
 
+    # v0.29: SITE_ALLOW_CIDRS (comma-separated CIDRs, unset = open) closes
+    # the whole site, web and cms, to every other source network, e.g. for
+    # a restore (docs/OPERATIONS.md). The caddy service's command turns the
+    # list into the space-separated SITE_ALLOW_RANGES. remote_ip is the
+    # direct peer: this edge must be the one the visitor connects to.
+    # Caddy's directive order runs respond before every reverse_proxy, and
+    # the header blocks below still apply to the 503.
+    @closed not remote_ip {$SITE_ALLOW_RANGES:0.0.0.0/0 ::/0}
+    respond @closed "maintenance" 503
+
     # Next.js Auth.js callbacks (must come before the /api/* catch-all)
     @nextauth path /api/auth/*
     reverse_proxy @nextauth web:3000

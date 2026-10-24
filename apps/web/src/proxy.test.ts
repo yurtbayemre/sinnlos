@@ -59,6 +59,10 @@ describe("isPublicPath — public entries", () => {
     expect(isPublicPath("/api/live/emit")).toBe(true);
   });
 
+  it("keeps the readiness check public for monitors (v0.29)", () => {
+    expect(isPublicPath("/healthz")).toBe(true);
+  });
+
   it("lets Next assets and the favicon through", () => {
     expect(isPublicPath("/_next/static/chunks/main.js")).toBe(true);
     expect(isPublicPath("/_next/image")).toBe(true);
@@ -117,6 +121,8 @@ describe("isPublicPath — guarded paths", () => {
       "/api/live/emitx",
       "/api/revalidate/x",
       "/api/revalidatex",
+      "/healthz/x",
+      "/healthzx",
     ]) {
       expect(isPublicPath(path)).toBe(false);
     }

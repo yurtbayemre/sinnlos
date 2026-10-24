@@ -13,6 +13,8 @@
  * and says so: retention fails closed.
  */
 
+import { reportRunFailure } from "./run-context";
+
 /** Days a search log row is kept (`SEARCH_LOG_RETENTION_DAYS` unset or blank). */
 export const DEFAULT_SEARCH_LOG_RETENTION_DAYS = 90;
 /** The longest retention the env may set (ten years). */
@@ -63,6 +65,7 @@ export async function pruneSearchLogs(
       strapi.log.info(`[search-log-janitor] pruned ${deleted} row(s) older than ${days} days`);
     }
   } catch (err) {
+    reportRunFailure(err);
     strapi.log.warn(`[search-log-janitor] prune failed: ${(err as Error).message}`);
   }
 }

@@ -155,3 +155,22 @@ describe("cms runtime switches (LF03, B05)", () => {
     expect(block("  cms:")).toContain(line);
   });
 });
+
+describe("site gate (v0.29, SITE_ALLOW_CIDRS)", () => {
+  it("passes SITE_ALLOW_CIDRS to caddy, empty by default", () => {
+    expect(block("  caddy:")).toContain("      SITE_ALLOW_CIDRS: ${SITE_ALLOW_CIDRS:-}");
+  });
+
+  it("runs the image's command after turning the list into ranges, open by default", () => {
+    const caddy = block("  caddy:");
+    const at = caddy.indexOf("    command:");
+    expect(caddy.slice(at, at + 6)).toEqual([
+      "    command:",
+      "      - sh",
+      "      - -c",
+      "      - >-",
+      "        export SITE_ALLOW_RANGES=\"$$(printf '%s' \"$${SITE_ALLOW_CIDRS:-0.0.0.0/0,::/0}\" | tr ',' ' ')\";",
+      "        exec caddy run --config /etc/caddy/Caddyfile --adapter caddyfile",
+    ]);
+  });
+});

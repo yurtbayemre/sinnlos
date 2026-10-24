@@ -51,6 +51,8 @@
  * the announcement and event lifecycles.
  */
 
+import { reportRunFailure } from "../cron/run-context";
+
 /**
  * The anchor kinds: content types whose publish triggers an audience-wide
  * fan-out, and "course" for the training expiry reminders
@@ -310,6 +312,10 @@ export async function resolveFanout<T>(
         `a re-publish would notify them again`,
     );
   } else if (plan.reason === "lookup-failed") {
+    reportRunFailure(
+      null,
+      `already-notified lookup of ${sourceType} ${anchor?.sourceDocumentId}: ${lookupError}`,
+    );
     strapiInstance.log?.warn?.(
       `[notifications] could not load the already-notified recipients of ${sourceType} ` +
         `${anchor?.sourceDocumentId} (${lookupError}) — notifying all ` +
