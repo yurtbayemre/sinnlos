@@ -372,6 +372,7 @@ const GOLDEN: Record<string, PolicySpec[]> = {
   // D-ENTRA-01: auth:false, authenticated in the controller (shared secret +
   // ID-token verification), 404 while ENTRA_ENABLED is not '1'.
   "api::entra-auth.entra-auth.exchange": [],
+  "api::health.health.ready": [],
   // v0.25.0: the OIDC exchange, the same way (404 while OIDC_ENABLED is not '1').
   "api::oidc-auth.oidc-auth.exchange": [],
   // v0.27: set-password links, auth:false, only for the web server (the
@@ -796,12 +797,13 @@ describe("route → policy matrix (S01)", async () => {
     expect(actual).toEqual(GOLDEN);
   });
 
-  it("only the exchanges and the set-password links disable authentication (auth: false)", () => {
+  it("only the exchanges, the set-password links and readiness disable authentication (auth: false)", () => {
     // An exchange authenticates its caller itself (shared secret + the
     // cms's own ID-token verification, src/entra/provision.ts and
     // src/oidc/provision.ts); a caller has no Strapi JWT before it. The
-    // v0.27 link routes take only the web server (shared secret). Any
-    // other auth:false route is a hole.
+    // v0.27 link routes take only the web server (shared secret). The
+    // v0.29 readiness route answers only "ok" or "unavailable". Any other
+    // auth:false route is a hole.
     const publicRoutes = [...routes.values()].filter((e) => e.config.auth === false);
     expect(publicRoutes.map((e) => ({ action: e.action, method: e.method, path: e.path }))).toEqual(
       [
@@ -809,6 +811,11 @@ describe("route → policy matrix (S01)", async () => {
           action: "api::entra-auth.entra-auth.exchange",
           method: "POST",
           path: "/auth/entra/exchange",
+        },
+        {
+          action: "api::health.health.ready",
+          method: "GET",
+          path: "/health/ready",
         },
         {
           action: "api::oidc-auth.oidc-auth.exchange",
@@ -877,6 +884,7 @@ describe("route → policy matrix (S01)", async () => {
       expect(customActions.filter((a) => isPublicRoute(a) && granted.has(a))).toEqual([]);
       expect(customActions.filter(isPublicRoute)).toEqual([
         "api::entra-auth.entra-auth.exchange",
+        "api::health.health.ready",
         "api::oidc-auth.oidc-auth.exchange",
         "api::password-auth.password-auth.forgot",
         "api::password-auth.password-auth.set",
