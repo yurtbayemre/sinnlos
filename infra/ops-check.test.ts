@@ -1,9 +1,10 @@
 /**
  * infra/ops-check.sh (v0.29, S8) with docker, df and curl stubbed on PATH:
  * silent and 0 when clean, one line per problem and 1 otherwise, and a
- * check that cannot look reports UNKNOWN instead of clean. The psql query
- * itself runs for real in apps/cms/src/integration/cron-status.integration
- * .test.ts (the same filter); here the stub answers its rows.
+ * check that cannot look, or reads a value of the wrong shape, reports
+ * UNKNOWN instead of clean. infra/ops-check.sql itself runs on a real
+ * Postgres in apps/cms/src/integration/cron-status.integration.test.ts;
+ * here the stub answers its rows.
  */
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -11,19 +12,23 @@ import { describe, expect, it } from "vitest";
 
 import { runBash, shellMode } from "./shell-runner.test.helper";
 
-const SCRIPT = readFileSync(fileURLToPath(new URL("./ops-check.sh", import.meta.url)), "utf8");
-const MODE = shellMode(["date", "awk", "sed"], { linux: false });
+const read = (name: string) => readFileSync(fileURLToPath(new URL(name, import.meta.url)), "utf8");
+const SCRIPT = read("./ops-check.sh");
+const SQL = read("./ops-check.sql");
+const MODE = shellMode(["date", "awk", "sed", "grep"], { linux: false });
 
 const MIN = 60_000;
 const iso = (agoMs: number) => new Date(Date.now() - agoMs).toISOString();
 
 interface Fixture {
-  /** last-success content; null: no file */
+  /** the last-success line; null: no file */
   lastSuccess?: string | null;
   backupStatus?: string;
-  /** used percentage per df target */
+  /** used percentage in every df row */
   used?: number;
-  /** the psql rows (kind|name|every|first|finished|outcome|failed) or "FAIL" */
+  /** df prints only its header */
+  dfHeaderOnly?: boolean;
+  /** psql's rows (kind|name|every|first|present|finished|outcome|failed), or "FAIL" */
   rows?: string[] | "FAIL";
   schemaEnv?: string;
   inspectFails?: boolean;
@@ -31,17 +36,19 @@ interface Fixture {
   env?: Record<string, string>;
 }
 
+const task = (name: string, every: number, firstAgo: number, status?: string) =>
+  `task|${name}|${every}|${iso(firstAgo)}|${status === undefined ? "no|||" : `yes|${status}`}`;
 const cleanRows = () => [
-  "expected|true|||||",
-  `task|scheduled-publisher|1|${iso(600 * MIN)}|${iso(2 * MIN)}|ok|`,
-  `task|digest-mailer|1440|${iso(3000 * MIN)}|${iso(600 * MIN)}|ok|`,
+  "expected|true|array|2||||",
+  task("scheduled-publisher", 1, 600 * MIN, `${iso(2 * MIN)}|ok|`),
+  task("digest-mailer", 1440, 3000 * MIN, `${iso(600 * MIN)}|ok|`),
 ];
 
 function run(f: Fixture = {}) {
   const used = f.used ?? 40;
   const df = [
     "Filesystem 1024-blocks Used Available Capacity Mounted on",
-    `/dev/sda1 1000 ${used * 10} ${(100 - used) * 10} ${used}% /`,
+    ...(f.dfHeaderOnly ? [] : [`/dev/sda1 1000 ${used * 10} ${(100 - used) * 10} ${used}% /x`]),
   ].join("\\n");
   const rows = f.rows === "FAIL" ? "FAIL" : (f.rows ?? cleanRows()).join("\\n");
   const env: Record<string, string> = {
@@ -57,18 +64,23 @@ function run(f: Fixture = {}) {
     "cat > \"$work/infra/ops-check.sh\" <<'__OPS__'",
     SCRIPT,
     "__OPS__",
+    "cat > \"$work/infra/ops-check.sql\" <<'__SQL__'",
+    SQL,
+    "__SQL__",
     f.lastSuccess === null
       ? ":"
       : `printf '%s\\n' '${f.lastSuccess ?? `${iso(3 * 3600_000)} nightly sinnlos-db-x.dump.gz.gpg`}' > "$work/backup/offsite/sinnlos/last-success"`,
     f.backupStatus === undefined
       ? ":"
       : `printf '%s\\n' '${f.backupStatus}' > "$work/backup-status"`,
-    // docker: inspect → env lines; exec … df → the df table; exec … sh → rows.
+    // docker: info → a root dir; inspect → env lines; exec … df → the df
+    // table; exec … sh (psql) → the rows.
     "cat > \"$work/bin/docker\" <<'__DOCKER__'",
     "#!/usr/bin/env bash",
     'echo "$*" >> "$OPS_STUB_LOG"',
     'case "$1" in',
-    `  inspect) ${f.inspectFails ? "exit 1" : `printf 'PATH=/usr/bin\\n${f.schemaEnv ?? ""}\\n'`} ;;`,
+    "  info) echo /var/lib/docker ;;",
+    `  inspect) ${f.inspectFails ? "exit 1" : `printf '%b\\n' 'PATH=/usr/bin\\n${f.schemaEnv ?? ""}'`} ;;`,
     "  exec)",
     '    case "$*" in',
     `      *" df -P "*) printf '%b\\n' '${df}' ;;`,
@@ -78,6 +90,7 @@ function run(f: Fixture = {}) {
     "__DOCKER__",
     "cat > \"$work/bin/df\" <<'__DF__'",
     "#!/usr/bin/env bash",
+    'echo "df $*" >> "$OPS_STUB_LOG"',
     `printf '%b\\n' '${df}'`,
     "__DF__",
     "cat > \"$work/bin/curl\" <<'__CURL__'",
@@ -90,8 +103,7 @@ function run(f: Fixture = {}) {
     ...Object.entries(env).map(([k, v]) => `export ${k}="${v}"`),
     ...(f.backupStatus === undefined ? [] : ['export OPS_BACKUP_STATUS="$work/backup-status"']),
     'PATH="$work/bin:$PATH" bash "$work/infra/ops-check.sh"',
-    "rc=$?",
-    'echo "--rc=$rc"',
+    'echo "--rc=$?"',
     'echo "--log"; cat "$OPS_STUB_LOG" 2>/dev/null',
     'echo "--sql"; cat "$OPS_STUB_LOG.sql" 2>/dev/null',
   ].join("\n");
@@ -100,13 +112,7 @@ function run(f: Fixture = {}) {
   const rc = Number(rest.split("\n")[0]);
   const log = rest.split("--log\n")[1]?.split("--sql\n")[0] ?? "";
   const sql = rest.split("--sql\n")[1] ?? "";
-  return {
-    rc,
-    lines: out.trim() === "" ? [] : out.trim().split("\n"),
-    log,
-    sql,
-    stderr: res.stderr,
-  };
+  return { rc, lines: out.trim() === "" ? [] : out.trim().split("\n"), log, sql };
 }
 
 // Each case runs the script a few times; Git Bash on Windows is slow at it.
@@ -117,14 +123,12 @@ describe.skipIf(MODE === null)("infra/ops-check.sh", { timeout: 60_000 }, () => 
     expect(r.rc).toBe(0);
   });
 
-  it("reads the cms's schema and queries the core store rows ops-check owns", () => {
+  it("runs ops-check.sql in the db container with the cms's schema as a psql variable", () => {
     const r = run({ schemaEnv: 'DATABASE_SCHEMA=we"ird' });
     expect(r.rc).toBe(0);
-    expect(r.sql).toContain('from "we""ird".strapi_core_store_settings');
-    expect(r.sql).toContain("key like 'plugin_sinnlos_cron:%' and type = 'object'");
-    expect(r.sql).toContain("environment is null and tag is null");
-    expect(run().sql).toContain('from "public".strapi_core_store_settings');
-    expect(r.log).toContain("exec -i prod-db-1 sh -c");
+    expect(r.sql.trim()).toBe(SQL.trim());
+    expect(r.log).toMatch(/^exec -i prod-db-1 sh -c psql .* -v schema="\$1" .* sh we"ird$/m);
+    expect(run().log).toMatch(/^exec -i prod-db-1 sh -c psql .* sh public$/m);
   });
 
   it("reports an old, a missing and a malformed backup sentinel", () => {
@@ -133,10 +137,13 @@ describe.skipIf(MODE === null)("infra/ops-check.sh", { timeout: 60_000 }, () => 
         /^backup: the last complete nightly backup is from .*, older than 26 h$/,
       ),
     ]);
+    expect(run({ lastSuccess: "2026-09-29T03:00:12+02:00 nightly x" }).rc).toBe(1);
     expect(run({ lastSuccess: null }).lines[0]).toMatch(/^UNKNOWN backup age: .* is missing/);
-    expect(run({ lastSuccess: "yesterday-ish nightly x" }).lines[0]).toMatch(
-      /^UNKNOWN backup age: no valid time/,
-    );
+    for (const stamp of ["now", "tomorrow", "yesterday-ish", iso(-3600_000)]) {
+      expect(run({ lastSuccess: `${stamp} nightly x` }).lines[0], stamp).toMatch(
+        /^UNKNOWN backup age: no valid time/,
+      );
+    }
     expect(run({ env: { SINNLOS_BACKUP_DIR: "" } }).lines[0]).toMatch(/^UNKNOWN backup age: set /);
   });
 
@@ -147,28 +154,41 @@ describe.skipIf(MODE === null)("infra/ops-check.sh", { timeout: 60_000 }, () => 
     );
   });
 
-  it("reports every path with too little free space", () => {
+  it("checks Docker's root, both volumes, the backup directory and the safety dumps", () => {
     const r = run({ used: 90 });
     expect(r.rc).toBe(1);
     expect(r.lines.every((l) => /^disk: .* has 10% free, less than 15%$/.test(l))).toBe(true);
-    expect(r.lines.map((l) => l.split(" (")[0])).toEqual([
-      "disk: the Docker root and the database volume",
+    expect(
+      r.lines.map((l) => l.replace(/ has 10% free.*$/, "").replace(/\/\S+/g, "<path>")),
+    ).toEqual([
+      "disk: Docker's root <path>",
+      "disk: the database volume",
       "disk: the uploads volume",
-      "disk: the backup directory",
-      "disk: the checkout",
+      "disk: the backup directory <path>",
+      "disk: the safety dumps <path>",
     ]);
+    expect(r.log).toContain("df -P /var/lib/docker");
+  });
+
+  it("reports a df that prints no row as UNKNOWN, not as clean", () => {
+    const r = run({ dfHeaderOnly: true });
+    expect(r.rc).toBe(1);
+    expect(r.lines).toHaveLength(5);
+    expect(
+      r.lines.every((l) => /^UNKNOWN disk space of .* printed no single usable row$/.test(l)),
+    ).toBe(true);
   });
 
   it("reports a failed task, a recent recovered failure, a missed run and a never-run task", () => {
     const r = run({
       rows: [
-        "expected|true|||||",
-        `task|erasure-sweep|1440|${iso(3000 * MIN)}|${iso(60 * MIN)}|failed|${iso(60 * MIN)}`,
-        `task|scheduled-publisher|1|${iso(600 * MIN)}|${iso(MIN)}|ok|${iso(30 * MIN)}`,
-        `task|search-index|1|${iso(600 * MIN)}|${iso(20 * MIN)}|ok|`,
-        `task|digest-mailer|1440|${iso(1600 * MIN)}||||`,
-        `task|training-reminders|1440|${iso(10 * MIN)}||||`,
-        `task|audit-janitor|1440|${iso(3000 * MIN)}|${iso(600 * MIN)}|ok|${iso(300 * MIN)}`,
+        "expected|true|array|6||||",
+        task("erasure-sweep", 1440, 3000 * MIN, `${iso(60 * MIN)}|failed|${iso(60 * MIN)}`),
+        task("scheduled-publisher", 1, 600 * MIN, `${iso(MIN)}|ok|${iso(30 * MIN)}`),
+        task("search-index", 1, 600 * MIN, `${iso(20 * MIN)}|ok|`),
+        task("digest-mailer", 1440, 1600 * MIN),
+        task("training-reminders", 1440, 10 * MIN),
+        task("audit-janitor", 1440, 3000 * MIN, `${iso(600 * MIN)}|ok|${iso(300 * MIN)}`),
       ],
     });
     expect(r.rc).toBe(1);
@@ -180,25 +200,53 @@ describe.skipIf(MODE === null)("infra/ops-check.sh", { timeout: 60_000 }, () => 
     ]);
   });
 
-  it("reports CRON_ENABLED off and a missing expected set", () => {
-    expect(run({ rows: ["expected|false|||||"] }).lines).toEqual([
+  it("reports CRON_ENABLED off, a missing expected set and an empty one", () => {
+    expect(run({ rows: ["expected|false|array|0||||"] }).lines).toEqual([
       "cron: the cms runs with CRON_ENABLED off; no task runs",
     ]);
     expect(run({ rows: [] }).lines).toEqual([
       "UNKNOWN cron status: no cron:expected entry (has the cms booted since v0.29?)",
     ]);
+    expect(run({ rows: ["expected|true|array|0||||"] }).lines).toEqual([
+      "UNKNOWN cron status: cron:expected lists no task although cron is on",
+    ]);
   });
 
-  it("reports UNKNOWN when docker or psql cannot answer, or an entry is unreadable", () => {
+  it("reports a value of the wrong shape as UNKNOWN, never as clean", () => {
+    const unknown = (rows: string[]) => run({ rows }).lines;
+    // cron:expected without a task list, or with cronEnabled not a boolean
+    expect(unknown(["expected|true|||||||"])).toEqual([
+      "UNKNOWN cron status: cron:expected has the wrong shape",
+    ]);
+    expect(unknown(["expected||array|1||||", task("x", 1, MIN, `${iso(MIN)}|ok|`)])).toEqual([
+      "UNKNOWN cron status: cron:expected has the wrong shape",
+    ]);
+    const head = "expected|true|array|1||||";
+    expect(unknown([head, task("x", 1, MIN, `${iso(MIN)}|garbage|`)])).toEqual([
+      "UNKNOWN cron status: unreadable status of task x",
+    ]);
+    // a status row without its finish time is not the same as no row
+    expect(unknown([head, task("x", 1, MIN, "|ok|")])).toEqual([
+      "UNKNOWN cron status: unreadable status of task x",
+    ]);
+    expect(unknown([head, task("x", 1, MIN, "tomorrow|ok|")])).toEqual([
+      "UNKNOWN cron status: unreadable status of task x",
+    ]);
+    expect(unknown([head, `task|x|1|now|no|||`])).toEqual([
+      "UNKNOWN cron status: unreadable expected entry for task 'x'",
+    ]);
+    expect(unknown([head, task("x", 0, MIN)])).toEqual([
+      "UNKNOWN cron status: unreadable expected entry for task 'x'",
+    ]);
+  });
+
+  it("reports UNKNOWN when docker or psql cannot answer", () => {
     expect(run({ inspectFails: true }).lines).toContain(
       "UNKNOWN cron status: docker inspect prod-cms-1 failed",
     );
     expect(run({ rows: "FAIL" }).lines[0]).toMatch(
       /^UNKNOWN cron status: psql in prod-db-1 failed: ERROR: invalid input syntax/,
     );
-    expect(run({ rows: ["expected|true|||||", "task|x|1|not-a-time|||"] }).lines).toEqual([
-      "UNKNOWN cron status: unreadable entry for task x",
-    ]);
   });
 
   it("pings OPS_PUSH_URL only when clean, and reports a failed push", () => {

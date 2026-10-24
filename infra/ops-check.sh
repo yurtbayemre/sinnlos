@@ -6,26 +6,29 @@
 # line with MAILTO mails exactly the problems:
 #   0 * * * * /path/to/infra/ops-check.sh
 # A line starting with UNKNOWN is a check that could not be made (a failed
-# docker or psql call, an unreadable file, a malformed time); it counts as a
-# problem: a check that cannot look must not report "clean".
+# docker, df or psql call, a missing file, a value of the wrong shape, a time
+# that is not an ISO time or lies in the future); it counts as a problem: a
+# check that cannot look must not report "clean".
 #
 #  1. Backup age: the newest complete nightly backup, from
 #     $SINNLOS_BACKUP_DIR/offsite/sinnlos/last-success (pg-backup.sh) or,
 #     with OPS_BACKUP_STATUS, backup-run's `backup-status` file
 #     (daily_last_ok_at=), is at most OPS_BACKUP_MAX_AGE_HOURS (26) old.
-#  2. Disk: at least OPS_DISK_MIN_PERCENT (15) free on the Docker root and
-#     the database volume (seen from the db container), the uploads volume
-#     (from the cms container), the backup directory and this checkout
-#     (restore-db.sh keeps its safety dumps in infra/backups).
+#  2. Disk: at least OPS_DISK_MIN_PERCENT (15) free on Docker's root
+#     directory, the database and uploads volumes (seen from their
+#     containers, so no root is needed), the backup directories and the
+#     checkout's infra/backups (restore-db.sh's safety dumps).
 #  3. Cron: the status the cms keeps in its core store (apps/cms/src/cron/
-#     cron-status.ts), read with psql in the db container: cron is on, every
-#     expected task ran within its interval + max(15 min, a tenth of it)
-#     (after a grace of that length once it became expected), none failed
-#     on its last run, none failed within OPS_CRON_LOOKBACK_MINUTES (120).
+#     cron-status.ts; the query is infra/ops-check.sql, run with psql in the
+#     db container): cron is on, every expected task ran within its interval
+#     + max(15 min, a tenth of it) (after a grace of that length once it
+#     became expected), none failed on its last run, none failed within
+#     OPS_CRON_LOOKBACK_MINUTES (120).
 #
 # Clean, with OPS_PUSH_URL set (an Uptime Kuma push URL, for example), it
 # calls that URL; a failed push is a problem too, so a host check that
-# cannot reach its monitor still mails. Environment: COMPOSE_PROJECT (infra)
+# cannot reach its monitor still mails. Containers: <COMPOSE_PROJECT>-db-1
+# and -cms-1, as infra/mfa-reset.sh. Environment: COMPOSE_PROJECT (infra)
 # and SINNLOS_BACKUP_DIR, also from infra/deploy.env as for deploy.sh.
 set -Euo pipefail
 
@@ -41,6 +44,7 @@ MAX_AGE_HOURS="${OPS_BACKUP_MAX_AGE_HOURS:-26}"
 DISK_MIN="${OPS_DISK_MIN_PERCENT:-15}"
 LOOKBACK="${OPS_CRON_LOOKBACK_MINUTES:-120}"
 NOW="$(date -u +%s)"
+ISO_RE='^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?(Z|[+-][0-9]{2}:?[0-9]{2})$'
 problems=0
 
 problem() {
@@ -48,9 +52,15 @@ problem() {
   problems=$((problems + 1))
 }
 
-# An ISO time as epoch seconds, or nothing (and status 1) when it is not one.
+# An ISO time (as pg-backup.sh and the cms write it) as epoch seconds; status
+# 1 for anything else (GNU date alone would take "now" or "tomorrow") and
+# for a time more than five minutes ahead.
 epoch() {
-  [[ -n "$1" ]] && date -u -d "$1" +%s 2>/dev/null
+  local t
+  [[ "$1" =~ ${ISO_RE} ]] || return 1
+  t="$(date -u -d "$1" +%s 2>/dev/null)" || return 1
+  ((t <= NOW + 300)) || return 1
+  echo "${t}"
 }
 
 check_backup() {
@@ -74,99 +84,100 @@ check_backup() {
   fi
 }
 
-# One `df -P` line per path (the Capacity column is the used percentage).
+# `check_df LABEL COMMAND…` for a `df -P` of exactly one path: exactly one
+# data row, whose Capacity column (the used percentage) leaves enough free.
 check_df() {
-  local label="$1" out line used
+  local label="$1" out rows used
   shift
   if ! out="$("$@" 2>/dev/null)"; then
     problem "UNKNOWN disk space of ${label}: $* failed"
     return
   fi
-  while IFS= read -r line; do
-    used="$(awk '{ sub("%", "", $5); print $5 }' <<<"${line}")"
-    if [[ ! "${used}" =~ ^[0-9]+$ ]]; then
-      problem "UNKNOWN disk space of ${label}: unreadable df line: ${line}"
-    elif ((100 - used < DISK_MIN)); then
-      problem "disk: ${label} ($(awk '{ print $6 }' <<<"${line}")) has $((100 - used))% free, less than ${DISK_MIN}%"
-    fi
-  done < <(tail -n +2 <<<"${out}")
+  rows="$(tail -n +2 <<<"${out}" | grep -c .)"
+  used="$(tail -n +2 <<<"${out}" | awk 'NR == 1 { sub("%", "", $5); print $5 }')"
+  if [[ "${rows}" != 1 || ! "${used}" =~ ^[0-9]+$ ]]; then
+    problem "UNKNOWN disk space of ${label}: $* printed no single usable row"
+  elif ((100 - used < DISK_MIN)); then
+    problem "disk: ${label} has $((100 - used))% free, less than ${DISK_MIN}%"
+  fi
 }
 
 check_disk() {
-  check_df "the Docker root and the database volume" \
-    docker exec "${PROJECT}-db-1" df -P / /var/lib/postgresql/data
+  local root dumps="${SCRIPT_DIR}/backups"
+  if root="$(docker info -f '{{.DockerRootDir}}' 2>/dev/null)" && [[ -n "${root}" ]]; then
+    check_df "Docker's root ${root}" df -P "${root}"
+  else
+    problem "UNKNOWN disk space of Docker's root: docker info failed"
+  fi
+  check_df "the database volume" docker exec "${PROJECT}-db-1" df -P /var/lib/postgresql/data
   check_df "the uploads volume" docker exec "${PROJECT}-cms-1" df -P /app/apps/cms/public/uploads
-  local backup_dir="${SINNLOS_BACKUP_DIR:-}"
-  [[ -z "${OPS_BACKUP_STATUS:-}" ]] || backup_dir="$(dirname "${OPS_BACKUP_STATUS}")"
-  [[ -z "${backup_dir}" ]] || check_df "the backup directory" df -P "${backup_dir}"
-  check_df "the checkout" df -P "${SCRIPT_DIR}"
+  [[ -z "${SINNLOS_BACKUP_DIR:-}" ]] ||
+    check_df "the backup directory ${SINNLOS_BACKUP_DIR}" df -P "${SINNLOS_BACKUP_DIR}"
+  [[ -z "${OPS_BACKUP_STATUS:-}" ]] ||
+    check_df "the backup-run directory" df -P "$(dirname "${OPS_BACKUP_STATUS}")"
+  [[ -d "${dumps}" ]] || dumps="${SCRIPT_DIR}"
+  check_df "the safety dumps ${dumps}" df -P "${dumps}"
+}
+
+# One task row of ops-check.sql: freshness, last outcome, recent failure.
+check_task() {
+  local name="$1" every="$2" first="$3" present="$4" finished="$5" outcome="$6" failed="$7"
+  local grace first_ts ts failed_ts=""
+  if [[ -z "${name}" || ! "${every}" =~ ^[1-9][0-9]*$ ]] || ! first_ts="$(epoch "${first}")"; then
+    problem "UNKNOWN cron status: unreadable expected entry for task '${name}'"
+    return
+  fi
+  grace=$((every + (every / 10 > 15 ? every / 10 : 15)))
+  if [[ "${present}" == no ]]; then
+    ((NOW - first_ts <= grace * 60)) ||
+      problem "cron: ${name} has not run since it became expected (more than ${grace} min)"
+    return
+  fi
+  if ! ts="$(epoch "${finished}")" || [[ "${outcome}" != ok && "${outcome}" != failed ]] ||
+    { [[ -n "${failed}" ]] && ! failed_ts="$(epoch "${failed}")"; }; then
+    problem "UNKNOWN cron status: unreadable status of task ${name}"
+    return
+  fi
+  ((NOW - ts <= grace * 60)) ||
+    problem "cron: ${name} last finished at ${finished}, more than ${grace} min ago"
+  if [[ "${outcome}" == failed ]]; then
+    problem "cron: ${name} failed on its last run (${finished}); see [cron] ${name} failed in the cms log"
+  elif [[ -n "${failed_ts}" ]] && ((NOW - failed_ts <= LOOKBACK * 60)); then
+    problem "cron: ${name} failed at ${failed} (it has run fine since)"
+  fi
 }
 
 check_cron() {
-  local schema table rows kind name every first finished outcome failed enabled="" grace ts
-  # The cms's schema (DATABASE_SCHEMA, default public); the container's
+  local env schema rows kind a b c d e f g seen=0 enabled="" tasks_type="" tasks_count=""
+  # The cms's schema (DATABASE_SCHEMA, default public), from the container's
   # config, so a stopped cms still answers.
-  if ! schema="$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "${PROJECT}-cms-1" 2>/dev/null)"; then
+  if ! env="$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "${PROJECT}-cms-1" 2>/dev/null)"; then
     problem "UNKNOWN cron status: docker inspect ${PROJECT}-cms-1 failed"
     return
   fi
-  schema="$(sed -n 's/^DATABASE_SCHEMA=//p' <<<"${schema}")"
-  schema="${schema:-public}"
-  table="\"${schema//\"/\"\"}\".strapi_core_store_settings"
-  if ! rows="$(docker exec -i "${PROJECT}-db-1" sh -c 'psql -X -q -t -A -F "|" -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"' 2>&1 <<SQL
-with rows as (
-  select key, value::jsonb as v from ${table}
-   where key like 'plugin_sinnlos_cron:%' and type = 'object'
-     and environment is null and tag is null
-), expected as (
-  select v from rows where key = 'plugin_sinnlos_cron:expected'
-)
-select 'expected', coalesce(v->>'cronEnabled', ''), '', '', '', '', '' from expected
-union all
-select 'task', t->>'name', t->>'everyMinutes', t->>'firstExpectedAt',
-       coalesce(s.v->>'lastFinishedAt', ''), coalesce(s.v->>'lastOutcome', ''),
-       coalesce(s.v->>'lastFailedAt', '')
-  from expected cross join lateral jsonb_array_elements(expected.v->'tasks') as t
-  left join rows s on s.key = 'plugin_sinnlos_cron:' || (t->>'name');
-SQL
-  )"; then
+  schema="$(sed -n 's/^DATABASE_SCHEMA=//p' <<<"${env}")"
+  # The schema goes in as a psql variable (:"schema" quotes it), never into the SQL text.
+  if ! rows="$(docker exec -i "${PROJECT}-db-1" sh -c 'psql -X -q -t -A -F "|" -v ON_ERROR_STOP=1 -v schema="$1" -U "$POSTGRES_USER" -d "$POSTGRES_DB"' \
+    sh "${schema:-public}" <"${SCRIPT_DIR}/ops-check.sql" 2>&1)"; then
     problem "UNKNOWN cron status: psql in ${PROJECT}-db-1 failed: ${rows//$'\n'/ }"
     return
   fi
-  while IFS='|' read -r kind name every first finished outcome failed; do
+  while IFS='|' read -r kind a b c d e f g; do
     case "${kind}" in
-      expected) enabled="${name}" ;;
-      task)
-        if [[ ! "${every}" =~ ^[0-9]+$ ]] || ! first="$(epoch "${first}")"; then
-          problem "UNKNOWN cron status: unreadable entry for task ${name}"
-          continue
-        fi
-        grace=$((every + (every / 10 > 15 ? every / 10 : 15)))
-        if [[ -z "${finished}" ]]; then
-          ((NOW - first <= grace * 60)) ||
-            problem "cron: ${name} has not run since it became expected (more than ${grace} min)"
-        elif ! ts="$(epoch "${finished}")"; then
-          problem "UNKNOWN cron status: unreadable lastFinishedAt of task ${name}"
-          continue
-        elif ((NOW - ts > grace * 60)); then
-          problem "cron: ${name} last finished at ${finished}, more than ${grace} min ago"
-        fi
-        if [[ "${outcome}" == failed ]]; then
-          problem "cron: ${name} failed on its last run (${finished}); see [cron] ${name} failed in the cms log"
-        elif [[ -n "${failed}" ]]; then
-          if ! ts="$(epoch "${failed}")"; then
-            problem "UNKNOWN cron status: unreadable lastFailedAt of task ${name}"
-          elif ((NOW - ts <= LOOKBACK * 60)); then
-            problem "cron: ${name} failed at ${failed} (it has run fine since)"
-          fi
-        fi
-        ;;
+      expected) seen=1 enabled="${a}" tasks_type="${b}" tasks_count="${c}" ;;
+      task) check_task "${a}" "${b}" "${c}" "${d}" "${e}" "${f}" "${g}" ;;
+      "") ;;
+      *) problem "UNKNOWN cron status: unexpected line from psql: ${kind}" ;;
     esac
   done <<<"${rows}"
-  if [[ -z "${enabled}" ]]; then
+  if ((seen == 0)); then
     problem "UNKNOWN cron status: no cron:expected entry (has the cms booted since v0.29?)"
-  elif [[ "${enabled}" != true ]]; then
+  elif [[ "${enabled}" != true && "${enabled}" != false ]] || [[ "${tasks_type}" != array ]]; then
+    problem "UNKNOWN cron status: cron:expected has the wrong shape"
+  elif [[ "${enabled}" == false ]]; then
     problem "cron: the cms runs with CRON_ENABLED off; no task runs"
+  elif [[ "${tasks_count}" == 0 ]]; then
+    problem "UNKNOWN cron status: cron:expected lists no task although cron is on"
   fi
 }
 
