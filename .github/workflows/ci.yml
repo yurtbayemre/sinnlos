@@ -400,15 +400,17 @@ jobs:
               -e DOMAIN=http://localhost -e "SITE_ALLOW_CIDRS=${cidrs}" \
               -v "${PWD}/infra/Caddyfile:/etc/caddy/Caddyfile:ro" caddy:2-alpine sh -c "${cmd}"
             for _ in $(seq 20); do curl -s -o /dev/null http://127.0.0.1:18080/ && break; sleep 0.5; done
-            for path in /hostname /api/x; do
+            # Open: busybox's own answers (a file, a missing path). Closed: 503.
+            for probe in /hostname:200 /api/x:404; do
+              path="${probe%%:*}"
+              want="${probe##*:}"
+              [[ -z "${cidrs}" ]] || want=503
               head="$(curl -s -D - -o /dev/null -H 'Host: localhost' -H 'X-Forwarded-For: 203.0.113.7' \
                 "http://127.0.0.1:18080${path}")"
               printf '%s %s\n' "${path}" "$(head -n 1 <<<"${head}")"
+              grep -q "^HTTP/1.1 ${want} " <<<"${head}"
               grep -qi '^x-content-type-options: nosniff' <<<"${head}"
               grep -qi '^x-frame-options: deny' <<<"${head}"
-              closed=no
-              if grep -q '^HTTP/1.1 503' <<<"${head}"; then closed=yes; fi
-              [[ "${closed}" == "$([[ -n "${cidrs}" ]] && echo yes || echo no)" ]]
             done
             docker stop gate-caddy
           done

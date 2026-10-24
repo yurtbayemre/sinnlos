@@ -115,6 +115,9 @@ check_disk() {
     check_df "the backup directory ${SINNLOS_BACKUP_DIR}" df -P "${SINNLOS_BACKUP_DIR}"
   [[ -z "${OPS_BACKUP_STATUS:-}" ]] ||
     check_df "the backup-run directory" df -P "$(dirname "${OPS_BACKUP_STATUS}")"
+  # restore-db.sh creates infra/backups on its first restore. Until then it
+  # cannot be a filesystem of its own: the checkout's is the one it will
+  # fill, so that is the one checked (a missing checkout fails df: UNKNOWN).
   [[ -d "${dumps}" ]] || dumps="${SCRIPT_DIR}"
   check_df "the safety dumps ${dumps}" df -P "${dumps}"
 }
