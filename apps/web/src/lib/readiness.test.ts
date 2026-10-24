@@ -65,6 +65,16 @@ describe("createReadinessCheck", () => {
     }
   });
 
+  it("aborts the call at once when the answer is known, a non-200 body never read included", async () => {
+    let signal: AbortSignal | undefined;
+    const endless503 = vi.fn(async (_url: string, init: RequestInit) => {
+      signal = init.signal ?? undefined;
+      return new Response(new ReadableStream({ start: () => undefined }), { status: 503 });
+    });
+    expect(await createReadinessCheck(URL, endless503)()).toBe(false);
+    expect(signal?.aborted).toBe(true);
+  });
+
   it("asks once for concurrent callers and caches the answer five seconds", async () => {
     let now = 0;
     let release!: (res: Response) => void;

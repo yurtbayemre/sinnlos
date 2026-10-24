@@ -13,7 +13,8 @@ type Fetch = (url: string, init: RequestInit) => Promise<Response>;
 /**
  * One upstream call, false after READINESS_TIMEOUT_MS at the latest: the
  * deadline covers the headers and the body (a body that never ends counts
- * too), and aborts the request.
+ * too). The request is aborted once the answer is known, so no response
+ * (a non-200 body never read included) outlives the check.
  */
 async function upstreamOk(url: string, fetchImpl: Fetch): Promise<boolean> {
   const controller = new AbortController();
@@ -45,6 +46,7 @@ async function upstreamOk(url: string, fetchImpl: Fetch): Promise<boolean> {
     return await Promise.race([ask().catch(() => false), deadline]);
   } finally {
     clearTimeout(timer);
+    controller.abort();
   }
 }
 
