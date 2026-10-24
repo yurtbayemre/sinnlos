@@ -13,7 +13,7 @@ How to move an installation to a newer release. A new installation: [INSTALL.md]
 
 What changed for the operator between v0.25 and this release. The release notes below have the details.
 
-1. **Host settings** (v0.26): `COMPOSE_PROJECT`, `DEPLOY_EDGE=traefik` on a host Traefik, `SINNLOS_BACKUP_DIR` (or `BACKUP_RUN`) and `PASSWORDS_FILE` for live-smoke, in `infra/deploy.env` (mode 600, from [`infra/deploy.env.example`](../infra/deploy.env.example)) or in the deploy user's environment, before the first deploy. A host Traefik without `DEPLOY_EDGE=traefik`, or no backup directory, makes `infra/deploy.sh` refuse before it changes anything.
+1. **Host settings** (v0.26): `COMPOSE_PROJECT`, `DEPLOY_EDGE=traefik` on a host Traefik, `SINNLOS_BACKUP_DIR` (or `BACKUP_RUN`) and `PASSWORDS_FILE` for live-smoke, in `infra/deploy.env` (mode 600, from [`infra/deploy.env.example`](../infra/deploy.env.example)) or in the deploy user's environment, before the first deploy. A host Traefik without `DEPLOY_EDGE=traefik`, or neither `SINNLOS_BACKUP_DIR` nor `BACKUP_RUN`, makes `infra/deploy.sh` refuse before it changes anything.
 2. **Strapi admin panel** (v0.26): only clients from `ADMIN_ALLOW_CIDRS` reach it; empty closes it from outside. `infra/admin-tunnel.sh` opens it through SSH ([INSTALL.md](INSTALL.md), section 8).
 3. **Analytics** (v0.26): loaded only when `PLAUSIBLE_SCRIPT_URL` and `PLAUSIBLE_DOMAIN` are set.
 4. **Operator links** (v0.26): `PRIVACY_URL`, `IMPRINT_URL` and, optionally, `WHISTLEBLOWING_URL`.

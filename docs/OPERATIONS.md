@@ -64,7 +64,7 @@ Restoring a backup brings back everyone the backup holds, **including people ano
 2. **Run `infra/restore-db.sh prepare <dump>`.** It reserves the restore and stops web and cms.
 3. **Restore uploads and configuration while the apps are stopped.** Keep the `ENCRYPTION_KEY` that belongs to the dump: it decrypts the second-factor secrets. (`rotate-jwt` in step 5 changes only `JWT_SECRET`.)
 4. **Close the site again.** The restored `infra/.env` may lack the two settings, so set `SITE_ALLOW_CIDRS` and `CRON_ENABLED=false` again in the `infra/.env` that will be used. Then:
-   - **Bundled Caddy:** run `docker compose up -d --no-deps --force-recreate caddy`. `--no-deps` keeps the apps stopped.
+   - **Bundled Caddy:** from the checkout, run `docker compose -p infra -f infra/docker-compose.yml up -d --no-deps --force-recreate caddy`. `--no-deps` keeps the apps stopped.
    - **Host Traefik:** the gate lives in the app labels. From the checkout, check them with `docker compose -p infra -f infra/docker-compose.yml -f infra/docker-compose.traefik.yml config`: `sinnlos-site-allow` must be in the chain of the four web routers and `sinnlos-cms-site-allow` in the cms router's, both with your range.
 5. **Run `apply`, `rotate-jwt` and `start`.** Then check from outside, on every route, that the site still answers 503.
 6. **Repeat the anonymisations.**
