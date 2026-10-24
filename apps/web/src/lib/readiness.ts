@@ -10,12 +10,25 @@ export const READINESS_TIMEOUT_MS = 3_000;
 
 type Fetch = (url: string, init: RequestInit) => Promise<Response>;
 
+/**
+ * One upstream call, false after READINESS_TIMEOUT_MS at the latest: the
+ * deadline covers the headers and the body (a body that never ends counts
+ * too), and aborts the request.
+ */
 async function upstreamOk(url: string, fetchImpl: Fetch): Promise<boolean> {
-  try {
+  const controller = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<false>((resolve) => {
+    timer = setTimeout(() => {
+      controller.abort();
+      resolve(false);
+    }, READINESS_TIMEOUT_MS);
+  });
+  const ask = async (): Promise<boolean> => {
     const res = await fetchImpl(url, {
       cache: "no-store",
       redirect: "error",
-      signal: AbortSignal.timeout(READINESS_TIMEOUT_MS),
+      signal: controller.signal,
     });
     if (res.status !== 200) return false;
     const body: unknown = await res.json();
@@ -27,8 +40,11 @@ async function upstreamOk(url: string, fetchImpl: Fetch): Promise<boolean> {
       Object.keys(body).join() === "status" &&
       (body as { status: unknown }).status === "ok"
     );
-  } catch {
-    return false;
+  };
+  try {
+    return await Promise.race([ask().catch(() => false), deadline]);
+  } finally {
+    clearTimeout(timer);
   }
 }
 

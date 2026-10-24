@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { createReadinessCheck, READINESS_CACHE_MS } from "./readiness";
+import { createReadinessCheck, READINESS_CACHE_MS, READINESS_TIMEOUT_MS } from "./readiness";
 
 /** v0.29 S8: the web half of /healthz is strict and bounded. */
 
@@ -25,19 +25,44 @@ describe("createReadinessCheck", () => {
     ).toBe(false);
   });
 
-  it("is unavailable when the cms cannot be reached or the call is aborted", async () => {
+  it("is unavailable when the cms cannot be reached", async () => {
     const down = vi.fn(async () => {
       throw new TypeError("fetch failed");
     });
     expect(await createReadinessCheck(URL, down)()).toBe(false);
-    // The three-second abort: the signal is passed, and an aborted call is "unavailable".
-    let signal: AbortSignal | undefined;
-    const hanging = vi.fn(async (_url: string, init: RequestInit) => {
-      signal = init.signal ?? undefined;
-      throw new DOMException("The operation was aborted due to timeout", "TimeoutError");
-    });
-    expect(await createReadinessCheck(URL, hanging)()).toBe(false);
-    expect(signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it("answers unavailable at the deadline, for hanging headers and for a body that never ends, and aborts", async () => {
+    vi.useFakeTimers();
+    try {
+      let signal: AbortSignal | undefined;
+      const hangingHeaders = vi.fn((_url: string, init: RequestInit) => {
+        signal = init.signal ?? undefined;
+        return new Promise<Response>(() => undefined);
+      });
+      const endlessBody = vi.fn(
+        async () =>
+          new Response(
+            new ReadableStream({ start: (c) => c.enqueue(new TextEncoder().encode("{")) }),
+            {
+              status: 200,
+            },
+          ),
+      );
+      for (const fetchImpl of [hangingHeaders, endlessBody]) {
+        const answer = createReadinessCheck(URL, fetchImpl)();
+        await vi.advanceTimersByTimeAsync(READINESS_TIMEOUT_MS - 1);
+        let settled = false;
+        void answer.then(() => (settled = true));
+        await vi.advanceTimersByTimeAsync(0);
+        expect(settled).toBe(false);
+        await vi.advanceTimersByTimeAsync(1);
+        expect(await answer).toBe(false);
+      }
+      expect(signal?.aborted).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("asks once for concurrent callers and caches the answer five seconds", async () => {
