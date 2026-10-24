@@ -87,7 +87,7 @@ export function ReactionBar({
                 reacted
                   ? "border-primary/40 bg-primary/10 text-primary"
                   : "border-transparent hover:border-border hover:bg-muted",
-                count === 0 && !reacted && "opacity-40 hover:opacity-100",
+                count === 0 && !reacted && "opacity-40 hover:opacity-100 focus-visible:opacity-100",
               )}
             >
               <span aria-hidden="true">{EMOJI_MAP[emoji]}</span>

@@ -143,7 +143,7 @@ export function FileField({
           htmlFor={id}
           className={cn(
             buttonVariants({ variant: "outline" }),
-            "cursor-pointer peer-focus:ring-2 peer-focus:ring-ring peer-focus:ring-offset-2 peer-disabled:cursor-not-allowed peer-disabled:opacity-50",
+            "cursor-pointer peer-focus:ring-2 peer-focus:ring-ring peer-focus:ring-offset-2 peer-focus:ring-offset-background peer-disabled:cursor-not-allowed peer-disabled:opacity-50",
           )}
         >
           <Upload className="h-4 w-4" aria-hidden="true" />
