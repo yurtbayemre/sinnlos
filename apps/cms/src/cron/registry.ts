@@ -116,8 +116,11 @@ export function cronRegistry(
       rule: "* * * * *",
       tz: timeZone,
       fn: async (strapi) => {
+        // `failed` only: `retrying` also holds the expected waits (a
+        // transient error not yet exhausted, a draft waiting for its course
+        // or parent); a failed failure record reports at its own catch.
         const result = await runScheduledPublishing(strapi);
-        const failed = result.failed.length + result.retrying.length;
+        const failed = result.failed.length;
         if (failed > 0) reportRunFailure(null, `${failed} scheduled change(s) failed`);
       },
     },

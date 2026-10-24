@@ -31,6 +31,7 @@ import {
   windowExpired,
   type ScheduleErrorCode,
 } from "../utils/schedule";
+import { reportRunFailure } from "./run-context";
 
 /**
  * Scheduled publishing on Strapi CE (decision 06 §D rules 2-13; batch 15
@@ -855,6 +856,7 @@ export async function runScheduledDocument(
       result.failed.push(key);
     } catch (recordError) {
       // The next run retries the document (its schedule is untouched).
+      reportRunFailure(recordError, `${key}: recording its failure failed`);
       strapi.log.error(
         `${SCHEDULER_LOG} ${key} failed: ${code}, and recording it failed too: ` +
           describeFailure(recordError),
