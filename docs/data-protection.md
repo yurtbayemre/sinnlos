@@ -128,11 +128,18 @@ Die Anonymisierung ist **endgültig**. Das Konto lässt sich danach weder entspe
 
 Eine Sicherung von vor einer Anonymisierung enthält die Person wieder vollständig. Deshalb:
 
-- **Register der Betroffenenanfragen führen** (gehört ohnehin zur Rechenschaftspflicht, Art. 5 Abs. 2 DSGVO). Je Anonymisierung:
+- **Register der Betroffenenanfragen führen** (gehört ohnehin zur Rechenschaftspflicht, Art. 5 Abs. 2 DSGVO). Die Wiederherstellung hängt davon ab: sinnlos selbst kann nach dem Einspielen nicht erkennen, welche Anonymisierungen jünger als die Sicherung sind. Je Anonymisierung:
   - die Dokument-ID des Kontos (in `/manage/activity` und in der cms-Logzeile `[anonymise] user=<Dokument-ID>`);
   - den Benutzernamen vor der Anonymisierung;
   - das Datum.
-- **Nach dem Einspielen und bevor das Intranet wieder für alle erreichbar ist:** jede Anonymisierung, die jünger als die Sicherung ist, wiederholen (sperren, dann anonymisieren).
+- **Das Register ist selbst personenbezogen** (Dokument-ID und früherer Benutzername lassen sich der Person zuordnen):
+  - vollständig halten, auch über einen Serververlust und über Zeiten hinweg, in denen eine ältere Version lief;
+  - nur für die Verantwortlichen zugänglich und außerhalb des Servers geschützt aufbewahren, etwa bei den Unterlagen zur Anfrage;
+  - aufbewahren, solange noch eine Sicherung eingespielt werden kann, die älter als die Anfrage ist; danach löschen.
+- **Wiederherstellung hinter geschlossener Tür** ([OPERATIONS.md](OPERATIONS.md#restore), „Restore“):
+  - Vor dem Einspielen die Seite mit `SITE_ALLOW_CIDRS` für alle außer der eigenen Adresse schließen und die Nachtjobs anhalten (`CRON_ENABLED=false`).
+  - Danach jede Anonymisierung, die jünger als die Sicherung ist, wiederholen (sperren, dann anonymisieren) und prüfen.
+  - Erst wenn auch der Suchindex nachgezogen ist, die Seite wieder öffnen.
 - Die Wiederholung setzt ein neues Anonymisierungsdatum. Die Schulungsnachweise dieser Person bleiben dadurch höchstens um das Alter der eingespielten Sicherung länger.
 - Ein Export, der jünger als die Sicherung ist, steht nicht mehr im Aktivitätsprotokoll; das Register hält auch ihn fest.
 

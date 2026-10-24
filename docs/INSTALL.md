@@ -183,15 +183,20 @@ gh attestation verify oci://ghcr.io/yurtbayemre/sinnlos-cms:<version> --owner yu
 
 ## Restore
 
-On the machine with the private key:
+On the machine with the private key, decrypt the artifacts:
 
-1. **Database:**
-   1. Decrypt the database artifact: `gpg --decrypt sinnlos-db-<ts>.dump.gz.gpg | gunzip > sinnlos.dump`.
-   2. Copy it to the host, into the checkout directory (or give `restore-db.sh` its full path).
-   3. Run `infra/restore-db.sh prepare sinnlos.dump`, then `apply`, `rotate-jwt` and `start`. Each step says what it did. The rotation signs everyone out.
-2. **Uploads:** untar the uploads artifact into the `infra_cms_uploads` volume with cms and web stopped.
-3. **Configuration:** the `.env` artifact holds the `infra/.env` of that day.
-4. **Anonymisations:** a backup from before an anonymisation brings the person back. Close the site before you restore and repeat every anonymisation newer than the backup before you open it again: [OPERATIONS.md, Restore](OPERATIONS.md#restore) is the complete procedure ([data-protection.md](data-protection.md), section 5).
+- **Database:** `gpg --decrypt sinnlos-db-<ts>.dump.gz.gpg | gunzip > sinnlos.dump`. Copy the result to the host, into the checkout directory, or give `restore-db.sh` its full path.
+- **Uploads:** the uploads artifact is a tar of the `infra_cms_uploads` volume. Untar it into the volume while cms and web are stopped.
+- **Configuration:** the `.env` artifact holds the `infra/.env` of that day.
+
+Then follow [OPERATIONS.md, Restore](OPERATIONS.md#restore), in this order:
+
+1. Close the site.
+2. Run `infra/restore-db.sh prepare sinnlos.dump`.
+3. Restore the uploads and the configuration while the apps are stopped.
+4. Run `apply`, `rotate-jwt` and `start`. The rotation signs everyone out.
+5. Repeat every anonymisation that is newer than the backup ([data-protection.md](data-protection.md), section 5).
+6. Open the site again.
 
 The backup and restore tools in detail: [OPERATIONS.md, Backup & Restore](OPERATIONS.md#backup--restore).
 

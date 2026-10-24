@@ -38,6 +38,7 @@ behind most rules (its §5 conventions and §7 open issues).
   - [Private user fields](#private-user-fields)
   - [Blocked and anonymised people](#blocked-and-anonymised-people)
   - [Module and feature switches](#module-and-feature-switches)
+  - [Course reports](#course-reports)
 - [Upload hardening](#upload-hardening)
 - [Frontend role gating](#frontend-role-gating)
 - [Tests that pin these rules](#tests-that-pin-these-rules)
@@ -1351,6 +1352,29 @@ grant check).
   never switched.
 - The Strapi admin panel is not covered: technical admins still see every
   type.
+
+### Course reports
+
+`GET /api/courses/report` and `GET /api/courses/:id/report` (the named
+training report at `/manage/training/report`) are granted to admins,
+department heads and team leads. The controller checks the role again,
+whatever the grants say (`apps/cms/src/api/course/controllers/course.ts`).
+
+- **Admins** see every published mandatory course and every current,
+  unblocked learner.
+- **Department heads and team leads** see their **whole current
+  department**, not only their team. That means the published mandatory
+  courses whose audience includes that department, and the current,
+  unblocked people of that department with a learner role.
+  - A head or lead without a department gets 403.
+  - A course outside their scope gets 404.
+- **People who left** (blocked or anonymised) appear only through
+  `?leavers=1`, which is for admins only (403 for heads and leads), and in
+  the admin-only training evidence of `/manage/users`.
+- The `training` module and the `training-reports` feature switch
+  (`FEATURES_OFF`) turn both routes off.
+- It is no access to the full training history. Receipts outside these
+  courses and people are not part of the report.
 
 ## Upload hardening
 
