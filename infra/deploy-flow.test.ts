@@ -45,9 +45,7 @@
  *   9. batch 16 (DA03): a checkout that runs wiki revisions without draft &
  *      publish is refused before the backup while the database holds
  *      revision draft rows (a rollback's twins), deploys once migrate.sql
- *      removed them, and a failed deploy whose target cms runs wiki
- *      revisions with draft & publish says the roll-forward needs
- *      migrate.sql.
+ *      removed them.
  * Each sequence runs in one bash process. Git Bash forks slowly (a stubbed
  * deploy costs about 6 s there, both sequences about 100 s), so on Windows
  * the two sequences run only with SINNLOS_SLOW_SHELL_TESTS=1; CI (Linux)

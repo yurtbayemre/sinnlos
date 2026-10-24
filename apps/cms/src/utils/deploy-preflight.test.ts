@@ -57,6 +57,7 @@ const REPO_ROOT = join(__dirname, "..", "..", "..", "..");
 const read = (...parts: string[]) =>
   readFileSync(join(REPO_ROOT, ...parts), "utf8").replace(/\r\n/g, "\n");
 const DEPLOY = read("infra", "deploy.sh");
+const WEB_DOCKERFILE = read("apps", "web", "Dockerfile");
 const WEB_AUTH_CONFIG = read("apps", "web", "src", "lib", "auth-config.ts");
 const COMPOSE = read("infra", "docker-compose.yml");
 
@@ -815,6 +816,16 @@ describe("Meilisearch preflight (v0.21)", () => {
   });
 });
 
+describe("web image labels for deploy.sh before v0.29", () => {
+  it("keeps the two labels an older checkout's deploy.sh reads (JWT gate, rollback hint)", () => {
+    // Without the first, a deploy.sh before v0.29 would demand a JWT_SECRET
+    // rotation when this web runs; without the second, its rollback hint
+    // would add a legacy-zone override for it.
+    expect(WEB_DOCKERFILE).toContain('LABEL org.sinnlos.strapi-jwt="server-only"');
+    expect(WEB_DOCKERFILE).toContain('LABEL org.sinnlos.datetime="zone-explicit"');
+  });
+});
+
 describe("compose_env_value", () => {
   it.skipIf(!HAS_AWK)("extracts JWT_SECRET from compose JSON with Go escapes undone", () => {
     for (const secret of ["b64+/sEcReT==", "a&b<c>d", "with space", ""]) {
@@ -963,7 +974,7 @@ function rollbackHintRun(probes: HintProbes = {}): { stdout: string; stderr: str
     "  esac",
     "}",
     "GIT=(git_stub)",
-    shellFunction("image_commit"),
+    shellFunction("image_field"),
     shellFunction("rollback_target_commit"),
     shellFunction("print_rollback_hint"),
     "print_rollback_hint",
@@ -1048,12 +1059,19 @@ describe("rollback hint: a verified v0.25+ target only (upgrade floor, v0.29)", 
       [
         "before the floor",
         {
+          ref: OLD.slice(0, 12),
           webLabel: OLD.slice(0, 12),
           cmsLabel: OLD.slice(0, 12),
           stateSha: OLD,
-          known: { [OLD.slice(0, 12)]: OLD },
+          known: { [OLD.slice(0, 12)]: OLD, [OLD]: OLD },
         },
       ],
+      [
+        // The state names v0.25, but its tags now name the failed release.
+        "labels that disagree with the state",
+        { ref: V025.slice(0, 12), stateSha: V025 },
+      ],
+      ["a state SHA that is not the tag's", { stateSha: V025 }],
       ["a commit the checkout does not know", { known: {} }],
       ["a shallow clone", { shallow: "true" }],
       ["no git answer", { shallow: "" }],
@@ -1152,12 +1170,14 @@ function traefikComposeJson(hosts: TraefikHosts = {}, cmsEnv: Record<string, str
  * The preflight of deploy.sh from its scan to "Preflight OK", in bash, with
  * compose answering `env` (the cms service) in a Traefik mode whose routers
  * and public URLs point at `hosts` (by default one real host), and the
- * wiki-revision probe stubbed (`revisions`).
+ * wiki-revision probe stubbed (`revisions`), and `docker ps` listing the
+ * containers' config_files labels (`containers`).
  */
 function preflightRun(
   env: Record<string, string>,
   hosts: TraefikHosts = {},
   revisions: { dpOff: boolean; drafts: string } = { dpOff: false, drafts: "0" },
+  containers: { configFiles?: string; psFail?: boolean } = {},
 ): {
   status: number | null;
   stdout: string;
@@ -1171,6 +1191,7 @@ function preflightRun(
     "log() { printf '==> %s\\n' \"$*\"; }",
     `checkout_revisions_dp_off() { return ${revisions.dpOff ? 0 : 1}; }`,
     `revision_draft_rows() { printf '%s' ${shellQuote(revisions.drafts)}; }`,
+    `docker() { ${containers.psFail ? "return 1" : `printf '%s\\n' ${shellQuote(containers.configFiles ?? "")}`}; }`,
     shellLine("PROBE_TIMEOUT=("),
     shellLine("REVISION_DP_RUNBOOK="),
     "INFRA_DIR=/srv/infra",
@@ -1526,6 +1547,48 @@ describe(
     });
   },
 );
+
+describe("preflight: retired legacy-zone overrides (v0.29)", BASH_BUDGET, () => {
+  const fits = { ENTRA_ENABLED: "0" };
+  const files = (...names: string[]) => names.map((n) => `/srv/infra/${n}`).join(",");
+
+  it.skipIf(!HAS_BASH)(
+    "refuses containers started with one, running or stopped, naming the way out",
+    () => {
+      const listed = [
+        files(
+          "docker-compose.yml",
+          "docker-compose.traefik.yml",
+          "docker-compose.cms-legacy-tz.yml",
+        ),
+        files("docker-compose.yml", "docker-compose.web-legacy-tz.yml"),
+      ].join("\n");
+      const run = preflightRun(fits, {}, undefined, { configFiles: listed });
+      expect(run.status).toBe(1);
+      expect(run.stderr).toContain(
+        "ERROR: containers of compose project infra were started with docker-compose.cms-legacy-tz.yml docker-compose.web-legacy-tz.yml (the legacy-zone",
+      );
+      expect(run.stderr).toContain("upgrade through v0.28.x first (docs/UPGRADE.md)");
+      expect(run.stderr).toContain("compose_stub up -d --no-build --force-recreate web cms");
+      expect(run.stderr).toContain("Preflight failed. Nothing was changed.");
+    },
+  );
+
+  it.skipIf(!HAS_BASH)(
+    "passes the supported files, no containers, and refuses a failed listing",
+    () => {
+      for (const configFiles of [files("docker-compose.yml", "docker-compose.traefik.yml"), ""]) {
+        const run = preflightRun(fits, {}, undefined, { configFiles });
+        expect(run.status, run.stderr).toBe(0);
+      }
+      const failed = preflightRun(fits, {}, undefined, { psFail: true });
+      expect(failed.status).toBe(1);
+      expect(failed.stderr).toContain(
+        "ERROR: docker ps failed, so deploy.sh cannot tell which compose files",
+      );
+    },
+  );
+});
 
 describe("preflight: a site closed at the edge (SITE_ALLOW_CIDRS, v0.29)", BASH_BUDGET, () => {
   const fits = { ENTRA_ENABLED: "0" };

@@ -28,7 +28,8 @@
  *      releases;
  *   6. one step at a time per compose project (the deploy lock); the
  *      compose files are the ordered list of the project's web and cms
- *      containers (overlays such as the cms legacy-zone file kept), known
+ *      containers (overlays such as the Traefik file kept; a retired legacy-zone
+ *      override is refused with what to do), known
  *      files of the checkout, or RESTORE_COMPOSE_FILES, the same for every
  *      step of an attempt.
  *

@@ -590,43 +590,49 @@ ROLLBACK_ORIGIN=""
 # with v0.29; their runbooks are in docs/archive/deployment-history.md.
 FLOOR_COMMIT="0c26656e98f930d6298ae5ee3b3234ba7fdc780f"
 
-# The source commit of the rollback image $1 (12 to 40 hex digits), or
-# nothing: its org.opencontainers.image.revision label (set since v0.26),
-# else $2 (the last-known-good state's SHA) when the image's id is $3 (the
-# id the state recorded for it; v0.25 images carry no label). Bounded
-# (PROBE_TIMEOUT), never pulls; a failed or hung docker call gives nothing.
-image_commit() {
-  local image="$1" state_sha="$2" state_id="$3" label id
-  label="$("${PROBE_TIMEOUT[@]}" docker image inspect -f '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "${image}" 2>/dev/null)" || return 0
-  if [[ "${label}" =~ ^[0-9a-f]{12,40}$ ]]; then
-    printf '%s\n' "${label}"
-    return 0
-  fi
-  [[ -n "${state_id}" && "${state_sha}" =~ ^[0-9a-f]{12,40}$ ]] || return 0
-  id="$("${PROBE_TIMEOUT[@]}" docker image inspect -f '{{.Id}}' "${image}" 2>/dev/null)" || return 0
-  if [[ "${id}" == "${state_id}" ]]; then printf '%s\n' "${state_sha}"; fi
-  return 0
+# One field of rollback image $2 (docker inspect format $1), or nothing:
+# bounded (PROBE_TIMEOUT), never pulls; a failed or hung docker call gives
+# nothing.
+image_field() {
+  "${PROBE_TIMEOUT[@]}" docker image inspect -f "$1" "$2" 2>/dev/null || true
 }
 
-# The commit both rollback images (ROLLBACK_REF) come from, when this
-# checkout's full history shows it at or after FLOOR_COMMIT; false when that
-# cannot be shown: an image that names no commit (the :rollback or bootstrap
-# fallback of images without the label), a shallow or partial history, web
-# and cms from different commits, or a commit before the floor.
+# The commit both rollback images (ROLLBACK_REF) come from, when every
+# identity they carry agrees and this checkout's full history shows it at or
+# after FLOOR_COMMIT. The identities: each image's
+# org.opencontainers.image.revision label (set since v0.26) and, for the
+# last-known-good target, the state's SHA, its TAG and the image ids it
+# recorded (v0.25 images carry no label). False when that cannot be shown:
+# an image missing here, a SHA target whose images are not the recorded ones
+# (a tag moved), a :rollback target without both labels, a label or SHA this
+# checkout does not know, identities that disagree, a shallow history, or a
+# commit before the floor.
 rollback_target_commit() {
-  local state_sha="" web_id="" cms_id="" web cms
-  if [[ "${ROLLBACK_REF}" != rollback ]]; then
-    state_sha="${STATE_SHA:-}" web_id="${STATE_WEB_IMAGE:-}" cms_id="${STATE_CMS_IMAGE:-}"
-  fi
-  web="$(image_commit "${PROJECT}-web:${ROLLBACK_REF}" "${state_sha}" "${web_id}")"
-  cms="$(image_commit "${PROJECT}-cms:${ROLLBACK_REF}" "${state_sha}" "${cms_id}")"
-  [[ -n "${web}" && -n "${cms}" ]] || return 1
+  local svc image id label commit full=""
+  local -a ids=() candidates=()
   [[ "$("${GIT[@]}" rev-parse --is-shallow-repository 2>/dev/null)" == false ]] || return 1
-  web="$("${GIT[@]}" rev-parse --verify -q "${web}^{commit}" 2>/dev/null)" || return 1
-  cms="$("${GIT[@]}" rev-parse --verify -q "${cms}^{commit}" 2>/dev/null)" || return 1
-  [[ "${web}" == "${cms}" ]] || return 1
-  "${GIT[@]}" merge-base --is-ancestor "${FLOOR_COMMIT}" "${web}" 2>/dev/null || return 1
-  printf '%s\n' "${web}"
+  for svc in web cms; do
+    image="${PROJECT}-${svc}:${ROLLBACK_REF}"
+    id="$(image_field '{{.Id}}' "${image}")"
+    [[ -n "${id}" ]] || return 1
+    ids+=("${id}")
+    label="$(image_field '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "${image}")"
+    if [[ "${label}" =~ ^[0-9a-f]{12,40}$ ]]; then candidates+=("${label}"); fi
+  done
+  if [[ "${ROLLBACK_REF}" != rollback ]]; then
+    [[ "${STATE_SHA:-}" =~ ^[0-9a-f]{40}$ && "${STATE_SHA:0:12}" == "${ROLLBACK_REF}" ]] || return 1
+    [[ "${ids[0]}" == "${STATE_WEB_IMAGE:-}" && "${ids[1]}" == "${STATE_CMS_IMAGE:-}" ]] || return 1
+    candidates+=("${STATE_SHA}")
+  elif ((${#candidates[@]} < 2)); then
+    return 1
+  fi
+  for commit in "${candidates[@]}"; do
+    commit="$("${GIT[@]}" rev-parse --verify -q "${commit}^{commit}" 2>/dev/null)" || return 1
+    [[ -z "${full}" || "${full}" == "${commit}" ]] || return 1
+    full="${commit}"
+  done
+  "${GIT[@]}" merge-base --is-ancestor "${FLOOR_COMMIT}" "${full}" 2>/dev/null || return 1
+  printf '%s\n' "${full}"
 }
 
 # The rollback commands for a failed deploy, for the target above, when it
@@ -647,7 +653,7 @@ print_rollback_hint() {
     echo "       (--no-build is essential — --build would rebuild the broken image)" >&2
   else
     echo "       The rollback target ${ROLLBACK_REF} (${web_image}, ${cms_image}) is not a verified v0.25+ release:" >&2
-    echo "       its images name no commit of this checkout at or after v0.25.0 (or web and cms differ)." >&2
+    echo "       its images and the state do not agree on one commit of this checkout at or after v0.25.0." >&2
     echo "       Check it by hand (docs/UPGRADE.md, \"Rollback\"); releases before v0.25:" >&2
     echo "       docs/archive/deployment-history.md." >&2
   fi
@@ -1268,6 +1274,23 @@ if [[ "${DEPLOY_EDGE}" != traefik ]]; then
     echo "       Set DEPLOY_EDGE=traefik in infra/deploy.env (infra/deploy.env.example) and re-run." >&2
     preflight_failed=1
   fi
+fi
+# v0.29: the legacy-zone overrides of releases before v0.25 are gone. A
+# container of the project (running or stopped) started with one runs a
+# setup below the upgrade floor, or was left with an override this deploy
+# would drop: refused, naming the way out. A failed listing proves nothing.
+if ! compose_files="$(docker ps -a --filter "label=com.docker.compose.project=${PROJECT}" --format '{{.Label "com.docker.compose.project.config_files"}}')"; then
+  echo "ERROR: docker ps failed, so deploy.sh cannot tell which compose files the containers of project" >&2
+  echo "       ${PROJECT} were started with. Run it as a user with access to Docker, and re-run." >&2
+  preflight_failed=1
+elif retired="$(grep -oE 'docker-compose\.(cms|web)-legacy-tz\.yml' <<<"${compose_files}" | sort -u | tr '\n' ' ')" &&
+  [[ -n "${retired}" ]]; then
+  echo "ERROR: containers of compose project ${PROJECT} were started with ${retired}(the legacy-zone" >&2
+  echo "       overrides of releases before v0.25, gone since v0.29). If they run a release before v0.25," >&2
+  echo "       upgrade through v0.28.x first (docs/UPGRADE.md). Otherwise recreate them with the supported" >&2
+  echo "       compose files, then re-run:" >&2
+  echo "                      ${COMPOSE[*]} up -d --no-build --force-recreate web cms" >&2
+  preflight_failed=1
 fi
 if "${COMPOSE[@]}" config --format json 2>/dev/null | site_closed; then
   echo "ERROR: the site is closed (SITE_ALLOW_CIDRS); open it before deploying." >&2

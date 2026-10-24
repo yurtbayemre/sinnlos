@@ -37,8 +37,7 @@ export function knexSqlClient(knex: KnexRawLike): SqlClient {
       sql: string,
       bindings: readonly unknown[] = [],
     ): Promise<Row[]> {
-      // knex expands an array binding into a list, so array values are
-      // always passed as Postgres array literals (pgArrayLiteral) instead.
+      // knex expands an array binding into a list: pass no arrays here.
       const result = (await knex.raw(sql, bindings as unknown[])) as { rows?: Row[] } | undefined;
       return result?.rows ?? [];
     },
