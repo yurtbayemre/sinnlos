@@ -535,7 +535,7 @@ required, the keyring defaults to `$SINNLOS_BACKUP_DIR/.gnupg`. `infra/deploy.sh
 ```bash
 # in the crontab of the backup root's owner; set your own backup root and env file
 ( crontab -l 2>/dev/null ; \
-  echo '0 3 * * * SINNLOS_BACKUP_DIR=/path/to/backup-root SINNLOS_ENV_FILE=/opt/sinnlos/infra/.env /opt/sinnlos/infra/backup/pg-backup.sh >> "$HOME/sinnlos-backup.log" 2>&1' ) \
+  echo '0 3 * * * SINNLOS_BACKUP_DIR=/path/to/backup-root SINNLOS_ENV_FILE=/home/deploy/sinnlos/infra/.env /home/deploy/sinnlos/infra/backup/pg-backup.sh >> "$HOME/sinnlos-backup.log" 2>&1' ) \
   | crontab -
 ```
 

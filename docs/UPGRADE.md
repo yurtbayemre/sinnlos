@@ -28,7 +28,9 @@ What changed for the operator between v0.25 and this release. The release notes 
 On the live Traefik host the wrapper handles the checks, backup, build,
 smoke checks and the SHA tags of the last-known-good deploy in one shot
 ([INSTALL.md](INSTALL.md)). Run every step as the owner of the checkout (the
-`deploy` user of [INSTALL.md](INSTALL.md); from a root shell `sudo -iu deploy`):
+`deploy` user of [INSTALL.md](INSTALL.md); from a root shell `sudo -iu deploy`).
+The examples use the INSTALL checkout `~/sinnlos`; an existing installation
+uses its own checkout path:
 
 ```bash
 cd ~/sinnlos && git fetch --tags && git checkout v<new version>   # a detached tag checkout is fine; a checkout that follows main: git pull --ff-only
@@ -95,7 +97,7 @@ checkout with changed tracked files, and tags the rebuilt images by that
 commit):
 
 ```bash
-cd /opt/sinnlos
+cd ~/sinnlos
 git reset --hard <previous-commit-sha>
 infra/deploy.sh
 ```

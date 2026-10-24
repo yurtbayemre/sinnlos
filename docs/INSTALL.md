@@ -290,7 +290,7 @@ image names stay `infra-web-1`, `infra-cms-1`, `infra-db-1` / `infra-web`,
 `infra-cms`):
 
 ```bash
-cd /opt/sinnlos
+cd ~/sinnlos
 docker compose -p infra \
   -f infra/docker-compose.yml \
   -f infra/docker-compose.traefik.yml \
