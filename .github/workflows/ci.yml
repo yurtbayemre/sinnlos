@@ -372,6 +372,32 @@ jobs:
             and (.services.meili.ports // []) == []
             and (.services.meili.labels // {}) == {}'
 
+      # v0.29: the site gate (SITE_ALLOW_CIDRS). The Caddyfile validates open
+      # and closed with the caddy service's own command (run → validate);
+      # the Traefik override puts it on all five routers, after the headers.
+      - name: Site gate (Caddy validate open and closed, Traefik routers)
+        run: |
+          secrets="${RUNNER_TEMP}/compose-ci.env"
+          compose() {
+            docker compose --env-file infra/.env.example --env-file "${secrets}" \
+              -f infra/docker-compose.yml "$@"
+          }
+          cmd="$(compose config --format json | jq -r '.services.caddy.command[2]' |
+            sed -e 's/\$\$/$/g' -e 's/exec caddy run /exec caddy validate /')"
+          for cidrs in "" "203.0.113.7/32,2001:db8::/32"; do
+            echo "Caddyfile with SITE_ALLOW_CIDRS='${cidrs}'"
+            docker run --rm -e DOMAIN=intranet.example.com -e "SITE_ALLOW_CIDRS=${cidrs}" \
+              -v "${PWD}/infra/Caddyfile:/etc/caddy/Caddyfile:ro" caddy:2-alpine sh -c "${cmd}"
+          done
+          echo "Traefik: the gate on every router, with the listed range"
+          SITE_ALLOW_CIDRS=203.0.113.7/32 compose -f infra/docker-compose.traefik.yml \
+            config --format json | jq -e '
+            [.services[] | (.labels // {}) | to_entries[]] as $labels
+            | ([$labels[] | select(.key | test("^traefik\\.http\\.routers\\.[^.]+\\.middlewares$"))
+                | .value | split(",") | .[1] | endswith("site-allow")] | length == 5 and all)
+              and ([$labels[] | select(.key | test("site-allow\\.ipallowlist\\.sourcerange$")) | .value]
+                | length == 2 and all(. == "203.0.113.7/32"))'
+
   # Both production images build from a clean checkout, exactly as
   # infra/deploy.sh builds them (context = repo root). Nothing is pushed;
   # the layer cache lives in the GitHub Actions cache, one scope per image.
