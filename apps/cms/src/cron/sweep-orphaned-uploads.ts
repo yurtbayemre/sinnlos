@@ -38,6 +38,7 @@ import {
   tombstoneOf,
   uploadedByOf,
 } from "../utils/upload-orphans";
+import { reportRunFailure } from "./run-context";
 
 export const ORPHAN_MIN_AGE_MS = 24 * 60 * 60 * 1000;
 
@@ -142,6 +143,7 @@ export async function sweepOrphanedUploads(strapi: any, now: Date = new Date()):
     }
     hasLoggedSinceBoot = true;
   } catch (err) {
+    reportRunFailure(err);
     strapi.log.error(`[uploads-janitor] sweep failed: ${(err as Error).message}`);
   }
 }

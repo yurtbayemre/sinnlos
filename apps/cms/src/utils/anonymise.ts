@@ -20,6 +20,7 @@ import { refuse } from "./refusal";
 import { fillMissingSnapshots, publicationStamp } from "./training-evidence";
 import { removeReserved, reserveRemoval } from "./upload-orphans";
 import { assertActiveAdmin, lockDirectory, type UserAdminHost } from "./user-admin";
+import { reportRunFailure } from "../cron/run-context";
 
 /**
  * The anonymisation of one person (GDPR Art. 17; v0.28, deep-dive
@@ -425,6 +426,7 @@ export async function sweepAnonymised(
       deleted += done.deleted;
       rewritten += done.rewritten;
     } catch (err) {
+      reportRunFailure(err, `user=${id}: ${(err as Error).message}`);
       strapi.log.error(
         `[erasure-sweep] user=${id} failed (${(err as Error).message}); the next night retries it`,
       );

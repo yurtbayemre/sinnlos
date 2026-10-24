@@ -29,6 +29,7 @@ import {
   loadRosterCourses,
   newestByUser,
 } from "../utils/training-roster";
+import { reportRunFailure } from "./run-context";
 
 export type TrainingReminderStrapi = NotifyStrapi & Parameters<typeof loadRosterCourses>[0];
 
@@ -99,6 +100,7 @@ export async function sendTrainingReminders(
         }
       }
     } catch (err) {
+      reportRunFailure(err, `course ${course.documentId}: ${(err as Error).message}`);
       strapi.log.error(
         `[training-reminders] course ${course.documentId} failed: ${(err as Error).message}`,
       );

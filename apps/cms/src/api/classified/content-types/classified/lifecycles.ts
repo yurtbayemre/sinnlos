@@ -67,6 +67,7 @@ import {
   mediaReferences,
   resolveFileIds,
 } from "../../../../utils/upload-orphans";
+import { reportRunFailure } from "../../../../cron/run-context";
 
 /** An image of a deleted ad, recorded before the relation rows go. */
 interface DeletedImage {
@@ -139,6 +140,7 @@ export default {
     } catch (err) {
       // Fail open: a broken pre-scan must not block the delete; the
       // janitor sweeps whatever this misses.
+      reportRunFailure(err, `classified beforeDelete scan: ${(err as Error).message}`);
       strapi.log.error(
         `[uploads-janitor] classified beforeDelete scan failed: ${(err as Error).message}`,
       );

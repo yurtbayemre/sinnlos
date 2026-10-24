@@ -59,6 +59,8 @@
  * A live ping carries no content; a phantom one only makes clients refetch.
  */
 
+import { reportRunFailure, trackRunWork } from "../cron/run-context";
+
 /** What a transaction callback receives; `trx` and `onRollback` are optional for test doubles. */
 export interface CommitAwareScope {
   onCommit: (callback: () => unknown) => void;
@@ -106,7 +108,7 @@ function isOpen(trx: unknown): boolean {
 /**
  * Runs `task` after the ambient transaction commits, or now without one.
  * Never throws: an error of the task is handed to `onError` (which must not
- * throw either). Resolves once the task is registered (inside a
+ * throw either) and, inside a cron run, reported to the run. Resolves once the task is registered (inside a
  * transaction) or finished (outside one). A rollback of the transaction
  * cancels the task, also when a later sibling transaction's commit calls
  * the callback (see the header).
@@ -120,6 +122,7 @@ export async function afterCommit(
     try {
       await task();
     } catch (err) {
+      reportRunFailure(err);
       try {
         onError(err);
       } catch {
@@ -130,7 +133,8 @@ export async function afterCommit(
   const transaction = db?.transaction;
   if (db?.inTransaction?.() === true && typeof transaction === "function") {
     await transaction.call(db, ({ onCommit, onRollback, trx }) => {
-      onCommit(() => guarded.run());
+      // Inside a cron run the run waits for the task (run-context.ts).
+      onCommit(() => trackRunWork(guarded.run() ?? Promise.resolve()));
       // Someone else's rollback in the shared list must not cancel a task
       // whose own transaction is still open.
       onRollback?.(() => {

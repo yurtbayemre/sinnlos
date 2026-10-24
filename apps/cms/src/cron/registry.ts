@@ -26,6 +26,10 @@
  *  - one `[cron] <name> took <n>ms` info line per run, or `[cron] <name>
  *    failed after <n>ms: <message>` (error) when the task throws; the task
  *    functions log their own results (`[uploads-janitor] …`, `[digest] …`);
+ *  - a run context (run-context.ts, v0.29): what a task catches on its own
+ *    is reported with `[cron] <name> failed: …`, and the run waits for the
+ *    work it started after a commit; the outcome goes to the core store
+ *    (cron-status.ts), which infra/ops-check.sh reads;
  *  - an in-process overlap guard: a run that starts while the previous run
  *    of the same task is still in flight (a slow digest, a manual invoke) is
  *    skipped with a warn line instead of running twice. One cms process runs
@@ -62,6 +66,8 @@ import { sweepOrphanedUploads } from "./sweep-orphaned-uploads";
 import { sendTrainingReminders, type TrainingReminderStrapi } from "./training-reminders";
 import { unlinkPollVoters, type PollVoterJanitorStrapi } from "../utils/poll-voter-retention";
 import { syncSearchIndex, type SearchStrapi } from "../search/meili-index";
+import { recordCronRun, type CronOutcome, type CronStatusStrapi } from "./cron-status";
+import { reportRunFailure, runCronTask } from "./run-context";
 
 /** The slice of the Strapi instance the tasks use: what each of them needs. */
 export type CronStrapi = DigestStrapi &
@@ -73,7 +79,8 @@ export type CronStrapi = DigestStrapi &
   AuditJanitorStrapi &
   ScheduledPublishStrapi &
   TrainingReminderStrapi &
-  SearchStrapi;
+  SearchStrapi &
+  CronStatusStrapi;
 
 /** One cron task: a pure description, no state. */
 export interface CronTaskSpec {
@@ -109,7 +116,9 @@ export function cronRegistry(
       rule: "* * * * *",
       tz: timeZone,
       fn: async (strapi) => {
-        await runScheduledPublishing(strapi);
+        const result = await runScheduledPublishing(strapi);
+        const failed = result.failed.length + result.retrying.length;
+        if (failed > 0) reportRunFailure(null, `${failed} scheduled change(s) failed`);
       },
     },
     // v0.28: re-applies the anonymisation's deletions and notification
@@ -262,10 +271,13 @@ export function cronEnabled(value: string | undefined): boolean {
 const errorMessage = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 
 /**
- * The Strapi task for one spec: duration logging and the in-process overlap
- * guard (see the module comment). A task that throws is logged and does not
- * reach croner, which would log it a second time without the task's name
- * in the message. `clock` is injectable for the tests.
+ * The Strapi task for one spec: duration logging, the in-process overlap
+ * guard and the run context with its recorded outcome (see the module
+ * comment). A task that throws is logged and does not reach croner, which
+ * would log it a second time without the task's name in the message. The
+ * outcome is recorded after the run's tracked work settled and before the
+ * guard is released; a failed write is logged and never fails the task.
+ * `clock` is injectable for the tests.
  */
 export function guardedTask(
   spec: CronTaskSpec,
@@ -279,14 +291,21 @@ export function guardedTask(
     }
     inFlight = true;
     const started = clock();
+    let outcome: CronOutcome = "failed";
     try {
-      await spec.fn(strapi);
+      const run = await runCronTask(spec.name, strapi.log, () => spec.fn(strapi));
+      outcome = run.failed ? "failed" : "ok";
       strapi.log.info(`[cron] ${spec.name} took ${clock() - started}ms`);
     } catch (err) {
       strapi.log.error(
         `[cron] ${spec.name} failed after ${clock() - started}ms: ${errorMessage(err)}`,
       );
     } finally {
+      try {
+        await recordCronRun(strapi, spec, outcome, started, clock());
+      } catch (err) {
+        strapi.log.error(`[cron] ${spec.name}: recording the outcome failed: ${errorMessage(err)}`);
+      }
       inFlight = false;
     }
   };

@@ -55,6 +55,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 
 import { recordDelete, runWithDeleteAudit } from "./delete-audit";
+import { reportRunFailure } from "../cron/run-context";
 
 export const FILE_UID = "plugin::upload.file";
 
@@ -378,6 +379,7 @@ export async function claimAndRemove(
         now,
       );
     } catch (err) {
+      reportRunFailure(err, `reserve file ${fileId}: ${(err as Error).message}`);
       strapi.log.error(
         `${UPLOADS_LOG} could not reserve file ${fileId}: ${(err as Error).message}`,
       );
@@ -391,6 +393,7 @@ export async function claimAndRemove(
       }
       return outcome;
     } catch (err) {
+      reportRunFailure(err, `remove file ${fileId}: ${(err as Error).message}`);
       strapi.log.error(
         `${UPLOADS_LOG} could not remove file ${fileId} (tombstoned; the janitor retries): ${(err as Error).message}`,
       );
