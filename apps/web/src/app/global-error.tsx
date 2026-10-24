@@ -42,13 +42,15 @@ export default function GlobalError({
             ⚠️
           </p>
           <h1 style={{ fontSize: 18, margin: "12px 0 4px" }}>
-            Etwas ist schiefgelaufen / Something went wrong
+            Etwas ist schiefgelaufen / <span lang="en">Something went wrong</span>
           </h1>
           <p style={{ fontSize: 14, color: "#9ca3af", margin: "0 0 16px" }}>
             Das Intranet hat einen unerwarteten Fehler. Bitte erneut versuchen — wenn es bleibt, sag
             der IT Bescheid.
             <br />
-            The intranet hit an unexpected error. Please retry — if it persists, tell IT.
+            <span lang="en">
+              The intranet hit an unexpected error. Please retry — if it persists, tell IT.
+            </span>
             {error.digest ? (
               <>
                 <br />
@@ -68,7 +70,7 @@ export default function GlobalError({
               cursor: "pointer",
             }}
           >
-            Erneut versuchen / Try again
+            Erneut versuchen / <span lang="en">Try again</span>
           </button>
         </main>
       </body>

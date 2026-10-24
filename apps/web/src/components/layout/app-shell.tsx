@@ -22,21 +22,23 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
         {tCommon("skipToContent")}
       </a>
       <Sidebar />
-      <div className="flex min-w-0 flex-1 flex-col">
+      {/* Below md, room for the bottom nav: 5rem plus the home indicator's
+          safe-area inset (issue #71; 0 without one), below the footer. */}
+      <div className="flex min-w-0 flex-1 flex-col pb-[calc(5rem+env(safe-area-inset-bottom))] md:pb-8">
         <Topbar />
-        {/* Below md, room for the bottom nav: 5rem plus the home indicator's
-            safe-area inset (issue #71; 0 without one). */}
         <main
           id={MAIN_ID}
           tabIndex={-1}
-          className="flex-1 px-4 pb-[calc(5rem+env(safe-area-inset-bottom))] pt-6 outline-hidden sm:px-6 md:pb-8 md:pt-8"
+          className="flex-1 px-4 pt-6 outline-hidden sm:px-6 md:pt-8"
         >
           <div className="mx-auto w-full max-w-6xl">
             <PageFade>{children}</PageFade>
           </div>
-          {/* Inside <main>, so it stays above the bottom nav's room. */}
-          <SiteFooter className="mx-auto mt-12 max-w-6xl" />
         </main>
+        {/* After <main>, so it is the page's contentinfo landmark (S6). */}
+        <div className="px-4 sm:px-6">
+          <SiteFooter className="mx-auto mt-12 max-w-6xl" />
+        </div>
       </div>
       <ViewerMobileNav />
     </div>

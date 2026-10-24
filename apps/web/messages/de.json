@@ -355,6 +355,7 @@
   },
   "polls": {
     "title": "Umfragen",
+    "yourVote": "Deine Stimme",
     "description": "Stimmen Sie bei Unternehmensumfragen ab und sehen Sie Ergebnisse.",
     "active": "Aktiv",
     "closed": "Beendet",
@@ -532,6 +533,7 @@
   },
   "search": {
     "label": "Suche (Strg+K)",
+    "resultsCount": "{count, plural, =0 {Keine Treffer} one {# Treffer} other {# Treffer}}",
     "placeholder": "Wiki, Personen, Teams suchen…",
     "searchPlaceholder": "Suchen…",
     "globalSearch": "Globale Suche",

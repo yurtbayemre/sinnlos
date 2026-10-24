@@ -539,6 +539,11 @@ export function SearchCommand() {
             className="flex h-12 w-full bg-transparent text-sm outline-hidden placeholder:text-muted-foreground"
           />
         </div>
+        {/* The server's answer to a search, counted for screen readers (S6);
+            mounted empty with the dialog so the count is announced. */}
+        <p role="status" className="sr-only">
+          {settled ? tSearch("resultsCount", { count: items.length }) : ""}
+        </p>
         <Command.List className="max-h-80 overflow-y-auto p-2">
           {loading && (
             <Command.Loading>
