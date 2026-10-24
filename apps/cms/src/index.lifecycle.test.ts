@@ -24,6 +24,7 @@ const { calls, step, syncStep, failing } = vi.hoisted(() => {
   return { calls, step, syncStep, failing };
 });
 
+vi.mock("./utils/upgrade-floor", () => ({ assertUpgradeFloor: step("assertUpgradeFloor") }));
 vi.mock("./utils/org-dp-guard", () => ({ assertNoOrgDrafts: step("assertNoOrgDrafts") }));
 vi.mock("./utils/revision-dp-guard", () => ({
   assertNoRevisionDrafts: step("assertNoRevisionDrafts"),
@@ -105,9 +106,10 @@ beforeEach(() => {
 });
 
 describe("src/index.ts lifecycle order (B01)", () => {
-  it("register(): the org and revision draft guards first, the Document Service middlewares last", async () => {
+  it("register(): the upgrade floor and the draft guards first, the Document Service middlewares last", async () => {
     await lifecycle.register({ strapi });
     expect(calls).toEqual([
+      "assertUpgradeFloor",
       "assertNoOrgDrafts",
       "assertNoRevisionDrafts",
       "prepareDatetimeContract",
@@ -186,16 +188,22 @@ describe("src/index.ts lifecycle order (B01)", () => {
     expect(calls).not.toContain("ensureDraftTwins");
   });
 
-  it("a failing org draft guard stops register() before anything else", async () => {
+  it("a database below the upgrade floor stops register() before anything else", async () => {
+    failing.add("assertUpgradeFloor");
+    await expect(lifecycle.register({ strapi })).rejects.toThrow("assertUpgradeFloor failed");
+    expect(calls).toEqual(["assertUpgradeFloor"]);
+  });
+
+  it("a failing org draft guard stops register() before anything after the floor", async () => {
     failing.add("assertNoOrgDrafts");
     await expect(lifecycle.register({ strapi })).rejects.toThrow("assertNoOrgDrafts failed");
-    expect(calls).toEqual(["assertNoOrgDrafts"]);
+    expect(calls).toEqual(["assertUpgradeFloor", "assertNoOrgDrafts"]);
   });
 
   it("a failing revision draft guard stops register() before anything after the org guard", async () => {
     failing.add("assertNoRevisionDrafts");
     await expect(lifecycle.register({ strapi })).rejects.toThrow("assertNoRevisionDrafts failed");
-    expect(calls).toEqual(["assertNoOrgDrafts", "assertNoRevisionDrafts"]);
+    expect(calls).toEqual(["assertUpgradeFloor", "assertNoOrgDrafts", "assertNoRevisionDrafts"]);
   });
 
   it("a failing revision backfill stops bootstrap() before the seed and the draft twins", async () => {
