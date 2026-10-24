@@ -179,7 +179,7 @@ Single sign-on users get their second factor from their identity provider.
 Optional and off unless `ENTRA_ENABLED=1` (D-ENTRA-01,
 `apps/cms/src/entra/`). Setup:
 [README](../CONTRIBUTING.md#microsoft-entra-id-sign-in-optional); runbook:
-[DEPLOYMENT.md](./SSO.md#microsoft-entra-id-sign-in).
+[SSO.md, Microsoft Entra ID sign-in](./SSO.md#microsoft-entra-id-sign-in).
 
 1. Auth.js runs the OIDC code flow against the one configured tenant
    (scope `openid profile email User.Read`, no refresh token) and refuses an
@@ -268,7 +268,7 @@ apply in both modes. More in
 Optional and off unless `OIDC_ENABLED=1` (v0.25.0, `apps/cms/src/oidc/`,
 the shared steps in `apps/cms/src/idp/exchange-core.ts`); never together
 with Entra. Runbook and recipes:
-[DEPLOYMENT.md](./SSO.md#oidc-sign-in-keycloak-authentik-zitadel).
+[SSO.md, OIDC sign-in (Keycloak, authentik, Zitadel)](./SSO.md#oidc-sign-in-keycloak-authentik-zitadel).
 The same exchange pattern as Entra, without Graph:
 
 1. Auth.js runs the OIDC code flow with PKCE against `OIDC_ISSUER`. It

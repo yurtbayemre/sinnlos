@@ -192,10 +192,10 @@ syncDepartment=<0|1> syncManager=<0|1> ttl=<ttl> local=<0|1>`.
 1. Configure a staging instance with `ENTRA_ENABLED=1` and
    `ENTRA_SYNC_MODE=dry-run` (the default), on its own host or behind its
    own Traefik, never behind the production one
-   ([§3.6 B](INSTALL.md#behind-your-own-traefik)); run `infra/deploy.sh --check`
+   ([INSTALL.md, Behind your own Traefik](INSTALL.md#behind-your-own-traefik)); run `infra/deploy.sh --check`
    until it prints `Preflight OK`, then deploy (the smoke checks follow
    its `DOMAIN`; a compose project other than `infra` also needs
-   `SMOKE_URL`, [§3.6 B](INSTALL.md#behind-your-own-traefik)). The cms logs
+   `SMOKE_URL`, [INSTALL.md, Behind your own Traefik](INSTALL.md#behind-your-own-traefik)). The cms logs
    `[entra] enabled … mode=dry-run`.
    `infra/deploy.sh` ends with `infra/live-smoke.sh`, which signs in with
    local demo accounts. On an identity-provider-only instance
@@ -271,7 +271,7 @@ cms image does not write them back.
 providers synced (email=on, microsoft=off)`.
    3. Roll both images back to the pair you are going back to, then
       `up -d --no-build web cms` (with the overrides the target needs,
-      [§7.4](UPGRADE.md#update-procedure-production-safe)). From the first
+      [UPGRADE.md, Update procedure (production-safe)](UPGRADE.md#update-procedure-production-safe)). From the first
       recorded batch-10 deploy on, `deploy.sh` no longer moves `:rollback`:
       the target its rollback hint names is the last-known-good SHA tag
       (`grep '^TAG=' .git/sinnlos-deploy/infra.state`, then

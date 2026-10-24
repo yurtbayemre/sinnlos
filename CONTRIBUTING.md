@@ -126,7 +126,7 @@ Notes:
   Postgres block in `apps/cms/.env` with `DATABASE_HOST=localhost`, and add
   `TZ=UTC` (the cms must run in UTC on Postgres). A one-line Postgres
   container is in
-  [DEPLOYMENT.md §1.2](#local-development-sqlite).
+  [Local development (SQLite)](#local-development-sqlite).
 - **An older dev database** can still hold department or team drafts; the
   cms then refuses to boot with `[org-dp] … still holds N draft row(s)`.
   Delete `apps/cms/.tmp/data.db` and boot again (with `SEED_DEMO_DATA=1` if
@@ -211,8 +211,8 @@ name gets a Let's Encrypt certificate. Caddy sends `/api/*` (except
 the cms and everything else to the web, including `/uploads/*`, which the
 web serves through its session-gated proxy. The first build takes a few
 minutes; then open the web URL and `/admin`. Step by step:
-[DEPLOYMENT.md §2](#full-stack-with-docker-compose) (local)
-and [§3](./docs/INSTALL.md) (a server).
+[Full stack with Docker Compose](#full-stack-with-docker-compose) (local)
+and [INSTALL.md](./docs/INSTALL.md) (a server).
 
 ### Microsoft Entra ID sign-in (optional)
 
@@ -225,7 +225,7 @@ accounts Entra owns (an account that existed before, or whose role an admin
 changed, keeps its role) and issues the intranet session (how it works:
 [docs/security.md](./docs/security.md#microsoft-entra-id)). The full
 runbook, with a staging dry run before roles are applied, is
-[DEPLOYMENT.md, "Microsoft Entra ID sign-in"](./docs/SSO.md#microsoft-entra-id-sign-in).
+[SSO.md, Microsoft Entra ID sign-in](./docs/SSO.md#microsoft-entra-id-sign-in).
 
 **1. Set up the provider** in the
 [Microsoft Entra admin center](https://entra.microsoft.com):
@@ -314,7 +314,7 @@ The recipes for Keycloak (a client-role mapper into the ID token),
 authentik (signing key, trailing slash in the issuer, an own e-mail
 mapping) and Zitadel (`OIDC_ZITADEL_ORG_ID`, project role assertion), the
 role rules, identity changes and the sign-in errors are in
-[DEPLOYMENT.md, "OIDC sign-in"](./docs/SSO.md#oidc-sign-in-keycloak-authentik-zitadel);
+[SSO.md, OIDC sign-in (Keycloak, authentik, Zitadel)](./docs/SSO.md#oidc-sign-in-keycloak-authentik-zitadel);
 the remaining knobs in the [environment reference](README.md#environment-reference).
 
 ## Verification checklist
@@ -353,7 +353,7 @@ Roles and access:
 - [ ] Through the API, a team lead can change their team's description,
       and a payload with `members` (or any other field outside the write
       allowlist) answers 400 (probe in
-      [DEPLOYMENT.md §6.4](./docs/OPERATIONS.md#role-enforcement-optional));
+      [OPERATIONS.md, Role enforcement (optional)](./docs/OPERATIONS.md#role-enforcement-optional));
       a department head can change their own department's description; a
       department member sees the announcements and wiki spaces targeted at
       their department

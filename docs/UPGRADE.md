@@ -27,7 +27,7 @@ What changed for the operator between v0.25 and this release. The release notes 
 
 On the live Traefik host the wrapper handles the checks, backup, build,
 smoke checks and the SHA tags of the last-known-good deploy in one shot
-([§3.6](INSTALL.md)). On the owner's host the checkout is
+([INSTALL.md](INSTALL.md)). On the owner's host the checkout is
 `/home/bigemo/git/sinnlos` and every step runs as its owner `bigemo`
 (from a root shell `sudo -iu bigemo`):
 
@@ -43,7 +43,7 @@ The manual equivalent (e.g. on a standalone Caddy box):
 docker tag "$(docker inspect -f '{{.Image}}' infra-web-1)" infra-web:manual-prev
 docker tag "$(docker inspect -f '{{.Image}}' infra-cms-1)" infra-cms:manual-prev
 
-# 1. Always back up first (pg-backup.sh needs SINNLOS_BACKUP_DIR and SINNLOS_ENV_FILE, §7.3)
+# 1. Always back up first (pg-backup.sh needs SINNLOS_BACKUP_DIR and SINNLOS_ENV_FILE, OPERATIONS.md)
 /opt/sinnlos/infra/backup/pg-backup.sh
 
 # 2. Pull latest code and validate infra/.env (deploys nothing)
@@ -65,11 +65,7 @@ the commit) and records them as **last-known-good** in
 the newest five SHA tags stay, `DEPLOY_KEEP_TAGS`). A failed deploy never
 moves that state. When a deploy fails, the script prints the rollback to
 it, with every override and extra step the target needs; run it as
-printed. A target cms from before batch 13 needs the `JWT_SECRET`
-rotation **before** it starts (the printed commands say so; by hand see
-[Deploying batch 13](archive/deployment-history.md#deploying-batch-13-2026-10-12), Rollback R2 to R4,
-R4 being `infra/restore-db.sh rotate-jwt --env-only`), or every JWT a
-password change revoked works again. By hand:
+printed. By hand:
 
 ```bash
 grep '^TAG=' .git/sinnlos-deploy/infra.state      # TAG=<sha>
@@ -94,52 +90,7 @@ in `.git/sinnlos-deploy/infra.bootstrap`: a re-run before the first
 successful deploy keeps the first run's `:rollback` (the images from
 before this version, not the ones a failed run left running) and says
 `:rollback kept from <time>`. The first recorded deploy deletes that file;
-delete it by hand only to have the next run tag what runs then. The special cases below apply whatever the
-target is called (rolling back the datetime release needs an extra override
-file, see [Rolling back this release](archive/deployment-history.md#rolling-back-this-release); rolling
-back the web to an image from before the web datetime port (batch 8) needs
-`-f infra/docker-compose.web-legacy-tz.yml` on top of the live compose
-files, see below; rolling back poll guest access needs a step **before**
-the retag, see
-[Rolling back poll department targeting](archive/deployment-history.md#rolling-back-poll-department-targeting)).
-
-Since the web datetime port (batch 8) the compose file runs the web in UTC.
-A web image from before it renders dates in its process zone and must run
-in `APP_TIME_ZONE`; check the image before the re-up:
-
-```bash
-docker image inspect -f '{{ index .Config.Labels "org.sinnlos.datetime" }}' infra-web:<TAG>   # the rollback target's tag
-```
-
-`zone-explicit` means no override (the command above). An empty line or
-`<no value>` means the image predates the port: re-up with the web
-override after the live compose files:
-
-```bash
-docker compose -p infra \
-  -f infra/docker-compose.yml -f infra/docker-compose.traefik.yml \
-  -f infra/docker-compose.web-legacy-tz.yml \
-  up -d --no-build web cms
-```
-
-Without it, a web from the datetime release (2026-09-27) up to batch 7
-answers every request with 500, and an older one (such as `:pre-datetime`)
-quietly shows every date and time in UTC. This applies to every recipe in
-this document that re-ups a web image from before batch 8, also where its
-command lists only the live compose files (it was written before the
-port); add the override next to any other override file there. Details:
-[Upgrading to the web datetime port](archive/deployment-history.md#upgrading-to-the-web-datetime-port-batch-8-lane-3a).
-
-A cms image from before the ICS and cms start fixes, whose
-`docker image inspect -f '{{json .Config.Cmd}}'` shows `["pnpm","start"]`
-(including `infra-cms:rollback` right after deploying that release), runs
-`pnpm start` and downloads pnpm from registry.npmjs.org at every start. Its
-build date does not tell: the image that release's first deploy tags
-`:rollback` was built on the same day. If the registry is unreachable, start
-it directly: see the rollback note of
-[Upgrading to the ICS and cms start fixes (2026-09-27)](archive/deployment-history.md#upgrading-to-the-ics-and-cms-start-fixes-2026-09-27).
-Current images (`["node_modules/.bin/strapi","start"]`) start without
-registry access.
+delete it by hand only to have the next run tag what runs then.
 
 If a code revert is needed instead, reset and rebuild (`deploy.sh` refuses a
 checkout with changed tracked files, and tags the rebuilt images by that
@@ -153,19 +104,13 @@ infra/deploy.sh
 
 If the database schema changed, restore from the pre-deploy backup
 (`sinnlos-db-<ts>-predeploy.dump.gz.gpg`; decrypt it first with the off-box
-private key, [§7.3](OPERATIONS.md#automated-daily-backups-cron); production: the
+private key, [OPERATIONS.md, Automated daily backups (cron)](OPERATIONS.md#automated-daily-backups-cron); production: the
 `-predeploy` generation of `backup-run`, decrypted and checked as in
 [Restoring a production generation](OPERATIONS.md#restoring-a-production-generation))
 with `infra/restore-db.sh`
 ([Restoring a database dump](OPERATIONS.md#restoring-a-database-dump)): into a clean
 database, in one transaction, checked, and with a fresh `JWT_SECRET`
 before the cms starts.
-
-A dump taken before the org draft/publish migration, restored under a
-release from 2026-09-26 on, makes the cms refuse to boot (`[org-dp]`) until
-`migrate.sql` has run on it again
-([One-time: org draft/publish off](archive/deployment-history.md#one-time-org-draftpublish-off), step 0, then
-steps 3–7).
 
 ## Rollback
 

@@ -103,7 +103,7 @@ The Strapi super-admin from section 3 can use the admin panel, but it is not an 
 
 3. Sign in to `https://<DOMAIN>` with that e-mail address. As an admin you set up the second factor right away: scan the QR code with an authenticator app (Aegis, 2FAS, Google or Microsoft Authenticator), enter the current password and a code, and keep the ten recovery codes somewhere safe. Departments, teams and users are managed at **/manage**.
 
-Everyone else gets an invitation: **/manage/users → Invite people** (German: _Personen einladen_), for one person or several at once. The e-mail carries a link to set a password, valid for 7 days. Accounts can also come from your identity provider (Microsoft Entra ID or OIDC, see [DEPLOYMENT.md](DEPLOYMENT.md)). Do not grant the content-API roles the generic user permissions.
+Everyone else gets an invitation: **/manage/users → Invite people** (German: _Personen einladen_), for one person or several at once. The e-mail carries a link to set a password, valid for 7 days. Accounts can also come from your identity provider (Microsoft Entra ID or OIDC, see [SSO.md](SSO.md)). Do not grant the content-API roles the generic user permissions.
 
 ### Passwords and the second factor
 
@@ -149,7 +149,7 @@ The supported path, every release's notes and rollback: [UPGRADE.md](UPGRADE.md)
 1. Read the release notes of the new version, especially the "Upgrade notes" and "Breaking changes" sections.
 2. Check out the new version: `git fetch --tags && git checkout v<new version>`.
 3. Run `infra/deploy.sh --record-without-live-smoke`. It runs the preflight, the backup, the build, the start and the smoke check.
-4. If the deploy fails after the start, `deploy.sh` prints the rollback commands. They switch back to the previous images. Restore the database only when the release notes say a rollback needs it ([DEPLOYMENT.md](DEPLOYMENT.md), "Restoring a database dump").
+4. If the deploy fails after the start, `deploy.sh` prints the rollback commands. They switch back to the previous images. Restore the database only when the release notes say a rollback needs it ([OPERATIONS.md, Restoring a database dump](OPERATIONS.md#restoring-a-database-dump)).
 
 Optional live-smoke, the end-to-end check of live updates. It signs in as two accounts of yours, so invite two local accounts for it (section 6), and publish at least one announcement they can see. **Both must be outside `MFA_REQUIRED_ROLES`** (not admins or editors): the script cannot type a second-factor code.
 
@@ -207,7 +207,7 @@ Traefik instead of the bundled Caddy. The second compose file
 - adds Traefik router/middleware labels that mirror the Caddyfile routing
   (`/api/auth/*` → web, Strapi paths → cms, everything else → web), terminate TLS
   via the `lehttp` certresolver, and apply the security headers + rate limits
-  described in [§3.9](OPERATIONS.md#production-hardening).
+  described in [OPERATIONS.md, Production hardening](OPERATIONS.md#production-hardening).
 
 **`DOMAIN` is required here.** Every router matches ``Host(`$DOMAIN`)`` from
 `infra/.env`, so the overlay file is the same for every instance (it named
@@ -325,7 +325,7 @@ the pre-deploy backup (step 1,
 
 0. An env preflight that stops before anything is touched
    (`infra/deploy.sh --check` runs only this step, see
-   [§3.8](archive/deployment-history.md#upgrading-an-existing-instance-to-this-release)), then the deploy
+   [deployment-history.md, Upgrading an existing instance to this release](archive/deployment-history.md#upgrading-an-existing-instance-to-this-release)), then the deploy
    checks: one deploy per compose project at a time (`flock`, from
    util-linux), a clean checkout (a changed tracked file refuses the
    deploy, and so does an untracked file or directory, an empty one
@@ -362,7 +362,7 @@ the pre-deploy backup (step 1,
    it). Any other compose project (a staging copy) keeps
    `infra/backup/pg-backup.sh` with `SINNLOS_BACKUP_KIND=predeploy` into its
    own `SINNLOS_BACKUP_DIR`: its artifacts are named `…-predeploy…` and kept
-   apart from the nightly ones, [§7.3](OPERATIONS.md#automated-daily-backups-cron).
+   apart from the nightly ones, [OPERATIONS.md, Automated daily backups (cron)](OPERATIONS.md#automated-daily-backups-cron).
    A failed backup stops the deploy before anything is touched. A first
    install, with neither the db container nor its volume, has nothing to
    back up.
@@ -387,7 +387,7 @@ the pre-deploy backup (step 1,
    (`up -d --no-build`).
 4. Curl smoke-checks `https://$DOMAIN`, the host the preflight checked
    (override with `SMOKE_URL=`, which live-smoke gets as `BASE_URL`, see
-   [§3.6 B](#behind-your-own-traefik)), then runs `infra/live-smoke.sh`: first the
+   [Behind your own Traefik](#behind-your-own-traefik)), then runs `infra/live-smoke.sh`: first the
    [datetime contract](OPERATIONS.md#datetime-contract) check (no
    `timestamp without time zone` column left, the cms process runs in UTC:
    by its `[datetime]` boot line, or, once log rotation has dropped that
@@ -395,7 +395,7 @@ the pre-deploy backup (step 1,
    pipeline probe (one comment
    posted through the cms → the ping frame on a subscribed stream, which
    must be uncompressed, and, when the comment lands on the stream user's
-   own announcement, the notification frame; see [§6.1](OPERATIONS.md#health-checks)).
+   own announcement, the notification frame; see [OPERATIONS.md, Health checks](OPERATIONS.md#health-checks)).
    The stream user is `SMOKE_EMAIL`, by default the first of
    `alex.morgan@sinnlos.local` (an announcement author in the demo data)
    and `casey.jones@sinnlos.local` with a line in the credentials file; when
@@ -474,15 +474,10 @@ The preflight fails (naming keys, never values) when:
   only earn a note (they are ignored), or a warning when they are a real app
   registration (a GUID client id plus a secret: Microsoft sign-in of the
   running release, if any, is off after the deploy); neither stops it;
-- the running database still holds datetime columns in the pre-contract
-  format (`timestamp without time zone` outside Strapi's bookkeeping tables)
-  and `DATETIME_LEGACY_ZONE` is empty: the new cms would refuse to start
-  ([Upgrading an existing instance to this release](archive/deployment-history.md#upgrading-an-existing-instance-to-this-release)).
-  No running database (a fresh install) skips this check;
 - `DOMAIN` does not fit the instance (since batch 10): the five Traefik
   routers do not all match one host, or that host is not a bare host name,
   is a placeholder, or is not the host of `WEB_PUBLIC_URL` and
-  `CMS_PUBLIC_URL` ([§3.6 B](#behind-your-own-traefik)).
+  `CMS_PUBLIC_URL` ([Behind your own Traefik](#behind-your-own-traefik)).
   This check names the hosts, which are no secrets.
 
 `apps/cms/src/utils/deploy-preflight.test.ts` pins the preflight's key lists,
