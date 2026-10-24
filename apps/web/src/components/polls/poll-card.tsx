@@ -166,7 +166,16 @@ export function PollCard({
                   {isMyVote && <Check className="mr-1.5 inline h-3.5 w-3.5" />}
                   {option}
                 </span>
-                {showResults && <span className="text-xs text-muted-foreground">{pct}%</span>}
+                {showResults && (
+                  <span
+                    className={cn(
+                      "text-xs",
+                      isMyVote ? "text-foreground" : "text-muted-foreground",
+                    )}
+                  >
+                    {pct}%
+                  </span>
+                )}
               </div>
             </button>
           );
