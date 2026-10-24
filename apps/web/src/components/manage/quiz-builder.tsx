@@ -165,7 +165,7 @@ export function QuizBuilder({
                     aria-describedby={
                       problems?.[q].correct ? `${id}-correct-${q}-error` : undefined
                     }
-                    className="h-4 w-4 accent-primary"
+                    className="h-4 w-4 accent-primary-text"
                   />
                   <span className="sr-only">{t("chooseCorrect", { number: o + 1 })}</span>
                 </label>

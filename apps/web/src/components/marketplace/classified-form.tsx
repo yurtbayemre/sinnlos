@@ -176,7 +176,7 @@ export function ClassifiedForm({ initial }: { initial?: ClassifiedFormInitial })
               type="checkbox"
               name="priceNegotiable"
               defaultChecked={v ? v.priceNegotiable : (initial?.priceNegotiable ?? false)}
-              className="h-4 w-4 rounded border accent-primary"
+              className="h-4 w-4 rounded border accent-primary-text"
             />
             {t("negotiableLabel")}
           </label>

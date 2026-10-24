@@ -21,7 +21,7 @@ export const textareaClass =
   "min-h-40 w-full rounded-xl border bg-muted/40 px-3 py-2 font-mono text-sm leading-relaxed outline-hidden transition-colors placeholder:text-muted-foreground focus:bg-background focus:ring-2 focus:ring-ring aria-invalid:border-destructive disabled:cursor-not-allowed disabled:opacity-60";
 
 const checkboxClass =
-  "mt-0.5 h-4 w-4 shrink-0 rounded border accent-primary disabled:cursor-not-allowed";
+  "mt-0.5 h-4 w-4 shrink-0 rounded border accent-primary-text disabled:cursor-not-allowed";
 
 /** The attributes a control gets from its field. */
 export interface ControlA11y {
