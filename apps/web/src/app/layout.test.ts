@@ -50,15 +50,15 @@ describe("the root branding", () => {
     });
   });
 
-  it("keeps a %s inside the name literal in page titles", async () => {
+  it("refuses a name with the title placeholder %s", async () => {
+    // Next's resolver runs template.replace(/%s/g, pageTitle) over the whole
+    // template, so "Acme %s" would show "Sign in · Acme Sign in".
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     vi.stubEnv("SITE_NAME", "Acme %s");
     const { title } = (await generateMetadata()) as { title: { template: string } };
-    // Next's resolver: template.replace(/%s/g, pageTitle).
-    const shown = title.template
-      .replace(/%s/g, "Sign in")
-      .split(String.fromCharCode(0x2060))
-      .join("");
-    expect(shown).toBe("Sign in · Acme %s");
+    expect(title.template).toBe("%s · Sinnlos");
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("SITE_NAME"));
+    warn.mockRestore();
   });
 
   /** The <head> child of the rendered <html>, if any. */

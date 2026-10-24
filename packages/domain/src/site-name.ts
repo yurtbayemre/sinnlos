@@ -21,8 +21,9 @@ function hasControl(value: string): boolean {
 
 /**
  * The trimmed `SITE_NAME`: `name` null when unset or blank; `invalid` when it
- * is longer than SITE_NAME_MAX_LENGTH characters or holds a control
- * character (the caller warns and keeps the default).
+ * is longer than SITE_NAME_MAX_LENGTH characters, holds a control character
+ * or the page-title placeholder "%s" (Next substitutes every "%s" of the
+ * title template, the name's too); the caller warns and keeps the default.
  */
 export function parseSiteName(value: string | undefined): {
   name: string | null;
@@ -30,7 +31,7 @@ export function parseSiteName(value: string | undefined): {
 } {
   const name = value?.trim() ?? "";
   if (!name) return { name: null, invalid: false };
-  if ([...name].length > SITE_NAME_MAX_LENGTH || hasControl(name)) {
+  if ([...name].length > SITE_NAME_MAX_LENGTH || hasControl(name) || name.includes("%s")) {
     return { name: null, invalid: true };
   }
   return { name, invalid: false };

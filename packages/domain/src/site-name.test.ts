@@ -22,6 +22,11 @@ describe("parseSiteName", () => {
     });
   });
 
+  it("refuses the page-title placeholder %s, not a lone %", () => {
+    expect(parseSiteName("Acme %s")).toEqual({ name: null, invalid: true });
+    expect(parseSiteName("100% Acme").name).toBe("100% Acme");
+  });
+
   const ctl = (code: number) => String.fromCharCode(code);
 
   it.each([0x0a, 0x0d, 0x07, 0x7f, 0x85, 0x2028, 0x2029].map((code) => `Acme${ctl(code)}x`))(

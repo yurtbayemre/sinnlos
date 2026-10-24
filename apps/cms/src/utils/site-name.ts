@@ -13,7 +13,7 @@ export function siteName(env: Record<string, string | undefined> = process.env):
   if (invalid && !invalidReported) {
     invalidReported = true;
     console.warn(
-      `[branding] SITE_NAME must be 1-${SITE_NAME_MAX_LENGTH} characters without control characters; it is not used`,
+      `[branding] SITE_NAME must be 1-${SITE_NAME_MAX_LENGTH} characters without control characters or "%s"; it is not used`,
     );
   }
   return name;

@@ -119,7 +119,7 @@ export function brand(env: Env): Brand {
   if (site.invalid) {
     warnOnce(
       `SITE_NAME=${env.SITE_NAME}`,
-      `[branding] SITE_NAME must be 1-${SITE_NAME_MAX_LENGTH} characters without control characters; it is not used`,
+      `[branding] SITE_NAME must be 1-${SITE_NAME_MAX_LENGTH} characters without control characters or "%s"; it is not used`,
     );
   }
   const accent = env.SITE_ACCENT?.trim();
