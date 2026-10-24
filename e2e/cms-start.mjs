@@ -32,6 +32,7 @@ const lessonUid = "api::lesson.lesson";
 const progressUid = "api::lesson-progress.lesson-progress";
 const announcementUid = "api::announcement.announcement";
 const commentUid = "api::comment.comment";
+const pollUid = "api::poll.poll";
 let phase = "environment check";
 /** @type {Cms | undefined} */
 let strapi;
@@ -124,7 +125,15 @@ async function start() {
         documentId: "",
         id: 0,
       },
+      // v0.29 (a11y.spec.ts): an admin of its own, so its MFA enrollment,
+      // lesson completion and poll vote leave every other spec's user alone.
+      a11y: {
+        email: "a11y@e2e.test",
+        password: fixturePassword("E2E_A11Y_PASSWORD"),
+        documentId: "",
+      },
     },
+    poll: { question: "E2E Lunch poll", documentId: "" },
     privacy: {
       announcement: { title: "E2E Privacy Announcement", documentId: "" },
       comment: "E2E leaver comment",
@@ -231,7 +240,7 @@ async function start() {
   const roleTypeOf = (key) =>
     key === "lead"
       ? "team_lead"
-      : key === "admin" || key === "inviter" || key === "privacy"
+      : key === "admin" || key === "inviter" || key === "privacy" || key === "a11y"
         ? "admin_role"
         : key === "leaver"
           ? "member"
@@ -315,6 +324,11 @@ async function start() {
     status: "published",
   });
   fixtures.privacy.announcement.documentId = announcement.documentId;
+  const poll = await cms.documents(pollUid).create({
+    data: { question: fixtures.poll.question, options: ["Pasta", "Salad"], audience: "all" },
+    status: "published",
+  });
+  fixtures.poll.documentId = poll.documentId;
   await cms.documents(commentUid).create({
     data: {
       body: fixtures.privacy.comment,
@@ -326,7 +340,7 @@ async function start() {
 
   phase = "fixture relationship assertions";
   assert.equal(await cms.db.query(departmentUid).count(), 1, "Expected one department");
-  assert.equal(await cms.db.query(userUid).count(), 7, "Expected seven local users");
+  assert.equal(await cms.db.query(userUid).count(), 8, "Expected eight local users");
   assert.equal(await cms.db.query(teamUid).count(), 2, "Expected two teams");
   for (const [key, fixture] of Object.entries(fixtures.users)) {
     const user = await cms.db.query(userUid).findOne({
@@ -453,7 +467,7 @@ async function start() {
     });
   });
   console.log(
-    "[e2e-cms] Ready: normal bootstrap and fixture assertions passed (1 department, 7 users, 2 teams, 3 published quiz courses and lessons, 1 commented announcement).",
+    "[e2e-cms] Ready: normal bootstrap and fixture assertions passed (1 department, 8 users, 2 teams, 3 published quiz courses and lessons, 1 commented announcement, 1 poll).",
   );
 }
 
