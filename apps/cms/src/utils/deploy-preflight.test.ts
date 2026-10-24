@@ -1628,6 +1628,16 @@ describe("preflight: a site closed at the edge (SITE_ALLOW_CIDRS, v0.29)", BASH_
     expect(closed("203.0.113.7/32")).toBe(0);
     expect(closed("0.0.0.0/0,::/0")).toBe(1);
   });
+
+  it("is the same function restore-db.sh uses for its reminder", () => {
+    // One rule for "closed": deploy refuses and restore stays quiet on exactly
+    // the same rendered configuration.
+    const restore = read("infra", "restore-db.sh");
+    const start = restore.indexOf("\nsite_closed() {\n");
+    expect(start).toBeGreaterThan(-1);
+    const end = restore.indexOf("\n}\n", start + 1);
+    expect(restore.slice(start + 1, end + 2)).toBe(shellFunction("site_closed"));
+  });
 });
 
 describe("preflight: wiki revision draft rows (batch 16, DA03)", BASH_BUDGET, () => {

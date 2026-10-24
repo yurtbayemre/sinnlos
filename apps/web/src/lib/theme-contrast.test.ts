@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { compileTailwind, ruleBody, themeValue } from "./tailwind-css.test.helper";
@@ -81,6 +81,19 @@ describe("tailwind text colours (FX31)", () => {
     expect(themeValue(css, "--color-primary-text")).toBe("hsl(var(--primary-text))");
     expect(ruleBody(css, ".bg-primary-text")).toBe("background-color: var(--color-primary-text);");
     expect(ruleBody(css, ".accent-primary-text")).toBe("accent-color: var(--color-primary-text);");
+  });
+});
+
+describe("native controls (v0.29)", () => {
+  // A checked radio or checkbox is an indicator: under a light SITE_ACCENT the
+  // fill (accent-primary) can vanish against the page, the verified text token
+  // cannot. Every native control in apps/web/src uses accent-primary-text.
+  it("never use the bare accent-primary fill", () => {
+    const src = join(__dirname, "..");
+    const offenders = (readdirSync(src, { recursive: true }) as string[])
+      .filter((file) => file.endsWith(".tsx"))
+      .filter((file) => /accent-primary(?!-text)/.test(readFileSync(join(src, file), "utf8")));
+    expect(offenders).toEqual([]);
   });
 });
 
