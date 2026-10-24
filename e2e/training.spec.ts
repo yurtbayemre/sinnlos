@@ -44,10 +44,10 @@ test("training-quiz-completion", async ({ page }) => {
   await test.step("Missing and wrong answers keep completion locked", async () => {
     await expect(check).toBeDisabled();
     await expect(complete).toBeDisabled();
-    await https.getByRole("button", { name: "80", exact: true }).click();
+    await https.getByRole("radio", { name: "80", exact: true }).click();
     await expect(check).toBeDisabled();
     await expect(complete).toBeDisabled();
-    await phishing.getByRole("button", { name: "Yes", exact: true }).click();
+    await phishing.getByRole("radio", { name: "Yes", exact: true }).click();
     await check.click();
     await expect(
       main.getByRole("status").filter({
@@ -63,8 +63,8 @@ test("training-quiz-completion", async ({ page }) => {
   });
 
   await test.step("Passing the quiz alone does not persist a completion", async () => {
-    await https.getByRole("button", { name: "443", exact: true }).click();
-    await phishing.getByRole("button", { name: "Yes", exact: true }).click();
+    await https.getByRole("radio", { name: "443", exact: true }).click();
+    await phishing.getByRole("radio", { name: "Yes", exact: true }).click();
     await check.click();
     await expect(main.getByText("All correct!", { exact: true })).toBeVisible();
     await expect(complete).toBeEnabled();
@@ -75,8 +75,8 @@ test("training-quiz-completion", async ({ page }) => {
   });
 
   await test.step("Explicit completion survives a full reload", async () => {
-    await https.getByRole("button", { name: "443", exact: true }).click();
-    await phishing.getByRole("button", { name: "Yes", exact: true }).click();
+    await https.getByRole("radio", { name: "443", exact: true }).click();
+    await phishing.getByRole("radio", { name: "Yes", exact: true }).click();
     await check.click();
     await expect(main.getByText("All correct!", { exact: true })).toBeVisible();
     await complete.click();
@@ -133,10 +133,10 @@ test("training-exam-completion", async ({ page }) => {
   });
 
   await test.step("Missing or wrong answers cannot complete the exam", async () => {
-    await https.getByRole("button", { name: "80", exact: true }).click();
+    await https.getByRole("radio", { name: "80", exact: true }).click();
     await expect(check).toBeDisabled();
     await expect(complete).toBeDisabled();
-    await phishing.getByRole("button", { name: "Yes", exact: true }).click();
+    await phishing.getByRole("radio", { name: "Yes", exact: true }).click();
     await check.click();
     await expectOverallFeedback(notPassed);
     await expect(complete).toBeDisabled();
@@ -144,7 +144,7 @@ test("training-exam-completion", async ({ page }) => {
   });
 
   await test.step("Passing shows only an overall result and creates no receipt", async () => {
-    await https.getByRole("button", { name: "443", exact: true }).click();
+    await https.getByRole("radio", { name: "443", exact: true }).click();
     await expect(complete).toBeDisabled();
     await check.click();
     await expectOverallFeedback("All correct!");
@@ -156,8 +156,8 @@ test("training-exam-completion", async ({ page }) => {
   });
 
   await test.step("Explicit completion survives a full reload", async () => {
-    await https.getByRole("button", { name: "443", exact: true }).click();
-    await phishing.getByRole("button", { name: "Yes", exact: true }).click();
+    await https.getByRole("radio", { name: "443", exact: true }).click();
+    await phishing.getByRole("radio", { name: "Yes", exact: true }).click();
     await check.click();
     await expectOverallFeedback("All correct!");
     await complete.click();
@@ -172,13 +172,13 @@ test("training-exam-completion", async ({ page }) => {
   });
 
   await test.step("Completed exam review stays overall-only and preserves the receipt", async () => {
-    await https.getByRole("button", { name: "80", exact: true }).click();
-    await phishing.getByRole("button", { name: "Yes", exact: true }).click();
+    await https.getByRole("radio", { name: "80", exact: true }).click();
+    await phishing.getByRole("radio", { name: "Yes", exact: true }).click();
     await check.click();
     await expectOverallFeedback(notPassed);
     await expect(completed).toBeVisible();
     await expect(complete).toHaveCount(0);
-    await https.getByRole("button", { name: "443", exact: true }).click();
+    await https.getByRole("radio", { name: "443", exact: true }).click();
     await check.click();
     await expectOverallFeedback("All correct!");
     await expect(completed).toBeVisible();
@@ -219,16 +219,16 @@ test("training-confirm-completion", async ({ page }) => {
   });
 
   await test.step("Each selection gets immediate feedback while missing or wrong answers stay locked", async () => {
-    await https.getByRole("button", { name: "80", exact: true }).click();
+    await https.getByRole("radio", { name: "80", exact: true }).click();
     await expect(wrong).toBeVisible();
     await expect(correct).toHaveCount(0);
     await expect(complete).toBeDisabled();
-    await https.getByRole("button", { name: "443", exact: true }).click();
+    await https.getByRole("radio", { name: "443", exact: true }).click();
     await expect(correct).toHaveCount(1);
     await expect(wrong).toHaveCount(0);
     await expect(passed).toHaveCount(0);
     await expect(complete).toBeDisabled();
-    await phishing.getByRole("button", { name: "No", exact: true }).click();
+    await phishing.getByRole("radio", { name: "No", exact: true }).click();
     await expect(wrong).toBeVisible();
     await expect(correct).toHaveCount(1);
     await expect(complete).toBeDisabled();
@@ -237,17 +237,17 @@ test("training-confirm-completion", async ({ page }) => {
   });
 
   await test.step("Only all correct answers unlock completion and a wrong edit locks it again", async () => {
-    await phishing.getByRole("button", { name: "Yes", exact: true }).click();
+    await phishing.getByRole("radio", { name: "Yes", exact: true }).click();
     await expect(passed).toBeVisible();
     await expect(correct).toHaveCount(2);
     await expect(wrong).toHaveCount(0);
     await expect(complete).toBeEnabled();
-    await https.getByRole("button", { name: "80", exact: true }).click();
+    await https.getByRole("radio", { name: "80", exact: true }).click();
     await expect(wrong).toBeVisible();
     await expect(correct).toHaveCount(1);
     await expect(passed).toHaveCount(0);
     await expect(complete).toBeDisabled();
-    await https.getByRole("button", { name: "443", exact: true }).click();
+    await https.getByRole("radio", { name: "443", exact: true }).click();
     await expect(passed).toBeVisible();
     await expect(correct).toHaveCount(2);
     await expect(complete).toBeEnabled();
@@ -260,10 +260,10 @@ test("training-confirm-completion", async ({ page }) => {
   });
 
   await test.step("Explicit completion survives a full reload", async () => {
-    await https.getByRole("button", { name: "443", exact: true }).click();
+    await https.getByRole("radio", { name: "443", exact: true }).click();
     await expect(correct).toHaveCount(1);
     await expect(complete).toBeDisabled();
-    await phishing.getByRole("button", { name: "Yes", exact: true }).click();
+    await phishing.getByRole("radio", { name: "Yes", exact: true }).click();
     await expect(passed).toBeVisible();
     await expect(correct).toHaveCount(2);
     await expect(complete).toBeEnabled();
