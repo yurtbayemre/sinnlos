@@ -17,12 +17,17 @@ const inter = Inter({ subsets: ["latin"], variable: "--font-inter", display: "sw
  * public/, not in the app/ file conventions, because Next would always add a
  * convention favicon next to configured icons.
  */
+// Next replaces every "%s" of a title template, also one inside the name; a
+// word joiner (U+2060, invisible) keeps the name's own "%s" literal.
+const literalInTemplate = (text: string) =>
+  text.split("%s").join(`%${String.fromCharCode(0x2060)}s`);
+
 export async function generateMetadata(): Promise<Metadata> {
   const { name, iconUrl } = brand(process.env);
   return {
     title: {
       default: name ?? `${DEFAULT_SITE_NAME} Intranet`,
-      template: `%s · ${name ?? DEFAULT_SITE_NAME}`,
+      template: `%s · ${literalInTemplate(name ?? DEFAULT_SITE_NAME)}`,
     },
     description: "Self-hosted company intranet",
     icons: iconUrl

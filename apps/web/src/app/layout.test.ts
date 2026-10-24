@@ -50,6 +50,17 @@ describe("the root branding", () => {
     });
   });
 
+  it("keeps a %s inside the name literal in page titles", async () => {
+    vi.stubEnv("SITE_NAME", "Acme %s");
+    const { title } = (await generateMetadata()) as { title: { template: string } };
+    // Next's resolver: template.replace(/%s/g, pageTitle).
+    const shown = title.template
+      .replace(/%s/g, "Sign in")
+      .split(String.fromCharCode(0x2060))
+      .join("");
+    expect(shown).toBe("Sign in · Acme %s");
+  });
+
   /** The <head> child of the rendered <html>, if any. */
   async function headOf(): Promise<
     ReactElement<{ children: ReactElement<{ children: string }> }> | undefined
