@@ -16,12 +16,12 @@ Everyday operation of an installed instance: monitoring, restore, backups, harde
 - **Answers:** `200 {"status":"ok"}` when the web reaches the cms and the cms reaches its database, else `503 {"status":"unavailable"}`.
 - **What it proves:** the chain edge → web → cms → database. It does not check the schema, search, e-mail or the nightly jobs.
 - **Staleness:** each process caches its answer for up to 5 seconds, so the result can be that much out of date. It answers within 3 seconds.
-- **Monitor:** point an uptime monitor at `https://<DOMAIN>/healthz` every minute, and alert after a few failures in a row.
+- **Monitor:** point an uptime monitor at `https://<DOMAIN>/healthz` every minute, and alert after a few failures in a row. Do not let it follow redirects, and expect the body `{"status":"ok"}`: releases before v0.29 answer `/healthz` with a redirect to `/sign-in`, which a redirect-following monitor would count as up.
 - **Behind it:** the cms route `GET /api/health/ready` (one probe at a time, its own 5-second cache, an answer within 2 seconds).
 
 ### `infra/ops-check.sh`
 
-`infra/ops-check.sh` checks what an HTTP monitor cannot see. Run it on the host as the deploy user. Like `deploy.sh`, it reads `COMPOSE_PROJECT` (default `infra`) and `SINNLOS_BACKUP_DIR` from `infra/deploy.env`, and it reads the database with `docker exec <project>-db-1` (the query is `infra/ops-check.sql`).
+`infra/ops-check.sh` checks what an HTTP monitor cannot see. Run it on the Docker host itself, as the deploy user: it checks the disk of the Docker data root, which a deployer container without that directory cannot see (it then reports `UNKNOWN`). Like `deploy.sh`, it reads `COMPOSE_PROJECT` (default `infra`) and `SINNLOS_BACKUP_DIR` from `infra/deploy.env`, and it reads the database with `docker exec <project>-db-1` (the query is `infra/ops-check.sql`).
 
 **Output:** one line per problem and exit 1; nothing and exit 0 when everything is clean. A line starting with `UNKNOWN` means it could not check something, and that counts as a problem too.
 
@@ -59,10 +59,10 @@ Restoring a backup brings back everyone the backup holds, **including people ano
 1. **Close the site and check it.**
    - Check your current public address first.
    - In `infra/.env`, set `SITE_ALLOW_CIDRS=<your address>/32` (comma-separated for several networks) and `CRON_ENABLED=false`.
-   - Recreate the edge and the apps.
+   - Recreate the edge and the apps. From the checkout: with the bundled Caddy, `docker compose -p infra -f infra/docker-compose.yml up -d --force-recreate caddy cms web`; with a host Traefik, `docker compose -p infra -f infra/docker-compose.yml -f infra/docker-compose.traefik.yml up -d --force-recreate cms web` (the gate lives in their labels).
    - Check **from outside** that the site answers 503.
 2. **Run `infra/restore-db.sh prepare <dump>`.** It reserves the restore and stops web and cms.
-3. **Restore uploads and configuration while the apps are stopped.** Keep the `ENCRYPTION_KEY` that belongs to the dump: it decrypts the second-factor secrets. (`rotate-jwt` in step 5 changes only `JWT_SECRET`.)
+3. **Restore uploads and configuration while the apps are stopped.** Uploads: `docker run --rm -i -v infra_cms_uploads:/uploads alpine tar xf - -C /uploads < uploads.tar` (it adds and overwrites, it deletes nothing). Keep the `ENCRYPTION_KEY` that belongs to the dump: it decrypts the second-factor secrets. (`rotate-jwt` in step 5 changes only `JWT_SECRET`.)
 4. **Close the site again.** The restored `infra/.env` may lack the two settings, so set `SITE_ALLOW_CIDRS` and `CRON_ENABLED=false` again in the `infra/.env` that will be used. Then:
    - **Bundled Caddy:** from the checkout, run `docker compose -p infra -f infra/docker-compose.yml up -d --no-deps --force-recreate caddy`. `--no-deps` keeps the apps stopped.
    - **Host Traefik:** the gate lives in the app labels. From the checkout, check them with `docker compose -p infra -f infra/docker-compose.yml -f infra/docker-compose.traefik.yml config`: `sinnlos-site-allow` must be in the chain of the four web routers and `sinnlos-cms-site-allow` in the cms router's, both with your range.
@@ -109,11 +109,10 @@ responsible for backing up two things:
 
 ### Manual Postgres backup
 
-From the Docker Compose host (on the owner's host the checkout is
-`/home/bigemo/git/sinnlos`):
+From the Docker Compose host, in the checkout:
 
 ```bash
-cd /home/bigemo/git/sinnlos/infra   # a standalone Caddy box: cd /opt/sinnlos/infra
+cd ~/sinnlos/infra
 umask 077 && mkdir -p backups   # the dump holds every user and password hash
 
 # Dump to a timestamped file
@@ -136,8 +135,8 @@ drops and recreates the database and restores in one transaction that
 stops at the first error.
 
 **`infra/restore-db.sh`** does it in four steps, run one after the other
-as the checkout owner (on the owner's host `bigemo`; from a root shell
-`sudo -iu bigemo`), from any directory. Each step ends with one `OK: …`
+as the checkout owner (from a root shell `sudo -iu <owner>`), from any
+directory. Each step ends with one `OK: …`
 or `STOP: …` line and exits 0 (OK), 1 (STOP: the line says what changed
 and what to do next), 2 (usage) or 3 (another restore step or a deploy of
 the project holds the lock; nothing changed). A dump counts as readable
@@ -196,11 +195,10 @@ starts a new attempt from the copy of the database as it was before the
 restore (below). `infra/restore-db.sh cancel` ends an attempt whose
 `apply` has not begun, and the reservation (below).
 
-**Restore** (the dump's path in the first step; on the owner's host the
-checkout is `/home/bigemo/git/sinnlos`, elsewhere e.g. `/opt/sinnlos`):
+**Restore** (the dump's path in the first step; run it in the checkout):
 
 ```bash
-cd /home/bigemo/git/sinnlos
+cd ~/sinnlos
 infra/restore-db.sh prepare infra/backups/sinnlos-20260415-120000.dump
 infra/restore-db.sh apply
 infra/restore-db.sh rotate-jwt
@@ -530,8 +528,8 @@ not exist`;
   it still exits 0 (the skipped quick-access copy does not count).
 
 It reads its paths from the backup keyring env (`SINNLOS_BACKUP_DIR`,
-`SINNLOS_GNUPGHOME`, `SINNLOS_BACKUP_KEYID`), defaulting to the shared
-`/home/bigemo/backups/momsbest` keyring. `infra/deploy.sh` runs it once as a
+`SINNLOS_GNUPGHOME`, `SINNLOS_BACKUP_KEYID`); `SINNLOS_BACKUP_DIR` is
+required, the keyring defaults to `$SINNLOS_BACKUP_DIR/.gnupg`. `infra/deploy.sh` runs it once as a
 **pre-deploy** snapshot of a compose project other than `infra`; register it nightly with cron:
 
 ```bash
@@ -549,12 +547,9 @@ The paths come from `SINNLOS_BACKUP_DIR`, `SINNLOS_GNUPGHOME`,
 `SINNLOS_BACKUP_KEYID`, `SINNLOS_ENV_FILE`, `SINNLOS_DB_CONTAINER`
 (`infra-db-1`) and `SINNLOS_UPLOADS_VOLUME` (`infra_cms_uploads`), plus
 `SINNLOS_LOCAL_ENV_BACKUP` (a plaintext quick-access copy, refreshed only
-when it exists). The other defaults (`/home/bigemo/backups/momsbest`,
-`/home/bigemo/git/sinnlos/infra/.env`,
-`/home/bigemo/.sinnlos-env-backup/.env`) fit only the owner's host, which
-no longer runs this script for project `infra`: set `SINNLOS_BACKUP_DIR`
-and `SINNLOS_ENV_FILE` everywhere else (without the env file every run is
-partial; without the backup root it stops).
+when it exists). `SINNLOS_BACKUP_DIR` has no default (without it the
+script stops); `SINNLOS_ENV_FILE` defaults to the checkout's `infra/.env`
+(without the env file every run is partial).
 
 **Is it running?** `tail -n 5 <offsite>/backup.log` ends with `done nightly`
 after 03:00, and `cat <offsite>/last-success` names last night. A `FAIL`

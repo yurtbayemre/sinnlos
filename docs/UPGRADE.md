@@ -16,7 +16,7 @@ What changed for the operator between v0.25 and this release. The release notes 
 1. **Host settings** (v0.26): `COMPOSE_PROJECT`, `DEPLOY_EDGE=traefik` on a host Traefik, `SINNLOS_BACKUP_DIR` (or `BACKUP_RUN`) and `PASSWORDS_FILE` for live-smoke, in `infra/deploy.env` (mode 600, from [`infra/deploy.env.example`](../infra/deploy.env.example)) or in the deploy user's environment, before the first deploy. A host Traefik without `DEPLOY_EDGE=traefik`, or neither `SINNLOS_BACKUP_DIR` nor `BACKUP_RUN`, makes `infra/deploy.sh` refuse before it changes anything.
 2. **Strapi admin panel** (v0.26): only clients from `ADMIN_ALLOW_CIDRS` reach it; empty closes it from outside. `infra/admin-tunnel.sh` opens it through SSH ([INSTALL.md](INSTALL.md), section 8).
 3. **Analytics** (v0.26): loaded only when `PLAUSIBLE_SCRIPT_URL` and `PLAUSIBLE_DOMAIN` are set.
-4. **Operator links** (v0.26): `PRIVACY_URL`, `IMPRINT_URL` and, optionally, `WHISTLEBLOWING_URL`.
+4. **Operator links** (v0.26): `PRIVACY_URL`, `IMPRINT_URL` and, optionally, `WHISTLEBLOWING_URL`. **Demo data** (v0.26): production refuses `SEED_DEMO_DATA=1`; remove it from `infra/.env`, or every boot logs the refusal.
 5. **Second factor** (v0.27): password accounts of the roles in `MFA_REQUIRED_ROLES` (default: admins and editors) enrol an authenticator app at their next sign-in, and their older sessions end. Keep `ENCRYPTION_KEY` in your `.env` backup.
 6. **live-smoke accounts** (v0.27): `SMOKE_EMAIL` and `SMOKE_AUTHOR_EMAIL` must have roles outside `MFA_REQUIRED_ROLES`.
 7. **Accounts and e-mail** (v0.27): self-registration is gone; invitations and password links need `SMTP_*` and `DIGEST_FROM`. New passwords need 12 characters.
@@ -27,12 +27,11 @@ What changed for the operator between v0.25 and this release. The release notes 
 
 On the live Traefik host the wrapper handles the checks, backup, build,
 smoke checks and the SHA tags of the last-known-good deploy in one shot
-([INSTALL.md](INSTALL.md)). On the owner's host the checkout is
-`/home/bigemo/git/sinnlos` and every step runs as its owner `bigemo`
-(from a root shell `sudo -iu bigemo`):
+([INSTALL.md](INSTALL.md)). Run every step as the owner of the checkout (the
+`deploy` user of [INSTALL.md](INSTALL.md); from a root shell `sudo -iu deploy`):
 
 ```bash
-cd /opt/sinnlos && git fetch --tags && git checkout v<new version>   # a checkout that follows main: git pull --ff-only
+cd ~/sinnlos && git fetch --tags && git checkout v<new version>   # a detached tag checkout is fine; a checkout that follows main: git pull --ff-only
 infra/deploy.sh
 ```
 
@@ -44,10 +43,10 @@ docker tag "$(docker inspect -f '{{.Image}}' infra-web-1)" infra-web:manual-prev
 docker tag "$(docker inspect -f '{{.Image}}' infra-cms-1)" infra-cms:manual-prev
 
 # 1. Always back up first (pg-backup.sh needs SINNLOS_BACKUP_DIR and SINNLOS_ENV_FILE, OPERATIONS.md)
-/opt/sinnlos/infra/backup/pg-backup.sh
+~/sinnlos/infra/backup/pg-backup.sh
 
 # 2. Pull latest code and validate infra/.env (deploys nothing)
-cd /opt/sinnlos && git fetch --tags && git checkout v<new version>
+cd ~/sinnlos && git fetch --tags && git checkout v<new version>
 infra/deploy.sh --check
 
 # 3. Rebuild and restart (no data loss)

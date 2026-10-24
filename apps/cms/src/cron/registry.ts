@@ -298,7 +298,11 @@ export function guardedTask(
     try {
       const run = await runCronTask(spec.name, strapi.log, () => spec.fn(strapi));
       outcome = run.failed ? "failed" : "ok";
-      strapi.log.info(`[cron] ${spec.name} took ${clock() - started}ms`);
+      // A run with reported failures still finishes; its line says so, so a
+      // grep for `took` is not read as success.
+      strapi.log.info(
+        `[cron] ${spec.name} took ${clock() - started}ms${run.failed ? " (with failures)" : ""}`,
+      );
     } catch (err) {
       strapi.log.error(
         `[cron] ${spec.name} failed after ${clock() - started}ms: ${errorMessage(err)}`,

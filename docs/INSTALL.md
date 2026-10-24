@@ -44,7 +44,7 @@ Then edit `infra/.env`. The comments in the file explain every key.
 - **First Strapi super-admin:** `STRAPI_ADMIN_EMAIL` and `STRAPI_ADMIN_PASSWORD` create it on the first boot. Remove both values afterwards.
 - **E-mail:** `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, and `DIGEST_FROM` as a sender address your mail server accepts. Invitations and password-reset links need it. The server needs a certificate the cms trusts (a publicly signed one); with a self-signed STARTTLS certificate every mail fails (`ESOCKET` in the cms log).
 - **Second factor:** `MFA_REQUIRED_ROLES` stays empty for the default: admins and editors sign in with an authenticator app as well (section 6). `ENCRYPTION_KEY` encrypts those app secrets, so it belongs in your `.env` backup.
-- **Language and time:** `DEFAULT_LOCALE` (`de` or `en`) and `APP_TIME_ZONE`.
+- **Language and time:** `DEFAULT_LOCALE` (`de` or `en`) and `APP_TIME_ZONE`. E-mails (invitations, password links, digests) follow `DIGEST_DEFAULT_LOCALE` (default `en`): set it to `de` for a German instance.
 - **Your links:** `PRIVACY_URL`, `IMPRINT_URL` and, optionally, `WHISTLEBLOWING_URL`: a link to your reporting channel, since sinnlos has no channel of its own. If you change the code, also set `SOURCE_URL` to the source of the version you run (AGPL-3.0, §13).
 - **Branding (optional):** `SITE_NAME` (the instance name in titles, the sidebar, the sign-in page, e-mail subjects and the authenticator app; at most 40 characters), `SITE_LOGO_URL` and `SITE_ICON_URL` (`https://` addresses; visitors' browsers fetch them before sign-in, so host them yourself) and `SITE_ACCENT` (`#rrggbb`; a colour that fails the contrast checks falls back to the default with a warning). Unset keeps the default look. The footer always names sinnlos and its source.
 - **Single sign-on (optional):** Microsoft Entra ID or one OIDC provider, see [SSO.md](SSO.md). SSO users get their second factor from the identity provider; `MFA_REQUIRED_ROLES` applies to password accounts only.
@@ -186,7 +186,7 @@ gh attestation verify oci://ghcr.io/yurtbayemre/sinnlos-cms:<version> --owner yu
 On the machine with the private key, decrypt the artifacts:
 
 - **Database:** `gpg --decrypt sinnlos-db-<ts>.dump.gz.gpg | gunzip > sinnlos.dump`. Copy the result to the host, into the checkout directory, or give `restore-db.sh` its full path.
-- **Uploads:** the uploads artifact is a tar of the `infra_cms_uploads` volume. Untar it into the volume while cms and web are stopped.
+- **Uploads:** the uploads artifact is a tar of the `infra_cms_uploads` volume. Untar it into the volume while cms and web are stopped: `docker run --rm -i -v infra_cms_uploads:/uploads alpine tar xf - -C /uploads < uploads.tar`.
 - **Configuration:** the `.env` artifact holds the `infra/.env` of that day.
 
 Then restore step by step as [OPERATIONS.md, Restore](OPERATIONS.md#restore) describes. It closes the site first, closes it again after the configuration restore, repeats every anonymisation that is newer than the backup ([data-protection.md](data-protection.md), section 5), and opens the site only after the search cleanup.
@@ -312,11 +312,9 @@ In practice you don't run that by hand — use the wrapper:
 infra/deploy.sh
 ```
 
-On the owner's host the checkout is `/home/bigemo/git/sinnlos` (this guide
-writes `/opt/sinnlos` for a generic install), and every deploy runs as the
-checkout owner `bigemo`, from a root shell as `sudo -u bigemo -H
-infra/deploy.sh`; `bigemo` needs docker access and the sudoers rule for
-the pre-deploy backup (step 1,
+Every deploy runs as the checkout owner (from a root shell as
+`sudo -u <owner> -H infra/deploy.sh`); the owner needs docker access and the
+sudoers rule for the pre-deploy backup (step 1,
 [Checking the backup permission](OPERATIONS.md#checking-the-backup-permission-production)).
 
 `deploy.sh` does, in order:

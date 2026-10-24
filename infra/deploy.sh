@@ -1296,7 +1296,7 @@ if "${COMPOSE[@]}" config --format json 2>/dev/null | site_closed; then
   echo "ERROR: the site is closed (SITE_ALLOW_CIDRS); open it before deploying." >&2
   echo "       A deploy is no step of the restricted restore (docs/OPERATIONS.md, \"Restore\"): its smoke" >&2
   echo "       checks would get 503 from this host. Finish the restore, remove SITE_ALLOW_CIDRS from" >&2
-  echo "       infra/.env, recreate the edge, and re-run." >&2
+  echo "       infra/.env, recreate the edge (Caddy) or the apps (Traefik), and re-run." >&2
   preflight_failed=1
 fi
 if checkout_revisions_dp_off; then

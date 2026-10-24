@@ -9,6 +9,7 @@ import {
   type CronStrapi,
   type CronTaskSpec,
 } from "./registry";
+import { reportRunFailure } from "./run-context";
 
 /**
  * LF03: the task table, the CRON_ENABLED switch and the wrapper every task
@@ -172,6 +173,20 @@ describe("guardedTask", () => {
     expect(log.info).toHaveBeenCalledWith("[cron] test-task took 250ms");
     expect(log.warn).not.toHaveBeenCalled();
     expect(log.error).not.toHaveBeenCalled();
+  });
+
+  it("marks the duration line of a run that reported failures", async () => {
+    const { strapi, log } = fakeStrapi();
+    let now = 1_000;
+    const task = guardedTask(
+      spec(async () => {
+        now += 40;
+        reportRunFailure(new Error("smtp down"), "a digest could not be sent");
+      }),
+      () => now,
+    );
+    await task({ strapi });
+    expect(log.info).toHaveBeenCalledWith("[cron] test-task took 40ms (with failures)");
   });
 
   it("passes the Strapi instance to the task", async () => {
