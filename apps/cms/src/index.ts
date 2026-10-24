@@ -39,6 +39,7 @@ import { assertNoOrgDrafts } from "./utils/org-dp-guard";
 import { backfillPollAudience } from "./utils/poll-audience-backfill";
 import { backfillRevisions } from "./utils/revision-backfill";
 import { assertNoRevisionDrafts } from "./utils/revision-dp-guard";
+import { assertUpgradeFloor } from "./utils/upgrade-floor";
 import { backfillTargetingFlags } from "./utils/targeting-flags-backfill";
 import { trainingEvidenceRetentionYears } from "./utils/training-evidence";
 
@@ -82,6 +83,10 @@ export type { RestrictedRelationGuardHost } from "./bootstrap/restricted-relatio
 
 export default {
   async register({ strapi }: { strapi: any }) {
+    // v0.29 upgrade floor: a database from before v0.25 (no
+    // up_users.oidc_subject) is upgraded through v0.28.x first. FIRST, before
+    // the draft guards and Strapi's sync touch it; see utils/upgrade-floor.ts.
+    await assertUpgradeFloor(strapi);
     // Decision 05: refuse to boot while department/team hold draft rows.
     // Strapi would delete them in the beforeSync hook right after register()
     // (draftAndPublish true -> false). FIRST, so nothing in register() runs

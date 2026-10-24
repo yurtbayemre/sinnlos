@@ -318,7 +318,7 @@ jobs:
 
       # infra/.env.example leaves the required secrets empty (compose
       # refuses to render without them), so dummy values fill them in.
-      - name: Compose files render (Caddy mode, Traefik mode, rollback overrides)
+      - name: Compose files render (Caddy mode, Traefik mode, search profile)
         run: |
           secrets="${RUNNER_TEMP}/compose-ci.env"
           cat > "${secrets}" <<'EOF'
@@ -361,10 +361,6 @@ jobs:
             exit 1
           fi
           grep -q 'required variable DOMAIN is missing a value' "${RUNNER_TEMP}/domain.err"
-          echo "Traefik mode with both rollback overrides"
-          DATETIME_LEGACY_ZONE=Europe/Berlin compose -f infra/docker-compose.traefik.yml \
-            -f infra/docker-compose.cms-legacy-tz.yml \
-            -f infra/docker-compose.web-legacy-tz.yml config -q
           echo "Optional search: meili only with its profile, on the project network only"
           compose -f infra/docker-compose.traefik.yml config --format json | jq -e '.services.meili == null'
           COMPOSE_PROFILES=search compose -f infra/docker-compose.traefik.yml config --format json | jq -e '

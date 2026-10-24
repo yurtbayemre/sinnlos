@@ -177,8 +177,9 @@ docker() {
       echo running >"${T}/apps"
       ;;
     config)
-      printf '{\n  "services": {\n    "cms": {\n      "environment": {\n        "ADMIN_JWT_SECRET": "a\\u003cb",\n        "JWT_SECRET": "%s"\n      }\n    }\n  }\n}\n' \
-        "$(stub_effective_jwt)"
+      # STUB_SITE_ALLOW: what the caddy service gets as SITE_ALLOW_CIDRS.
+      printf '{\n  "services": {\n    "caddy": {\n      "environment": {\n        "SITE_ALLOW_CIDRS": "%s"\n      }\n    },\n    "cms": {\n      "environment": {\n        "ADMIN_JWT_SECRET": "a\\u003cb",\n        "JWT_SECRET": "%s"\n      }\n    }\n  }\n}\n' \
+        "${STUB_SITE_ALLOW:-}" "$(stub_effective_jwt)"
       ;;
     exec)
       shift 2

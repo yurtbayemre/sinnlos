@@ -28,7 +28,8 @@
  *      releases;
  *   6. one step at a time per compose project (the deploy lock); the
  *      compose files are the ordered list of the project's web and cms
- *      containers (overlays such as the cms legacy-zone file kept), known
+ *      containers (overlays such as the Traefik file kept; a retired legacy-zone
+ *      override is refused with what to do), known
  *      files of the checkout, or RESTORE_COMPOSE_FILES, the same for every
  *      step of an attempt.
  *
@@ -192,7 +193,7 @@ function restoreSteps(steps: readonly Step[], mode: ShellMode): StepReport[] {
     SCRIPT.trimEnd(),
     "RESTORE_DB_EOF",
     'chmod 755 "$REPO/infra/restore-db.sh"',
-    'for f in docker-compose.yml docker-compose.traefik.yml docker-compose.cms-legacy-tz.yml; do : > "$REPO/infra/$f"; done',
+    'for f in docker-compose.yml docker-compose.traefik.yml; do : > "$REPO/infra/$f"; done',
     "printf 'DATABASE_PASSWORD=pw\\nJWT_SECRET=old-secret\\nAUTH_SECRET=keep-me\\n' > \"$REPO/infra/.env\"",
     'G=(git -C "$REPO" -c user.name=restore-test -c user.email=restore-test@example.invalid -c commit.gpgsign=false -c init.defaultBranch=main -c core.hooksPath=/dev/null)',
     '"${G[@]}" init -q && "${G[@]}" add -A && "${G[@]}" commit -q -m first',
@@ -208,7 +209,7 @@ function restoreSteps(steps: readonly Step[], mode: ShellMode): StepReport[] {
     fakeDump("older.dump", ["up_users 2"]),
     "STEP_CWD=",
     `STUB_LABEL_WEB="${TRAEFIK_LABEL}" STUB_LABEL_CMS="${TRAEFIK_LABEL}" STUB_LABEL_DB="${TRAEFIK_LABEL}"`,
-    "export T REPO STUB_LABEL_WEB STUB_LABEL_CMS STUB_LABEL_DB STUB_STOP_FAIL= STUB_UP_FAIL= STUB_ON_STOP= STUB_RM_AS_USER= STUB_KILL_AFTER_STARTED= STUB_PGDUMP_FAIL= STUB_CREATEDB_FAIL= STUB_RESTORE_FAIL= STUB_LOCK_HELD=",
+    "export T REPO STUB_LABEL_WEB STUB_LABEL_CMS STUB_LABEL_DB STUB_STOP_FAIL= STUB_UP_FAIL= STUB_ON_STOP= STUB_RM_AS_USER= STUB_KILL_AFTER_STARTED= STUB_PGDUMP_FAIL= STUB_CREATEDB_FAIL= STUB_RESTORE_FAIL= STUB_LOCK_HELD= STUB_SITE_ALLOW=",
     'S="$REPO/.git/sinnlos-deploy/restore"',
     HARNESS_STUBS,
   ];
@@ -452,6 +453,10 @@ describe.skipIf(!FAST)(`restore-db.sh: a good restore, step by step${FAST_TITLE}
     expect(r[4].apps).toBe("running");
     expect(r[4].startedJwtSum).toBe(await sha256(r[3].jwt[0]));
     expect(r[4].calls).toContainEqual(expect.stringMatching(/ up -d --no-build web cms$/));
+    // The site is open (no SITE_ALLOW_CIDRS): the reminder, before the start.
+    expect(r[4].stdout).toContain(
+      '  The site will be public. If anonymisations must be repeated, close it first (docs/OPERATIONS.md, "Restore").',
+    );
     expect(r[4].state.STARTED_AT).not.toBe("");
     expect(r[4].reserved).toBe(false);
     expect(r[4].stages).toEqual([]);
@@ -1270,8 +1275,9 @@ describe.skipIf(!FAST)(
   `restore-db.sh: order, the env-only pair, the lock and the compose files${FAST_TITLE}`,
   () => {
     let r: StepReport[] = [];
-    const legacy =
-      "$REPO/infra/docker-compose.yml,$REPO/infra/docker-compose.traefik.yml,$REPO/infra/docker-compose.cms-legacy-tz.yml";
+    const baseOnly = "$REPO/infra/docker-compose.yml";
+    /** As an app started with a legacy-zone override before v0.25 (retired in v0.29). */
+    const retired = "$REPO/infra/docker-compose.yml,$REPO/infra/docker-compose.cms-legacy-tz.yml";
     beforeAll(() => {
       r = restoreSteps(
         [
@@ -1279,8 +1285,8 @@ describe.skipIf(!FAST)(
           /* 1 */ { args: ["rotate-jwt"] },
           /* 2 */ { args: ["start", "--env-only"] },
           /* 3 */ { args: ["rotate-jwt", "--env-only"] },
-          /* 4 */ { args: ["start", "--env-only"] },
-          /* 5 */ { args: ["start", "--env-only"] },
+          /* 4 */ { before: "STUB_SITE_ALLOW=203.0.113.7/32", args: ["start", "--env-only"] },
+          /* 5 */ { before: "STUB_SITE_ALLOW=", args: ["start", "--env-only"] },
           /* 6 */ { args: ["prepare", "good.dump"] },
           /* 7 */ { args: ["start"] },
           /* 8 */ { args: ["apply"] },
@@ -1289,10 +1295,13 @@ describe.skipIf(!FAST)(
           /* 11 */ { args: ["start"] },
           /* 12 */ { before: "STUB_LOCK_HELD=1", args: ["rotate-jwt"] },
           /* 13 */ {
-            before: `STUB_LOCK_HELD=; STUB_LABEL_WEB="${legacy}" STUB_LABEL_CMS="${legacy}"`,
+            before: `STUB_LOCK_HELD=; STUB_LABEL_WEB="${baseOnly}" STUB_LABEL_CMS="${baseOnly}"`,
             args: ["rotate-jwt"],
           },
-          /* 14 */ { args: ["rotate-jwt", "--env-only"] },
+          /* 14 */ {
+            before: `STUB_LABEL_WEB="${TRAEFIK_LABEL}" STUB_LABEL_CMS="${TRAEFIK_LABEL}"`,
+            args: ["rotate-jwt", "--env-only"],
+          },
           /* 15 */ {
             before:
               'STUB_LABEL_WEB="$REPO/infra/docker-compose.yml,/tmp/cms-direct-start.yml" STUB_LABEL_CMS="$STUB_LABEL_WEB"',
@@ -1313,6 +1322,17 @@ describe.skipIf(!FAST)(
           /* 19 */ { args: ["prepare"] },
           /* 20 */ { args: ["rotate-jwt", "--now"] },
           /* 21 */ { args: ["status"], env: { COMPOSE_PROJECT: "staging" } },
+          /* 22 */ {
+            before: `STUB_LABEL_WEB="${retired}" STUB_LABEL_CMS="${retired}"`,
+            args: ["rotate-jwt", "--env-only"],
+          },
+          /* 23 */ {
+            args: ["rotate-jwt", "--env-only"],
+            env: {
+              RESTORE_COMPOSE_FILES:
+                "infra/docker-compose.yml:infra/docker-compose.web-legacy-tz.yml",
+            },
+          },
         ],
         MODE as ShellMode,
       );
@@ -1334,6 +1354,8 @@ describe.skipIf(!FAST)(
       expect(r[4].status, r[4].stderr).toBe(0);
       expect(r[4].apps).toBe("running");
       expect(r[4].envOnly.STARTED_AT).not.toBe("");
+      // Closed at the edge (SITE_ALLOW_CIDRS): no reminder.
+      expect(r[4].stdout).not.toContain("The site will be public");
       expect(r[5].status).toBe(1);
     });
 
@@ -1362,17 +1384,27 @@ describe.skipIf(!FAST)(
       );
     });
 
-    it("keeps every overlay of the running containers in their order, such as the cms legacy zone", () => {
-      // Before the review fix only the Traefik overlay was detected, and an
-      // up of a pre-repair cms would have dropped its legacy-zone file.
+    it("keeps every overlay of the running containers in their order", () => {
       expect(r[14].status, r[14].stderr).toBe(0);
       const c = r[14].checkout;
       expect(r[14].envOnly.COMPOSE_FILES).toBe(
-        `${c}/infra/docker-compose.yml,${c}/infra/docker-compose.traefik.yml,${c}/infra/docker-compose.cms-legacy-tz.yml`,
+        `${c}/infra/docker-compose.yml,${c}/infra/docker-compose.traefik.yml`,
       );
       expect(r[14].calls).toContainEqual(
-        `docker compose -p infra -f ${c}/infra/docker-compose.yml -f ${c}/infra/docker-compose.traefik.yml -f ${c}/infra/docker-compose.cms-legacy-tz.yml config --format json cms`,
+        `docker compose -p infra -f ${c}/infra/docker-compose.yml -f ${c}/infra/docker-compose.traefik.yml config --format json cms`,
       );
+    });
+
+    it("refuses a retired legacy-zone override, from the containers or named, saying what to do", () => {
+      for (const n of [22, 23]) {
+        expect(r[n].status, `step ${n}`).toBe(1);
+        expect(stopLine(r[n]), `step ${n}`).toContain(
+          "is a retired compose file (the legacy-zone override of releases before v0.25, gone since v0.29): recreate web and cms with the supported files first",
+        );
+        expect(r[n].calls, `step ${n}`).not.toContainEqual(expect.stringContaining(" config "));
+      }
+      expect(stopLine(r[22])).toContain("/infra/docker-compose.cms-legacy-tz.yml is a retired");
+      expect(stopLine(r[23])).toContain("/infra/docker-compose.web-legacy-tz.yml is a retired");
     });
 
     it("refuses an unknown compose file, web and cms that differ, and containers that tell nothing", () => {

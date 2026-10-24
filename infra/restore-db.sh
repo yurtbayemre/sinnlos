@@ -92,9 +92,9 @@ set +x # first: never trace this script (rotate-jwt handles a secret), also unde
 #                          checkout or absolute), when the project's containers do
 #                          not tell; unset: the ordered config_files label of its web
 #                          and cms containers, each a known compose file of this
-#                          checkout's infra/ (docker-compose.yml first, then any of
-#                          docker-compose.traefik.yml, docker-compose.cms-legacy-tz.yml,
-#                          docker-compose.web-legacy-tz.yml)
+#                          checkout's infra/ (docker-compose.yml first, then
+#                          docker-compose.traefik.yml); the legacy-zone overrides of
+#                          releases before v0.25 are retired and refused
 #   SINNLOS_CHECKOUT       the checkout this script lives in
 #   DEPLOY_STATE_DIR       <common git dir>/sinnlos-deploy, as infra/deploy.sh: its lock,
 #                          and restore/ with the attempt state and the reservation
@@ -180,7 +180,11 @@ CHECKOUT="$(cd "${SINNLOS_CHECKOUT:-${SCRIPT_DIR}/..}" && pwd)"
 INFRA_DIR="${CHECKOUT}/infra"
 ENV_FILE="${INFRA_DIR}/.env"
 BACKUP_DIR="${INFRA_DIR}/backups"
-KNOWN_COMPOSE=(docker-compose.yml docker-compose.traefik.yml docker-compose.cms-legacy-tz.yml docker-compose.web-legacy-tz.yml)
+KNOWN_COMPOSE=(docker-compose.yml docker-compose.traefik.yml)
+# The legacy-zone overrides of releases before v0.25, gone with v0.29: apps
+# still started with one are recreated with the supported files first (or an
+# attempt that started with one finishes from the old checkout).
+RETIRED_COMPOSE=(docker-compose.cms-legacy-tz.yml docker-compose.web-legacy-tz.yml)
 
 PROJECT="${COMPOSE_PROJECT:-infra}"
 if ! [[ "${PROJECT}" =~ ^[a-z0-9][a-z0-9_-]*$ ]]; then
@@ -430,6 +434,17 @@ valid_compose_list() { # <list>
   for f in "${files[@]}"; do [[ "${f}" == /* ]] || return 1; done
 }
 
+# Says why a retired compose file cannot be used, and fails; true for any other.
+not_retired() { # <path>
+  local k
+  for k in "${RETIRED_COMPOSE[@]}"; do
+    if [[ "${1##*/}" == "${k}" ]]; then
+      echo "${1} is a retired compose file (the legacy-zone override of releases before v0.25, gone since v0.29): recreate web and cms with the supported files first (infra/deploy.sh, docs/UPGRADE.md), or finish a restore attempt that started with it from the checkout of that release"
+      return 1
+    fi
+  done
+}
+
 # The project's compose files, in order, comma-separated: RESTORE_COMPOSE_FILES,
 # or the config_files label of its web and cms containers (which must agree;
 # the db container's when neither exists), each a known compose file of this
@@ -442,6 +457,7 @@ detect_compose_files() {
     for f in "${files[@]}"; do
       [[ -n "${f}" ]] || continue
       if [[ "${f}" != /* ]]; then f="${CHECKOUT}/${f}"; fi
+      not_retired "${f}" || return 1
       if [[ "${f}" == *[,[:cntrl:]]* || -L "${f}" || ! -f "${f}" ]]; then
         echo "RESTORE_COMPOSE_FILES names ${f}, which is no regular file (or holds a comma)"
         return 1
@@ -474,6 +490,7 @@ detect_compose_files() {
     infra_real="$(readlink -f -- "${INFRA_DIR}")"
     IFS=',' read -r -a files <<<"${raw}"
     for f in "${files[@]}"; do
+      not_retired "${f}" || return 1
       base="${f##*/}"
       known=0
       for k in "${KNOWN_COMPOSE[@]}"; do if [[ "${base}" == "${k}" ]]; then known=1; fi; done
@@ -552,6 +569,35 @@ db_exists() {
     <<<"SELECT count(*) FROM pg_database WHERE datname = :'db';")" || return 1
   [[ "${n}" == 0 || "${n}" == 1 ]] || return 1
   printf '%s\n' "${n}"
+}
+
+# v0.29 restore privacy: SITE_ALLOW_CIDRS closes the whole site at the edge
+# for a restricted restore (docs/OPERATIONS.md, "Restore"): the caddy service
+# gets it in its environment, the Traefik routers as the sinnlos-site-allow
+# ipallowlist. Reads `compose config --format json` on stdin; true (0) when a
+# value it renders is a non-empty list without an open range (one ending in
+# /0, as 0.0.0.0/0 and ::/0, the defaults).
+site_closed() {
+  local values value entry open closed=1
+  local -a entries
+  values="$(awk '
+    /^[ \t]*"(SITE_ALLOW_CIDRS|traefik\.http\.middlewares\.sinnlos-site-allow\.ipallowlist\.sourcerange)": / {
+      v = $0; sub(/^[ \t]*"[^"]*":[ \t]*/, "", v); sub(/,[ \t]*$/, "", v)
+      if (v == "null") next
+      if (length(v) >= 2 && substr(v, 1, 1) == "\"" && substr(v, length(v), 1) == "\"") v = substr(v, 2, length(v) - 2)
+      print v
+    }')"
+  while IFS= read -r value; do
+    value="${value//[[:space:]]/}"
+    [[ -n "${value}" ]] || continue
+    open=0
+    IFS=',' read -r -a entries <<<"${value}"
+    for entry in "${entries[@]}"; do
+      if [[ "${entry}" == */0 ]]; then open=1; fi
+    done
+    if ((!open)); then closed=0; fi
+  done <<<"${values}"
+  return "${closed}"
 }
 
 stop_apps() { compose stop web cms </dev/null; }
@@ -1007,6 +1053,11 @@ cmd_start() {
   require_env_file
   if ! effective="$(effective_jwt_sum)" || [[ "${effective}" != "${sum}" ]]; then
     stop "Compose would not hand the cms the rotated JWT_SECRET (infra/.env or a compose file changed since rotate-jwt): run rotate-jwt again; web and cms not started"
+  fi
+  # Advisory only: a restore that must repeat anonymisations runs with the
+  # site closed first (docs/OPERATIONS.md, "Restore").
+  if ! compose config --format json </dev/null 2>/dev/null | site_closed; then
+    note "The site will be public. If anonymisations must be repeated, close it first (docs/OPERATIONS.md, \"Restore\")."
   fi
   PHASE_NOTE="web and cms may not be (all) up: run start again"
   if ! compose up -d --no-build web cms </dev/null; then

@@ -82,11 +82,6 @@ services:
       # times, all-day events) use APP_TIME_ZONE, never the process zone.
       TZ: UTC
       APP_TIME_ZONE: ${APP_TIME_ZONE:-Europe/Berlin}
-      # Only for a database written by a cms before the datetime contract:
-      # the one-time repair reads them (see infra/.env.example). Fresh
-      # installs leave both empty.
-      DATETIME_LEGACY_ZONE: ${DATETIME_LEGACY_ZONE:-}
-      DATETIME_LEGACY_UTC_UNTIL: ${DATETIME_LEGACY_UTC_UNTIL:-}
       HOST: 0.0.0.0
       PORT: 1337
       # Secrets fail fast when unset/empty (FX13); the cms additionally
@@ -266,10 +261,7 @@ services:
       # Datetime contract (docs/DEPLOYMENT.md §3.10): since its datetime port
       # (phase 2) the web renders and computes every date in APP_TIME_ZONE
       # explicitly, so its process runs in UTC like the cms (the image sets
-      # it too). A web image from BEFORE that port renders in its process
-      # zone and refuses to start in UTC: roll back to one only with
-      # infra/docker-compose.web-legacy-tz.yml on top (infra/deploy.sh prints
-      # it).
+      # it too).
       TZ: UTC
       # Business and display zone: "today", event days, ad expiry, poll
       # deadlines ("closes on D" = D 23:59:59 there), every rendered date;

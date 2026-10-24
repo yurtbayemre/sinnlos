@@ -9,9 +9,9 @@
 # the project and $T go on exit.
 : "${T:?}" "${REPO:?}"
 P="rs-restore-$$-${RANDOM}"
-# As a pre-repair production host after a rollback: the cms runs with the
-# legacy-zone overlay, which every restore step must keep.
-C=(docker compose -p "${P}" -f "${REPO}/infra/docker-compose.yml" -f "${REPO}/infra/docker-compose.cms-legacy-tz.yml")
+# As on a host behind Traefik: the cms runs with an overlay, which every
+# restore step must keep.
+C=(docker compose -p "${P}" -f "${REPO}/infra/docker-compose.yml" -f "${REPO}/infra/docker-compose.traefik.yml")
 cleanup() {
   "${C[@]}" down -v --remove-orphans >/dev/null 2>&1
   rm -rf "${T}"
@@ -44,8 +44,8 @@ services:
     image: alpine:3.20
     command: ["sleep", "86400"]
 YML
-: >"${REPO}/infra/docker-compose.traefik.yml"
-printf 'services:\n  cms:\n    environment:\n      TZ: Europe/Berlin\n' >"${REPO}/infra/docker-compose.cms-legacy-tz.yml"
+overlay() { printf 'services:\n  cms:\n    environment:\n      TZ: Europe/Berlin\n' >"${REPO}/infra/docker-compose.traefik.yml"; }
+overlay
 printf 'DATABASE_PASSWORD=pw\nJWT_SECRET=old-secret\n' >"${REPO}/infra/.env"
 G=(git -C "${REPO}" -c user.name=restore-test -c user.email=restore-test@example.invalid
   -c commit.gpgsign=false -c init.defaultBranch=main -c core.hooksPath=/dev/null)
@@ -153,11 +153,11 @@ facts d2
 # E. a compose file that pins the cms's JWT_SECRET, an exported JWT_SECRET,
 # and the env-only pair
 printf 'services:\n  cms:\n    environment:\n      JWT_SECRET: pinned-by-override\n' >"${REPO}/infra/docker-compose.traefik.yml"
-(cd "${T}" && COMPOSE_PROJECT="${P}" RESTORE_COMPOSE_FILES=infra/docker-compose.yml:infra/docker-compose.cms-legacy-tz.yml:infra/docker-compose.traefik.yml \
+(cd "${T}" && COMPOSE_PROJECT="${P}" RESTORE_COMPOSE_FILES=infra/docker-compose.yml:infra/docker-compose.traefik.yml \
   bash "${REPO}/infra/restore-db.sh" rotate-jwt --env-only) >"${T}/out" 2>"${T}/err"
 echo "@@e.pinned.rc $?"
 sed "s/^/@@e.pinned.err /" "${T}/err"
-: >"${REPO}/infra/docker-compose.traefik.yml"
+overlay
 run e.rotate rotate-jwt --env-only
 (cd "${T}" && JWT_SECRET=old-secret COMPOSE_PROJECT="${P}" bash "${REPO}/infra/restore-db.sh" start --env-only) >"${T}/out" 2>"${T}/err"
 echo "@@e.exported.rc $?"

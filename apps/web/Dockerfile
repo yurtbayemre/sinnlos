@@ -38,15 +38,12 @@ WORKDIR /app/apps/web
 RUN pnpm build && mkdir -p public
 
 FROM node-base AS runner
-# D-SESSION-01: this web keeps the Strapi JWT server-side (never on
-# /api/auth/session). infra/deploy.sh demands a JWT_SECRET rotation when the
-# running web lacks this label, i.e. when it still exposed the JWTs.
+# Kept for infra/deploy.sh before v0.29, which a checkout rolled back to such
+# a release runs: this web keeps the Strapi JWT server-side (D-SESSION-01;
+# without the label that deploy.sh demands a JWT_SECRET rotation), and it
+# renders every date in APP_TIME_ZONE, so it runs in UTC (datetime contract,
+# phase 2).
 LABEL org.sinnlos.strapi-jwt="server-only"
-# Datetime contract, phase 2: this web renders every date with an explicit
-# zone (APP_TIME_ZONE), so it runs in UTC like the cms. The label tells
-# infra/deploy.sh's rollback hint that a :rollback web image with it needs no
-# legacy-zone override; one without it predates the port and refuses to
-# start in UTC (infra/docker-compose.web-legacy-tz.yml).
 LABEL org.sinnlos.datetime="zone-explicit"
 WORKDIR /app
 ENV NODE_ENV=production

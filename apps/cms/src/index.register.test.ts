@@ -89,7 +89,11 @@ function datetimeHost() {
     // No API routers: nothing for the FEATURES_OFF decoration to walk.
     apis: {},
     log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
-    db: { dialect: { client: "sqlite" } },
+    // A fresh database for the upgrade floor guard (no up_users yet).
+    db: {
+      dialect: { client: "sqlite" },
+      getSchemaConnection: () => ({ hasTable: async () => false, hasColumn: async () => false }),
+    },
     documents: { use: vi.fn() },
     // users-permissions' verify (strategies/users-permissions.js): the
     // request's ability decides; no auth or no ability, no grant.
@@ -576,7 +580,7 @@ describe("org draft guard in register() (decision 05)", () => {
       contentAPI: { sanitize: { query: coreSanitizeQuery } },
       db: {
         dialect: { client: "sqlite" },
-        getSchemaConnection: () => ({ hasTable: async () => true }),
+        getSchemaConnection: () => ({ hasTable: async () => true, hasColumn: async () => true }),
         getConnection: (table: string) => ({
           whereNull: () => ({
             count: async () => {
