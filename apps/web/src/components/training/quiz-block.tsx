@@ -176,7 +176,7 @@ export function QuizBlock({
                         name={`quiz-${lessonDocumentId}-${qi}`}
                         checked={isPicked}
                         onChange={() => pick(qi, oi)}
-                        className="h-4 w-4 shrink-0 accent-primary outline-hidden"
+                        className="h-4 w-4 shrink-0 accent-primary-text outline-hidden"
                       />
                       <span>{option}</span>
                     </span>
