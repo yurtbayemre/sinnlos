@@ -1,13 +1,14 @@
 # Road to v1.0.0
 
-Status: 2026-10-23, owner-approved. Baseline was v0.25.0 (`0c26656e`). This file lists **everything that still has to be done before v1.0.0**. Each item gets ticked when its release ships.
+Status: 2026-10-24, owner-approved. Baseline was v0.25.0 (`0c26656e`). This file lists **everything that still has to be done before v1.0.0**. Each item gets ticked when its release ships.
 
-**Current state (2026-10-23):**
+**Current state (2026-10-24):**
 
 - **v0.26.0 "portable"** is shipped and live since 2026-10-23 03:26 CEST.
 - **v0.27.0 "accounts"** is shipped and live since 2026-10-23 12:47 CEST; the owner's browser check passed.
 - **v0.28.0 "data protection"** is shipped and live since 2026-10-23 18:06 CEST. The data inventory for the data-protection officer and the works council is `docs/data-protection.md`.
-- **Next is v0.29 "polish"** (below), then v1.0.0-rc.1.
+- **v0.29.0 "polish"** is shipped and live since 2026-10-24 09:55 CEST: branding by config, the accessibility pass, `/healthz` and `infra/ops-check.sh`, the closed-door restore, the v0.25 upgrade floor and the docs split (INSTALL, UPGRADE, OPERATIONS, SSO).
+- **Next is v1.0.0-rc.1** (below). v1.0.0 itself waits for the lawyer review (S5 and the GHCR publication; owner decision 2026-10-24).
 
 ## What v1.0.0 means
 
@@ -51,6 +52,15 @@ The owner rule still applies: **no bloat**. Every item below has the smallest sc
 | Poll voter links (v0.28)                     | **Removed 30 days after a poll closes**; the results stay the same and the poll can no longer be reopened. Polls without an end date keep the links while they exist.                                                                                                                                                                                                                                                                                                                             |
 | Read-confirmation retention (v0.28)          | **No age rule.** A confirmation stays while its document exists.                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | People who left, in training reports (v0.28) | **Admins only.** Department heads and team leads see their current scope.                                                                                                                                                                                                                                                                                                                                                                                                                         |
+
+## Owner decisions (2026-10-24)
+
+| Question                       | Decision                                                                                                                                                                                              |
+| ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Branding (v0.29, S1)           | **Four optional keys** (`SITE_NAME`, `SITE_LOGO_URL`, `SITE_ICON_URL`, `SITE_ACCENT`); unset keeps the default look. The footer always names sinnlos and its source. Logo and icon by URL, no upload. |
+| Docs (v0.29, S4)               | INSTALL, UPGRADE, OPERATIONS and SSO; DEPLOYMENT.md a pointer page; the history in `docs/archive/`. **architecture.md is split too.**                                                                 |
+| Alerts on the owner's instance | **Both:** Uptime Kuma (`/healthz` and an `ops-check.sh` push monitor) and cron mail.                                                                                                                  |
+| v1.0.0 and the lawyer          | **v1.0.0 waits for the lawyer review** (S5 and the GHCR publication). The release candidate runs on the owner's instance until then.                                                                  |
 
 ## Must be done before v1.0.0
 
@@ -129,26 +139,30 @@ The owner rule still applies: **no bloat**. Every item below has the smallest sc
   - Every module is on by default.
   - A module that is switched off disappears from the navigation, the dashboard and the digest, and the cms refuses its routes. Its data stays.
 
-### Polish and release candidate (v0.29)
+### Polish and release candidate (v0.29) — v0.29.0 shipped (2026-10-24); the release candidate is open
 
-- [ ] **S1 Branding by config.** Product name, logo and favicon, and one accent colour. Today the name is hard-coded in the title, sidebar, digest subject and welcome text. No theme builder.
-- [ ] **S4 Docs split.** Today README.md is about 108 KB, security.md about 116 KB and DEPLOYMENT.md about 867 KB. Target: one page each for INSTALL, UPGRADE and OPERATIONS, plus an archive of the batch history. ROADMAP.md shrinks to a status list.
-- [ ] **S6 Accessibility pass.** Keyboard, focus, screen reader and zoom on sign-in, search, navigation, authoring and training. Fix real blockers; claim no certification.
-- [ ] **S8 Readiness check** through web → cms → db, plus documented alerts for backup age, a failed cron and disk space.
-- [ ] **S9 Documentation**:
+- [x] **S1 Branding by config.** Product name, logo and favicon, and one accent colour. Today the name is hard-coded in the title, sidebar, digest subject and welcome text. No theme builder.
+- [x] **S4 Docs split.** Today README.md is about 108 KB, security.md about 116 KB and DEPLOYMENT.md about 867 KB. Target: one page each for INSTALL, UPGRADE and OPERATIONS, plus an archive of the batch history. ROADMAP.md shrinks to a status list.
+- [x] **S6 Accessibility pass.** Keyboard, focus, screen reader and zoom on sign-in, search, navigation, authoring and training. Fix real blockers; claim no certification.
+- [x] **S8 Readiness check** through web → cms → db, plus documented alerts for backup age, a failed cron and disk space.
+- [x] **S9 Documentation**:
   - AD/LDAP through Keycloak or authentik.
   - MFA through the IdP for SSO users.
   - The whistleblower channel is a link and is not built in.
   - Team leads see their whole department's training reports.
-- [ ] **Remove the pre-v0.25 upgrade machinery from the main path** (decision 5). `DATETIME_LEGACY_*` and the old migration runbooks move to the archive.
-- [ ] **Final rehearsal** on the final schema and authentication: fresh install, upgrade from v0.25.x and restore (including re-applied anonymisations). Then v1.0.0-rc.1, then v1.0.0 with all package versions at 1.0.0.
+- [x] **Remove the pre-v0.25 upgrade machinery from the main path** (decision 5). `DATETIME_LEGACY_*` and the old migration runbooks move to the archive.
+- [x] **Final rehearsal** on the final schema and authentication: fresh install, upgrade from v0.25.x and restore (including re-applied anonymisations). Done 2026-10-24 on a fresh host (Caddy) and on staging (Traefik).
+- [ ] **v1.0.0-rc.1:** all package versions at 1.0.0-rc.1, the immutable images validated, then at least one week on the owner's instance with backup, cron-status and restore evidence.
+- [ ] **v1.0.0:** after the lawyer review (S5 and the GHCR publication), all package versions at 1.0.0.
 
 ### Open owner and ops items (not code)
 
 - [ ] From 2026-12-26: DROP `datetime_migration_audit` and delete the pre-datetime dump on the test instance (go given; via the deploy session).
 - [ ] Browser check of Meilisearch on the test instance (⌘K typo, a compound-word part, department news hidden, guests without news).
 - [ ] Entra sign-in tested against a real tenant (issue #20).
-- [ ] Remove the merged worktrees and leftover folders on the development machine.
+- [ ] Remove the leftover folders on the development machine (the merged worktrees are gone since 2026-10-23).
+- [ ] Alerts on the owner's instance: an Uptime Kuma monitor on `/healthz` (no redirects) and a push monitor, `infra/ops-check.sh` hourly from root's crontab, and the host's mail relay repointed before cron mail is used.
+- [ ] The owner's accessibility check in a real browser: keyboard only with MFA, a screen reader, 200 % zoom.
 - [ ] A lawyer checks the CLA text, the two Strapi Enterprise packages in the cms image, and the review list of packages without a license file (printed by `scripts/third-party-notices.mjs` in the image build). GHCR publication waits for it.
 
 ## After v1.0.0
