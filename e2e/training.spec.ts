@@ -80,7 +80,8 @@ test("training-quiz-completion", async ({ page }) => {
     await check.click();
     await expect(main.getByText("All correct!", { exact: true })).toBeVisible();
     await complete.click();
-    await expect(main.getByText(/^Completed(?: on .+)?$/)).toBeVisible();
+    // S6: without a reload, the refreshed completion takes the focus the button had.
+    await expect(main.getByText(/^Completed on .+/)).toBeFocused();
     await expect(main.getByRole("alert")).toHaveCount(0);
     await page.reload();
     await expect(main.getByText(/^Completed on .+/)).toBeVisible();

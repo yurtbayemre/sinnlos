@@ -613,6 +613,8 @@
     "repeatEvery": "{count, plural, one {Repeat every month} other {Repeat every # months}}",
     "renewCourse": "Renew now",
     "lessonRenew": "renew",
+    "lessonDoneSr": "completed",
+    "lessonOpenSr": "not completed",
     "renewSoon": "Your completion expires on {date}. You can complete this lesson again now.",
     "renewOverdue": "Your completion expired on {date}. Please complete this lesson again.",
     "reload": "Reload"

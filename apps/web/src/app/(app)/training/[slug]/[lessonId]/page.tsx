@@ -114,13 +114,13 @@ export default async function LessonPage({
         </p>
       )}
 
-      {/* A refreshed question set or mode must clear feedback from the previous render. */}
+      {/* A refreshed question set, mode or version must clear feedback from the previous
+          render. The completion itself does not remount, so focus can follow it (S6). */}
       <LessonCompletion
         key={JSON.stringify([
           lesson.documentId,
           lesson.quiz,
           lesson.course.completionMode,
-          completedAtIso,
           lesson.version,
         ])}
         quiz={lesson.quiz}

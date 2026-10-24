@@ -139,9 +139,15 @@ export default async function CoursePage({ params }: Params) {
                 <span className="text-sm">
                   <span className="mr-2 text-muted-foreground">{index + 1}.</span>
                   {lesson.title}
-                  {renew && (
+                  {renew ? (
                     <span className="ml-2 text-xs text-amber-700 dark:text-amber-400">
                       {t("lessonRenew")}
+                    </span>
+                  ) : (
+                    // The icon alone carries the state; say it in words too (S6).
+                    <span className="sr-only">
+                      {", "}
+                      {isDone ? t("lessonDoneSr") : t("lessonOpenSr")}
                     </span>
                   )}
                 </span>
