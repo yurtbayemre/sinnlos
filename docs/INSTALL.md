@@ -189,14 +189,7 @@ On the machine with the private key, decrypt the artifacts:
 - **Uploads:** the uploads artifact is a tar of the `infra_cms_uploads` volume. Untar it into the volume while cms and web are stopped.
 - **Configuration:** the `.env` artifact holds the `infra/.env` of that day.
 
-Then follow [OPERATIONS.md, Restore](OPERATIONS.md#restore), in this order:
-
-1. Close the site.
-2. Run `infra/restore-db.sh prepare sinnlos.dump`.
-3. Restore the uploads and the configuration while the apps are stopped.
-4. Run `apply`, `rotate-jwt` and `start`. The rotation signs everyone out.
-5. Repeat every anonymisation that is newer than the backup ([data-protection.md](data-protection.md), section 5).
-6. Open the site again.
+Then restore step by step as [OPERATIONS.md, Restore](OPERATIONS.md#restore) describes. It closes the site first, closes it again after the configuration restore, repeats every anonymisation that is newer than the backup ([data-protection.md](data-protection.md), section 5), and opens the site only after the search cleanup.
 
 The backup and restore tools in detail: [OPERATIONS.md, Backup & Restore](OPERATIONS.md#backup--restore).
 
@@ -362,9 +355,8 @@ the pre-deploy backup (step 1,
    without it `sudo -n` refuses and the deploy stops here. sudo applies
    the **last** matching rule, so the drop-in must be the last rule that
    matches this command for that user
-   ([Checking the backup permission](OPERATIONS.md#checking-the-backup-permission-production)). `BACKUP_RUN`
-   names another command, which then runs without `sudo` (the tests use
-   it). Any other compose project (a staging copy) keeps
+   ([Checking the backup permission](OPERATIONS.md#checking-the-backup-permission-production)). `DEPLOY_BACKUP_NO_SUDO=1`
+   runs `BACKUP_RUN` without `sudo` (the tests use it). Any other compose project (a staging copy) keeps
    `infra/backup/pg-backup.sh` with `SINNLOS_BACKUP_KIND=predeploy` into its
    own `SINNLOS_BACKUP_DIR`: its artifacts are named `…-predeploy…` and kept
    apart from the nightly ones, [OPERATIONS.md, Automated daily backups (cron)](OPERATIONS.md#automated-daily-backups-cron).
@@ -441,7 +433,7 @@ share: a second clone that deploys or restores the same project must point
 `DEPLOY_STATE_DIR` at that same directory, or the two neither share the
 lock nor the rollback target, and a deploy from one does not see a restore
 in the other), `DEPLOY_KEEP_TAGS` and `BACKUP_RUN`
-(`/usr/local/sbin/backup-run`, through `sudo -n`). A second compose project (a
+(unset: `infra/backup/pg-backup.sh`; set, for example to `/usr/local/sbin/backup-run`, it runs through `sudo -n`). A second compose project (a
 staging copy) needs its own backup dir, smoke URL and edge: `deploy.sh`
 refuses a project other than `infra` without `SMOKE_URL` and
 `SINNLOS_BACKUP_DIR` (passed on to the pre-deploy backup, whose
@@ -463,11 +455,6 @@ The preflight fails (naming keys, never values) when:
 - `SMTP_HOST`/`SMTP_USER`/`SMTP_PASS` are set, `DIGESTS_DISABLED` is off
   (read as the cms reads it: `1`, `true`, `yes` or `on`, any case, switch it
   on), and `DIGEST_FROM` or `PUBLIC_WEB_URL` is empty;
-- `JWT_SECRET` must be rotated: the running `infra-web-1` lacks the image
-  label `org.sinnlos.strapi-jwt=server-only` (i.e. it is a web from before
-  2026-09-24 that handed users their Strapi JWT) and the `JWT_SECRET` about to
-  be deployed equals the one the running cms uses. A fresh install (no
-  running web/cms) skips this check;
 - `ENTRA_ENABLED=1` and an Entra setting the cms or the web would refuse to
   start with: `MS_TENANT_ID` or `MS_CLIENT_ID` not a GUID (`common` and
   domain names included), `MS_CLIENT_SECRET` empty, `ENTRA_EXCHANGE_SECRET`

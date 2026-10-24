@@ -151,11 +151,11 @@ export async function reportOidcStatus(
   if (found.ok === false) {
     if (found.reason === "mismatch") {
       throw new Error(
-        `[oidc] ${found.detail}. Fix OIDC_ISSUER or the identity provider (docs/SSO.md, "OIDC sign-in"); refusing to start with OIDC_ENABLED=1.`,
+        `[oidc] ${found.detail}. Fix OIDC_ISSUER or the identity provider (docs/SSO.md, "OIDC sign-in (Keycloak, authentik, Zitadel)"); refusing to start with OIDC_ENABLED=1.`,
       );
     }
     log.error(
-      `[oidc] discovery failed: ${found.detail}. Sign-ins answer 503 until it works (docs/SSO.md, "OIDC sign-in").`,
+      `[oidc] discovery failed: ${found.detail}. Sign-ins answer 503 until it works (docs/SSO.md, "OIDC sign-in (Keycloak, authentik, Zitadel)").`,
     );
     return;
   }

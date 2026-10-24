@@ -42,6 +42,7 @@ behind most rules (its §5 conventions, kept in
   - [Course reports](#course-reports)
 - [Upload hardening](#upload-hardening)
 - [Frontend role gating](#frontend-role-gating)
+- [Accessibility](#accessibility)
 - [Tests that pin these rules](#tests-that-pin-these-rules)
 
 ## Principles
@@ -420,11 +421,11 @@ per-user token version so that a password change can end the older ones:
   `[auth] tokenVersion dropped …`. Only the atomic bump writes it, so it
   never goes down and a revoked JWT never becomes valid again.
 - **Rollback.** A cms from before batch 13 ignores the claim and would
-  accept every revoked JWT again under the same `JWT_SECRET`. A rollback of
-  the cms to such an image therefore rotates `JWT_SECRET` first (owner
-  decision 2026-10-12; everyone signs in again once). The rollback commands
-  `infra/deploy.sh` prints after a failed deploy check the target image for
-  the token version and demand the rotation when it lacks it
+  accept every revoked JWT again under the same `JWT_SECRET`. Such images
+  predate v0.25, which `infra/deploy.sh` no longer offers as a rollback
+  target ([UPGRADE.md, Rollback](./UPGRADE.md#rollback)); a rollback to one
+  by hand rotates `JWT_SECRET` first (owner decision 2026-10-12; everyone
+  signs in again once)
   ([batch 13 rollback](./archive/deployment-history.md#deploying-batch-13-2026-10-12)).
   The same holds for every **restore** of a database dump or of the
   backed-up `infra/.env`, also with the same images: the dump brings back
@@ -1556,6 +1557,13 @@ account_, the dashboard leaves those sections out, the navigation hides
 them, and the ⌘K search skips them. The admin area lives under
 **`/manage`**: `/admin` is the Strapi admin panel, routed to the cms by the
 reverse proxy.
+
+## Accessibility
+
+Not a security rule, but tested the same way: the browser tests check the
+main screens for WCAG 2.1 A/AA with axe, and a manual keyboard and zoom
+pass covers the same paths. This is no conformance claim
+([README, Accessibility](../README.md#accessibility)).
 
 ## Tests that pin these rules
 

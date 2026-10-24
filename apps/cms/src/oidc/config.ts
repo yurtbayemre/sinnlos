@@ -75,7 +75,9 @@ export class OidcConfigError extends Error {
     super(
       `[oidc] OIDC_ENABLED=1, but the OIDC configuration is invalid: ${issues
         .map(({ variable, message }) => `${variable} ${message}`)
-        .join("; ")}. Fix infra/.env (docs/SSO.md, "OIDC sign-in"), or unset OIDC_ENABLED.`,
+        .join(
+          "; ",
+        )}. Fix infra/.env (docs/SSO.md, "OIDC sign-in (Keycloak, authentik, Zitadel)"), or unset OIDC_ENABLED.`,
     );
     this.name = "OidcConfigError";
     this.issues = issues;

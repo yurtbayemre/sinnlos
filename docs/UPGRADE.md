@@ -13,7 +13,7 @@ How to move an installation to a newer release. A new installation: [INSTALL.md]
 
 What changed for the operator between v0.25 and this release. The release notes below have the details.
 
-1. **`infra/deploy.env`** (v0.26): create it (mode 600) from [`infra/deploy.env.example`](../infra/deploy.env.example) before the first deploy: `COMPOSE_PROJECT`, `DEPLOY_EDGE=traefik` on a host Traefik, `SINNLOS_BACKUP_DIR` (or `BACKUP_RUN`), and `PASSWORDS_FILE` for live-smoke. Without it `infra/deploy.sh` refuses before it changes anything.
+1. **Host settings** (v0.26): `COMPOSE_PROJECT`, `DEPLOY_EDGE=traefik` on a host Traefik, `SINNLOS_BACKUP_DIR` (or `BACKUP_RUN`) and `PASSWORDS_FILE` for live-smoke, in `infra/deploy.env` (mode 600, from [`infra/deploy.env.example`](../infra/deploy.env.example)) or in the deploy user's environment, before the first deploy. A host Traefik without `DEPLOY_EDGE=traefik`, or no backup directory, makes `infra/deploy.sh` refuse before it changes anything.
 2. **Strapi admin panel** (v0.26): only clients from `ADMIN_ALLOW_CIDRS` reach it; empty closes it from outside. `infra/admin-tunnel.sh` opens it through SSH ([INSTALL.md](INSTALL.md), section 8).
 3. **Analytics** (v0.26): loaded only when `PLAUSIBLE_SCRIPT_URL` and `PLAUSIBLE_DOMAIN` are set.
 4. **Operator links** (v0.26): `PRIVACY_URL`, `IMPRINT_URL` and, optionally, `WHISTLEBLOWING_URL`.
@@ -32,7 +32,7 @@ smoke checks and the SHA tags of the last-known-good deploy in one shot
 (from a root shell `sudo -iu bigemo`):
 
 ```bash
-cd /opt/sinnlos && git pull --ff-only    # owner's host: /home/bigemo/git/sinnlos
+cd /opt/sinnlos && git fetch --tags && git checkout v<new version>   # a checkout that follows main: git pull --ff-only
 infra/deploy.sh
 ```
 
@@ -47,7 +47,7 @@ docker tag "$(docker inspect -f '{{.Image}}' infra-cms-1)" infra-cms:manual-prev
 /opt/sinnlos/infra/backup/pg-backup.sh
 
 # 2. Pull latest code and validate infra/.env (deploys nothing)
-cd /opt/sinnlos && git pull
+cd /opt/sinnlos && git fetch --tags && git checkout v<new version>
 infra/deploy.sh --check
 
 # 3. Rebuild and restart (no data loss)
@@ -63,9 +63,8 @@ run as `infra-web:<sha>` / `infra-cms:<sha>` (the first 12 characters of
 the commit) and records them as **last-known-good** in
 `.git/sinnlos-deploy/infra.state` of the checkout (`infra.history` next to it;
 the newest five SHA tags stay, `DEPLOY_KEEP_TAGS`). A failed deploy never
-moves that state. When a deploy fails, the script prints the rollback to
-it, with every override and extra step the target needs; run it as
-printed. By hand:
+moves that state. When a deploy fails, the script prints the rollback commands for a
+verified target only ([Rollback](#rollback)). By hand:
 
 ```bash
 grep '^TAG=' .git/sinnlos-deploy/infra.state      # TAG=<sha>
@@ -78,7 +77,7 @@ docker compose -p infra \
 
 `--no-build` is essential: `--build` would rebuild the broken image.
 `docker images infra-web` lists the SHA tags that are still there; any of
-them is a rollback target the same way. `:pre-deploy` names the images that
+them can be a rollback target; check its release first ([Rollback](#rollback)). `:pre-deploy` names the images that
 ran when the latest `deploy.sh` run started (it keeps them resolvable
 through the build); the script never rolls back to it, and after a failed
 deploy it may name that failed deploy's images. **First run of this version:**

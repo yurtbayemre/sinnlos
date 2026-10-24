@@ -120,13 +120,20 @@ Notes:
 - **Keep the dev cms off the network.** The example sets `HOST=0.0.0.0`,
   and `strapi develop` serves the admin through Vite's dev server, which has
   open advisories. On a shared network set `HOST=127.0.0.1` in
-  `apps/cms/.env`
-  ([details](#local-development-sqlite)).
+  `apps/cms/.env`; the `localhost` URLs keep working. Production
+  (`strapi start`, the Docker image) does not load Vite.
 - **Postgres locally:** set `DATABASE_CLIENT=postgres`, uncomment the
   Postgres block in `apps/cms/.env` with `DATABASE_HOST=localhost`, and add
-  `TZ=UTC` (the cms must run in UTC on Postgres). A one-line Postgres
-  container is in
-  [Local development (SQLite)](#local-development-sqlite).
+  `TZ=UTC` (the cms must run in UTC on Postgres). A Postgres container
+  in one command:
+
+  ```bash
+  docker run -d --name sinnlos-pg \
+    -e POSTGRES_DB=sinnlos -e POSTGRES_USER=sinnlos -e POSTGRES_PASSWORD=sinnlos \
+    -p 5432:5432 -v sinnlos-pgdata:/var/lib/postgresql/data \
+    postgres:16-alpine
+  ```
+
 - **An older dev database** can still hold department or team drafts; the
   cms then refuses to boot with `[org-dp] … still holds N draft row(s)`.
   Delete `apps/cms/.tmp/data.db` and boot again (with `SEED_DEMO_DATA=1` if

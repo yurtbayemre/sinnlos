@@ -65,7 +65,7 @@ Restoring a backup brings back everyone the backup holds, **including people ano
 3. **Restore uploads and configuration while the apps are stopped.** Keep the `ENCRYPTION_KEY` that belongs to the dump: it decrypts the second-factor secrets. (`rotate-jwt` in step 5 changes only `JWT_SECRET`.)
 4. **Close the site again.** The restored `infra/.env` may lack the two settings, so set `SITE_ALLOW_CIDRS` and `CRON_ENABLED=false` again in the `infra/.env` that will be used. Then:
    - **Bundled Caddy:** run `docker compose up -d --no-deps --force-recreate caddy`. `--no-deps` keeps the apps stopped.
-   - **Host Traefik:** the gate lives in the app labels. Check them with `docker compose … config`: the `sinnlos-site-allow` middleware must be on all five routers, with your range.
+   - **Host Traefik:** the gate lives in the app labels. From the checkout, check them with `docker compose -p infra -f infra/docker-compose.yml -f infra/docker-compose.traefik.yml config`: `sinnlos-site-allow` must be in the chain of the four web routers and `sinnlos-cms-site-allow` in the cms router's, both with your range.
 5. **Run `apply`, `rotate-jwt` and `start`.** Then check from outside, on every route, that the site still answers 503.
 6. **Repeat the anonymisations.**
    - Sign in from your address.
@@ -92,7 +92,7 @@ Notes on the gate:
 - **The org draft/publish guard** (department or team drafts): follow [infra/migrations/org-dp/README.md](../infra/migrations/org-dp/README.md).
 - **The revision guard** (wiki revision drafts): follow [infra/migrations/wiki-revision-dp/README.md](../infra/migrations/wiki-revision-dp/README.md).
 
-Both guards fire only after a rollback to images from before those changes.
+Both guards check the database itself: they fire whenever it holds such drafts, for example after a restore of an old dump, a rollback to images from before those changes, or raw SQL.
 
 ## Backup & Restore
 
@@ -123,6 +123,8 @@ docker compose exec -T db \
 ```
 
 #### Restoring a database dump
+
+> Close the site first and follow [Restore](#restore): it says when each command below runs.
 
 Restore into a **clean** database, never over the one that runs:
 `pg_restore --clean` drops only the objects the dump holds, so a table a
@@ -392,6 +394,8 @@ docker run --rm \
 > copy).
 
 #### Restoring a production generation
+
+> Close the site first and follow [Restore](#restore): it says when each step below runs.
 
 Production's backups are `backup-run` generations in
 `/srv/backup/outbox/sinnlos/<YYYYMMDD>T<HHMMSS>Z-<daily|predeploy>/` (UTC;
