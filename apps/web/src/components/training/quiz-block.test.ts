@@ -302,6 +302,20 @@ describe("answerless quiz feedback", () => {
     expect(render().text).toContain("quizNotPassed");
   });
 
+  it("offers a retry of the same answers after a failed confirm check (S6: native radios)", async () => {
+    check.mockResolvedValueOnce({ ok: false, code: "unavailable" });
+    render().pick(0, 1);
+    await harness.settle();
+    check.mockResolvedValueOnce(result("confirm", false, [{ questionIndex: 0, correct: true }]));
+    render().check();
+    await harness.settle();
+    expect(check.mock.calls.map((call) => call[1])).toEqual([
+      [{ questionIndex: 0, optionIndex: 1 }],
+      [{ questionIndex: 0, optionIndex: 1 }],
+    ]);
+    expect(render().colors[1]).toContain("border-emerald");
+  });
+
   it.each(["quizContentInvalid", "unavailable"] as const)(
     "keeps %s failures out of the completion gate",
     async (code) => {

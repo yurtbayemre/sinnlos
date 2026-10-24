@@ -40,7 +40,7 @@ export function QuizBlock({
   const [isPending, startTransition] = useTransition();
   const revision = useRef(0);
   // Set by "Check answers": its pass removes the button (which the pending
-  // check had disabled, so the browser may already have moved focus away).
+  // check disabled, so the browser may already have dropped its focus).
   const focusOutcome = useRef(false);
   const statusRef = useRef<HTMLSpanElement>(null);
   useEffect(
@@ -54,10 +54,12 @@ export function QuizBlock({
   const passedNow = answeredAllNow && feedback?.passed === true;
   useEffect(() => {
     // The pass unmounts the focused check button; keep focus on the outcome.
-    if (passedNow && focusOutcome.current) {
-      focusOutcome.current = false;
-      statusRef.current?.focus();
-    }
+    if (!passedNow || !focusOutcome.current) return () => {};
+    focusOutcome.current = false;
+    // Only if the removed button still held the focus (the browser then
+    // falls back to the body): a user who moved on keeps their place.
+    const active = document.activeElement;
+    if (active === null || active === document.body) statusRef.current?.focus();
     return () => {};
   }, [passedNow]);
 
@@ -238,6 +240,18 @@ export function QuizBlock({
                   : null}
         </span>
       </div>
+      {error && mode === "confirm" && Object.keys(answers).length > 0 && (
+        // Confirm mode checks on each pick; after a failed check, picking
+        // the same answer again fires nothing, so retrying needs a button.
+        <button
+          type="button"
+          onClick={() => check(answers, ++revision.current)}
+          disabled={isPending}
+          className="text-sm font-medium text-primary underline-offset-4 outline-hidden hover:underline focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:opacity-50"
+        >
+          {t("quizRetry")}
+        </button>
+      )}
       {error && (
         <p role="alert" className="text-sm text-destructive">
           {error === QUIZ_CONTENT_INVALID

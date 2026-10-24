@@ -599,6 +599,7 @@
     "quizChecking": "Antworten werden geprüft…",
     "quizExamNotPassed": "Noch nicht bestanden. Prüfen Sie Ihre Antworten und versuchen Sie es erneut.",
     "quizCheckFailed": "Ihre Antworten konnten nicht geprüft werden. Bitte versuchen Sie es erneut.",
+    "quizRetry": "Erneut prüfen",
     "quizCheckButton": "Antworten prüfen",
     "quizAnswerAll": "Bitte beantworte zuerst alle Fragen.",
     "quizAllCorrect": "Alles richtig!",

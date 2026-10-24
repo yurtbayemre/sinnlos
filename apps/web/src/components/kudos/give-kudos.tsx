@@ -2,7 +2,7 @@
 
 import { useId, useMemo, useRef, useState, useTransition } from "react";
 import { useTranslations } from "next-intl";
-import { Award, Send, X, Search } from "lucide-react";
+import { Award, Check, Send, X, Search } from "lucide-react";
 import { ModalDialog } from "@/components/ui/confirm-dialog";
 import { cn } from "@/lib/utils";
 import { isSharedErrorCode, startCmsAction, type CommonCode } from "@/lib/action-result";
@@ -37,7 +37,8 @@ const VALUES: {
  * Accessibility (S6): the search input and the message are labelled; the
  * suggestions are plain buttons with a polite result count; picking one
  * moves focus to the message (the picked button disappears). The values
- * are native radios in a fieldset, so arrow keys work.
+ * are native radios in a fieldset, so arrow keys work; the picked one also
+ * carries a check mark.
  */
 export function GiveKudos({ people }: { people: KudosRecipient[] }) {
   const t = useTranslations("kudos");
@@ -203,6 +204,8 @@ export function GiveKudos({ people }: { people: KudosRecipient[] }) {
                   />
                   <span aria-hidden="true">{v.emoji}</span>
                   {t(v.labelKey)}
+                  {/* The pick is shown by a mark, not by colour alone. */}
+                  {value === v.value && <Check className="h-3 w-3" aria-hidden="true" />}
                 </label>
               ))}
             </div>

@@ -599,6 +599,7 @@
     "quizChecking": "Checking answers…",
     "quizExamNotPassed": "Not passed yet. Review your answers and try again.",
     "quizCheckFailed": "Could not check your answers. Please try again.",
+    "quizRetry": "Check again",
     "quizCheckButton": "Check answers",
     "quizAnswerAll": "Please answer all questions first.",
     "quizAllCorrect": "All correct!",
