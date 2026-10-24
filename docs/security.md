@@ -178,8 +178,8 @@ Single sign-on users get their second factor from their identity provider.
 
 Optional and off unless `ENTRA_ENABLED=1` (D-ENTRA-01,
 `apps/cms/src/entra/`). Setup:
-[README](../README.md#microsoft-entra-id-sign-in-optional); runbook:
-[DEPLOYMENT.md](./DEPLOYMENT.md#microsoft-entra-id-sign-in).
+[README](../CONTRIBUTING.md#microsoft-entra-id-sign-in-optional); runbook:
+[DEPLOYMENT.md](./SSO.md#microsoft-entra-id-sign-in).
 
 1. Auth.js runs the OIDC code flow against the one configured tenant
    (scope `openid profile email User.Read`, no refresh token) and refuses an
@@ -196,7 +196,7 @@ Optional and off unless `ENTRA_ENABLED=1` (D-ENTRA-01,
    role (`ENTRA_SYNC_MODE=dry-run`: at most `member`). A local account with the same e-mail is never taken over: the
    sign-in answers "account exists" until an admin who has confirmed the
    account is theirs binds it
-   ([the 409 procedure](./DEPLOYMENT.md#an-e-mail-address-that-already-has-an-account-409)).
+   ([the 409 procedure](./SSO.md#an-e-mail-address-that-already-has-an-account-409)).
 4. With `ENTRA_SYNC_MODE=on` and a successful Graph `/me`, display name,
    job title, phone and office location are synced at every sign-in, and
    department (`ENTRA_SYNC_DEPARTMENT=1`) and manager
@@ -261,14 +261,14 @@ role an admin changes in the Strapi admin, is `manual` and keeps its role.
 `ENTRA_SYNC_MODE=dry-run` (the default) changes no existing user (it logs
 what `on` would do) and creates new users as `member` at most; refusals
 apply in both modes. More in
-[What Entra owns](./DEPLOYMENT.md#what-entra-owns).
+[What Entra owns](./SSO.md#what-entra-owns).
 
 ### OIDC (Keycloak, authentik, Zitadel)
 
 Optional and off unless `OIDC_ENABLED=1` (v0.25.0, `apps/cms/src/oidc/`,
 the shared steps in `apps/cms/src/idp/exchange-core.ts`); never together
 with Entra. Runbook and recipes:
-[DEPLOYMENT.md](./DEPLOYMENT.md#oidc-sign-in-keycloak-authentik-zitadel).
+[DEPLOYMENT.md](./SSO.md#oidc-sign-in-keycloak-authentik-zitadel).
 The same exchange pattern as Entra, without Graph:
 
 1. Auth.js runs the OIDC code flow with PKCE against `OIDC_ISSUER`. It
@@ -423,7 +423,7 @@ per-user token version so that a password change can end the older ones:
   decision 2026-10-12; everyone signs in again once). The rollback commands
   `infra/deploy.sh` prints after a failed deploy check the target image for
   the token version and demand the rotation when it lacks it
-  ([batch 13 rollback](./DEPLOYMENT.md#deploying-batch-13-2026-10-12)).
+  ([batch 13 rollback](./archive/deployment-history.md#deploying-batch-13-2026-10-12)).
   The same holds for every **restore** of a database dump or of the
   backed-up `infra/.env`, also with the same images: the dump brings back
   older token versions (and the `.env` possibly an older `JWT_SECRET`), so
@@ -431,7 +431,7 @@ per-user token version so that a password change can end the older ones:
   `JWT_SECRET` before the cms starts (`infra/restore-db.sh` rotates it
   between the restore and the start and refuses to start the apps
   without it:
-  [Restoring a database dump](./DEPLOYMENT.md#restoring-a-database-dump)).
+  [Restoring a database dump](./OPERATIONS.md#restoring-a-database-dump)).
 - **Limits.** The web's `/uploads` proxy caches the cms's answer for up to
   60 seconds, so a revoked JWT can fetch file bytes for up to that minute;
   an open live stream keeps its content-free pings until its next rotation
@@ -829,7 +829,7 @@ Department-head and team-lead rights compare
 department and team row ids, which is valid because departments and teams
 have no draft & publish (one row each, stable id). An instance that ran an
 earlier release with org drafts runs the one-time migration first
-([One-time: org draft/publish off](./DEPLOYMENT.md#one-time-org-draftpublish-off));
+([One-time: org draft/publish off](./archive/deployment-history.md#one-time-org-draftpublish-off));
 the cms refuses to boot until then.
 
 ### Read-side filters
@@ -1254,7 +1254,7 @@ admin or editor opens them, per poll, with two fields (owner decision
 - A cms from before guest access ignores both fields and never removes the
   guest vote grant, so a rollback to one removes it first
   (`infra/rollback/revoke-guest-poll-vote.sql`;
-  [Upgrading to poll department targeting](./DEPLOYMENT.md#upgrading-to-poll-department-targeting),
+  [Upgrading to poll department targeting](./archive/deployment-history.md#upgrading-to-poll-department-targeting),
   Rollback).
 
 ### Private user fields

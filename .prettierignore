@@ -29,8 +29,9 @@ apps/cms/src/utils/common-passwords.ts
 
 # Hand-formatted long docs: prettier's Markdown parser re-renders stray
 # `*`/`_` in prose and blockquoted SHAs differently from GitHub.
-docs/DEPLOYMENT.md
 docs/architecture.md
+docs/architecture/
+docs/archive/
 
 # Browser E2E reports, traces, private sessions and runtime data
 .e2e/

@@ -9,7 +9,7 @@ Otherwise Strapi deletes those rows on its own at boot
 `dist/migrations/draft-publish.js` `disable`, no transaction) and their link
 rows cascade away.
 
-**The operator runbook is in [docs/DEPLOYMENT.md, "One-time: wiki revisions draft/publish off"](../../../docs/DEPLOYMENT.md#one-time-wiki-revisions-draftpublish-off-batch-16).**
+**The operator runbook is in [docs/DEPLOYMENT.md, "One-time: wiki revisions draft/publish off"](../../../docs/archive/deployment-history.md#one-time-wiki-revisions-draftpublish-off-batch-16).**
 
 **Where draft rows come from:**
 

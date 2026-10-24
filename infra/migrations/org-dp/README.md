@@ -10,7 +10,7 @@ transaction), and their link rows cascade away: units that were never
 published disappear, users lose their department, and draft content loses its
 department/team targeting (a wider audience on its next publish).
 
-**The operator runbook is in [docs/DEPLOYMENT.md, "One-time: org draft/publish off"](../../../docs/DEPLOYMENT.md#one-time-org-draftpublish-off).**
+**The operator runbook is in [docs/DEPLOYMENT.md, "One-time: org draft/publish off"](../../../docs/archive/deployment-history.md#one-time-org-draftpublish-off).**
 A fresh install needs nothing, as long as its first boot runs a release that
 contains this change.
 

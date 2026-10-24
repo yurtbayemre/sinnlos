@@ -128,7 +128,7 @@ Die Liste grenzt die Arbeiten ein; beim Umsetzen wird der kleinste passende Zusc
 
 | Schritt                            | Status   | Nachweis                                      |
 | ---------------------------------- | -------- | --------------------------------------------- |
-| 1 Werkzeug und Projektanbindung    | Erledigt | Nachweise unten; [Anleitung](./e2e-tests.md)  |
+| 1 Werkzeug und Projektanbindung    | Erledigt | Nachweise unten; [Anleitung](../e2e-tests.md)  |
 | 2 Isolierte Testumgebung           | Erledigt | Lokale Nachweise unten; [CI](#github-abnahme) |
 | 3 Beschreibung bearbeiten          | Erledigt | Lokale Nachweise unten; [CI](#github-abnahme) |
 | 4 Mitglied ohne Bearbeitungsrechte | Erledigt | Lokale Nachweise unten; [CI](#github-abnahme) |
@@ -156,7 +156,7 @@ Die folgenden Einträge halten den Stand beim Abschluss jedes Schritts fest; die
 - Der reguläre Einstieg `pnpm test:e2e` startet denselben frischen Stack, endet mangels Browserfällen erwartungsgemäß mit `No tests found` und Status 1 und bereinigt danach ebenfalls alle eigenen Ressourcen.
 - Die fünf Node-Tests prüfen Umgebungstrennung, Secret-Redaktion, Fremd-Container-/Fremdpfad-Abwehr und echte HTTP-Readiness-Fehler/Timeouts. Sie sind in `pnpm test` eingebunden. Typecheck und Lint des gesamten Repositories bestanden; Lint hat nur die vorhandenen App-Warnungen.
 - Der Standard-Bridge des eigenen Compose-Projekts wird verwendet: `internal: true` ließ auf dem geprüften Docker Desktop zwar interne Healthchecks bestehen, verhinderte aber den Host-Zugriff auf den veröffentlichten Web-Port. Keine Verbindung zu bestehenden Projektnetzwerken; SMTP, Digests, App- und Plugin-Crons sind deaktiviert.
-- Laufdaten liegen ausschließlich unter `.e2e/`; private Env-/Fixturedateien werden gelöscht, bekannte zufällige Secrets in gespeicherten Logs redigiert. Bei hartem Prozessabbruch oder nicht erreichbarem Docker-Daemon kann eine manuelle Bereinigung anhand der protokollierten Run-ID nötig sein; siehe [Anleitung](./e2e-tests.md).
+- Laufdaten liegen ausschließlich unter `.e2e/`; private Env-/Fixturedateien werden gelöscht, bekannte zufällige Secrets in gespeicherten Logs redigiert. Bei hartem Prozessabbruch oder nicht erreichbarem Docker-Daemon kann eine manuelle Bereinigung anhand der protokollierten Run-ID nötig sein; siehe [Anleitung](../e2e-tests.md).
 - Auf Wunsch bleibt dieser Schritt lokal: kein Push, keine Änderung an Staging oder Produktion. Browserfälle und E2E-CI folgen weiterhin erst in Schritten 3–5.
 
 ### Nachweise zu Schritt 3 (18.10.2026, lokal)
@@ -165,7 +165,7 @@ Die folgenden Einträge halten den Stand beim Abschluss jedes Schritts fest; die
 - Ein vollständiger Reload prüft das gespeicherte Bearbeitungsfeld. Anschließend wird derselbe Text auf der Detailseite und nach einem eigenen Formularlogin als Mitglied in einem getrennten Browser-Kontext gelesen. Rollen-/Label-Locators reichen aus; keine zusätzlichen Test-IDs, API-Abkürzungen oder festen Wartezeiten.
 - `pnpm test:e2e --grep teams-edit-description` bestand auf einer frischen Datenbank mit Chromium. E2E-Typecheck und Lint bestanden; ein unabhängiger Review fand keine relevanten Probleme.
 - Für die Negativprobe wurde ausschließlich in der lokalen CMS-Testversion die neue Beschreibung durch den bisherigen Datenbankwert ersetzt. Trotz sichtbarem „Saved.“ scheiterte der Test zuverlässig beim Reload am alten Feldinhalt und lieferte Status 1, Screenshot und Trace. Die einzelne Störungszeile wurde vollständig zurückgenommen. Der anschließende reguläre Lauf `pnpm test:e2e` bestand erneut auf frischen Daten. Nach allen drei Läufen fehlten eigene Container, Netzwerke und private Laufdateien.
-- Die dokumentierten Browser-Installations- und Einzeltestbefehle stehen in der [Anleitung](./e2e-tests.md). Punkt 4 (Mitglied ohne Bearbeitungsrechte) und Punkt 5 (automatische CI) bleiben offen. Kein Push, keine Änderung an Staging oder Produktion.
+- Die dokumentierten Browser-Installations- und Einzeltestbefehle stehen in der [Anleitung](../e2e-tests.md). Punkt 4 (Mitglied ohne Bearbeitungsrechte) und Punkt 5 (automatische CI) bleiben offen. Kein Push, keine Änderung an Staging oder Produktion.
 
 ### Nachweise zu Schritt 4 (18.10.2026, lokal)
 
@@ -173,7 +173,7 @@ Die folgenden Einträge halten den Stand beim Abschluss jedes Schritts fest; die
 - Der direkte Aufruf der Edit-URL muss die konkreten Texte der Nicht-gefunden-Ansicht und ihren Dashboard-Rücklink zeigen. Erst danach werden fehlende Description-Textbox und Save-Button geprüft. Ein Loading-Skeleton, ein generischer Fehler oder eine Umleitung zum Login genügt nicht; HTTP 200 durch Streaming bleibt zulässig.
 - Ein erneuter Dokumentabruf der Teamdetailseite bestätigt den unveränderten Text. Der Rechtefall benötigt weder den Bearbeitungsfall noch dessen veränderte Daten.
 - Beide Fälle bestanden einzeln über `pnpm test:e2e --grep <Testname>`. Auch der gemeinsame Lauf mit zuerst `teams-member-read-only` bestand. Dafür wurden nur vorübergehend die beiden Testblöcke vertauscht und anschließend vollständig zurückgestellt; ein dauerhafter Reihenfolge-Schalter wurde nicht ergänzt. Abschließend bestand `pnpm test:e2e` in der normalen Reihenfolge ebenfalls (2 Tests, 8,7 Sekunden). Alle vier Läufe verwendeten frische Datenbanken; danach waren eigene Container, Netzwerke und private Laufdateien entfernt.
-- E2E-Typecheck, Lint und Formatprüfung bestanden; der unabhängige Review fand keine relevanten Probleme. Anwendungscode, Fixtures und Runner bleiben unverändert. Die [Anleitung](./e2e-tests.md) beschreibt beide Fälle und ihre Einzelaufrufe.
+- E2E-Typecheck, Lint und Formatprüfung bestanden; der unabhängige Review fand keine relevanten Probleme. Anwendungscode, Fixtures und Runner bleiben unverändert. Die [Anleitung](../e2e-tests.md) beschreibt beide Fälle und ihre Einzelaufrufe.
 - Dieser Schritt bleibt lokal: kein Push und keine Änderung an Staging oder Produktion. Als Nächstes folgt Punkt 5, die automatische CI-Ausführung.
 
 ### Nachweise zu Schritt 5 (18.10.2026, lokale Umsetzung)
@@ -185,7 +185,7 @@ Die folgenden Einträge halten den Stand beim Abschluss jedes Schritts fest; die
 - Actionlint 1.7.12 akzeptierte den Workflow; die 21 Build-/Action-Pin-Tests und fünf Runner-Tests bestanden. Ein unabhängiger Review fand keine relevanten Probleme.
 - Eine temporär falsche Browser-Erwartung unter `CI=true` ließ den echten Lauf mit Status 1 scheitern. HTML-Bericht, Screenshot, Trace und Runner-/Dienst-/Build-Logs waren vorhanden; die Credential-Felder der gespeicherten Containerdiagnose waren vollständig redigiert. Die Störung wurde vollständig zurückgenommen. Anschließend bestanden beide Browserfälle unter `CI=true` wieder (2 Tests, 9,0 Sekunden). Nach beiden Läufen waren eigene Container, Netzwerke und private Laufdateien entfernt.
 - Die GitHub-API bestätigte am 18.10.2026: `main` hat keine Branch Protection und keine anwendbaren Branch Rules. Der neue Check wird deshalb nicht als erzwungene Merge-Sperre ausgegeben; keine Repository-Regel wurde verändert. Das öffentliche Repository macht auch Diagnoseartefakte für Repository-Leser zugänglich; sie enthalten ausschließlich Wegwerfdaten.
-- Zum Abschluss der lokalen Umsetzung gab es noch keinen Push oder Remote-Workflow-Start und keine Änderung an Staging/Produktion. Damals offen waren der tatsächliche Ubuntu-Lauf (einschließlich kaltem Image-Build), ein Docs-only-Run ohne E2E/Datenbank sowie die rote/grüne GitHub-Probe mit herunterladbaren Artefakten. Die [Anleitung](./e2e-tests.md#ci-execution-and-scope) beschreibt Scope, Budgets, Abbruchgrenze und Artefakte.
+- Zum Abschluss der lokalen Umsetzung gab es noch keinen Push oder Remote-Workflow-Start und keine Änderung an Staging/Produktion. Damals offen waren der tatsächliche Ubuntu-Lauf (einschließlich kaltem Image-Build), ein Docs-only-Run ohne E2E/Datenbank sowie die rote/grüne GitHub-Probe mit herunterladbaren Artefakten. Die [Anleitung](../e2e-tests.md#ci-execution-and-scope) beschreibt Scope, Budgets, Abbruchgrenze und Artefakte.
 
 ### Nachweise zu Schritt 6 (18.10.2026, lokale Abnahme)
 
@@ -199,7 +199,7 @@ Die folgenden Einträge halten den Stand beim Abschluss jedes Schritts fest; die
 
 - Messung am unveränderten Runner über seine Fortschrittsmeldungen, einschließlich Browser-Prozessstart und Berichtserstellung. Die Gesamtdauer enthält zusätzlich pnpm-Aufruf und Vorbereitung. Umgebung: Windows mit Docker Desktop/Linux-Containern und vorhandenem Docker-Build-Cache; beide Datenbanken waren frisch. Diese Werte belegen keinen kalten Ubuntu-CI-Build. Zusätzliche Caches oder Parallelisierung werden vor dessen Messung nicht eingeführt.
 - Der unabhängige Schlussreview des gesamten Pilot-Diffs `1498786..0dd5a04` fand keine bestätigten Probleme in Isolation, Secrets, Fixtures, Testaussagen, CI-Auslösern, Artefaktgrenzen oder Cleanup.
-- Die [Betriebsanleitung](./e2e-tests.md) enthält Installation, Voraussetzungen, Gesamt-/Einzelaufrufe, Bericht/Trace sowie konkrete Bereinigung nach hartem Abbruch. Dabei werden nur geprüfte Run-IDs und lokale Docker-Endpunkte verwendet; fehlende Env-Dateien werden nicht rekonstruiert. Für private Dateien wird die vorhandene Pfad-/Owner-Prüfung des Runners wiederverwendet.
+- Die [Betriebsanleitung](../e2e-tests.md) enthält Installation, Voraussetzungen, Gesamt-/Einzelaufrufe, Bericht/Trace sowie konkrete Bereinigung nach hartem Abbruch. Dabei werden nur geprüfte Run-IDs und lokale Docker-Endpunkte verwendet; fehlende Env-Dateien werden nicht rekonstruiert. Für private Dateien wird die vorhandene Pfad-/Owner-Prüfung des Runners wiederverwendet.
 - [Letzter bestandener CI-Basislauf](https://github.com/yurtbayemre/sinnlos/actions/runs/39113118307) auf `a30549166b1cf0a40ce265163648b9a58b1e374b`: Unit-/Build-Prüfung, TZ-Matrix und SQLite-/Postgres-HTTP-Integration grün. Anwendungscode, Domain-Paket, Lockfile und Root-Paketmanifest sind seither unverändert. Die aktuellen Scope-/Pin-/Runner-Prüfungen sind in Schritt 5 nachgewiesen. Der alte CI-Link ist ausdrücklich kein Nachweis für den neuen E2E-Job; die vollständigen Unit-/HTTP-Suites wurden lokal nicht erneut ausgeführt.
 - Der lokale Abschluss in `50e746e` änderte nur die Dokumentation; zu diesem Zeitpunkt gab es keinen Push, neuen Remote-CI-Lauf oder Eingriff in Staging/Produktion. Die damals noch fehlenden GitHub-Läufe und Artefakt-Downloads sind im folgenden Abschnitt nachgewiesen. Der Pilot deckt Teams ab; Quiz-Abschluss und weitere Module bleiben separate Folgeaufträge, ebenso eine vollständige Batch-17-Browserabnahme.
 
@@ -223,7 +223,7 @@ Die drei lokalen Commits `5cd0062`, `0dd5a04` und `50e746e` wurden nach der loka
 
 ## Technische Bezugspunkte
 
-- [Teamdetailseite](<../apps/web/src/app/(app)/teams/[slug]/page.tsx>), [Bearbeitungsseite](<../apps/web/src/app/(app)/teams/[slug]/edit/page.tsx>), [Organisationseditor](../apps/web/src/components/manage/org-editor.tsx) und [Loader](../apps/web/src/lib/loaders/manage/org.ts).
-- [Vorhandenes CMS-Testsetup](../apps/cms/src/integration/harness.test.helper.ts) und [CMS-Compiler für Tests](../apps/cms/src/integration/global-setup.test.helper.ts) als Muster für Bootstrap, Fixtures und Lebensdauer.
-- [Bestehende CI](../.github/workflows/ci.yml) und [Scope-Erkennung](../scripts/ci-scope.mjs).
+- [Teamdetailseite](<../../apps/web/src/app/(app)/teams/[slug]/page.tsx>), [Bearbeitungsseite](<../../apps/web/src/app/(app)/teams/[slug]/edit/page.tsx>), [Organisationseditor](../../apps/web/src/components/manage/org-editor.tsx) und [Loader](../../apps/web/src/lib/loaders/manage/org.ts).
+- [Vorhandenes CMS-Testsetup](../../apps/cms/src/integration/harness.test.helper.ts) und [CMS-Compiler für Tests](../../apps/cms/src/integration/global-setup.test.helper.ts) als Muster für Bootstrap, Fixtures und Lebensdauer.
+- [Bestehende CI](../../.github/workflows/ci.yml) und [Scope-Erkennung](../../scripts/ci-scope.mjs).
 - Playwright: [CI-Ausführung](https://playwright.dev/docs/ci), [Aufzeichnungen und Screenshots](https://playwright.dev/docs/test-use-options#recording-options).
