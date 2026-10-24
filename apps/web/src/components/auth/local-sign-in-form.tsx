@@ -8,6 +8,8 @@ import { AUTH_FORM_MESSAGES } from "@/lib/auth/form-messages";
 const inputClass =
   "h-10 w-full rounded-xl border bg-muted/40 px-4 text-sm outline-hidden placeholder:text-muted-foreground focus:bg-background focus:ring-2 focus:ring-ring";
 
+const ERROR_ID = "sign-in-error";
+
 export function LocalSignInForm({ from = "/" }: { from?: string }) {
   const t = useTranslations("auth");
   const [state, formAction, isPending] = useActionState<SignInFormState, FormData>(
@@ -17,6 +19,10 @@ export function LocalSignInForm({ from = "/" }: { from?: string }) {
   // Controlled, so the password survives React 19's form reset when the
   // cms asks for the second factor and the form sends all three again.
   const [password, setPassword] = useState("");
+  // The error names the fields it is about (S6): wrong credentials mark both
+  // credential fields, a wrong code only the code field.
+  const badCredentials = state.error === "invalidCredentials";
+  const badCode = state.error === "mfaInvalid";
 
   return (
     <form action={formAction} className="space-y-3">
@@ -35,6 +41,8 @@ export function LocalSignInForm({ from = "/" }: { from?: string }) {
           // Echoed by a failed attempt: React 19 resets the form on every
           // settled submission (the password is never echoed).
           defaultValue={state.values?.identifier ?? ""}
+          aria-invalid={badCredentials || undefined}
+          aria-describedby={badCredentials ? ERROR_ID : undefined}
           placeholder={t("emailPlaceholder")}
           className={inputClass}
         />
@@ -51,6 +59,8 @@ export function LocalSignInForm({ from = "/" }: { from?: string }) {
           required
           value={password}
           onChange={(e) => setPassword(e.target.value)}
+          aria-invalid={badCredentials || undefined}
+          aria-describedby={badCredentials ? ERROR_ID : undefined}
           className={inputClass}
         />
       </div>
@@ -69,7 +79,8 @@ export function LocalSignInForm({ from = "/" }: { from?: string }) {
             autoFocus
             required
             maxLength={32}
-            aria-describedby="otp-hint"
+            aria-invalid={badCode || undefined}
+            aria-describedby={badCode ? `otp-hint ${ERROR_ID}` : "otp-hint"}
             className={inputClass}
           />
           <p id="otp-hint" className="mt-1 text-xs text-muted-foreground">
@@ -78,7 +89,7 @@ export function LocalSignInForm({ from = "/" }: { from?: string }) {
         </div>
       )}
       {state.error && (
-        <p role="alert" className="text-sm text-destructive">
+        <p id={ERROR_ID} role="alert" className="text-sm text-destructive">
           {t(AUTH_FORM_MESSAGES[state.error])}
         </p>
       )}
