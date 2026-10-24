@@ -19,13 +19,25 @@ describe("createReadinessCheck", () => {
     expect(await createReadinessCheck(URL, answer(503, { status: "unavailable" }))()).toBe(false);
     expect(await createReadinessCheck(URL, answer(200, { status: "fine" }))()).toBe(false);
     expect(await createReadinessCheck(URL, answer(200, null))()).toBe(false);
+    expect(await createReadinessCheck(URL, answer(200, ["ok"]))()).toBe(false);
+    expect(
+      await createReadinessCheck(URL, answer(200, { status: "ok", error: "db failed" }))(),
+    ).toBe(false);
   });
 
-  it("is unavailable when the cms cannot be reached", async () => {
+  it("is unavailable when the cms cannot be reached or the call is aborted", async () => {
     const down = vi.fn(async () => {
       throw new TypeError("fetch failed");
     });
     expect(await createReadinessCheck(URL, down)()).toBe(false);
+    // The three-second abort: the signal is passed, and an aborted call is "unavailable".
+    let signal: AbortSignal | undefined;
+    const hanging = vi.fn(async (_url: string, init: RequestInit) => {
+      signal = init.signal ?? undefined;
+      throw new DOMException("The operation was aborted due to timeout", "TimeoutError");
+    });
+    expect(await createReadinessCheck(URL, hanging)()).toBe(false);
+    expect(signal).toBeInstanceOf(AbortSignal);
   });
 
   it("asks once for concurrent callers and caches the answer five seconds", async () => {

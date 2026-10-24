@@ -18,8 +18,15 @@ async function upstreamOk(url: string, fetchImpl: Fetch): Promise<boolean> {
       signal: AbortSignal.timeout(READINESS_TIMEOUT_MS),
     });
     if (res.status !== 200) return false;
-    const body = (await res.json()) as { status?: unknown } | null;
-    return body?.status === "ok";
+    const body: unknown = await res.json();
+    // Exactly {"status":"ok"}: any other field means something else answered.
+    return (
+      typeof body === "object" &&
+      body !== null &&
+      !Array.isArray(body) &&
+      Object.keys(body).join() === "status" &&
+      (body as { status: unknown }).status === "ok"
+    );
   } catch {
     return false;
   }
