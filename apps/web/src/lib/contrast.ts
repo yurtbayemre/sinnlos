@@ -221,9 +221,10 @@ export const CONTRAST_PAIRS: readonly ContrastPair[] = [
   // Graphics: focus rings (offset on the background or a card), KPI bars,
   // the read-confirmation progress fill (on the card and the muted track), the
   // route progress, the active navigation bar, the ring round today in the
-  // calendar, checked native controls, the borders of the selected quiz option
-  // and RSVP (outside on the card, inside on their /10 tint, checked above) and
-  // the unread dot on the bell's /4 row.
+  // calendar, checked native controls, every selected-state border (quiz
+  // option, RSVP, poll vote, kudos value, reaction, filter chips, list and
+  // duty-plan selections; outside on the card, inside on their /10 tint,
+  // checked above) and the unread dot on the bell's /4 row.
   ...onSurfaces("ring", AA_GRAPHIC, tok("ring"), same),
   ...onSurfaces("primary-text graphic", AA_GRAPHIC, tok("primary-text"), same),
   ...onSurfaces("primary-text graphic on primary/4", AA_GRAPHIC, tok("primary-text"), (s) =>

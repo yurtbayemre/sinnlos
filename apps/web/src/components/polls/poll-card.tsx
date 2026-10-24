@@ -148,7 +148,7 @@ export function PollCard({
                 "relative w-full overflow-hidden rounded-lg border px-4 py-2.5 text-left text-sm outline-hidden transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
                 !showResults && "hover:border-primary/40 hover:bg-muted",
                 isPending && !showResults && "opacity-60",
-                isMyVote && "border-primary/40",
+                isMyVote && "border-primary-text",
                 showResults && "cursor-default",
               )}
             >
