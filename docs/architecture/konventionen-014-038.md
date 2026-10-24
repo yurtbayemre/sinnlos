@@ -1,6 +1,7 @@
 # Architektur-Karte: Konventionen §5.14–§5.38
 
 Teil von [architecture.md](../architecture.md), §5 „Konventionen im Einzelnen“; Nummern unverändert. Index: [architecture.md](../architecture.md#konventionen-im-einzelnen).
+
 **NEU (Pflicht-Muster seit den Security-Runden + Modulen vom 2026-08-15):**
 
 14. **`getMutableQuery` — die Policy-No-Op-Falle** (`apps/cms/src/utils/policy-query.ts:32-42`): Read-Policies dürfen Filter NIE auf `policyContext.query` schreiben — Koa exponiert `query` als Prototype-Getter, `createPolicyContext`s `Object.assign` kopiert ihn nicht (5.49 wie 5.55.1, per node-Repro) → stiller No-Op (genau so waren wiki-/document-visibility monatelang wirkungslos, Fix-Commit 439a93f). Immer `getMutableQuery(policyContext)` (mutiert `policyContext.request.query` in place) und den eigenen Filter per `$and` mit dem Client-Filter verknüpfen (narrow-only, nie widen). So machen es alle Filter-Policies (acknowledgement-/announcement-/notification-/quick-link-/wiki-/document-/comment-target-/training-/lesson-progress-/poll-visibility, `event-rsvp-own-rows` sowie `published-only`); `poll-vote-visibility` ist mit den `/api/poll-votes`-Routen entfallen (§5.30). **Seit 2026-09-28k (PL01/PL02):** die `$and`-Komposition macht `narrowFilters(query, clause)` (`policy-query.ts`, nie Spread), und die Filter-Policies sind Aufrufe der Factories in `utils/policy-factories.ts` (§5.61) — eine neue Lese-Policy nimmt `ownRowsFilter` oder `visibleIdsPolicy`, statt die Schritte selbst zu schreiben.

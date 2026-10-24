@@ -1,6 +1,7 @@
 # Architektur-Karte: Konventionen §5.71–§5.90
 
 Teil von [architecture.md](../architecture.md), §5 „Konventionen im Einzelnen“; Nummern unverändert. Index: [architecture.md](../architecture.md#konventionen-im-einzelnen).
+
 **NEU (2026-09-29, Plan-Batch 5 Lane 5A):**
 
 71. **Edge je Instanz: Traefik-Host aus `DOMAIN`, Caddy mit Header-Parität (Traefik-Host-Parametrisierung, FX33, QW-FX33; 2026-09-29, `infra/docker-compose.traefik.yml`, `infra/Caddyfile`, `infra/docker-compose.yml`):**

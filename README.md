@@ -426,6 +426,8 @@ Every key, with its default and meaning, is in the example files. `infra/env-exa
 
 The installation steps that use these keys: [docs/INSTALL.md](./docs/INSTALL.md).
 
+The operator links `PRIVACY_URL`, `IMPRINT_URL` and, optionally, `WHISTLEBLOWING_URL` are reachable before sign-in. The whistleblower entry is only a link to your reporting channel; sinnlos has no channel of its own.
+
 ## Deployment
 
 - **A new installation, with the bundled Caddy or behind a host Traefik:** [docs/INSTALL.md](./docs/INSTALL.md). With Traefik, the router names are fixed (`sinnlos-*`), so there is one Sinnlos stack per Traefik; a staging copy needs its own host or its own Traefik.

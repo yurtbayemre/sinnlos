@@ -1,6 +1,7 @@
 # Architektur-Karte: Konventionen §5.39
 
 Teil von [architecture.md](../architecture.md), §5 „Konventionen im Einzelnen“; Nummern unverändert. Index: [architecture.md](../architecture.md#konventionen-im-einzelnen).
+
 **NEU (2026-09-27b, Deep-Dive-Entscheidung 02):**
 
 39. **Poll-Department-Targeting — serverseitig, fail-closed, per documentId** (Regeln `apps/cms/src/utils/poll-audience.ts`, Loader `utils/poll-access.ts`, Policy `policies/poll-visibility.ts`, Controller `api/poll-vote/controllers/poll-vote.ts`, Backfill `utils/poll-audience-backfill.ts`, Schreibzeit-Guard `utils/poll-audience-guard.ts`, Delete-Hook `utils/poll-department-delete.ts`; Gastzugang seit 2026-09-27e, eigener Punkt unten):

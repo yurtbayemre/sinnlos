@@ -1,6 +1,7 @@
 # Architektur-Karte: Konventionen §5.40–§5.70
 
 Teil von [architecture.md](../architecture.md), §5 „Konventionen im Einzelnen“; Nummern unverändert. Index: [architecture.md](../architecture.md#konventionen-im-einzelnen).
+
 **NEU (2026-09-28c, Test-Sicherheitsnetze S03–S06, S09):**
 
 40. **Test-Konventionen: gemeinsamer Stub, Contract-Suites, Framework-Contract vor jedem Strapi-Bump:**

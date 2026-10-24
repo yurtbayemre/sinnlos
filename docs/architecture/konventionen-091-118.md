@@ -1,6 +1,7 @@
 # Architektur-Karte: Konventionen §5.91–§5.118
 
 Teil von [architecture.md](../architecture.md), §5 „Konventionen im Einzelnen“; Nummern unverändert. Index: [architecture.md](../architecture.md#konventionen-im-einzelnen).
+
 **NEU (2026-09-29f, Plan-Batch 7 Lane 7B):**
 
 91. **Gemeinsames Domain-Paket statt Spiegel-Modulen (SH01; `packages/domain` = `@sinnlos/domain`):** Die Regeln, die cms und Web bisher als (teils byte-gleiche) Kopien hielten, gibt es EINMAL. Wo diese Karte von Spiegeln, Spiegel-Paaren oder byte-gleichen Kopien spricht (§5.15/§5.27 Audience und Anker, §5.37 plain-date, §5.64 Live-Vertrag, der YouTube-Parser, `entry-id`), gilt seit 2026-09-29f das Paket.
