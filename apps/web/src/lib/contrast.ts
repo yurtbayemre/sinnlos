@@ -2,8 +2,8 @@
  * WCAG contrast of the colour tokens (FX31; v0.29 S1): the helpers, the
  * default tokens of app/globals.css, and every rendered pair the UI draws
  * with them. lib/theme-contrast.test.ts proves the defaults (and that
- * DEFAULT_TOKENS mirrors globals.css); lib/branding.ts verifies an
- * operator's derived accent palette against the same list before using it.
+ * DEFAULT_TOKENS mirrors globals.css); deriveAccentPalette verifies an
+ * operator's SITE_ACCENT against the same list before it is used.
  *
  * Classification (WCAG 1.4.3 / 1.4.11):
  *   - text: 4.5:1 (no large-text exception is taken);
@@ -242,4 +242,111 @@ export function failingPairs(tokens: Tokens): FailingPair[] {
     if (ratio < pair.min) failing.push({ id: pair.id, ratio, min: pair.min });
   }
   return failing;
+}
+
+/** The four tokens an operator's accent replaces, per theme. */
+export type AccentTokens = Record<"primary" | "primary-foreground" | "primary-text" | "ring", Hsl>;
+
+/** The two label colours a fill may carry: today's light and dark foregrounds. */
+const LABELS: readonly Hsl[] = [
+  [210, 40, 98],
+  [222.2, 47.4, 11.2],
+];
+
+const round1 = (n: number) => Math.round(n * 10) / 10;
+
+/** `#rrggbb` as HSL (degrees, percent), or null for anything else. */
+export function hexToHsl(hex: string): Hsl | null {
+  const match = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex.trim());
+  if (!match) return null;
+  const [r, g, b] = match.slice(1).map((part) => parseInt(part, 16) / 255) as [
+    number,
+    number,
+    number,
+  ];
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const l = (max + min) / 2;
+  const d = max - min;
+  if (d === 0) return [0, 0, round1(l * 100)];
+  const s = d / (1 - Math.abs(2 * l - 1));
+  const h = max === r ? ((g - b) / d) % 6 : max === g ? (b - r) / d + 2 : (r - g) / d + 4;
+  return [round1((h * 60 + 360) % 360), round1(s * 100), round1(l * 100)];
+}
+
+const withLightness = ([h, s]: Hsl, l: number): Hsl => [h, s, Math.min(100, Math.max(0, l))];
+
+/** Whether a pair reads the text or ring token (a different text colour can fix it). */
+const readsText = (id: string) => id.includes("primary-text") || id.startsWith("ring");
+
+function deriveTheme(base: Tokens, accent: Hsl, theme: ThemeName): AccentTokens | null {
+  const labelPasses = (fill: Hsl, label: Hsl) =>
+    contrast(toRgb(label), toRgb(fill)) >= AA_TEXT &&
+    SURFACES.every(
+      (s) => contrast(toRgb(label), over(toRgb(fill), 0.9, toRgb(base[s]!))) >= AA_TEXT,
+    );
+  // The text (and ring) colour steps darker on the light theme, lighter on
+  // the dark one, until every pair passes; null as soon as a pair fails that
+  // only the fill decides (a tint under muted text, a label).
+  const direction = theme === "light" ? -1 : 1;
+  const withText = (fill: Hsl, label: Hsl): AccentTokens | null => {
+    for (let l = fill[2]; l >= 0 && l <= 100; l += direction) {
+      const text = withLightness(fill, l);
+      const tokens: AccentTokens = {
+        primary: fill,
+        "primary-foreground": label,
+        "primary-text": text,
+        ring: text,
+      };
+      const failing = failingPairs({ ...base, ...tokens });
+      if (failing.length === 0) return tokens;
+      if (failing.some((pair) => !readsText(pair.id))) return null;
+    }
+    return null;
+  };
+  // The fill keeps the accent if it can; otherwise the nearest lightness
+  // (one step lighter, one darker, two lighter, …) that passes.
+  for (let delta = 0; delta <= 100; delta++) {
+    for (const l of delta === 0 ? [accent[2]] : [accent[2] + delta, accent[2] - delta]) {
+      if (l < 0 || l > 100) continue;
+      const fill = withLightness(accent, l);
+      const label = LABELS.find((candidate) => labelPasses(fill, candidate));
+      const tokens = label && withText(fill, label);
+      if (tokens) return tokens;
+    }
+  }
+  return null;
+}
+
+const derived = new Map<string, Record<ThemeName, AccentTokens> | null>();
+
+/**
+ * The accent tokens of both themes for `#rrggbb`, verified against every
+ * pair; null when the value is malformed or no derivation passes (the caller
+ * keeps the default tokens). Memoised per value.
+ */
+export function deriveAccentPalette(hex: string): Record<ThemeName, AccentTokens> | null {
+  const key = hex.trim().toLowerCase();
+  if (derived.has(key)) return derived.get(key)!;
+  const accent = hexToHsl(key);
+  const light = accent && deriveTheme(DEFAULT_TOKENS.light, accent, "light");
+  const dark = accent && deriveTheme(DEFAULT_TOKENS.dark, accent, "dark");
+  const palette = light && dark ? { light, dark } : null;
+  derived.set(key, palette);
+  return palette;
+}
+
+const cssHsl = ([h, s, l]: Hsl) => `${round1(h)} ${round1(s)}% ${round1(l)}%`;
+
+/**
+ * The palette as CSS custom properties for both themes. Built from numbers
+ * only; `:root.dark` outranks the stylesheet's `.dark` block, and the
+ * unlayered rule outranks its `:root` one.
+ */
+export function paletteCss(palette: Record<ThemeName, AccentTokens>): string {
+  const block = (tokens: AccentTokens) =>
+    Object.entries(tokens)
+      .map(([name, value]) => `--${name}:${cssHsl(value)};`)
+      .join("");
+  return `:root{${block(palette.light)}}:root.dark{${block(palette.dark)}}`;
 }

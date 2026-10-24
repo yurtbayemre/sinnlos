@@ -1,9 +1,11 @@
+import { SITE_NAME_MAX_LENGTH, parseSiteName } from "@sinnlos/domain";
 import pkg from "../../package.json";
+import { deriveAccentPalette, hexToHsl, type AccentTokens, type ThemeName } from "./contrast";
 
 /**
  * Operator configuration of the site chrome (v0.26): the release identity,
- * the source and legal links of the footer and the optional analytics
- * script. Every value is read from the runtime env (compose passes it), never
+ * the source and legal links of the footer, the optional analytics script
+ * and (v0.29) the branding. Every value is read from the runtime env (compose passes it), never
  * baked in at build time, so one image fits every install.
  */
 
@@ -69,4 +71,71 @@ export function plausibleScript(env: Env): { src: string; domain: string } | nul
     warnOnce("PLAUSIBLE", "[site] analytics need PLAUSIBLE_SCRIPT_URL and PLAUSIBLE_DOMAIN; off");
   }
   return null;
+}
+
+/**
+ * A logo or icon URL (v0.29, S1): an absolute https URL without credentials
+ * (no root-relative, protocol-relative or backslash forms). It loads before
+ * sign-in, so its host sees visitors' addresses: host it yourself.
+ */
+function assetUrlFromEnv(env: Env, key: string): string | null {
+  const value = env[key]?.trim();
+  if (!value) return null;
+  try {
+    const url = new URL(value);
+    if (
+      value.toLowerCase().startsWith("https://") &&
+      !value.includes("\\") &&
+      !url.username &&
+      !url.password
+    ) {
+      return value;
+    }
+  } catch {
+    // reported below
+  }
+  warnOnce(
+    `${key}=${value}`,
+    `[branding] ${key} must be an https URL without credentials; it is not used`,
+  );
+  return null;
+}
+
+export interface Brand {
+  /** SITE_NAME, or null for the product's own wording. */
+  name: string | null;
+  logoUrl: string | null;
+  iconUrl: string | null;
+  /** The SITE_ACCENT tokens of both themes, or null for the stylesheet's own. */
+  palette: Record<ThemeName, AccentTokens> | null;
+}
+
+/** The product's wording when SITE_NAME is unset. */
+export const DEFAULT_SITE_NAME = "Sinnlos";
+
+/** The instance's branding (v0.29, S1): every key optional, invalid ones warn once and fall back. */
+export function brand(env: Env): Brand {
+  const site = parseSiteName(env.SITE_NAME);
+  if (site.invalid) {
+    warnOnce(
+      `SITE_NAME=${env.SITE_NAME}`,
+      `[branding] SITE_NAME must be 1-${SITE_NAME_MAX_LENGTH} characters without control characters; it is not used`,
+    );
+  }
+  const accent = env.SITE_ACCENT?.trim();
+  const palette = accent ? deriveAccentPalette(accent) : null;
+  if (accent && !palette) {
+    warnOnce(
+      `SITE_ACCENT=${accent}`,
+      hexToHsl(accent)
+        ? `[branding] SITE_ACCENT ${accent} fails the contrast checks; the default colours are used`
+        : "[branding] SITE_ACCENT must be #rrggbb; the default colours are used",
+    );
+  }
+  return {
+    name: site.name,
+    logoUrl: assetUrlFromEnv(env, "SITE_LOGO_URL"),
+    iconUrl: assetUrlFromEnv(env, "SITE_ICON_URL"),
+    palette,
+  };
 }
