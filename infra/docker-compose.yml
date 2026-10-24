@@ -212,6 +212,9 @@ services:
       # The web's UI language (below); the cms names an anonymised person
       # in it ("Ehemalige Person" / "Former person", v0.28).
       DEFAULT_LOCALE: ${DEFAULT_LOCALE:-en}
+      # The instance's name (v0.29) in the digest and account-mail subjects
+      # and new TOTP enrolments; empty = the product's wording.
+      SITE_NAME: ${SITE_NAME:-}
       # Optional search ranking (v0.21, docs/DEPLOYMENT.md "Meilisearch
       # (optional search)"): off unless MEILISEARCH_ENABLED=1. The cms keeps
       # the index sinnlos_search current with the write key; it never gets
@@ -338,6 +341,11 @@ services:
       WHISTLEBLOWING_URL: ${WHISTLEBLOWING_URL:-}
       PLAUSIBLE_SCRIPT_URL: ${PLAUSIBLE_SCRIPT_URL:-}
       PLAUSIBLE_DOMAIN: ${PLAUSIBLE_DOMAIN:-}
+      # Branding (v0.29, infra/.env.example), all optional.
+      SITE_NAME: ${SITE_NAME:-}
+      SITE_LOGO_URL: ${SITE_LOGO_URL:-}
+      SITE_ICON_URL: ${SITE_ICON_URL:-}
+      SITE_ACCENT: ${SITE_ACCENT:-}
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/ || exit 1"]
       interval: 15s
