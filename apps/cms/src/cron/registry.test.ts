@@ -82,7 +82,7 @@ describe("cronRegistry", () => {
       const [minute, hour, ...rest] = rule.split(" ");
       expect(rest, name).toEqual(["*", "*", "*"]);
       const minutes = Number(hour) * 60 + Number(minute);
-      // 03:00 is pg-backup.sh in the host crontab (docs/DEPLOYMENT.md §7.3);
+      // 03:00 is pg-backup.sh in the host crontab (docs/OPERATIONS.md, "Automated daily backups (cron)");
       // anything it deletes must still be in that night's backup.
       if (name.endsWith("-janitor")) {
         expect(minutes, name).toBeGreaterThan(3 * 60);

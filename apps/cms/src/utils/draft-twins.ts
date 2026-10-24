@@ -107,7 +107,7 @@
  * as well (publish rebuilds it from the draft; the old row's link rows
  * cascade). In this app those are the course-lesson, space-page and
  * parent-child page links. The error line says so; the runbook
- * (docs/DEPLOYMENT.md) says to fix the named entry first. Rolling the whole
+ * (docs/archive/deployment-history.md) says to fix the named entry first. Rolling the whole
  * group back instead would leave the other side published-only, where an
  * admin publish drops every link.
  *

@@ -5,7 +5,7 @@
 -- editors only and notifies nobody (decision 06 §B6, D-PT01). Before, such
 -- a row was company-wide. This lists exactly those rows, so the owner can
 -- re-target or accept each one before the deploy; the count goes into the
--- release note (DEPLOYMENT.md "Deploying batch 15").
+-- release note (docs/archive/deployment-history.md, "Deploying batch 15").
 --
 -- Runs on the batch-14 schema (before the deploy) and on every later one;
 -- it reads only columns batch 14 already has. Also part of the rollback
@@ -17,7 +17,7 @@
 -- Output: one summary row, then one row per announcement row (draft and
 -- published apart) with its document_id, title and published_at, and
 -- `on_rollback` for the saved list of a rollback to batch 14
--- (DEPLOYMENT.md "Deploying batch 15", R2): `hide_then_restore` on a
+-- (docs/archive/deployment-history.md, "Deploying batch 15", R2): `hide_then_restore` on a
 -- published row (unpublish it for the window, R3; republish it after the
 -- roll-forward, R6f), `none` on a draft row. Titles are content, not
 -- personal data; treat the output as internal anyway.

@@ -27,7 +27,8 @@ if (range) {
   };
   const changesOutside = (...excluded) => changesIn(".", ...excluded);
   const docs = ":(exclude,glob)docs/**/*.md";
-  full = changesOutside(docs);
+  // docs/INSTALL.md pins the release tag (infra/install-version.test.ts).
+  full = changesOutside(docs) || changesIn(":(literal)docs/INSTALL.md");
   // CMS queries, shared rules, infra and dependency/config changes can affect stored data;
   // the web search reads the cms's Meilisearch index (v0.21), whose suite runs there too.
   database =

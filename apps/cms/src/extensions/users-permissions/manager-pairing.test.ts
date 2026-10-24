@@ -10,7 +10,7 @@ import { openSqliteEngine, type SqliteEngine } from "../../test/sqlite-engine.te
  * /people/[id] never rendered.
  *
  * Pinned against @strapi/database 5.55.1 on SQLite (the same sync ran on
- * Postgres 16 in the lane rehearsal, docs/architecture.md Nachtrag
+ * Postgres 16 in the lane rehearsal, docs/archive/architecture-history.md, Nachtrag
  * 2026-09-28f):
  *   1. the schema pairs the two sides (infra/contracts.test.ts checks every
  *      pair),

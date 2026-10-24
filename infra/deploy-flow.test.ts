@@ -1325,7 +1325,7 @@ const TWO_CLONE_MODE: ShellMode | null = RUN_SEQUENCES
   : null;
 
 /**
- * Two clones of the project, as DEPLOYMENT.md §3.6 allows: clone A restores
+ * Two clones of the project, as docs/INSTALL.md allows: clone A restores
  * with the real infra/restore-db.sh (docker stubbed as in restore-db.test.ts,
  * over a fake database in $RS), clone B (the harness's $REPO) deploys with
  * DEPLOY_STATE_DIR pointing at A's state dir, as a second clone must. The

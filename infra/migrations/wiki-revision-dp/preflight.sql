@@ -3,7 +3,7 @@
 -- Shows what infra/migrations/wiki-revision-dp/migrate.sql would do to
 -- wiki_revisions before the release that switches draftAndPublish off for
 -- wiki-revision (batch 16, decision 06 §J4 and Migration §2). Runbook:
--- docs/DEPLOYMENT.md "One-time: wiki revisions draft/publish off", notes in
+-- docs/archive/deployment-history.md, "One-time: wiki revisions draft/publish off", notes in
 -- infra/migrations/wiki-revision-dp/README.md. Safe while the current
 -- release is live:
 --   docker compose -p infra -f infra/docker-compose.yml -f infra/docker-compose.traefik.yml \

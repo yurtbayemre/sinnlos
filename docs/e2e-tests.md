@@ -2,13 +2,13 @@
 
 The suite covers team editing, member read-only access, all three quiz modes
 and training authoring. It uses one isolated runtime and six independent browser cases. The
-[Teams pilot](./plan-e2e-tests.md#github-abnahme) passed local and hosted
+[Teams pilot](./archive/plan-e2e-tests.md#github-abnahme) passed local and hosted
 acceptance and is merged into main. The
-[quiz extension](./plan-e2e-quiz.md) records its separate implementation and
-validation status. The [exam extension](./plan-e2e-exam.md) adds overall-only
-feedback and completed review. The [confirm extension](./plan-e2e-confirm.md)
+[quiz extension](./archive/plan-e2e-quiz.md) records its separate implementation and
+validation status. The [exam extension](./archive/plan-e2e-exam.md) adds overall-only
+feedback and completed review. The [confirm extension](./archive/plan-e2e-confirm.md)
 checks immediate feedback after each selection. The
-[authoring extension](./plan-e2e-authoring.md) adds course/lesson creation and
+[authoring extension](./archive/plan-e2e-authoring.md) adds course/lesson creation and
 quiz editing through the web; its plan records the current acceptance status.
 This suite is a focused browser check, not a complete Batch 17 browser acceptance.
 
@@ -152,13 +152,13 @@ branch rules. This check therefore reports CI failures but is not an enforced
 merge requirement. No repository protection settings were changed. Hosted
 acceptance of the Teams pilot passed: full green pilot run, docs-only skip, deliberate red E2E
 with downloaded and inspected artifacts, then green E2E after restoring the
-test. The [pilot plan records each commit and CI run](./plan-e2e-tests.md#github-abnahme).
+test. The [pilot plan records each commit and CI run](./archive/plan-e2e-tests.md#github-abnahme).
 Its historical job/artifacts were named `e2e · teams` / `e2e-teams-…`.
 The quiz extension's [hosted run](https://github.com/yurtbayemre/sinnlos/actions/runs/39120220734)
 passed all three browser cases. Its downloaded `e2e-browser-39120220734-1`
 artifact contains the report, results and redacted logs; private env and
 fixture files are excluded, and cleanup succeeded. The
-[quiz plan records the implementation and acceptance evidence](./plan-e2e-quiz.md#nachweise).
+[quiz plan records the implementation and acceptance evidence](./archive/plan-e2e-quiz.md#nachweise).
 
 ## One disposable stack per run
 

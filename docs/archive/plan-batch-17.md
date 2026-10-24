@@ -349,7 +349,7 @@ Next: prepare and review the exam mode downgrade/restore SQL and deployment inst
 
 ## 17. Rollback preparation on 2026-10-17
 
-The [exam-mode runbook](../infra/rollback/exam-mode/README.md) now supplies the downgrade and roll-forward commands for the previously deployed CMS/web pair. `infra/deploy.sh` points to it before printing the retag/start instructions and performs no mode writes itself.
+The exam-mode runbook (`infra/rollback/exam-mode/README.md`, removed in v0.29; see the git history) now supplies the downgrade and roll-forward commands for the previously deployed CMS/web pair. `infra/deploy.sh` points to it before printing the retag/start instructions and performs no mode writes itself.
 
 - `downgrade.sql` atomically records only exam variants in a separate operational schema and maps them to quizGate. The saved identity is application schema, course documentId and draft/published state; row IDs and update times are diagnostics. An existing snapshot is never overwritten. The snapshot contains no quiz content or answer keys.
 - `restore.sql` requires an explicit decision for each saved variant. Only approved identities currently in quizGate are restored to exam, including rows replaced by republishing. Missing/ambiguous variants, unreviewed decisions and incompatible modes abort the transaction. Intentional learning modes and deleted variants can be excluded; unrelated courses and new variants are not converted.

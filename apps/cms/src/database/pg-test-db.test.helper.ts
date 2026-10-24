@@ -2,7 +2,7 @@
  * Test support for the Postgres integration suites (*.pg.test.ts). They run
  * only when SINNLOS_TEST_PG_URL points at a Postgres 16 the tests may create
  * and drop schemas in (CI: the postgres:16 service of the `postgres` job;
- * locally: a throwaway container, see docs/DEPLOYMENT.md "Datetime
+ * locally: a throwaway container, see docs/OPERATIONS.md "Datetime
  * contract"). Every suite works in its own schema.
  */
 import { loadStrapiKnex, type RawKnex } from "./strapi-knex.test.helper";

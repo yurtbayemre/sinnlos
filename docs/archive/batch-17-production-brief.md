@@ -30,7 +30,7 @@ Unbegrenzte Quizversuche und fehlender Timer bleiben akzeptiert. Bereits bekannt
 
 ## Ablauf in der Deployment-Session
 
-Die folgenden Befehle sind **vorbereitet, hier nicht ausgeführt**. Bestehende [Deployment-Prozedur](DEPLOYMENT.md#74-update-procedure-production-safe), Compose-Overrides, Backup- und Lock-Konfiguration der bestätigten Instanz verwenden. Kein neuer Deploymentmechanismus und keine Übernahme lokaler Rehearsal-Secrets oder -Fixtures.
+Die folgenden Befehle sind **vorbereitet, hier nicht ausgeführt**. Bestehende [Deployment-Prozedur](../UPGRADE.md#update-procedure-production-safe), Compose-Overrides, Backup- und Lock-Konfiguration der bestätigten Instanz verwenden. Kein neuer Deploymentmechanismus und keine Übernahme lokaler Rehearsal-Secrets oder -Fixtures.
 
 ### 1. Live-/Rollbacknachweis und sauberes Zielcheckout
 
@@ -60,7 +60,7 @@ COMPOSE_PROJECT="$PROJECT" DEPLOY_STATE_DIR="$STATE_DIR" infra/deploy.sh --check
 COMPOSE_PROJECT="$PROJECT" DEPLOY_STATE_DIR="$STATE_DIR" infra/deploy.sh --dry-run --require-green-ci
 ```
 
-Erwartet: sauberer Checkout/Buildkontext, `Preflight OK`, freie Deploysperre, genau die Ziel-CI grün, richtiges vorheriges Image-Paar und regulärer Live-Smoke. `--check` allein ersetzt den vollständigen Dry-run nicht. Die bestehende lesende [Grantdiagnostik](../infra/diagnostics/prod-perm-diff.sql) vor/nach dem Deploy archivieren; vor dem Update können erwartete Unterschiede zum neuen Soll auftreten. Eine Datei `admin-panel-permissions.sql` existiert nicht; das in der Abnahme dokumentierte lesende Grantinventar ersetzt keine effektive Panel-Rechteprüfung.
+Erwartet: sauberer Checkout/Buildkontext, `Preflight OK`, freie Deploysperre, genau die Ziel-CI grün, richtiges vorheriges Image-Paar und regulärer Live-Smoke. `--check` allein ersetzt den vollständigen Dry-run nicht. Die bestehende lesende [Grantdiagnostik](../../infra/diagnostics/prod-perm-diff.sql) vor/nach dem Deploy archivieren; vor dem Update können erwartete Unterschiede zum neuen Soll auftreten. Eine Datei `admin-panel-permissions.sql` existiert nicht; das in der Abnahme dokumentierte lesende Grantinventar ersetzt keine effektive Panel-Rechteprüfung.
 
 ### 2. Backup und Deploy nach dem Instanz-Go
 
@@ -87,7 +87,7 @@ Testschreibvorgänge, erhaltene Testdaten und Wiederherstellungen im Deployment-
 
 ## Rollback und Roll-forward
 
-Das [geprobte Exam-Rollback-Runbook](../infra/rollback/exam-mode/README.md) ist die ausführbare Quelle. Vor einem Rollback alle CMS-/Schedulerwriter und Web stoppen, die tatsächlich vorhandenen Exam-Varianten sichern und zu `quizGate` downgraden, den Modestand exportieren und **erst danach** beide bestätigten vorherigen Images starten. Eine vorhandene Snapshot-Struktur nicht überschreiben oder ungeprüft löschen. Kein voller Datenbank-Restore allein für einen Moduswechsel.
+Das geprobte Exam-Rollback-Runbook (`infra/rollback/exam-mode/README.md`, removed in v0.29; see the git history) ist die ausführbare Quelle. Vor einem Rollback alle CMS-/Schedulerwriter und Web stoppen, die tatsächlich vorhandenen Exam-Varianten sichern und zu `quizGate` downgraden, den Modestand exportieren und **erst danach** beide bestätigten vorherigen Images starten. Eine vorhandene Snapshot-Struktur nicht überschreiben oder ungeprüft löschen. Kein voller Datenbank-Restore allein für einen Moduswechsel.
 
 Roll-forward ebenfalls bei gestoppten Writern: jede gespeicherte Dokument-/Draft-/Published-Identität gegen zwischenzeitliche Änderungen prüfen, bewusste Lernmodi respektieren und erst dann `restore.sql` ausführen. Republish kann numerische IDs ersetzt haben. Keine pauschale Umwandlung aller quizGate-Kurse. Alte Images dürfen nie gegen bereits wiederhergestellte Exam-Werte laufen. Snapshot erst nach erfolgreicher Prüfung und Archivierung gemäß Runbook entfernen.
 

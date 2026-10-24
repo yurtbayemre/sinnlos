@@ -1,5 +1,5 @@
 /**
- * infra/restore-db.sh: the database restore of docs/DEPLOYMENT.md §7.1 as a
+ * infra/restore-db.sh: the database restore of docs/OPERATIONS.md, "Restoring a database dump", as a
  * script with an on-disk attempt state. Pinned:
  *   1. prepare copies the dump into the attempt's own staged file and checks
  *      that copy in full (it lists a table AND decodes to the end) before

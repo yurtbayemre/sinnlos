@@ -7,7 +7,7 @@
 -- DELETE ... WHERE published_at IS NULL at boot, no transaction; the link
 -- rows of every deleted draft cascade away).
 --
--- Runbook: docs/DEPLOYMENT.md "One-time: org draft/publish off", notes in
+-- Runbook: docs/archive/deployment-history.md, "One-time: org draft/publish off", notes in
 -- infra/migrations/org-dp/README.md. Run the read-only preflight.sql first.
 -- Run with cms and web STOPPED, right after a verified pg_dump, as ONE
 -- transaction (the script refuses anything else):

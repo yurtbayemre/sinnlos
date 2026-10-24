@@ -75,7 +75,9 @@ export class OidcConfigError extends Error {
     super(
       `[oidc] OIDC_ENABLED=1, but the OIDC configuration is invalid: ${issues
         .map(({ variable, message }) => `${variable} ${message}`)
-        .join("; ")}. Fix infra/.env (docs/DEPLOYMENT.md, "OIDC sign-in"), or unset OIDC_ENABLED.`,
+        .join(
+          "; ",
+        )}. Fix infra/.env (docs/SSO.md, "OIDC sign-in (Keycloak, authentik, Zitadel)"), or unset OIDC_ENABLED.`,
     );
     this.name = "OidcConfigError";
     this.issues = issues;
@@ -196,7 +198,7 @@ export function oidcConfigWarnings(settings: OidcSettings): string[] {
     warnings.push(
       "[oidc] LOCAL_REGISTRATION=1 next to OIDC sign-in: anyone can register a local account. " +
         "An OIDC user whose e-mail was registered first gets 409 oidc_account_exists; " +
-        "check who registered that account before an admin binds it (docs/DEPLOYMENT.md, the 409 procedure).",
+        "check who registered that account before an admin binds it (docs/SSO.md, the 409 procedure).",
     );
   }
   return warnings;

@@ -3,7 +3,7 @@
  *
  * The env templates ship recognisable placeholders (`change-me…` in
  * infra/.env.example until FX13, `toBeModified…` in apps/cms/.env.example,
- * `<secret>` / `<openssl rand …>` in docs/DEPLOYMENT.md). Strapi accepts any
+ * `<secret>` / `<openssl rand …>` in docs/archive/deployment-history.md). Strapi accepts any
  * non-empty string, so a copied template made Strapi JWTs, admin sessions,
  * API tokens and the internal webhook / upload secrets forgeable with a
  * publicly known value. Compose `${VAR:?}` only catches EMPTY values; this
