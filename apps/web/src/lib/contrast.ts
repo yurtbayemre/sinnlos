@@ -12,7 +12,9 @@
  *     option's border, checked native controls, icons in tinted tiles); all
  *     of them draw with the primary-text token (bg-/border-/accent-primary-text);
  *   - decorative, not checked: border-primary/* outlines next to a text or
- *     icon cue, the sign-in glow (bg-primary/10 blur), shadows.
+ *     icon cue, the sign-in glow (bg-primary/10 blur), shadows, and solid
+ *     bg-primary shapes whose label carries the meaning (buttons, the brand
+ *     tile; today's date also gets a primary-text ring).
  */
 export type Hsl = readonly [number, number, number];
 export type Rgb = readonly [number, number, number];
@@ -218,8 +220,9 @@ export const CONTRAST_PAIRS: readonly ContrastPair[] = [
   ),
   // Graphics: focus rings (offset on the background or a card), KPI bars,
   // the read-confirmation progress fill (on the card and the muted track), the
-  // route progress, checked native controls, the selected quiz option's
-  // border (outside on the card, inside on its /10 tint, checked above) and
+  // route progress, the active navigation bar, the ring round today in the
+  // calendar, checked native controls, the borders of the selected quiz option
+  // and RSVP (outside on the card, inside on their /10 tint, checked above) and
   // the unread dot on the bell's /4 row.
   ...onSurfaces("ring", AA_GRAPHIC, tok("ring"), same),
   ...onSurfaces("primary-text graphic", AA_GRAPHIC, tok("primary-text"), same),
@@ -286,6 +289,9 @@ const withLightness = ([h, s]: Hsl, l: number): Hsl => [h, s, Math.min(100, Math
 const readsText = (id: string) => id.includes("primary-text") || id.startsWith("ring");
 
 function deriveTheme(base: Tokens, accent: Hsl, theme: ThemeName): AccentTokens | null {
+  // A label passes "on the fill" when it does on the solid fill and on its
+  // /90 hover (every bg-primary button has both); otherwise common brand
+  // colours (#0f766e, #ff0000, mid greys) would fall back on the hover alone.
   const labelPasses = (fill: Hsl, label: Hsl) =>
     contrast(toRgb(label), toRgb(fill)) >= AA_TEXT &&
     SURFACES.every(

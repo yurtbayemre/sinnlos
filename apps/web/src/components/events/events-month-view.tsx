@@ -140,7 +140,8 @@ export async function EventsMonthView({
                           className={cn(
                             "inline-flex h-6 w-6 items-center justify-center rounded-full text-xs",
                             !inMonth && "text-muted-foreground",
-                            isToday && "bg-primary font-semibold text-primary-foreground",
+                            isToday &&
+                              "bg-primary font-semibold text-primary-foreground ring-2 ring-primary-text",
                           )}
                         >
                           {Number(key.slice(8, 10))}

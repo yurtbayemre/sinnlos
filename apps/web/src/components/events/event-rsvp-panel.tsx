@@ -95,7 +95,7 @@ export function EventRsvpPanel({
               aria-pressed={selected}
               className={cn(
                 "inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium outline-hidden transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
-                selected ? "border-primary/40 bg-primary/10 text-primary" : "hover:bg-muted",
+                selected ? "border-primary-text bg-primary/10 text-primary" : "hover:bg-muted",
                 (isPending || blocked) && "opacity-50",
               )}
             >
