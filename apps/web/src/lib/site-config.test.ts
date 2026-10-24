@@ -69,6 +69,11 @@ describe("brand", () => {
   const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
   afterEach(() => warn.mockClear());
 
+  it("names a valid accent that fails the contrast checks", () => {
+    expect(brand({ SITE_ACCENT: "#050505" }).palette).toBeNull();
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("fails the contrast checks"));
+  });
+
   it("keeps the product's look without any key", () => {
     expect(brand({})).toEqual({ name: null, logoUrl: null, iconUrl: null, palette: null });
     expect(warn).not.toHaveBeenCalled();
@@ -101,6 +106,7 @@ describe("brand", () => {
     ["SITE_LOGO_URL", "https://user:pass@cdn.example.com/logo.svg"],
     ["SITE_ICON_URL", "javascript:alert(1)"],
     ["SITE_ACCENT", "teal"],
+    ["SITE_ACCENT", "#0000ff"],
     ["SITE_ACCENT", "#0f766e;}body{display:none"],
   ])("refuses %s=%j with one warning", (key, value) => {
     const result = brand({ [key]: value });

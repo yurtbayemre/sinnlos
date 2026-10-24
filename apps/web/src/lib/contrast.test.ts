@@ -38,18 +38,39 @@ describe("deriveAccentPalette", () => {
     "#0f766e",
   ];
 
-  it.each(COLOURS)("%s: a derived palette passes every pair, or there is none", (hex) => {
+  // Whether each colour derives a palette (null = the defaults stay).
+  const EXPECTED: Record<string, boolean> = {
+    "#fefefe": true,
+    "#050505": false, // the dark fill under muted text on its tints
+    "#ffeb3b": true,
+    "#777777": true,
+    "#ff0000": true,
+    "#00ff00": true,
+    "#0000ff": false, // muted text on the /6 gradient start: 4.497:1
+    "#4f46e5": true,
+    "#0f766e": true,
+  };
+
+  it.each(COLOURS)("%s: a derived palette passes every pair, else there is none", (hex) => {
     const palette = deriveAccentPalette(hex);
+    expect(palette !== null, hex).toBe(EXPECTED[hex]);
     if (!palette) return;
     for (const theme of ["light", "dark"] as ThemeName[]) {
       expect(failingPairs({ ...DEFAULT_TOKENS[theme], ...palette[theme] }), theme).toEqual([]);
     }
   });
 
-  it("derives a palette for ordinary brand colours", () => {
-    for (const hex of ["#4f46e5", "#0f766e", "#ff0000", "#0000ff", "#777777", "#ffeb3b"]) {
-      expect(deriveAccentPalette(hex), hex).not.toBeNull();
-    }
+  it("returns null when the derived palette fails a pair the fill decides", () => {
+    const accent = hexToHsl("#0000ff")!;
+    const tokens = {
+      ...DEFAULT_TOKENS.light,
+      primary: accent,
+      "primary-foreground": [0, 0, 100] as const,
+    };
+    expect(failingPairs(tokens).map((pair) => pair.id)).toContain(
+      "muted-foreground on primary/6 over background",
+    );
+    expect(deriveAccentPalette("#0000ff")).toBeNull();
   });
 
   it("keeps the colour as the fill when a label passes on it", () => {

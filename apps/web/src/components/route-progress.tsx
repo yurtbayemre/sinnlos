@@ -30,7 +30,7 @@ export function RouteProgress() {
       aria-label={tCommon("loadingPage")}
       className="fixed left-0 right-0 top-0 z-60 h-0.5 overflow-hidden bg-transparent"
     >
-      <div className="absolute top-0 h-full rounded-full bg-primary/80 shadow-[0_0_8px_hsl(var(--primary)/0.6)] animate-indeterminate" />
+      <div className="absolute top-0 h-full rounded-full bg-primary-text shadow-[0_0_8px_hsl(var(--primary)/0.6)] animate-indeterminate" />
     </div>,
     document.body,
   );

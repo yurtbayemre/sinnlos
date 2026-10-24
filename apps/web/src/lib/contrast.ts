@@ -8,10 +8,11 @@
  * Classification (WCAG 1.4.3 / 1.4.11):
  *   - text: 4.5:1 (no large-text exception is taken);
  *   - graphic: 3:1, for indicators that carry meaning (focus rings, bars,
- *     progress fills, checked native controls, icons in tinted tiles);
+ *     progress fills, the route progress, the unread dot, the selected quiz
+ *     option's border, checked native controls, icons in tinted tiles); all
+ *     of them draw with the primary-text token (bg-/border-/accent-primary-text);
  *   - decorative, not checked: border-primary/* outlines next to a text or
- *     icon cue, the sign-in glow (bg-primary/10 blur), the transient route
- *     progress bar (bg-primary/80), shadows.
+ *     icon cue, the sign-in glow (bg-primary/10 blur), shadows.
  */
 export type Hsl = readonly [number, number, number];
 export type Rgb = readonly [number, number, number];
@@ -215,11 +216,16 @@ export const CONTRAST_PAIRS: readonly ContrastPair[] = [
       (s) => tint("primary", alpha, tint("muted", 0.4, s)),
     ),
   ),
-  // Graphics: focus rings (offset on the background or a card), KPI bars and
-  // the read-confirmation progress fill (bg-primary-text, on the card and the
-  // muted track), checked native controls (accent-primary-text).
+  // Graphics: focus rings (offset on the background or a card), KPI bars,
+  // the read-confirmation progress fill (on the card and the muted track), the
+  // route progress, checked native controls, the selected quiz option's
+  // border (outside on the card, inside on its /10 tint, checked above) and
+  // the unread dot on the bell's /4 row.
   ...onSurfaces("ring", AA_GRAPHIC, tok("ring"), same),
   ...onSurfaces("primary-text graphic", AA_GRAPHIC, tok("primary-text"), same),
+  ...onSurfaces("primary-text graphic on primary/4", AA_GRAPHIC, tok("primary-text"), (s) =>
+    tint("primary", 0.04, s),
+  ),
   {
     id: "primary-text graphic on muted",
     min: AA_GRAPHIC,
@@ -247,10 +253,10 @@ export function failingPairs(tokens: Tokens): FailingPair[] {
 /** The four tokens an operator's accent replaces, per theme. */
 export type AccentTokens = Record<"primary" | "primary-foreground" | "primary-text" | "ring", Hsl>;
 
-/** The two label colours a fill may carry: today's light and dark foregrounds. */
+/** The two label colours a fill may carry: white or a dark navy. */
 const LABELS: readonly Hsl[] = [
-  [210, 40, 98],
-  [222.2, 47.4, 11.2],
+  [0, 0, 100],
+  [222, 47, 11],
 ];
 
 const round1 = (n: number) => Math.round(n * 10) / 10;
@@ -304,16 +310,15 @@ function deriveTheme(base: Tokens, accent: Hsl, theme: ThemeName): AccentTokens 
     }
     return null;
   };
-  // The fill keeps the accent if it can; otherwise the nearest lightness
-  // (one step lighter, one darker, two lighter, …) that passes.
-  for (let delta = 0; delta <= 100; delta++) {
-    for (const l of delta === 0 ? [accent[2]] : [accent[2] + delta, accent[2] - delta]) {
-      if (l < 0 || l > 100) continue;
-      const fill = withLightness(accent, l);
-      const label = LABELS.find((candidate) => labelPasses(fill, candidate));
-      const tokens = label && withText(fill, label);
-      if (tokens) return tokens;
-    }
+  // The fill keeps the accent unless neither label passes on it; then it
+  // steps away from the better label until one does.
+  let fill = accent;
+  for (let step = 0; step <= 100; step++) {
+    const label = LABELS.find((candidate) => labelPasses(fill, candidate));
+    if (label) return withText(fill, label);
+    const lightLabelWins =
+      contrast(toRgb(LABELS[0]!), toRgb(fill)) >= contrast(toRgb(LABELS[1]!), toRgb(fill));
+    fill = withLightness(fill, fill[2] + (lightLabelWins ? -1 : 1));
   }
   return null;
 }
