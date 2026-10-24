@@ -373,22 +373,47 @@ jobs:
             and (.services.meili.labels // {}) == {}'
 
       # v0.29: the site gate (SITE_ALLOW_CIDRS). The Caddyfile validates open
-      # and closed with the caddy service's own command (run → validate);
-      # the Traefik override puts it on all five routers, after the headers.
-      - name: Site gate (Caddy validate open and closed, Traefik routers)
+      # and closed with the caddy service's own command (run → validate),
+      # then serves both states in front of two busybox upstreams named web
+      # and cms: open, a normal answer with the security headers; closed, a
+      # 503 with them, on a web and a cms path. The Traefik override puts the
+      # gate on all five routers, after the headers.
+      - name: Site gate (Caddy open and closed, Traefik routers)
         run: |
           secrets="${RUNNER_TEMP}/compose-ci.env"
           compose() {
             docker compose --env-file infra/.env.example --env-file "${secrets}" \
               -f infra/docker-compose.yml "$@"
           }
-          cmd="$(compose config --format json | jq -r '.services.caddy.command[2]' |
-            sed -e 's/\$\$/$/g' -e 's/exec caddy run /exec caddy validate /')"
+          cmd="$(compose config --format json | jq -r '.services.caddy.command[2]' | sed -e 's/\$\$/$/g')"
+          docker network create gate-ci
+          for upstream in web:3000 cms:1337; do
+            docker run -d --rm --name "gate-${upstream%%:*}" --network gate-ci \
+              --network-alias "${upstream%%:*}" busybox:1.37 httpd -f -p "${upstream##*:}" -h /etc
+          done
           for cidrs in "" "203.0.113.7/32,2001:db8::/32"; do
             echo "Caddyfile with SITE_ALLOW_CIDRS='${cidrs}'"
             docker run --rm -e DOMAIN=intranet.example.com -e "SITE_ALLOW_CIDRS=${cidrs}" \
+              -v "${PWD}/infra/Caddyfile:/etc/caddy/Caddyfile:ro" caddy:2-alpine \
+              sh -c "${cmd/exec caddy run /exec caddy validate }"
+            docker run -d --rm --name gate-caddy --network gate-ci -p 18080:80 \
+              -e DOMAIN=http://localhost -e "SITE_ALLOW_CIDRS=${cidrs}" \
               -v "${PWD}/infra/Caddyfile:/etc/caddy/Caddyfile:ro" caddy:2-alpine sh -c "${cmd}"
+            for _ in $(seq 20); do curl -s -o /dev/null http://127.0.0.1:18080/ && break; sleep 0.5; done
+            for path in /hostname /api/x; do
+              head="$(curl -s -D - -o /dev/null -H 'Host: localhost' -H 'X-Forwarded-For: 203.0.113.7' \
+                "http://127.0.0.1:18080${path}")"
+              printf '%s %s\n' "${path}" "$(head -n 1 <<<"${head}")"
+              grep -qi '^x-content-type-options: nosniff' <<<"${head}"
+              grep -qi '^x-frame-options: deny' <<<"${head}"
+              closed=no
+              if grep -q '^HTTP/1.1 503' <<<"${head}"; then closed=yes; fi
+              [[ "${closed}" == "$([[ -n "${cidrs}" ]] && echo yes || echo no)" ]]
+            done
+            docker stop gate-caddy
           done
+          docker stop gate-web gate-cms
+          docker network rm gate-ci
           echo "Traefik: the gate on every router, with the listed range"
           SITE_ALLOW_CIDRS=203.0.113.7/32 compose -f infra/docker-compose.traefik.yml \
             config --format json | jq -e '

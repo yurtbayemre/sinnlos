@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { createTestStrapi, testEngines, type TestStrapi } from "./harness.test.helper";
@@ -97,4 +99,82 @@ describe.each(testEngines())("cron status on %s", (engine) => {
       everyMinutes: 1440,
     });
   });
+
+  it("waits for work after a real commit and records its late failure", async () => {
+    const { guardedTask } = t.requireBuilt<Registry>("src/cron/registry");
+    const { afterCommit } = t.requireBuilt<AfterCommit>("src/utils/after-commit");
+    const db = (t.strapi as unknown as { db: TransactionDb }).db;
+    const name = `it-late-${engine}`;
+    let settled = false;
+    await guardedTask({
+      name,
+      rule: "20 3 * * *",
+      tz: "UTC",
+      fn: async () => {
+        await db.transaction(async () => {
+          await afterCommit(
+            db,
+            async () => {
+              await new Promise((r) => setTimeout(r, 50));
+              settled = true;
+              throw new Error("late cleanup failed");
+            },
+            () => undefined,
+          );
+        });
+      },
+    })({ strapi: t.strapi });
+    expect(settled).toBe(true);
+    expect((await statusRows()).get(`plugin_sinnlos_cron:${name}`)).toMatchObject({
+      lastOutcome: "failed",
+    });
+  });
+
+  // infra/ops-check.sh runs infra/ops-check.sql with psql; jsonb, so Postgres only.
+  it.skipIf(engine !== "postgres")(
+    "answers ops-check.sql with one line per expected task",
+    async () => {
+      const { guardedTask } = t.requireBuilt<Registry>("src/cron/registry");
+      await guardedTask({
+        name: "digest-mailer",
+        rule: "30 7 * * *",
+        tz: "UTC",
+        fn: async () => {},
+      })({ strapi: t.strapi });
+      const schema = `"${t.database.env.DATABASE_SCHEMA!.replace(/"/g, '""')}"`;
+      const query = readFileSync(
+        join(__dirname, "..", "..", "..", "..", "infra", "ops-check.sql"),
+        "utf8",
+      )
+        .split(':"schema"')
+        .join(schema);
+      const rows = await t.database.sql<Record<string, string>>(query);
+      const [expected, ...tasks] = rows.map((r) => [r.kind, r.a, r.b, r.c, r.d, r.e, r.f, r.g]);
+      expect(expected!.slice(0, 3)).toEqual(["expected", "true", "array"]);
+      expect(Number(expected![3])).toBe(tasks.length);
+      const digest = tasks.find((row) => row[1] === "digest-mailer");
+      expect(digest).toEqual([
+        "task",
+        "digest-mailer",
+        "1440",
+        expect.stringMatching(/^\d{4}-\d\d-\d\dT/),
+        "yes",
+        expect.stringMatching(/^\d{4}-\d\d-\d\dT/),
+        "ok",
+        "",
+      ]);
+      expect(tasks.find((row) => row[1] === "audit-janitor")?.slice(4)).toEqual(["no", "", "", ""]);
+    },
+  );
 });
+
+interface TransactionDb {
+  transaction(fn: () => Promise<void>): Promise<void>;
+}
+interface AfterCommit {
+  afterCommit(
+    db: unknown,
+    task: () => Promise<void>,
+    onError: (err: unknown) => void,
+  ): Promise<void>;
+}
