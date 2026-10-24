@@ -82,11 +82,6 @@ services:
       # times, all-day events) use APP_TIME_ZONE, never the process zone.
       TZ: UTC
       APP_TIME_ZONE: ${APP_TIME_ZONE:-Europe/Berlin}
-      # Only for a database written by a cms before the datetime contract:
-      # the one-time repair reads them (see infra/.env.example). Fresh
-      # installs leave both empty.
-      DATETIME_LEGACY_ZONE: ${DATETIME_LEGACY_ZONE:-}
-      DATETIME_LEGACY_UTC_UNTIL: ${DATETIME_LEGACY_UTC_UNTIL:-}
       HOST: 0.0.0.0
       PORT: 1337
       # Secrets fail fast when unset/empty (FX13); the cms additionally
