@@ -15,15 +15,15 @@ Everyday operation of an installed instance: monitoring, restore, backups, harde
 
 - **Answers:** `200 {"status":"ok"}` when the web reaches the cms and the cms reaches its database, else `503 {"status":"unavailable"}`.
 - **What it proves:** the chain edge → web → cms → database. It does not check the schema, search, e-mail or the nightly jobs.
-- **Staleness:** each process caches its answer for up to 5 seconds, so the result can be that much out of date.
+- **Staleness:** each process caches its answer for up to 5 seconds, so the result can be that much out of date. It answers within 3 seconds.
 - **Monitor:** point an uptime monitor at `https://<DOMAIN>/healthz` every minute, and alert after a few failures in a row.
-- **Behind it:** the cms route is `GET /api/health/ready`.
+- **Behind it:** the cms route `GET /api/health/ready` (one probe at a time, its own 5-second cache, an answer within 2 seconds).
 
 ### `infra/ops-check.sh`
 
-`infra/ops-check.sh` checks what an HTTP monitor cannot see. Run it on the host as the deploy user; like `deploy.sh`, it reads `infra/deploy.env`.
+`infra/ops-check.sh` checks what an HTTP monitor cannot see. Run it on the host as the deploy user. Like `deploy.sh`, it reads `COMPOSE_PROJECT` (default `infra`) and `SINNLOS_BACKUP_DIR` from `infra/deploy.env`, and it reads the database with `docker exec <project>-db-1` (the query is `infra/ops-check.sql`).
 
-**Output:** one line per problem. It exits 1 if there is any problem and 0 when everything is clean. A line starting with `UNKNOWN` means it could not check something, and that counts as a problem too.
+**Output:** one line per problem and exit 1; nothing and exit 0 when everything is clean. A line starting with `UNKNOWN` means it could not check something, and that counts as a problem too.
 
 **What it checks:**
 
@@ -36,9 +36,12 @@ Everyday operation of an installed instance: monitoring, restore, backups, harde
 - **Disk.** A problem when free space is below `OPS_DISK_MIN_PERCENT` (default 15) on any of: the Docker root directory, the backup directory, `infra/backups`, the database volume, the uploads volume.
 - **Nightly jobs.** The cms records every job run in its database. A problem when:
   - cron is switched off (`CRON_ENABLED=false`);
-  - a job failed, either in its last run or within `OPS_CRON_LOOKBACK` (default 2 hours), even if a later run succeeded;
-  - a job has not run for longer than its schedule allows.
-- **Push.** With `OPS_PUSH_URL` set, a clean check calls that URL, for example an Uptime Kuma push monitor. Kuma then alerts when the pings stop. A failed ping is reported as a problem line.
+  - a job failed, either in its last run or within `OPS_CRON_LOOKBACK_MINUTES` (default 120), even if a later run succeeded;
+  - a job has not run for longer than its schedule allows: its interval plus the larger of 15 minutes and a tenth of the interval (16 minutes for the minute jobs, 26 hours 24 minutes for the daily ones), counted from when the job first became expected.
+
+  The status rows are `plugin_sinnlos_cron:<task>` and `plugin_sinnlos_cron:expected` in `strapi_core_store_settings`; a failed run also logs `[cron] <name> failed: …`.
+
+- **Push.** With `OPS_PUSH_URL` set, a clean check calls that URL, for example an Uptime Kuma push monitor (`http://127.0.0.1:3001/api/push/<token>` for a Kuma on the same host). Kuma then alerts when the pings stop. A failed ping is reported as a problem line.
 
 **Schedule:** run it hourly from the deploy user's crontab. Send the problem lines to a mail address (`MAILTO` needs a working mail transport on the host), use a push monitor, or both:
 
@@ -77,7 +80,8 @@ Restoring a backup brings back everyone the backup holds, **including people ano
 
 Notes on the gate:
 
-- `SITE_ALLOW_CIDRS` filters on the client address the edge sees. It works on the bundled Caddy, and on a host Traefik that is the direct ingress. Behind another proxy or a CDN, configure that layer instead.
+- `SITE_ALLOW_CIDRS` is a comma-separated list; unset means open for IPv4 and IPv6. On Traefik the gate sits right after the security headers in every router, so the 503 answers carry them too.
+- It filters on the client address the edge sees. It works on the bundled Caddy, and on a host Traefik that is the direct ingress. Behind another proxy or a CDN, configure that layer instead.
 - Checks from the host itself arrive from the Docker bridge, so they get 503 too unless you list the bridge range. That covers `deploy.sh`'s smoke check, live-smoke and a local uptime monitor.
 - `infra/deploy.sh` refuses to deploy while `SITE_ALLOW_CIDRS` is set, and `infra/restore-db.sh start` reminds you when the site would be public.
 - The erasure record is personal data ([data-protection.md](data-protection.md), section 5).
