@@ -51,13 +51,23 @@ import {
   type MfaHost,
 } from "./mfa-core";
 import { refuse } from "./refusal";
+import { siteName } from "./site-name";
 import { base32Decode, matchTotp, newTotpSecret, otpauthUri } from "./totp";
 
 /** How long a setup stays valid. */
 export const ENROLLMENT_TTL_MS = 10 * 60 * 1000;
 
-/** The issuer authenticator apps show next to the account. */
+/** The issuer authenticator apps show next to the account when SITE_NAME is unset. */
 export const TOTP_ISSUER = "sinnlos";
+
+/**
+ * The issuer of a new enrolment: SITE_NAME (v0.29, S1) with `:` replaced, as
+ * the otpauth label separates issuer and account with it; existing
+ * enrolments keep the label they were created with.
+ */
+export function totpIssuer(name: string | null = siteName()): string {
+  return name ? name.replace(/:/g, "-") : TOTP_ISSUER;
+}
 
 type Row = Record<string, unknown>;
 type Host = MfaHost & TokenVersionStrapi;
@@ -124,7 +134,7 @@ export async function mfaSetup(
   if (!enrollment) refuse(503, "mfa_unavailable", "ENCRYPTION_KEY is not configured");
   const account =
     (typeof row.email === "string" && row.email) || String(row.username ?? caller.userId);
-  return { secret, otpauthUri: otpauthUri(secret, account, TOTP_ISSUER), enrollment };
+  return { secret, otpauthUri: otpauthUri(secret, account, totpIssuer()), enrollment };
 }
 
 /** The enrollment of `userId`, unsealed and checked (user, expiry, shape), or 400 enrollment_invalid. */

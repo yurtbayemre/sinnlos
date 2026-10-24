@@ -9,6 +9,7 @@
  * en, the owner's default of 2026-09-29, like the web's DEFAULT_LOCALE).
  */
 
+import { siteName } from "../utils/site-name";
 import { notificationTitle } from "@sinnlos/domain";
 export interface DigestContent {
   announcements: { title: string; author?: string | null }[];
@@ -70,7 +71,8 @@ export function digestLocale(profileLocale: unknown, fallback: DigestLocale): Di
 
 const STR = {
   de: {
-    subject: (n: number) => `Sinnlos-Intranet: ${n} Neuigkeit${n === 1 ? "" : "en"} für dich`,
+    product: "Sinnlos-Intranet",
+    subject: (n: number) => `${n} Neuigkeit${n === 1 ? "" : "en"} für dich`,
     greeting: (name: string) => `Hallo ${name},`,
     intro: "hier ist deine Zusammenfassung aus dem Intranet:",
     announcements: "Neuigkeiten",
@@ -83,7 +85,8 @@ const STR = {
       `Du erhältst diese Mail, weil du Digests aktiviert hast. Abbestellen: ${base}/profile`,
   },
   en: {
-    subject: (n: number) => `Sinnlos intranet: ${n} update${n === 1 ? "" : "s"} for you`,
+    product: "Sinnlos intranet",
+    subject: (n: number) => `${n} update${n === 1 ? "" : "s"} for you`,
     greeting: (name: string) => `Hi ${name},`,
     intro: "here is your intranet summary:",
     announcements: "Announcements",
@@ -130,6 +133,8 @@ export function renderDigest(
     baseUrl: string;
     /** Defaults to DIGEST_DEFAULT_LOCALE (digestDefaultLocale()). */
     defaultLocale?: DigestLocale;
+    /** The subject's prefix (SITE_NAME); defaults to siteName(), null = the product's. */
+    siteName?: string | null;
   },
 ): RenderedDigest {
   const locale = digestLocale(opts.locale, opts.defaultLocale ?? digestDefaultLocale());
@@ -200,5 +205,6 @@ export function renderDigest(
     `<p style="margin-top:16px"><a href="${escapeHtml(opts.baseUrl)}/">${escapeHtml(opts.baseUrl)}</a></p>` +
     `<p style="color:#888;font-size:12px">${escapeHtml(t.footer(opts.baseUrl))}</p></div>`;
 
-  return { subject: t.subject(n), text, html };
+  const prefix = (opts.siteName === undefined ? siteName() : opts.siteName) ?? t.product;
+  return { subject: `${prefix}: ${t.subject(n)}`, text, html };
 }
