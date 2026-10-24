@@ -176,7 +176,7 @@ export function ClassifiedForm({ initial }: { initial?: ClassifiedFormInitial })
               type="checkbox"
               name="priceNegotiable"
               defaultChecked={v ? v.priceNegotiable : (initial?.priceNegotiable ?? false)}
-              className="h-4 w-4 rounded border accent-primary"
+              className="h-4 w-4 rounded border accent-primary-text"
             />
             {t("negotiableLabel")}
           </label>
@@ -239,7 +239,7 @@ export function ClassifiedForm({ initial }: { initial?: ClassifiedFormInitial })
           multiple
           accept={AD_IMAGE_TYPES.join(",")}
           onChange={onFilesChange}
-          className="w-full rounded-xl border bg-muted/40 px-4 py-2 text-sm file:mr-3 file:cursor-pointer file:rounded-lg file:border-0 file:bg-primary/10 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-primary file:transition-colors file:hover:bg-primary/20"
+          className="w-full rounded-xl border bg-muted/40 px-4 py-2 text-sm file:mr-3 file:cursor-pointer file:rounded-lg file:border-0 file:bg-primary/10 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-primary file:transition-colors file:hover:bg-primary/15"
         />
         <p className="mt-1 text-xs text-muted-foreground">
           {t("imagesHint", { count: MAX_AD_IMAGES, size: MAX_AD_IMAGE_MB })}

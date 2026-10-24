@@ -261,7 +261,9 @@ export function NotificationBell({
                         })}
                       </div>
                     </div>
-                    {!n.readAt && <div className="mt-2 h-2 w-2 shrink-0 rounded-full bg-primary" />}
+                    {!n.readAt && (
+                      <div className="mt-2 h-2 w-2 shrink-0 rounded-full bg-primary-text" />
+                    )}
                   </DropdownMenu.Item>
                 );
               })

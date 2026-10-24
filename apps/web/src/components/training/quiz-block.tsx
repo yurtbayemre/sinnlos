@@ -132,7 +132,7 @@ export function QuizBlock({
                         : state === "wrong"
                           ? "border-red-500/60 bg-red-500/10"
                           : isPicked
-                            ? "border-primary/60 bg-primary/10"
+                            ? "border-primary-text bg-primary/10"
                             : "hover:bg-muted/50"
                     }`}
                   >

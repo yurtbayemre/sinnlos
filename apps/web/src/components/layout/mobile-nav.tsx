@@ -200,7 +200,7 @@ export function MoreSheetLinks({
                 "flex h-full flex-col items-center gap-1.5 rounded-xl border px-2 py-3 text-center text-xs outline-hidden transition-colors",
                 "focus-visible:ring-2 focus-visible:ring-ring",
                 active
-                  ? "border-primary/40 bg-primary/10 font-medium text-primary"
+                  ? "border-primary-text bg-primary/10 font-medium text-primary"
                   : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
               )}
             >

@@ -69,8 +69,8 @@ describe("isPublicPath — public entries", () => {
     for (const path of [
       "/robots.txt",
       "/sitemap.xml",
-      "/site.webmanifest",
-      "/manifest.webmanifest",
+      "/icon.png",
+      "/apple-icon.png",
       "/apple-touch-icon.png",
       "/apple-touch-icon-precomposed.png",
       "/THIRD_PARTY_NOTICES.txt",
@@ -144,11 +144,11 @@ describe("isPublicPath — guarded paths", () => {
     }
   });
 
-  it("does not list the app-dir icon routes (current state)", () => {
-    // /icon.png and /apple-icon.png (app/ metadata routes, #33) are not in
-    // PUBLIC_FILES today, so anonymous requests get the sign-in redirect.
-    expect(isPublicPath("/icon.png")).toBe(false);
-    expect(isPublicPath("/apple-icon.png")).toBe(false);
+  it("does not list a manifest (none ships)", () => {
+    // v0.29: the bundled icons moved to public/ and are listed above; the
+    // two manifest names were listed although no manifest exists.
+    expect(isPublicPath("/site.webmanifest")).toBe(false);
+    expect(isPublicPath("/manifest.webmanifest")).toBe(false);
   });
 });
 

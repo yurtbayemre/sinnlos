@@ -298,7 +298,7 @@ function FilterTab({ href, active, label }: { href: Route; active: boolean; labe
       className={cn(
         "rounded-full border px-3 py-1.5 text-xs font-medium outline-hidden transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
         active
-          ? "border-primary/40 bg-primary/10 text-primary"
+          ? "border-primary-text bg-primary/10 text-primary"
           : "text-muted-foreground hover:bg-muted hover:text-foreground",
       )}
     >

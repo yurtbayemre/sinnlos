@@ -41,6 +41,10 @@
   --color-card-foreground: hsl(var(--card-foreground));
 
   --text-color-primary: hsl(var(--primary-text));
+  /* Indicators that need 3:1 on the card and the muted track (KPI bars, the
+     read-confirmation progress, checked native controls): bg-primary-text,
+     accent-primary-text (v0.29; lib/contrast.ts). */
+  --color-primary-text: hsl(var(--primary-text));
 
   --text-color-destructive: hsl(var(--destructive-text));
 

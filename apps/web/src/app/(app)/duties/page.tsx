@@ -64,7 +64,7 @@ export default async function DutiesPage({
       aria-current={active ? "page" : undefined}
       className={cn(
         "rounded-full border px-3 py-1 text-sm transition-colors",
-        active ? "border-primary bg-primary text-primary-foreground" : "hover:bg-accent",
+        active ? "border-primary-text bg-primary text-primary-foreground" : "hover:bg-accent",
       )}
     >
       {label}
