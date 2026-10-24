@@ -18,6 +18,20 @@ import { fetchCourseBySlug, fetchLessonByDocumentId, fetchMyProgress } from "@/l
 import { sortLessons } from "@/lib/training-shared";
 import { getViewer } from "@/lib/viewer";
 
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ slug: string; lessonId: string }>;
+}) {
+  const { lessonId } = await params;
+  const t = await getTranslations("training");
+  // No read for a role without the training reads (SH02).
+  if (isReadDenied((await getViewer()).role, "training")) return { title: t("title") };
+  // Same GET as the page's, sent once per render (Next's fetch dedupe).
+  const { data } = await tryFetch(() => fetchLessonByDocumentId(lessonId), "lesson-meta");
+  return { title: data?.title ?? t("title") };
+}
+
 /**
  * Lesson player (issue #29): markdown body (the shared renderer of the
  * wiki, components/markdown.tsx — react-markdown + gfm, NO rehype-raw ⇒ no

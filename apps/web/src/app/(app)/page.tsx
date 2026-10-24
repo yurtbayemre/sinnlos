@@ -21,6 +21,11 @@ import { DutiesNowSection } from "@/components/duties/duty-lists";
  * state, the quick links and the news selection. A failed read shows the
  * CMS-down banner and "–" on its tile, never a misleading 0.
  */
+export async function generateMetadata() {
+  const t = await getTranslations("nav");
+  return { title: t("dashboard") };
+}
+
 export default async function DashboardPage() {
   const [session, viewer] = await Promise.all([getSession(), getViewer()]);
   // Today and the greeting hour in APP_TIME_ZONE (datetime contract,
