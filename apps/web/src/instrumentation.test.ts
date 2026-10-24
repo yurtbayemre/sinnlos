@@ -48,7 +48,7 @@ describe("APP_TIME_ZONE in the web", () => {
     const legacy = { APP_TIME_ZONE: "Europe/Berlin", TZ: "Europe/Berlin" };
     expect(checkWebTimeZones(legacy)).toBe("Europe/Berlin");
     expect(webZoneWarning(legacy, "Europe/Berlin")).toMatch(
-      /runs in Europe\/Berlin \(TZ="Europe\/Berlin"\), not UTC.*docker-compose\.web-legacy-tz\.yml/,
+      /runs in Europe\/Berlin \(TZ="Europe\/Berlin"\), not UTC.*as infra\/docker-compose\.yml sets it/,
     );
     // TZ=europe/berlin: node:24-alpine does not know the lowercase name.
     expect(webZoneWarning({ TZ: "europe/berlin" }, undefined)).toMatch(/no zone Node recognises/);

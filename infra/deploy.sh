@@ -5,14 +5,11 @@
 # What it does, in order:
 #   0. Preflight of infra/.env against the env contract (FX13): required
 #      keys set, no template placeholder in the secrets, digest sender set
-#      when SMTP is, JWT_SECRET rotated when the running web still exposed
-#      Strapi JWTs (D-SESSION-01), a valid Entra configuration when
+#      when SMTP is, a valid Entra configuration when
 #      ENTRA_ENABLED=1 (D-ENTRA-01: cms and web would refuse to start),
 #      the profile and keys of the optional Meilisearch when
 #      MEILISEARCH_ENABLED=1, and a master key whenever its profile is on
 #      (v0.21: the meili container would not start),
-#      DATETIME_LEGACY_ZONE set while the running database still holds
-#      pre-contract datetime columns (the new cms would refuse to start),
 #      no wiki revision draft rows while this release runs wiki revisions
 #      without draft & publish (batch 16: the new cms would refuse to
 #      start; infra/migrations/wiki-revision-dp/migrate.sql first),
@@ -132,11 +129,6 @@ load_deploy_env "${INFRA_DIR}/deploy.env" "${CHECKOUT}"
 
 COMPOSE_BASE="${INFRA_DIR}/docker-compose.yml"
 COMPOSE_TRAEFIK="${INFRA_DIR}/docker-compose.traefik.yml"
-# Rollback only: runs a pre-datetime-contract cms image in its old zone.
-COMPOSE_LEGACY_TZ="${INFRA_DIR}/docker-compose.cms-legacy-tz.yml"
-# Rollback only: runs a web image from before the web's datetime port
-# (phase 2) in APP_TIME_ZONE again.
-COMPOSE_WEB_LEGACY_TZ="${INFRA_DIR}/docker-compose.web-legacy-tz.yml"
 BACKUP_SCRIPT="${INFRA_DIR}/backup/pg-backup.sh"
 # Project infra's pre-deploy backup on a host with its own backup service
 # (BACKUP_RUN): as root through `sudo -n` (never a password prompt; a sudoers
@@ -216,11 +208,8 @@ PREFLIGHT_WARN_KEYS="DATABASE_PASSWORD"
 # skip every run),
 # "entra-invalid KEY" (ENTRA_ENABLED=1 and KEY fails the check the cms
 # (apps/cms/src/entra/config.ts) or the web (apps/web/src/lib/auth-config.ts)
-# runs at start, so both would refuse to start), "entra-was-on MS_CLIENT_ID"
-# (without ENTRA_ENABLED=1, a real app registration: a GUID client id and a
-# client secret, with which the running release may have offered Microsoft
-# sign-in) or "entra-inert MS_CLIENT_ID" (other MS_* values left in
-# infra/.env without ENTRA_ENABLED=1: ignored), "oidc-invalid KEY" (v0.25.0:
+# runs at start, so both would refuse to start), "entra-inert MS_CLIENT_ID"
+# (MS_* values left in infra/.env without ENTRA_ENABLED=1: ignored), "oidc-invalid KEY" (v0.25.0:
 # OIDC_ENABLED=1 and KEY fails the check the cms (apps/cms/src/oidc/config.ts)
 # or the web (apps/web/src/lib/auth-config.ts) runs at start; ENTRA_ENABLED
 # when both are on), "meili-invalid KEY" (v0.21:
@@ -326,10 +315,6 @@ preflight_scan() {
         if (role != "" && role != "member" && role != "guest" && role != "deny") print "entra-invalid ENTRA_DEFAULT_ROLE"
         if (!ttl_ok(env["ENTRA_SESSION_TTL"])) print "entra-invalid ENTRA_SESSION_TTL"
         if (!group_roles_ok(env["ENTRA_GROUP_ROLES"])) print "entra-invalid ENTRA_GROUP_ROLES"
-      } else if (guid(trim(env["AUTH_MICROSOFT_ENTRA_ID_ID"])) && trim(env["AUTH_MICROSOFT_ENTRA_ID_SECRET"]) != "") {
-        # The web before D-ENTRA-01 offered Microsoft sign-in with exactly
-        # these two keys; this deploy switches it off.
-        print "entra-was-on MS_CLIENT_ID"
       } else if (env["MS_CLIENT_ID"] != "" || env["AUTH_MICROSOFT_ENTRA_ID_SECRET"] != "") {
         print "entra-inert MS_CLIENT_ID"
       }
@@ -374,17 +359,6 @@ preflight_scan() {
       }
     }' | sort -u
 }
-
-# D-SESSION-01: up to that change the web handed every signed-in user their
-# own Strapi JWT on /api/auth/session. users-permissions JWTs are stateless
-# (7 days, config/plugins.ts), so those copies stay valid until JWT_SECRET
-# changes. A web image that keeps the JWT server-side says so with this label
-# (apps/web/Dockerfile). A web container WITHOUT it — the first deploy of
-# D-SESSION-01, or a roll-forward after rolling the web back to an older
-# image — means the tokens were exposed, and the deploy needs a JWT_SECRET
-# other than the one the running cms signs with.
-JWT_OFF_SESSION_LABEL="org.sinnlos.strapi-jwt"
-JWT_OFF_SESSION_VALUE="server-only"
 
 # Prints one environment value from `compose config --format json` on stdin
 # (first match). Only ever captured into a variable, never echoed.
@@ -527,54 +501,6 @@ caddy_host_scan() {
   fi
 }
 
-# True (0) when the running web predates D-SESSION-01 and the JWT_SECRET about
-# to be deployed equals the running cms's. No running web or cms (first
-# install) = nothing was exposed = false.
-jwt_rotation_missing() {
-  local label running_secret new_secret
-  label="$(docker inspect --format "{{ index .Config.Labels \"${JWT_OFF_SESSION_LABEL}\" }}" \
-    "${PROJECT}-web-1" 2>/dev/null)" || return 1
-  [[ "${label}" != "${JWT_OFF_SESSION_VALUE}" ]] || return 1
-  running_secret="$(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' \
-    "${PROJECT}-cms-1" 2>/dev/null | sed -n 's/^JWT_SECRET=//p' | head -n 1)" || return 1
-  [[ -n "${running_secret}" ]] || return 1
-  new_secret="$("${COMPOSE[@]}" config --format json 2>/dev/null | compose_env_value JWT_SECRET)"
-  [[ "${new_secret}" == "${running_secret}" ]]
-}
-
-# Datetime contract: the first boot of a cms with it repairs the times a
-# pre-contract cms stored as naive wall clocks and converts the columns to
-# timestamptz (apps/cms/database/migrations/). With naive app columns in the
-# running database and DATETIME_LEGACY_ZONE unset it refuses to start, so
-# the deploy is refused here, before the backup and before any container
-# changes. No running db container (first install) = nothing to repair.
-# Strapi's bookkeeping tables do not count (the cms guard converts them).
-# Prints the number of naive timestamp columns of the running database's
-# app tables (bookkeeping excluded), or nothing when there is no db
-# container to ask or the query gave up (after 5 s waiting for a lock, 10 s
-# in all). Arguments run in front of the docker call: the rollback hint
-# passes PROBE_TIMEOUT.
-naive_app_columns() {
-  # $POSTGRES_USER / $POSTGRES_DB expand in the db container's sh (shellcheck
-  # no longer sees the docker exec behind the "$@" prefix).
-  # shellcheck disable=SC2016
-  "$@" docker exec -i "${PROJECT}-db-1" sh -c 'psql -X -q -tA -U "$POSTGRES_USER" -d "$POSTGRES_DB"' 2>/dev/null <<'SQL'
-SET lock_timeout = '5s';
-SET statement_timeout = '10s';
-SELECT count(*) FROM information_schema.columns
- WHERE table_schema = 'public' AND data_type = 'timestamp without time zone'
-   AND table_name NOT IN ('strapi_migrations', 'strapi_migrations_internal', 'strapi_database_schema');
-SQL
-}
-
-datetime_repair_env_missing() {
-  local zone naive
-  zone="$("${COMPOSE[@]}" config --format json 2>/dev/null | compose_env_value DATETIME_LEGACY_ZONE)"
-  [[ -z "${zone}" ]] || return 1
-  naive="$(naive_app_columns)" || return 1
-  [[ "${naive}" =~ ^[0-9]+$ && "${naive}" -gt 0 ]]
-}
-
 # Batch 16 (DA03): wiki revisions run without draft & publish from the
 # release whose wiki-revision schema says so. On a database that still
 # holds revision rows with published_at IS NULL (after a rollback to a
@@ -584,14 +510,12 @@ datetime_repair_env_missing() {
 # deploy is refused here instead, before the backup and before any
 # container changes, naming infra/migrations/wiki-revision-dp/migrate.sql.
 REVISION_SCHEMA="apps/cms/src/api/wiki-revision/content-types/wiki-revision/schema.json"
-REVISION_SCHEMA_IN_IMAGE="/app/apps/cms/dist/src/api/wiki-revision/content-types/wiki-revision/schema.json"
-REVISION_DP_RUNBOOK='docs/DEPLOYMENT.md, "One-time: wiki revisions draft/publish off"'
+REVISION_DP_RUNBOOK='infra/migrations/wiki-revision-dp/README.md'
 
 # Prints the number of wiki_revisions rows with published_at IS NULL in the
 # running database (0 without the table), or nothing when there is no db
 # container to ask or the query gave up (after 5 s waiting for a lock, 10 s
-# in all), like naive_app_columns. Arguments run in front of the docker
-# call (PROBE_TIMEOUT).
+# in all). Arguments run in front of the docker call (PROBE_TIMEOUT).
 revision_draft_rows() {
   # shellcheck disable=SC2016
   "$@" docker exec -i "${PROJECT}-db-1" sh -c 'psql -X -q -tA -U "$POSTGRES_USER" -d "$POSTGRES_DB"' 2>/dev/null <<'SQL'
@@ -620,129 +544,6 @@ checkout_revisions_dp_off() {
 # would have told as unknown and prints the safe variant.
 PROBE_TIMEOUT=(timeout -k 5 15)
 
-# Datetime phase 2: a web image that renders every date in APP_TIME_ZONE by
-# itself runs in UTC and says so with this label (apps/web/Dockerfile). An
-# older web image renders in its process zone: under compose's TZ=UTC it
-# refuses to start (from the datetime release on) or quietly shows UTC
-# times (before it); it runs only with COMPOSE_WEB_LEGACY_TZ on top.
-WEB_DATETIME_LABEL="org.sinnlos.datetime"
-WEB_DATETIME_VALUE="zone-explicit"
-
-# Whether a web image renders in APP_TIME_ZONE by itself (the label): exit 0
-# yes, 1 no (it predates the web's datetime port), anything else unknown (no
-# such image here, docker failed or timed out, no `timeout`). Never pulls.
-image_web_zone_explicit() {
-  local label
-  label="$("${PROBE_TIMEOUT[@]}" docker image inspect -f "{{ index .Config.Labels \"${WEB_DATETIME_LABEL}\" }}" "$1" 2>/dev/null)" || return 2
-  [[ "${label}" == "${WEB_DATETIME_VALUE}" ]]
-}
-
-# Whether a cms image knows poll guest access (its poll schema has
-# visibleToGuests): exit 0 yes, 1 no, anything else unknown (no such image
-# here, another layout, docker failed or timed out, no `timeout`). Never
-# pulls, no network. The compiled schema, the one Strapi loads: every cms
-# image has it there, also those from batch 12 on, which ship dist without
-# the sources (IN02).
-POLL_SCHEMA_IN_IMAGE="/app/apps/cms/dist/src/api/poll/content-types/poll/schema.json"
-image_has_poll_guest_access() {
-  "${PROBE_TIMEOUT[@]}" docker run --rm --pull never --network none --entrypoint grep "$1" \
-    -q visibleToGuests "${POLL_SCHEMA_IN_IMAGE}" 2>/dev/null
-}
-
-# Whether a cms image knows the token version of batch 13 (FX40; its user
-# schema has tokenVersion): exit 0 yes, 1 no, anything else unknown (no such
-# image here, another layout, docker failed or timed out, no `timeout`).
-# Never pulls, no network; the compiled schema, as for poll guest access.
-USER_SCHEMA_IN_IMAGE="/app/apps/cms/dist/src/extensions/users-permissions/content-types/user/schema.json"
-image_has_token_version() {
-  "${PROBE_TIMEOUT[@]}" docker run --rm --pull never --network none --entrypoint grep "$1" \
-    -q tokenVersion "${USER_SCHEMA_IN_IMAGE}" 2>/dev/null
-}
-
-# Whether a cms image runs wiki revisions WITH draft & publish (a release
-# before batch 16): exit 0 yes, 1 no, anything else unknown (no such image
-# here, another layout, docker failed or timed out, no `timeout`). Its first
-# boot after a rollback clones a draft twin of every revision, so a later
-# roll-forward to this release needs infra/migrations/wiki-revision-dp/
-# migrate.sql first (the preflight above refuses it until then). Never
-# pulls, no network; the compiled schema, as for poll guest access.
-image_revisions_draft_publish() {
-  "${PROBE_TIMEOUT[@]}" docker run --rm --pull never --network none --entrypoint grep "$1" \
-    -Eq '"draftAndPublish"[[:space:]]*:[[:space:]]*true' "${REVISION_SCHEMA_IN_IMAGE}" 2>/dev/null
-}
-
-# A cms from before batch 13 checks a Strapi JWT's signature and expiry
-# only: under the same JWT_SECRET every JWT that a password change on batch
-# 13 (or later) revoked works again there. So every rollback to such a cms,
-# or to one that cannot be checked, rotates JWT_SECRET before it starts
-# (owner decision 2026-10-12; docs/DEPLOYMENT.md, "Deploying batch 13",
-# Rollback R2 to R4; R4 is infra/restore-db.sh rotate-jwt --env-only).
-# Printed before the start commands, never done here: the edit of
-# infra/.env stays the operator's. $1 is the exit code of
-# image_has_token_version for the target cms image $2 (not 0).
-print_jwt_secret_rotation_hint() {
-  local image="$2"
-  if [[ "$1" == "1" ]]; then
-    echo "       MANDATORY before the start below: ${image} predates the token version of batch 13." >&2
-  else
-    echo "       MANDATORY before the start below, unless ${image} knows the token version of batch 13" >&2
-    echo "       (it could not be checked here: skip this step only if this prints 1 or more):" >&2
-    echo "                      docker run --rm --pull never --network none --entrypoint grep ${image} -c tokenVersion ${USER_SCHEMA_IN_IMAGE}" >&2
-  fi
-  echo "       That cms accepts every JWT a password change on this release revoked, as long as JWT_SECRET" >&2
-  echo "       stays. Rotate it first (owner decision 2026-10-12): docs/DEPLOYMENT.md, \"Deploying batch 13\"," >&2
-  echo "       Rollback R2 and R3 while the new cms still runs, then R4: ${INFRA_DIR}/restore-db.sh rotate-jwt --env-only" >&2
-  echo "       (a new value on the one JWT_SECRET= line of ${INFRA_DIR}/.env, checked against what Compose hands" >&2
-  echo "       the cms; AUTH_SECRET stays). This script does not do it. Every user is signed out once and signs in again." >&2
-}
-
-# Poll guest access: the first boot of that release grants the guest role
-# api::poll-vote.poll-vote.vote. A cms from before it (on the owner
-# instance the :rollback image of that deploy) ignores the per-poll guest
-# switches and the department targeting and never removes that row, so
-# there every guest can vote on every open poll. What the database holds
-# at the time decides nothing: a new cms that missed compose's health
-# deadline before its bootstrap granted the row keeps starting (or
-# restarts) and grants it afterwards. So every rollback to such a cms, or to one that cannot be
-# checked, stops the cms, removes the row, retags, starts, and removes it
-# again (docs/DEPLOYMENT.md, "Upgrading to poll department targeting",
-# Rollback). Only a target cms that knows guest access goes without: the
-# row is then its own grant. ($POSTGRES_USER / $POSTGRES_DB expand in the
-# db container's sh.)
-# shellcheck disable=SC2016
-REVOKE_GUEST_VOTE_PSQL='psql -X -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"'
-
-# Before the retag commands: stop the cms, then remove the row. $1 is the
-# exit code of image_has_poll_guest_access for the target cms image $2 (not
-# 0).
-print_guest_vote_revoke_hint() {
-  local image="$2"
-  if [[ "$1" == "1" ]]; then
-    echo "       FIRST, before the retag: ${image} predates poll guest access." >&2
-  else
-    echo "       FIRST, before the retag, unless ${image} knows poll guest access (it could not be" >&2
-    echo "       checked here: skip the removal and its rerun below only if this prints 1 or more):" >&2
-    echo "                      docker run --rm --pull never --network none --entrypoint grep ${image} -c visibleToGuests ${POLL_SCHEMA_IN_IMAGE}" >&2
-  fi
-  echo "       A cms from before poll guest access ignores the guest switches and the department targeting" >&2
-  echo "       of polls and never removes the guest poll-vote permission this release grants: while it" >&2
-  echo "       exists, every guest can vote on every open poll there. Stop the cms, then remove the" >&2
-  echo "       permission, also when the database or the admin panel shows none (a new cms that is" >&2
-  echo "       still starting or restarting grants it afterwards):" >&2
-  echo "                      ${COMPOSE[*]} stop cms" >&2
-  echo "                      ${COMPOSE[*]} exec -T db sh -c '${REVOKE_GUEST_VOTE_PSQL}' < ${INFRA_DIR}/rollback/revoke-guest-poll-vote.sql" >&2
-}
-
-# After the start commands: the same removal once more, which must find
-# nothing.
-print_guest_vote_recheck_hint() {
-  echo "       THEN, once the previous cms is up, run the removal again. It must remove nothing" >&2
-  echo "       (guest_links_removed 0, permission_rows_removed 0); anything else means a new cms had" >&2
-  echo "       granted the permission again in between, and the rerun removed it:" >&2
-  echo "                      ${COMPOSE[*]} exec -T db sh -c '${REVOKE_GUEST_VOTE_PSQL}' < ${INFRA_DIR}/rollback/revoke-guest-poll-vote.sql" >&2
-  echo "       (docs/DEPLOYMENT.md, \"Upgrading to poll department targeting\", Rollback)." >&2
-}
-
 # The rollback target of this deploy (step 2): the images
 # <project>-{web,cms}:<ROLLBACK_REF>. ROLLBACK_REF is the SHA tag of the
 # last-known-good deploy from the state file, or "rollback" when this run
@@ -751,115 +552,82 @@ print_guest_vote_recheck_hint() {
 ROLLBACK_REF=""
 ROLLBACK_ORIGIN=""
 
-# The rollback commands for a failed deploy, for the target above. While the
-# datetime repair has not run (naive app columns left), the previous cms
-# image predates the datetime contract and must run in its old zone, never
-# in the UTC this compose file sets (docs/DEPLOYMENT.md, "Rolling back this
-# release"). A cms image from before the ICS and cms start fixes starts with
-# `pnpm start` and downloads pnpm at every start. Its Cmd tells, not its
-# build date: the :rollback image of that release's first deploy was built
-# on the same day as the fix. A target cms from before poll guest access, or
-# one that cannot be checked, gets the guest vote row removed before the
-# retag and once more after the start (print_guest_vote_revoke_hint).
-# A target web from before the web's datetime port, or one that cannot be
-# checked, gets the web legacy-zone override: that web must run in
-# APP_TIME_ZONE (in UTC it refuses to start, or, before the datetime
-# release, quietly shows UTC times), and the override is harmless for a
-# newer one (it only warns). A target cms from before the token version of
-# batch 13, or one that cannot be checked, gets the mandatory JWT_SECRET
-# rotation before the start commands (print_jwt_secret_rotation_hint).
-# A target cms that runs wiki revisions with draft & publish (before batch
-# 16), or one that cannot be checked, gets the roll-forward note: the next
-# deploy of this release needs infra/migrations/wiki-revision-dp/migrate.sql
-# first (the revision preflight refuses it until then).
-# Every probe is bounded (PROBE_TIMEOUT); one that fails or times out
-# prints the variant for the unknown case, never fewer lines.
+# The upgrade floor: v0.25.0 (main 0c26656e). The rollback commands are
+# printed only for a target this checkout's history shows at or after that
+# commit. The special cases of older targets (the datetime repair and its
+# legacy-zone overrides, the guest vote permission, the token version of
+# batch 13, pnpm starts, exam modes, wiki revision drafts) left the script
+# with v0.29; their runbooks are in docs/archive/deployment-history.md.
+FLOOR_COMMIT="0c26656e98f930d6298ae5ee3b3234ba7fdc780f"
+
+# The source commit of the rollback image $1 (12 to 40 hex digits), or
+# nothing: its org.opencontainers.image.revision label (set since v0.26),
+# else $2 (the last-known-good state's SHA) when the image's id is $3 (the
+# id the state recorded for it; v0.25 images carry no label). Bounded
+# (PROBE_TIMEOUT), never pulls; a failed or hung docker call gives nothing.
+image_commit() {
+  local image="$1" state_sha="$2" state_id="$3" label id
+  label="$("${PROBE_TIMEOUT[@]}" docker image inspect -f '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "${image}" 2>/dev/null)" || return 0
+  if [[ "${label}" =~ ^[0-9a-f]{12,40}$ ]]; then
+    printf '%s\n' "${label}"
+    return 0
+  fi
+  [[ -n "${state_id}" && "${state_sha}" =~ ^[0-9a-f]{12,40}$ ]] || return 0
+  id="$("${PROBE_TIMEOUT[@]}" docker image inspect -f '{{.Id}}' "${image}" 2>/dev/null)" || return 0
+  if [[ "${id}" == "${state_id}" ]]; then printf '%s\n' "${state_sha}"; fi
+  return 0
+}
+
+# The commit both rollback images (ROLLBACK_REF) come from, when this
+# checkout's full history shows it at or after FLOOR_COMMIT; false when that
+# cannot be shown: an image that names no commit (the :rollback or bootstrap
+# fallback of images without the label), a shallow or partial history, web
+# and cms from different commits, or a commit before the floor.
+rollback_target_commit() {
+  local state_sha="" web_id="" cms_id="" web cms
+  if [[ "${ROLLBACK_REF}" != rollback ]]; then
+    state_sha="${STATE_SHA:-}" web_id="${STATE_WEB_IMAGE:-}" cms_id="${STATE_CMS_IMAGE:-}"
+  fi
+  web="$(image_commit "${PROJECT}-web:${ROLLBACK_REF}" "${state_sha}" "${web_id}")"
+  cms="$(image_commit "${PROJECT}-cms:${ROLLBACK_REF}" "${state_sha}" "${cms_id}")"
+  [[ -n "${web}" && -n "${cms}" ]] || return 1
+  [[ "$("${GIT[@]}" rev-parse --is-shallow-repository 2>/dev/null)" == false ]] || return 1
+  web="$("${GIT[@]}" rev-parse --verify -q "${web}^{commit}" 2>/dev/null)" || return 1
+  cms="$("${GIT[@]}" rev-parse --verify -q "${cms}^{commit}" 2>/dev/null)" || return 1
+  [[ "${web}" == "${cms}" ]] || return 1
+  "${GIT[@]}" merge-base --is-ancestor "${FLOOR_COMMIT}" "${web}" 2>/dev/null || return 1
+  printf '%s\n' "${web}"
+}
+
+# The rollback commands for a failed deploy, for the target above, when it
+# is a verified v0.25+ release (rollback_target_commit); otherwise only where
+# to check it by hand. Printing only: it never changes the target.
 print_rollback_hint() {
   if [[ -z "${ROLLBACK_REF}" ]]; then
     echo "       There is no earlier release on this host to roll back to (no last-known-good state and" >&2
     echo "       no containers ran before this deploy): fix the cause and re-run." >&2
     return 0
   fi
-  local rollback=("${COMPOSE[@]}") naive cms_cmd guest_access=0 web_zone=0 token_version=0 revisions_dp=0
-  local web_image="${PROJECT}-web:${ROLLBACK_REF}" cms_image="${PROJECT}-cms:${ROLLBACK_REF}"
-  naive="$(naive_app_columns "${PROBE_TIMEOUT[@]}" || true)"
-  cms_cmd="$("${PROBE_TIMEOUT[@]}" docker image inspect -f '{{json .Config.Cmd}}' "${cms_image}" 2>/dev/null || true)"
-  image_has_poll_guest_access "${cms_image}" || guest_access=$?
-  image_web_zone_explicit "${web_image}" || web_zone=$?
-  image_has_token_version "${cms_image}" || token_version=$?
-  image_revisions_draft_publish "${cms_image}" || revisions_dp=$?
-  if [[ "${guest_access}" != "0" ]]; then
-    print_guest_vote_revoke_hint "${guest_access}" "${cms_image}"
-  fi
-  echo "       If ${cms_image} predates batch 17, first stop all CMS/scheduler writers and follow:" >&2
-  echo "       ${INFRA_DIR}/rollback/exam-mode/README.md" >&2
-  echo "       Run ${INFRA_DIR}/rollback/exam-mode/downgrade.sql before starting the old CMS." >&2
-  echo "       On roll-forward, review the saved variants before running ${INFRA_DIR}/rollback/exam-mode/restore.sql." >&2
-  echo "       To roll back to ${ROLLBACK_ORIGIN:-${web_image} and ${cms_image}}, retag, then start without a build:" >&2
-  echo "                      docker tag ${web_image} ${PROJECT}-web:latest" >&2
-  echo "                      docker tag ${cms_image} ${PROJECT}-cms:latest" >&2
-  if [[ "${naive}" =~ ^[0-9]+$ && "${naive}" -gt 0 ]]; then
-    rollback+=(-f "${COMPOSE_LEGACY_TZ}")
-    echo "       (the datetime repair has NOT run: the previous cms must run in DATETIME_LEGACY_ZONE," >&2
-    echo "       hence the extra override file)" >&2
-  elif ! [[ "${naive}" =~ ^[0-9]+$ ]]; then
-    echo "       (the database could not be asked whether the datetime repair has run; if it has not, the" >&2
-    echo "       previous cms must run in DATETIME_LEGACY_ZONE: add -f ${COMPOSE_LEGACY_TZ} before up," >&2
-    echo "       docs/DEPLOYMENT.md, \"Rolling back this release\")" >&2
-  fi
-  if [[ "${web_zone}" != "0" ]]; then
-    rollback+=(-f "${COMPOSE_WEB_LEGACY_TZ}")
-    if [[ "${web_zone}" == "1" ]]; then
-      echo "       (${web_image} predates the web's datetime port: it renders dates in its process" >&2
-      echo "       zone, so in UTC it fails to start or shows UTC times; hence the web override, which runs it in APP_TIME_ZONE)" >&2
-    else
-      echo "       (${web_image} could not be checked for the web's datetime port, so the web" >&2
-      echo "       override is included: in UTC a web from before it fails to start or shows UTC times, a newer one only" >&2
-      echo "       warns. Check: docker image inspect -f '{{ index .Config.Labels \"${WEB_DATETIME_LABEL}\" }}' ${web_image}" >&2
-      echo "       prints ${WEB_DATETIME_VALUE} for a web that needs no override)" >&2
-    fi
-  fi
-  if [[ "${token_version}" != "0" ]]; then
-    print_jwt_secret_rotation_hint "${token_version}" "${cms_image}"
-  fi
-  echo "                      ${rollback[*]} up -d --no-build web cms" >&2
-  echo "       (--no-build is essential — --build would rebuild the broken image)" >&2
-  if [[ "${cms_cmd}" == *'"pnpm"'* ]]; then
-    echo "       ${cms_image} starts with pnpm (Cmd ${cms_cmd}) and downloads pnpm from" >&2
-    echo "       registry.npmjs.org at every start. Without registry access, start it directly instead:" >&2
-    # printf '%s\n': the \n of the printed command stay literal.
-    printf '%s\n' "                      printf 'services:\\n  cms:\\n    command: [\"node_modules/.bin/strapi\", \"start\"]\\n' > /tmp/cms-direct-start.yml" >&2
-    echo "                      ${rollback[*]} -f /tmp/cms-direct-start.yml up -d --no-build web cms" >&2
-    echo "       (docs/DEPLOYMENT.md, \"Upgrading to the ICS and cms start fixes (2026-09-27)\", Rollback)." >&2
-  elif [[ -z "${cms_cmd}" ]]; then
-    echo "       A cms image from before the ICS and cms start fixes starts with pnpm (Cmd [\"pnpm\",\"start\"])" >&2
-    echo "       and downloads pnpm from registry.npmjs.org at every start. Check the rollback image:" >&2
-    echo "                      docker image inspect -f '{{json .Config.Cmd}}' ${cms_image}" >&2
-    echo "       Without registry access, start it directly (docs/DEPLOYMENT.md, \"Upgrading to the ICS" >&2
-    echo "       and cms start fixes (2026-09-27)\", Rollback)." >&2
-  fi
-  if [[ "${guest_access}" != "0" ]]; then
-    print_guest_vote_recheck_hint
-  fi
-  if [[ "${revisions_dp}" != "1" ]]; then
-    if [[ "${revisions_dp}" == "0" ]]; then
-      echo "       A roll-forward to this release needs migrate.sql first: ${cms_image} runs wiki revisions with" >&2
-      echo "       draft & publish, and its first boot clones a draft twin of every revision." >&2
-    else
-      echo "       A roll-forward to this release needs migrate.sql first, unless ${cms_image} runs wiki revisions" >&2
-      echo "       without draft & publish (it could not be checked here: no migrate.sql only if this prints 0):" >&2
-      echo "                      docker run --rm --pull never --network none --entrypoint grep ${cms_image} -Ec '\"draftAndPublish\"[[:space:]]*:[[:space:]]*true' ${REVISION_SCHEMA_IN_IMAGE}" >&2
-    fi
-    echo "       Before the next deploy (it refuses until then), with cms and web stopped and after a backup:" >&2
-    echo "       ${INFRA_DIR}/migrations/wiki-revision-dp/preflight.sql, then migrate.sql (${REVISION_DP_RUNBOOK})." >&2
+  local web_image="${PROJECT}-web:${ROLLBACK_REF}" cms_image="${PROJECT}-cms:${ROLLBACK_REF}" commit
+  if commit="$(rollback_target_commit)"; then
+    echo "       To roll back to ${ROLLBACK_ORIGIN:-${web_image} and ${cms_image}} (commit ${commit:0:12}), retag, then start without a build:" >&2
+    echo "                      docker tag ${web_image} ${PROJECT}-web:latest" >&2
+    echo "                      docker tag ${cms_image} ${PROJECT}-cms:latest" >&2
+    echo "                      ${COMPOSE[*]} up -d --no-build web cms" >&2
+    echo "       (--no-build is essential — --build would rebuild the broken image)" >&2
+  else
+    echo "       The rollback target ${ROLLBACK_REF} (${web_image}, ${cms_image}) is not a verified v0.25+ release:" >&2
+    echo "       its images name no commit of this checkout at or after v0.25.0 (or web and cms differ)." >&2
+    echo "       Check it by hand (docs/UPGRADE.md, \"Rollback\"); releases before v0.25:" >&2
+    echo "       docs/archive/deployment-history.md." >&2
   fi
   if [[ "${ROLLBACK_REF}" == "rollback" ]]; then
     echo "       Rollback target: :rollback, the images that ran before the first deploy with this script (no" >&2
     echo "       last-known-good state yet); a re-run before the first successful deploy keeps this :rollback" >&2
-    echo "       (${BOOTSTRAP_FILE}, docs/DEPLOYMENT.md §7.4)." >&2
+    echo "       (${BOOTSTRAP_FILE}, docs/UPGRADE.md, \"Rollback\")." >&2
   else
     echo "       Rollback target: the last-known-good state (${STATE_FILE}); a re-run of this" >&2
-    echo "       script keeps it until a deploy passes the smoke check and live-smoke (docs/DEPLOYMENT.md §7.4)." >&2
+    echo "       script keeps it until a deploy passes the smoke check and live-smoke (docs/UPGRADE.md, \"Rollback\")." >&2
   fi
 }
 
@@ -1361,21 +1129,8 @@ warn_keys="$(keys_of warn)"
 digest_keys="$(keys_of digest)"
 entra_invalid_keys="$(keys_of entra-invalid)"
 entra_inert_keys="$(keys_of entra-inert)"
-entra_was_on_keys="$(keys_of entra-was-on)"
 oidc_invalid_keys="$(keys_of oidc-invalid)"
 meili_invalid_keys="$(keys_of meili-invalid)"
-# Not fatal: the owner instance may keep an unused registration in
-# infra/.env. But an instance that still signs users in with the old
-# Microsoft flow loses it with this deploy.
-if [[ -n "${entra_was_on_keys}" ]]; then
-  echo "WARNING: infra/.env holds a Microsoft app registration (MS_CLIENT_ID is a GUID and" >&2
-  echo "         MS_CLIENT_SECRET is set), but ENTRA_ENABLED is not 1. If Microsoft sign-in" >&2
-  echo "         works with the running release, it is OFF after this deploy (local sign-in is" >&2
-  echo "         on) until ENTRA_ENABLED=1 is set. Accounts the old flow created have no password," >&2
-  echo "         and the new sign-in answers \"already exists\" for them until an admin binds each" >&2
-  echo "         one: docs/DEPLOYMENT.md, \"Upgrading to the Entra sign-in (batch 9, lane 4A)\"." >&2
-  echo "         Nothing to do if Microsoft sign-in was never used here." >&2
-fi
 if [[ -n "${entra_inert_keys}" ]]; then
   echo "NOTE: MS_CLIENT_ID/MS_CLIENT_SECRET are set in infra/.env, but ENTRA_ENABLED is not 1:" >&2
   echo "      Microsoft sign-in stays off and the MS_* values are ignored (safe to delete)." >&2
@@ -1483,25 +1238,6 @@ if [[ "${DEPLOY_EDGE}" != traefik ]]; then
     echo "       Set DEPLOY_EDGE=traefik in infra/deploy.env (infra/deploy.env.example) and re-run." >&2
     preflight_failed=1
   fi
-fi
-if jwt_rotation_missing; then
-  echo "ERROR: JWT_SECRET must be rotated for this deploy (D-SESSION-01)." >&2
-  echo "       The running web (${PROJECT}-web-1, no ${JWT_OFF_SESSION_LABEL}=${JWT_OFF_SESSION_VALUE} label)" >&2
-  echo "       hands every signed-in user their Strapi JWT on /api/auth/session, and those" >&2
-  echo "       7-day tokens stay valid until JWT_SECRET changes. Put a fresh value in" >&2
-  echo "       infra/.env (openssl rand -base64 32) and re-run: everyone signs in once, open" >&2
-  echo "       tabs land on /sign-in?expired=1. Needed again after every roll-forward from" >&2
-  echo "       a web rollback to such an image." >&2
-  preflight_failed=1
-fi
-if datetime_repair_env_missing; then
-  echo "ERROR: the running database still stores datetimes in the pre-contract format (naive" >&2
-  echo "       timestamp columns), and DATETIME_LEGACY_ZONE is not set in infra/.env. The new cms" >&2
-  echo "       repairs those values once on its first boot and refuses to start without it." >&2
-  echo "       Follow docs/DEPLOYMENT.md, \"Upgrading an existing instance to this release\"" >&2
-  echo "       (read-only report, rehearsal on a copy), set DATETIME_LEGACY_ZONE (and, if the old cms" >&2
-  echo "       ran in UTC first, DATETIME_LEGACY_UTC_UNTIL) and re-run." >&2
-  preflight_failed=1
 fi
 if checkout_revisions_dp_off; then
   REVISION_DRAFTS="$(revision_draft_rows "${PROBE_TIMEOUT[@]}" || true)"

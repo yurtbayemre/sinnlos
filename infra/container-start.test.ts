@@ -96,11 +96,7 @@ describe("compose", () => {
     },
   );
 
-  it.each([
-    "docker-compose.traefik.yml",
-    "docker-compose.cms-legacy-tz.yml",
-    "docker-compose.web-legacy-tz.yml",
-  ])("%s overrides no start command", (file) => {
+  it.each(["docker-compose.traefik.yml"])("%s overrides no start command", (file) => {
     const lines = read(`./${file}`)
       .split("\n")
       .filter((line) => !line.trim().startsWith("#"));

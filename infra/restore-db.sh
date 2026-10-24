@@ -92,9 +92,9 @@ set +x # first: never trace this script (rotate-jwt handles a secret), also unde
 #                          checkout or absolute), when the project's containers do
 #                          not tell; unset: the ordered config_files label of its web
 #                          and cms containers, each a known compose file of this
-#                          checkout's infra/ (docker-compose.yml first, then any of
-#                          docker-compose.traefik.yml, docker-compose.cms-legacy-tz.yml,
-#                          docker-compose.web-legacy-tz.yml)
+#                          checkout's infra/ (docker-compose.yml first, then
+#                          docker-compose.traefik.yml); the legacy-zone overrides of
+#                          releases before v0.25 are retired and refused
 #   SINNLOS_CHECKOUT       the checkout this script lives in
 #   DEPLOY_STATE_DIR       <common git dir>/sinnlos-deploy, as infra/deploy.sh: its lock,
 #                          and restore/ with the attempt state and the reservation
@@ -180,7 +180,11 @@ CHECKOUT="$(cd "${SINNLOS_CHECKOUT:-${SCRIPT_DIR}/..}" && pwd)"
 INFRA_DIR="${CHECKOUT}/infra"
 ENV_FILE="${INFRA_DIR}/.env"
 BACKUP_DIR="${INFRA_DIR}/backups"
-KNOWN_COMPOSE=(docker-compose.yml docker-compose.traefik.yml docker-compose.cms-legacy-tz.yml docker-compose.web-legacy-tz.yml)
+KNOWN_COMPOSE=(docker-compose.yml docker-compose.traefik.yml)
+# The legacy-zone overrides of releases before v0.25, gone with v0.29: apps
+# still started with one are recreated with the supported files first (or an
+# attempt that started with one finishes from the old checkout).
+RETIRED_COMPOSE=(docker-compose.cms-legacy-tz.yml docker-compose.web-legacy-tz.yml)
 
 PROJECT="${COMPOSE_PROJECT:-infra}"
 if ! [[ "${PROJECT}" =~ ^[a-z0-9][a-z0-9_-]*$ ]]; then
@@ -430,6 +434,17 @@ valid_compose_list() { # <list>
   for f in "${files[@]}"; do [[ "${f}" == /* ]] || return 1; done
 }
 
+# Says why a retired compose file cannot be used, and fails; true for any other.
+not_retired() { # <path>
+  local k
+  for k in "${RETIRED_COMPOSE[@]}"; do
+    if [[ "${1##*/}" == "${k}" ]]; then
+      echo "${1} is a retired compose file (the legacy-zone override of releases before v0.25, gone since v0.29): recreate web and cms with the supported files first (infra/deploy.sh, docs/UPGRADE.md), or finish a restore attempt that started with it from the checkout of that release"
+      return 1
+    fi
+  done
+}
+
 # The project's compose files, in order, comma-separated: RESTORE_COMPOSE_FILES,
 # or the config_files label of its web and cms containers (which must agree;
 # the db container's when neither exists), each a known compose file of this
@@ -442,6 +457,7 @@ detect_compose_files() {
     for f in "${files[@]}"; do
       [[ -n "${f}" ]] || continue
       if [[ "${f}" != /* ]]; then f="${CHECKOUT}/${f}"; fi
+      not_retired "${f}" || return 1
       if [[ "${f}" == *[,[:cntrl:]]* || -L "${f}" || ! -f "${f}" ]]; then
         echo "RESTORE_COMPOSE_FILES names ${f}, which is no regular file (or holds a comma)"
         return 1
@@ -474,6 +490,7 @@ detect_compose_files() {
     infra_real="$(readlink -f -- "${INFRA_DIR}")"
     IFS=',' read -r -a files <<<"${raw}"
     for f in "${files[@]}"; do
+      not_retired "${f}" || return 1
       base="${f##*/}"
       known=0
       for k in "${KNOWN_COMPOSE[@]}"; do if [[ "${base}" == "${k}" ]]; then known=1; fi; done

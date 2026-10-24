@@ -149,7 +149,7 @@ function deploys(steps: readonly Step[], mode?: ShellMode): StepReport[] {
     'T="$(mktemp -d)"',
     "trap 'rm -rf \"$T\"' EXIT",
     'REPO="$T/checkout"',
-    'mkdir -p "$REPO/infra/backup" "$REPO/infra/rollback" "$T/img" "$T/ctr"',
+    'mkdir -p "$REPO/infra/backup" "$T/img" "$T/ctr" "$T/rev"',
     'echo 0 > "$T/n"',
     "cat > \"$REPO/infra/deploy.sh\" <<'DEPLOY_SH_EOF'",
     DEPLOY.trimEnd(),
@@ -159,7 +159,6 @@ function deploys(steps: readonly Step[], mode?: ShellMode): StepReport[] {
     "DEPLOY_ENV_SH_EOF",
     ': > "$REPO/infra/docker-compose.yml"',
     ': > "$REPO/infra/docker-compose.traefik.yml"',
-    ': > "$REPO/infra/rollback/revoke-guest-poll-vote.sql"',
     `printf '#!/usr/bin/env bash\\necho "backup kind=$SINNLOS_BACKUP_KIND db=$SINNLOS_DB_CONTAINER dir=\${SINNLOS_BACKUP_DIR:-default} quick=\${SINNLOS_LOCAL_ENV_BACKUP:-default}"\\n' > "$REPO/infra/backup/pg-backup.sh"`,
     // backup-run (project infra): STUB_BACKUP_RC makes it fail.
     `printf '#!/usr/bin/env bash\\necho "backup-run stub: $*"\\nexit "\${STUB_BACKUP_RC:-0}"\\n' > "$T/backup-run"`,
@@ -178,16 +177,23 @@ function deploys(steps: readonly Step[], mode?: ShellMode): StepReport[] {
     // A throwaway repo: identity and line endings on the command line only.
     'G=(git -C "$REPO" -c user.name=deploy-test -c user.email=deploy-test@example.invalid -c commit.gpgsign=false -c core.autocrlf=false -c core.safecrlf=false -c init.defaultBranch=main -c core.hooksPath=/dev/null)',
     '"${G[@]}" init -q',
+    // The upgrade floor of the rollback hint: this repo's first commit, so
+    // every deploy below descends from it (deploy.sh pins v0.25.0's).
+    '"${G[@]}" commit -q --allow-empty -m floor',
+    'FLOOR="$("${G[@]}" rev-parse HEAD)"',
+    'sed -i "s/^FLOOR_COMMIT=.*/FLOOR_COMMIT=\\"$FLOOR\\"/" "$REPO/infra/deploy.sh"',
     '"${G[@]}" add -A',
     '"${G[@]}" commit -q -m "first"',
     'commit() { "${G[@]}" commit -q --allow-empty -m "next"; }',
     'running() { echo "$1" > "$T/ctr/infra-web-1"; echo "$2" > "$T/ctr/infra-cms-1"; printf "%s\\n%s\\n" "$1" "$2" >> "$T/ids"; }',
+    // An image's org.opencontainers.image.revision label (builds get SINNLOS_REVISION).
+    'labelled() { echo "$2" > "$T/rev/${1#sha256:}"; }',
     'ci() { printf "%s\\n" "$1" > "$T/ci.json"; STUB_CI="$T/ci.json"; }',
     "KEEP=5",
     // The demo credentials file deploy.sh checks before it runs live-smoke.
     'echo "casey.jones@sinnlos.local pw" > "$T/passwords"',
     'export PASSWORDS_FILE="$T/passwords"',
-    "export T STUB_TRAEFIK= STUB_PS_FAIL= STUB_PULL_FAIL= STUB_LABELS= STUB_SMOKE_CODE=200 STUB_LIVE_RC=0 STUB_LIVE_NOFRAME= STUB_BUILD_FAIL= STUB_UP_FAIL= STUB_TAG_FAIL= STUB_LOCK_HELD= STUB_CI= STUB_NO_VOLUMES= STUB_CONTAINERD= STUB_UP_KEEP= STUB_STATE_WRITE_FAIL= STUB_BOOTSTRAP_WRITE_FAIL= STUB_BACKUP_RC= STUB_REVISION_DRAFTS=0 STUB_REVISION_DP=1",
+    "export T STUB_TRAEFIK= STUB_PS_FAIL= STUB_PULL_FAIL= STUB_LABELS= STUB_SMOKE_CODE=200 STUB_LIVE_RC=0 STUB_LIVE_NOFRAME= STUB_BUILD_FAIL= STUB_UP_FAIL= STUB_TAG_FAIL= STUB_LOCK_HELD= STUB_CI= STUB_NO_VOLUMES= STUB_CONTAINERD= STUB_UP_KEEP= STUB_STATE_WRITE_FAIL= STUB_BOOTSTRAP_WRITE_FAIL= STUB_BACKUP_RC= STUB_REVISION_DRAFTS=0",
     // Whether an image id resolves: on containerd only while a tag names it.
     "resolvable() {",
     // (No pipe: under deploy.sh's pipefail, grep -q ending early could fail cat.)
@@ -213,7 +219,8 @@ function deploys(steps: readonly Step[], mode?: ShellMode): StepReport[] {
     '          [[ -z "$STUB_BUILD_FAIL" ]] || return 1',
     '          id=$(( $(cat "$T/n") + 1 )); echo "$id" > "$T/n"',
     '          echo "sha256:web$id" > "$T/img/$p-web__latest"; echo "sha256:cms$id" > "$T/img/$p-cms__latest"',
-    '          printf "sha256:web%s\\nsha256:cms%s\\n" "$id" "$id" >> "$T/ids" ;;',
+    '          printf "sha256:web%s\\nsha256:cms%s\\n" "$id" "$id" >> "$T/ids"',
+    '          echo "$SINNLOS_REVISION" > "$T/rev/web$id"; echo "$SINNLOS_REVISION" > "$T/rev/cms$id" ;;',
     "        up)",
     '          [[ -z "$STUB_UP_FAIL" ]] || return 1',
     "          for a in web cms; do",
@@ -222,7 +229,6 @@ function deploys(steps: readonly Step[], mode?: ShellMode): StepReport[] {
     "      esac ;;",
     "    inspect)",
     '      ref="${*: -1}"',
-    '      if [[ "$*" == *"org.sinnlos.strapi-jwt"* ]]; then [[ -f "$T/ctr/$ref" ]] || return 1; echo server-only; return 0; fi',
     '      [[ -f "$T/ctr/$ref" ]] || return 1; cat "$T/ctr/$ref" ;;',
     "    image)",
     '      case "$2" in',
@@ -230,7 +236,7 @@ function deploys(steps: readonly Step[], mode?: ShellMode): StepReport[] {
     '          ref="${*: -1}"',
     '          if [[ "$ref" == sha256:* ]]; then resolvable "$ref"; return; fi',
     '          [[ -f "$(imgf "$ref")" ]] || return 1',
-    '          if [[ "$*" == *"{{.Id}}"* ]]; then cat "$(imgf "$ref")"; elif [[ "$*" == *org.sinnlos.datetime* ]]; then echo zone-explicit; elif [[ "$*" == *Config.Cmd* ]]; then echo \'["node_modules/.bin/strapi","start"]\'; elif [[ "$*" == *image.revision* ]]; then echo "$STUB_LABELS"; elif [[ "$*" == *RepoDigests* ]]; then echo "${ref%:*}@sha256:digest-${ref##*-}"; fi ;;',
+    '          if [[ "$*" == *"{{.Id}}"* ]]; then cat "$(imgf "$ref")"; elif [[ "$*" == *image.revision* && -n "$STUB_LABELS" ]]; then echo "$STUB_LABELS"; elif [[ "$*" == *image.revision* ]]; then id="$(cat "$(imgf "$ref")")"; cat "$T/rev/${id#sha256:}" 2> /dev/null || echo "<no value>"; elif [[ "$*" == *RepoDigests* ]]; then echo "${ref%:*}@sha256:digest-${ref##*-}"; fi ;;',
     '        rm) shift 2; for ref in "$@"; do rm -f "$(imgf "$ref")"; done ;;',
     "      esac ;;",
     "    tag)",
@@ -255,8 +261,6 @@ function deploys(steps: readonly Step[], mode?: ShellMode): StepReport[] {
     '        ref="${ref##*/}"',
     '        if [[ -e "$T/ctr/$ref" && "$*" == *"com.docker.compose.project=${ref%-*-1}" ]]; then echo "$ref"; fi',
     "      done ;;",
-    // The wiki-revision image check: 1 without draft & publish (batch 16 on), 0 with it.
-    '    run) if [[ "$*" == *draftAndPublish* ]]; then return "$STUB_REVISION_DP"; fi; return 0 ;;',
     "  esac",
     "}",
     "curl() {",
@@ -676,7 +680,10 @@ describe.skipIf(!RUN_SEQUENCES)(
     beforeAll(() => {
       r = deploys([
         // The first run: the images from before run, no state; it fails after `up`.
-        /* 0 */ { before: "running sha256:oldweb sha256:oldcms; STUB_SMOKE_CODE=502" },
+        /* 0 */ {
+          before:
+            'running sha256:oldweb sha256:oldcms; labelled sha256:oldweb "$FLOOR"; labelled sha256:oldcms "$FLOOR"; STUB_SMOKE_CODE=502',
+        },
         // A fix-forward re-run that fails after `up` again …
         /* 1 */ { before: "commit" },
         // … and one that passes.
@@ -1596,8 +1603,6 @@ describe.skipIf(!RUN_SEQUENCES)(
         /* 1 */ { before: "commit; STUB_REVISION_DRAFTS=7" },
         // … and once migrate.sql removed them, the deploy goes ahead.
         /* 2 */ { before: "STUB_REVISION_DRAFTS=0" },
-        // A failed deploy whose target cms runs wiki revisions with draft & publish.
-        /* 3 */ { before: "commit; STUB_SMOKE_CODE=502; STUB_REVISION_DP=0" },
       ]);
     }, SEQUENCE_BUDGET);
 
@@ -1623,19 +1628,6 @@ describe.skipIf(!RUN_SEQUENCES)(
       expect(r[2].status, r[2].stderr).toBe(0);
       expect(r[2].stdout).toContain("  wiki revisions: no draft rows");
       expect(r[2].state.SHA).not.toBe(r[0].state.SHA);
-    });
-
-    it("a failed deploy to a target with revision draft & publish names migrate.sql for the roll-forward", () => {
-      const failed = r[3];
-      expect(failed.status).toBe(1);
-      expect(failed.stderr).toContain(
-        `A roll-forward to this release needs migrate.sql first: infra-cms:${tagOf(r[2])} runs wiki revisions with`,
-      );
-      expect(failed.stderr).toContain(
-        "migrations/wiki-revision-dp/preflight.sql, then migrate.sql",
-      );
-      // The earlier failures of this file ran with a batch-16 target: no such line.
-      expect(r[1].stderr).not.toContain("A roll-forward to this release");
     });
   },
 );

@@ -19,19 +19,14 @@ import { canonicalTimeZone, resolveAppTimeZone } from "./lib/plain-date";
  *
  * APP_TIME_ZONE must still be an IANA name (resolveAppTimeZone): an empty or
  * unknown value, or a UTC offset, throws. Returns its canonical name.
- *
- * Before phase 2 the check here also required Node to run IN APP_TIME_ZONE
- * (compose set TZ from it). That is why a web image from before phase 2
- * refuses to start under this compose file's TZ=UTC: roll back to one only
- * with infra/docker-compose.web-legacy-tz.yml (docs/DEPLOYMENT.md).
  */
 export function checkWebTimeZones(env: Record<string, string | undefined>): string {
   return resolveAppTimeZone(env.APP_TIME_ZONE);
 }
 
 /**
- * A warning when the container sets TZ to anything but UTC, e.g. the legacy
- * rollback override left in place for this image. Harmless for rendering,
+ * A warning when the container sets TZ to anything but UTC (an override of
+ * the compose file's TZ=UTC). Harmless for rendering,
  * but not the deployment contract. A process without TZ (local `next dev`)
  * keeps the machine's zone and gets no warning. null: nothing to say.
  */
@@ -44,8 +39,7 @@ export function webZoneWarning(
   return (
     `[datetime] The web process runs in ${processZone ?? "no zone Node recognises"} (TZ="${env.TZ}"), ` +
     "not UTC. Dates do not depend on it (they are rendered in APP_TIME_ZONE), but the web container " +
-    "should run with TZ=UTC: remove a leftover infra/docker-compose.web-legacy-tz.yml, which only a " +
-    "web image from before the datetime port needs."
+    "should run with TZ=UTC, as infra/docker-compose.yml sets it."
   );
 }
 
