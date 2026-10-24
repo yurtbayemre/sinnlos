@@ -344,7 +344,7 @@ describe.each(testEngines())("authoring polls on %s", (engine) => {
       expect(vote.status, vote.text).toBe(200);
       return documentId;
     };
-    // The read-only query of docs/DEPLOYMENT.md ("Upgrading to the v2 write
+    // The read-only query of docs/archive/deployment-history.md ("Upgrading to the v2 write
     // model", before the deploy, step 3), verbatim.
     const UNPUBLISHED_VOTED_POLLS = `SELECT DISTINCT p.document_id, p.question
      FROM polls p

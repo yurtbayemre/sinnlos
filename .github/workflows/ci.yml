@@ -123,7 +123,7 @@ jobs:
         run: pnpm audit --prod --audit-level=high
         continue-on-error: true
 
-  # Datetime contract (docs/DEPLOYMENT.md): the whole suite once per process
+  # Datetime contract (docs/OPERATIONS.md): the whole suite once per process
   # time zone, with the Postgres 16 integration suites (*.pg.test.ts: the
   # timestamptz guard, the one-time repair through Strapi's own migration
   # runner, the read-only report) switched on by SINNLOS_TEST_PG_URL. Gate

@@ -127,7 +127,7 @@ Further reading:
 │   ├── Caddyfile                   the bundled Caddy (standalone boxes, local full-stack runs)
 │   ├── readme-permissions.test.ts  pins the permission tables of this README to the cms
 │   └── .env.example
-├── docs/                   DEPLOYMENT.md, security.md, architecture.md, ROADMAP.md, screenshots/
+├── docs/                   INSTALL, UPGRADE, OPERATIONS, SSO, security.md, architecture.md (+ architecture/), archive/, screenshots/
 ├── pnpm-workspace.yaml
 └── package.json
 ```
@@ -505,8 +505,8 @@ relevant web-only changes start its private DB without enabling the other
 database suites. See [E2E scope and artifacts](./docs/e2e-tests.md#ci-execution-and-scope).
 Actions are pinned by commit
 SHA and the base image by digest (`infra/build-pins.test.ts`); Dependabot
-opens weekly grouped updates. `docs/DEPLOYMENT.md` and
-`docs/architecture.md` are hand-formatted and excluded from prettier.
+opens weekly grouped updates. `docs/architecture.md`, `docs/architecture/`
+and `docs/archive/` are hand-formatted and excluded from prettier.
 
 **Tests.** Unit tests live next to their code as `*.test.ts` and run with
 vitest from the root (`vitest.config.ts`, which resolves `@sinnlos/domain`

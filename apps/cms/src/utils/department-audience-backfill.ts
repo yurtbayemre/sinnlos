@@ -43,7 +43,7 @@ import { DEPARTMENTS_AUDIENCE } from "./policy-factories";
  * back and is rethrown as a `[department-audience]` error, which stops the
  * boot before the server listens (@strapi/core 5.55.1 Strapi.js start →
  * stopWithError). The cms does not serve while a linked row may lack its
- * flag; every start retries. The operator steps are in docs/DEPLOYMENT.md.
+ * flag; every start retries. The operator steps of its release are in docs/archive/deployment-history.md.
  */
 
 /** The slice of the Strapi instance the backfill uses. */
@@ -89,7 +89,7 @@ export async function backfillDepartmentAudience(
       `${DEPARTMENT_AUDIENCE_LOG} could not backfill the audience of documents, quick links and courses (${reason}); ` +
         "nothing was changed (the transaction rolled back), and the cms does not start, because a row " +
         "that links a department without the flag can turn company-wide when the department is deleted. " +
-        "Fix the cause and start the cms again (every start retries), or roll back (docs/DEPLOYMENT.md)",
+        "Fix the cause and start the cms again (every start retries), or roll back (docs/UPGRADE.md, Rollback)",
     );
   }
   const changed = flagged.filter((type) => type.count > 0);

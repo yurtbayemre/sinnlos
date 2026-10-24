@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # provision-keys.sh — the two restricted Meilisearch keys of the optional
-# search module (docs/DEPLOYMENT.md, "Meilisearch (optional search)"),
+# search module (docs/OPERATIONS.md, "Meilisearch (optional search)"),
 # printed as infra/.env lines:
 #
 #   MEILISEARCH_WRITE_KEY   cms: rebuilds sinnlos_search via sinnlos_search_build

@@ -1,7 +1,7 @@
 /**
  * infra/backup/restore-drill.sh (FX36): the off-box restore drill. The real
  * decrypt-and-restore runs against Docker and a GPG key (lane rehearsal,
- * docs/DEPLOYMENT.md §7.3); pinned here:
+ * docs/OPERATIONS.md, "Automated daily backups (cron)"); pinned here:
  *   1. it picks the newest database artifact by the timestamp in its name,
  *      nightly and -predeploy alike, and nothing else;
  *   2. the throwaway Postgres has no network and keeps its data on a tmpfs,

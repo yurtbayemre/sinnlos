@@ -7,7 +7,7 @@
  * Order: the scheduled publisher runs every minute (decision 06 §D); the
  * janitors run from 03:20 to 03:56 APP_TIME_ZONE; the training expiry
  * reminders at 06:45, so the digest that mails at 07:30 carries them. When the host's nightly backup runs (infra/backup/pg-backup.sh,
- * or the host's backup-run at 04:00; docs/DEPLOYMENT.md §7.3) does not
+ * or the host's backup-run at 04:00; docs/OPERATIONS.md, "Automated daily backups (cron)") does not
  * matter for the janitors: they remove only old rows and files (orphaned
  * uploads after 24 hours, search logs after SEARCH_LOG_RETENTION_DAYS, read
  * notifications and expired ads after 90 days, unread notifications after

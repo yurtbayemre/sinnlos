@@ -20,7 +20,7 @@ pnpm test               # unit tests
 pnpm test:integration   # Strapi in process, SQLite (and Postgres with SINNLOS_TEST_PG_URL)
 ```
 
-CI runs the same checks plus the browser tests, the datetime matrix and both image builds. Commits are small and describe the why. Code follows the conventions in [docs/architecture.md](./docs/architecture.md).
+CI runs the same checks plus the browser tests, the datetime matrix and both image builds. Commits are small and describe the why. Code follows the conventions in [docs/architecture.md](./docs/architecture.md) (§5, in [docs/architecture/](./docs/architecture/)).
 
 ## Development setup
 

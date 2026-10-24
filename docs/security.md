@@ -10,7 +10,8 @@ role gating. The grants themselves are the two tables in the README,
 The rules point to the code that enforces them. When this file and the
 code disagree, the code wins: fix this file in the same change. The German
 [architecture map](./architecture.md) has the history and the reasoning
-behind most rules (its §5 conventions and §7 open issues).
+behind most rules (its §5 conventions, kept in
+[architecture/](./architecture/), and §7 open issues).
 
 ## Contents
 
@@ -1220,7 +1221,7 @@ Enforced by the cms, not only in the UI:
   poll with linked votes but no published row can no longer be published
   (Codex review of 15A, finding 1). A poll unpublished before batch 15 has
   no such votes: that unpublish deleted its vote links, so it counts as
-  unvoted and its orphaned ballots count nowhere (DEPLOYMENT.md
+  unvoted and its orphaned ballots count nowhere ([deployment history](./archive/deployment-history.md),
   "Deploying batch 15", step 6).
 - Where it is enforced: the `poll-visibility` read policy (list and
   detail), the custom `vote`/`results` actions and the batched

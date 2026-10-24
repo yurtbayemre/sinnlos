@@ -4,7 +4,7 @@ set +x # first: never trace this script (rotate-jwt handles a secret), also unde
 # restore-db.sh — restores a database dump (pg_dump -Fc) of the sinnlos
 # intranet into a CLEAN database of a compose project, rotates JWT_SECRET and
 # starts web and cms again, in steps that each end with one "OK: …" or
-# "STOP: …" line (docs/DEPLOYMENT.md §7.1, "Restoring a database dump").
+# "STOP: …" line (docs/OPERATIONS.md, "Restoring a database dump").
 #
 # Run it as the owner of the checkout (on the owner's host bigemo), from any
 # directory; the dump path is taken relative to the current directory.
@@ -111,7 +111,7 @@ usage: infra/restore-db.sh prepare <dump>
        infra/restore-db.sh status
        infra/restore-db.sh back
        infra/restore-db.sh cancel
-(docs/DEPLOYMENT.md §7.1, "Restoring a database dump")
+(docs/OPERATIONS.md, "Restoring a database dump")
 USAGE
   exit 2
 }

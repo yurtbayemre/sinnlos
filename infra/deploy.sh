@@ -1206,7 +1206,7 @@ if [[ -n "${entra_invalid_keys}" ]]; then
   echo "       GUIDs (never common/organizations/consumers), MS_CLIENT_SECRET set, ENTRA_EXCHANGE_SECRET" >&2
   echo "       32+ characters (openssl rand -hex 32), ENTRA_SYNC_MODE on|dry-run, ENTRA_DEFAULT_ROLE" >&2
   echo "       member|guest|deny, ENTRA_SESSION_TTL <n>m|h|d up to 7d, ENTRA_GROUP_ROLES <role>:<guid>,..." >&2
-  echo "       (docs/DEPLOYMENT.md, \"Microsoft Entra ID sign-in\"). Or unset ENTRA_ENABLED." >&2
+  echo "       (docs/SSO.md, \"Microsoft Entra ID sign-in\"). Or unset ENTRA_ENABLED." >&2
   preflight_failed=1
 fi
 # v0.25.0: the same for OIDC_ENABLED=1 (cms register(), web first request).
@@ -1219,7 +1219,7 @@ if [[ -n "${oidc_invalid_keys}" ]]; then
   echo "       OIDC_SESSION_TTL <n>m|h|d up to 7d, OIDC_ZITADEL_ORG_ID digits (required with a urn:zitadel:" >&2
   echo "       OIDC_ROLES_CLAIM), claim names or dotted paths in OIDC_ROLES_CLAIM and OIDC_DEPARTMENT_CLAIM," >&2
   echo "       OIDC_SCOPE with openid, OIDC_DISPLAY_NAME up to 40 characters, and never" >&2
-  echo "       next to ENTRA_ENABLED=1 (docs/DEPLOYMENT.md, \"OIDC sign-in (Keycloak, authentik, Zitadel)\")." >&2
+  echo "       next to ENTRA_ENABLED=1 (docs/SSO.md, \"OIDC sign-in (Keycloak, authentik, Zitadel)\")." >&2
   echo "       Or unset OIDC_ENABLED." >&2
   preflight_failed=1
 fi
@@ -1232,7 +1232,7 @@ if [[ -n "${meili_invalid_keys}" ]]; then
   echo "       MEILISEARCH_ENABLED=1 needs COMPOSE_PROFILES=search, MEILI_MASTER_KEY (16+ characters," >&2
   echo "       openssl rand -hex 32), MEILISEARCH_WRITE_KEY and MEILISEARCH_SEARCH_KEY (printed by" >&2
   echo "       infra/meilisearch/provision-keys.sh) and a MEILISEARCH_URL; the search profile alone" >&2
-  echo "       needs the master key. docs/DEPLOYMENT.md, \"Meilisearch (optional search)\"." >&2
+  echo "       needs the master key. docs/OPERATIONS.md, \"Meilisearch (optional search)\"." >&2
   echo "       Or unset MEILISEARCH_ENABLED and COMPOSE_PROFILES." >&2
   preflight_failed=1
 fi
@@ -1256,7 +1256,7 @@ if [[ -n "${edge_problems}" ]]; then
   fi
   echo "       with this value the site would answer 404 or break sign-in, and an image rollback would not" >&2
   echo "       help. Set DOMAIN to the public host name, the host of WEB_PUBLIC_URL and CMS_PUBLIC_URL" >&2
-  echo "       (docs/DEPLOYMENT.md §3.6 B), and re-run." >&2
+  echo "       (docs/INSTALL.md, \"Behind your own Traefik\"), and re-run." >&2
   preflight_failed=1
 fi
 # The Caddy edge next to a host Traefik: the bundled Caddy would claim
@@ -1394,7 +1394,7 @@ if [[ "${PROJECT}" != "infra" ]]; then
   if ((${#isolation[@]})); then
     echo "ERROR: compose project ${PROJECT} is not isolated from production:" >&2
     printf '       - %s\n' "${isolation[@]}" >&2
-    echo "       Nothing was changed (docs/DEPLOYMENT.md §3.6, the parameters)." >&2
+    echo "       Nothing was changed (docs/INSTALL.md, \"Behind your own Traefik\", the parameters)." >&2
     exit 1
   fi
 fi
@@ -1699,7 +1699,7 @@ if [[ "${LIVE_SMOKE_MODE}" == run* ]]; then
     LIVE_SMOKE_RESULT="passed (notification frame not checked)"
     echo "WARNING: live-smoke did not check the notification frame path: the stream user has no announcement" >&2
     echo "         of their own. Give ${PASSWORDS_FILE} a line for an announcement author, or set SMOKE_EMAIL" >&2
-    echo "         (docs/DEPLOYMENT.md, \"Upgrading to the deploy, backup and cron hardening\")." >&2
+    echo "         (docs/INSTALL.md, \"9. Upgrades\", live-smoke)." >&2
   else
     LIVE_SMOKE_RESULT="passed"
   fi

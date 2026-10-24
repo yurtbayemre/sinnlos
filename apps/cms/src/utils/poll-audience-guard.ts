@@ -126,7 +126,7 @@ import { instantMsOrNull } from "./time";
  *     `status: 'published'`; the same 400): what its ballots were cast on
  *     is unknown, and the draft is no baseline (it could differ from the
  *     published row before the first vote). Draft-only updates still pass:
- *     they reach no voter. docs/DEPLOYMENT.md lists such polls.
+ *     they reach no voter. docs/archive/deployment-history.md lists such polls.
  * The simplest fail-closed rule: a voted poll's baseline cannot go away,
  * so no second, immutable copy of it is needed.
  * It runs under the poll's lock: the document lock (slot 2) holds the

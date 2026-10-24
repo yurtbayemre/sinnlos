@@ -6,7 +6,7 @@
 -- The draft row is authoritative (decision 06 §D rule 2).
 --
 -- WHEN. Before a rollback to a batch-14 image, save the output off the host
--- (DEPLOYMENT.md "Deploying batch 15", rollback step 2). Batch 14 runs no
+-- (docs/archive/deployment-history.md, "Deploying batch 15", rollback step 2). Batch 14 runs no
 -- schedule. Each row's `on_rollback` says what the rollback does with it:
 --   - `pending_publish`: a pending publish waits (safe); re-entered after
 --     the roll-forward if a batch-14 write dropped it;

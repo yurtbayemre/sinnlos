@@ -76,7 +76,7 @@ services:
           - sinnlos-cms
     environment:
       NODE_ENV: production
-      # Datetime contract (docs/DEPLOYMENT.md): the cms process runs in UTC
+      # Datetime contract (docs/OPERATIONS.md): the cms process runs in UTC
       # (the image sets it too; a schema-changing boot refuses any other
       # zone). Business dates (today, day/week windows, anniversaries, cron
       # times, all-day events) use APP_TIME_ZONE, never the process zone.
@@ -105,7 +105,7 @@ services:
       # (comma list of CIDRs; empty: loopback only, i.e. closed from outside;
       # infra/admin-tunnel.sh opens it through SSH). docs/INSTALL.md.
       ADMIN_ALLOW_CIDRS: ${ADMIN_ALLOW_CIDRS:-}
-      # Microsoft Entra ID sign-in (D-ENTRA-01, docs/DEPLOYMENT.md "Microsoft
+      # Microsoft Entra ID sign-in (D-ENTRA-01, docs/SSO.md "Microsoft
       # Entra ID sign-in"): off unless ENTRA_ENABLED=1, and then validated at
       # boot (an invalid value refuses the start; deploy.sh --check says which).
       # The cms verifies the ID token itself (tenant + client id) and never
@@ -122,7 +122,7 @@ services:
       ENTRA_SYNC_MANAGER: ${ENTRA_SYNC_MANAGER:-0}
       ENTRA_SESSION_TTL: ${ENTRA_SESSION_TTL:-12h}
       # OIDC sign-in with Keycloak, authentik or Zitadel (v0.25.0,
-      # docs/DEPLOYMENT.md "OIDC sign-in"): off unless OIDC_ENABLED=1, then
+      # docs/SSO.md "OIDC sign-in"): off unless OIDC_ENABLED=1, then
       # validated at boot like Entra; never together with ENTRA_ENABLED=1.
       # The cms verifies the ID token itself (discovery of OIDC_ISSUER,
       # audience OIDC_CLIENT_ID) and never needs the client secret.
@@ -210,7 +210,7 @@ services:
       # The instance's name (v0.29) in the digest and account-mail subjects
       # and new TOTP enrolments; empty = the product's wording.
       SITE_NAME: ${SITE_NAME:-}
-      # Optional search ranking (v0.21, docs/DEPLOYMENT.md "Meilisearch
+      # Optional search ranking (v0.21, docs/OPERATIONS.md "Meilisearch
       # (optional search)"): off unless MEILISEARCH_ENABLED=1. The cms keeps
       # the index sinnlos_search current with the write key; it never gets
       # the master key.
@@ -261,7 +261,7 @@ services:
           - sinnlos-web
     environment:
       NODE_ENV: production
-      # Datetime contract (docs/DEPLOYMENT.md §3.10): since its datetime port
+      # Datetime contract (docs/OPERATIONS.md): since its datetime port
       # (phase 2) the web renders and computes every date in APP_TIME_ZONE
       # explicitly, so its process runs in UTC like the cms (the image sets
       # it too).
@@ -352,7 +352,7 @@ services:
     cap_drop:
       - ALL
 
-  # Optional search ranking (v0.21, docs/DEPLOYMENT.md "Meilisearch
+  # Optional search ranking (v0.21, docs/OPERATIONS.md "Meilisearch
   # (optional search)"): runs only with COMPOSE_PROFILES=search in
   # infra/.env. It ranks search candidates; Strapi still decides who reads
   # what, and the web falls back to its own search while it is off, down or

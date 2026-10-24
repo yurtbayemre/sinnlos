@@ -162,7 +162,7 @@ export async function prepareDatetimeContract(
     throw new Error(
       `[datetime] The database session runs in "${session}", not UTC. config/database.ts sends ` +
         "-c TimeZone=UTC; a connection pooler or proxy that drops startup options breaks that. " +
-        "Connect the cms to Postgres directly (docs/DEPLOYMENT.md, datetime contract).",
+        "Connect the cms to Postgres directly (docs/OPERATIONS.md, Datetime contract).",
     );
   }
 
@@ -321,7 +321,7 @@ export async function convertNaiveColumns(
         `[datetime] ${table} (${columns.join(", ")}) is timestamp without time zone again and holds values in ` +
           `${rowsWithValues} row(s); converting them as UTC wall clocks. That is right when Strapi re-created ` +
           "the column; after a manual ALTER in a non-UTC session the values move by that zone's offset " +
-          "(docs/DEPLOYMENT.md, datetime contract).",
+          "(docs/OPERATIONS.md, Datetime contract).",
       );
     }
   }

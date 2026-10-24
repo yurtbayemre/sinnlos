@@ -2,7 +2,7 @@
 --
 -- Shows what infra/migrations/org-dp/migrate.sql would do to department and
 -- team before draftAndPublish is switched off for both. Runbook:
--- docs/DEPLOYMENT.md "One-time: org draft/publish off", notes in
+-- docs/archive/deployment-history.md, "One-time: org draft/publish off", notes in
 -- infra/migrations/org-dp/README.md. Safe while the current release is
 -- live:
 --   docker compose -p infra -f infra/docker-compose.yml -f infra/docker-compose.traefik.yml \

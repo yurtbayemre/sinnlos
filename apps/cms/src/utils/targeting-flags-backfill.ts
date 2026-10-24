@@ -38,7 +38,7 @@ import { ANNOUNCEMENT_UID, EVENT_UID } from "./authoring-uids";
  *     when its twin says `true`. Otherwise the marker is left alone.
  * Residual: when BOTH rows lost the value on batch 14 (published there,
  * then discarded), nothing is left to tell; the saved lists of the
- * rollback runbook cover it (docs/DEPLOYMENT.md, the same accepted residual
+ * rollback runbook cover it (docs/archive/deployment-history.md, the same accepted residual
  * as the poll backfill).
  *
  * ATOMIC AND FAIL CLOSED, like its siblings: classification and every
@@ -351,7 +351,7 @@ export async function backfillTargetingFlags(
       `${TARGETING_FLAGS_LOG} could not backfill the announcement and event targeting flags (${reason}); ` +
         "nothing was changed (the transaction rolled back), and the cms does not start, because a row " +
         "without its flag can turn company-wide when its targets are deleted. Fix the cause and start " +
-        "the cms again (every start retries), or roll back (docs/DEPLOYMENT.md)",
+        "the cms again (every start retries), or roll back (docs/UPGRADE.md, Rollback)",
     );
   }
   const total = Object.values(counts).reduce((sum, count) => sum + count, 0);

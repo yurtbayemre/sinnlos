@@ -34,7 +34,7 @@ import { POLL_AUDIENCE_ALL, POLL_AUDIENCE_DEPARTMENTS } from "./poll-audience";
  * On the first boot of this release every row is NULL, so the exception
  * cannot apply there. When BOTH rows lost the flag on the previous cms
  * (published there and then discarded, or created there) nothing is left
- * to tell: that is the accepted residual of a rollback (§7b, DEPLOYMENT.md
+ * to tell: that is the accepted residual of a rollback (§7b, docs/archive/deployment-history.md
  * roll-forward check).
  *
  * ATOMIC AND FAIL CLOSED (Codex review, findings 3 and 4). Classification
@@ -50,7 +50,7 @@ import { POLL_AUDIENCE_ALL, POLL_AUDIENCE_DEPARTMENTS } from "./poll-audience";
  * sibling). Now nothing is written unless everything is, so a retry
  * classifies exactly like a clean first run. The operator consequence
  * (deploy.sh stops at `up -d`, restart retries, rollback) is in
- * docs/DEPLOYMENT.md.
+ * docs/archive/deployment-history.md.
  *
  * BOUNDED STATEMENTS (Codex review, P2). The NULL rows are read in pages
  * of POLL_AUDIENCE_BACKFILL_CHUNK by an id cursor. The department populate
@@ -244,7 +244,7 @@ export async function backfillPollAudience(strapi: PollAudienceBackfillHost): Pr
       `${POLL_AUDIENCE_BACKFILL_LOG} could not backfill the audience of existing polls (${reason}); ` +
         "nothing was changed (the transaction rolled back), and the cms does not start, because a poll row " +
         "without the flag can leave a restricted poll open. Fix the cause and start the cms again " +
-        "(every start retries), or roll back (docs/DEPLOYMENT.md)",
+        "(every start retries), or roll back (docs/UPGRADE.md, Rollback)",
     );
   }
   if (counts === null) return;

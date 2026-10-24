@@ -66,6 +66,6 @@ export function assertDatabaseUrlKeepsUtcSession(url: string | undefined | null)
     "DATABASE_URL sets its own `options` query parameter, which replaces the cms's " +
       `"${DB_SESSION_OPTIONS}" session pin (pg merges the URL over the connection config). ` +
       "Remove `options` from DATABASE_URL, or include -c TimeZone=UTC in it " +
-      "(docs/DEPLOYMENT.md, datetime contract).",
+      "(docs/OPERATIONS.md, Datetime contract).",
   );
 }

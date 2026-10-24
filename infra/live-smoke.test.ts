@@ -1,6 +1,6 @@
 /**
  * infra/live-smoke.sh (IN06, DOC-SMOKE-PW-ARGV). The end-to-end run needs a
- * real stack (lane rehearsal, docs/DEPLOYMENT.md §6.1); pinned here:
+ * real stack (lane rehearsal, docs/OPERATIONS.md, "Health checks"); pinned here:
  *   1. no password ever lands on a command line: curl reads SMOKE_PASSWORD
  *      from stdin, the cms container gets SMOKE_AUTHOR_PASSWORD through
  *      `docker exec -e`, and the node program reads the environment; the
