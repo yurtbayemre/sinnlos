@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { Route } from "next";
-import { Command, defaultFilter } from "cmdk";
+import { Command, defaultFilter, useCommandState } from "cmdk";
 import { DialogDescription, DialogTitle } from "@radix-ui/react-dialog";
 import {
   Search,
@@ -539,6 +539,7 @@ export function SearchCommand() {
             className="flex h-12 w-full bg-transparent text-sm outline-hidden placeholder:text-muted-foreground"
           />
         </div>
+        <ResultStatus ready={searching ? settled : !loading} />
         <Command.List className="max-h-80 overflow-y-auto p-2">
           {loading && (
             <Command.Loading>
@@ -580,5 +581,22 @@ export function SearchCommand() {
         </Command.List>
       </Command.Dialog>
     </>
+  );
+}
+
+/**
+ * The palette's result count for screen readers (S6), mounted empty with
+ * the dialog so each change is announced. cmdk's own count covers both the
+ * server's results and its local filter of the preloaded entries (a
+ * one-character term); `ready` holds it back while results are loading.
+ */
+function ResultStatus({ ready }: { ready: boolean }) {
+  const tSearch = useTranslations("search");
+  const search = useCommandState((state) => state.search);
+  const count = useCommandState((state) => state.filtered.count);
+  return (
+    <p role="status" className="sr-only">
+      {ready && search ? tSearch("resultsCount", { count }) : ""}
+    </p>
   );
 }

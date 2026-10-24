@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useTransition, useMemo } from "react";
+import { useId, useMemo, useRef, useState, useTransition } from "react";
 import { useTranslations } from "next-intl";
-import { Award, Send, X, Search } from "lucide-react";
+import { Award, Check, Send, X, Search } from "lucide-react";
 import { ModalDialog } from "@/components/ui/confirm-dialog";
 import { cn } from "@/lib/utils";
 import { isSharedErrorCode, startCmsAction, type CommonCode } from "@/lib/action-result";
@@ -33,6 +33,12 @@ const VALUES: {
  * Escape and backdrop close, focus back on the "Give kudos" button. The
  * search input takes the first focus (autoFocus) when no recipient is
  * picked. Closing keeps what was typed; a sent kudos clears and closes.
+ *
+ * Accessibility (S6): the search input and the message are labelled; the
+ * suggestions are plain buttons with a polite result count; picking one
+ * moves focus to the message (the picked button disappears). The values
+ * are native radios in a fieldset, so arrow keys work; the picked one also
+ * carries a check mark.
  */
 export function GiveKudos({ people }: { people: KudosRecipient[] }) {
   const t = useTranslations("kudos");
@@ -44,6 +50,9 @@ export function GiveKudos({ people }: { people: KudosRecipient[] }) {
   const [value, setValue] = useState<KudosValue>("teamwork");
   const [error, setError] = useState<CommonCode | null>(null);
   const [isPending, startTransition] = useTransition();
+  const searchId = useId();
+  const messageId = useId();
+  const messageRef = useRef<HTMLTextAreaElement>(null);
 
   const filtered = useMemo(() => {
     if (!search) return [];
@@ -96,7 +105,9 @@ export function GiveKudos({ people }: { people: KudosRecipient[] }) {
         <div className="mt-4 space-y-4">
           {/* Recipient picker */}
           <div>
-            <label className="mb-1 block text-sm font-medium">{t("to")}</label>
+            <label htmlFor={searchId} className="mb-1 block text-sm font-medium">
+              {t("to")}
+            </label>
             {selected ? (
               <div className="flex items-center gap-2 rounded-xl border bg-muted/40 px-3 py-2">
                 <Avatar className="h-7 w-7">
@@ -122,6 +133,7 @@ export function GiveKudos({ people }: { people: KudosRecipient[] }) {
               <div className="relative">
                 <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                 <input
+                  id={searchId}
                   type="text"
                   placeholder={t("searchColleague")}
                   value={search}
@@ -139,6 +151,7 @@ export function GiveKudos({ people }: { people: KudosRecipient[] }) {
                         onClick={() => {
                           setSelected(p);
                           setSearch("");
+                          messageRef.current?.focus();
                         }}
                         className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm outline-hidden transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
                       >
@@ -160,45 +173,52 @@ export function GiveKudos({ people }: { people: KudosRecipient[] }) {
                     ))}
                   </div>
                 )}
+                <p role="status" className="sr-only">
+                  {search ? t("searchResults", { count: filtered.length }) : ""}
+                </p>
               </div>
             )}
           </div>
 
           {/* Value selector */}
-          <div>
-            <span id="give-kudos-value-label" className="mb-1 block text-sm font-medium">
-              {t("for")}
-            </span>
-            <div
-              role="radiogroup"
-              aria-labelledby="give-kudos-value-label"
-              className="flex flex-wrap gap-2"
-            >
+          <fieldset>
+            <legend className="mb-1 block text-sm font-medium">{t("for")}</legend>
+            <div className="flex flex-wrap gap-2">
               {VALUES.map((v) => (
-                <button
+                <label
                   key={v.value}
-                  type="button"
-                  role="radio"
-                  aria-checked={value === v.value}
-                  onClick={() => setValue(v.value)}
                   className={cn(
-                    "inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium outline-hidden transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
+                    "inline-flex cursor-pointer items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring has-[:focus-visible]:ring-offset-2 has-[:focus-visible]:ring-offset-background",
                     value === v.value
                       ? "border-primary-text bg-primary/10 text-primary"
                       : "hover:border-border hover:bg-muted",
                   )}
                 >
+                  <input
+                    type="radio"
+                    name="kudos-value"
+                    value={v.value}
+                    checked={value === v.value}
+                    onChange={() => setValue(v.value)}
+                    className="sr-only"
+                  />
                   <span aria-hidden="true">{v.emoji}</span>
                   {t(v.labelKey)}
-                </button>
+                  {/* The pick is shown by a mark, not by colour alone. */}
+                  {value === v.value && <Check className="h-3 w-3" aria-hidden="true" />}
+                </label>
               ))}
             </div>
-          </div>
+          </fieldset>
 
           {/* Message */}
           <div>
-            <label className="mb-1 block text-sm font-medium">{t("message")}</label>
+            <label htmlFor={messageId} className="mb-1 block text-sm font-medium">
+              {t("message")}
+            </label>
             <textarea
+              id={messageId}
+              ref={messageRef}
               value={message}
               onChange={(e) => setMessage(e.target.value)}
               placeholder={t("messagePlaceholder")}

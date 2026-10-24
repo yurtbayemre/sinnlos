@@ -131,6 +131,7 @@ export function CommentThread({
         <form onSubmit={handleSubmit} className="flex gap-2">
           <input
             type="text"
+            aria-label={tComments("writeComment")}
             placeholder={tComments("writeComment")}
             value={body}
             onChange={(e) => setBody(e.target.value)}

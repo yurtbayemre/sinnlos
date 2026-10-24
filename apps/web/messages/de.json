@@ -282,7 +282,8 @@
     "customerFocus": "Kundenorientierung",
     "excellence": "Exzellenz",
     "sendFailed": "Kudos konnten nicht gesendet werden – bitte erneut versuchen.",
-    "removeRecipient": "Auswahl entfernen"
+    "removeRecipient": "Auswahl entfernen",
+    "searchResults": "{count, plural, =0 {Niemand gefunden} one {# Person gefunden} other {# Personen gefunden}}"
   },
   "marketplace": {
     "title": "Kleinanzeigen",
@@ -354,6 +355,7 @@
   },
   "polls": {
     "title": "Umfragen",
+    "yourVote": "Deine Stimme",
     "description": "Stimmen Sie bei Unternehmensumfragen ab und sehen Sie Ergebnisse.",
     "active": "Aktiv",
     "closed": "Beendet",
@@ -531,6 +533,7 @@
   },
   "search": {
     "label": "Suche (Strg+K)",
+    "resultsCount": "{count, plural, =0 {Keine Treffer} one {# Treffer} other {# Treffer}}",
     "placeholder": "Wiki, Personen, Teams suchen…",
     "searchPlaceholder": "Suchen…",
     "globalSearch": "Globale Suche",
@@ -596,6 +599,7 @@
     "quizChecking": "Antworten werden geprüft…",
     "quizExamNotPassed": "Noch nicht bestanden. Prüfen Sie Ihre Antworten und versuchen Sie es erneut.",
     "quizCheckFailed": "Ihre Antworten konnten nicht geprüft werden. Bitte versuchen Sie es erneut.",
+    "quizRetry": "Erneut prüfen",
     "quizCheckButton": "Antworten prüfen",
     "quizAnswerAll": "Bitte beantworte zuerst alle Fragen.",
     "quizAllCorrect": "Alles richtig!",
@@ -612,6 +616,8 @@
     "repeatEvery": "{count, plural, one {Jeden Monat zu wiederholen} other {Alle # Monate zu wiederholen}}",
     "renewCourse": "Jetzt erneuern",
     "lessonRenew": "erneuern",
+    "lessonDoneSr": "erledigt",
+    "lessonOpenSr": "offen",
     "renewSoon": "Dein Abschluss läuft am {date} ab. Du kannst die Lektion jetzt erneut abschließen.",
     "renewOverdue": "Dein Abschluss ist am {date} abgelaufen. Bitte schließe die Lektion erneut ab.",
     "reload": "Neu laden"

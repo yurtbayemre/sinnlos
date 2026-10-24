@@ -17,6 +17,9 @@ const inputClass =
 const buttonClass =
   "inline-flex w-full items-center justify-center rounded-xl bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground outline-hidden transition-colors hover:bg-primary/90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:opacity-50";
 
+/** Takes the focus once, when the element mounts in place of the form (S6). */
+const focusOnMount = (element: HTMLElement | null) => element?.focus();
+
 /** /forgot-password: one address, always the same neutral answer. */
 export function ForgotPasswordForm() {
   const t = useTranslations("auth");
@@ -26,7 +29,7 @@ export function ForgotPasswordForm() {
   );
   if (state.done) {
     return (
-      <p role="status" className="text-sm">
+      <p role="status" tabIndex={-1} ref={focusOnMount} className="text-sm">
         {t("forgotDone")}
       </p>
     );

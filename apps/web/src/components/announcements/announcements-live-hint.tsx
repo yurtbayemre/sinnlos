@@ -53,22 +53,31 @@ export function AnnouncementsLiveHint({ initialIds }: { initialIds: string[] }) 
 
   useLiveChannel("announcements", check);
 
-  if (!hydrated || !showHint) return null;
+  if (!hydrated) return null;
 
+  // The status is mounted before the hint appears, so screen readers hear
+  // it (S6); the button itself shows only while there is news.
   return createPortal(
-    <div className="fixed inset-x-0 bottom-[calc(6rem+env(safe-area-inset-bottom))] z-50 flex justify-center px-4 md:bottom-6">
-      <button
-        type="button"
-        onClick={() => {
-          setShowHint(false);
-          router.refresh();
-        }}
-        className="flex items-center gap-2 rounded-full border border-border bg-card px-4 py-2 text-sm font-medium text-foreground shadow-lg outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-      >
-        <Megaphone className="h-4 w-4" aria-hidden />
-        {t("liveNewHint")}
-      </button>
-    </div>,
+    <>
+      <p role="status" className="sr-only">
+        {showHint ? t("liveNewHint") : ""}
+      </p>
+      {showHint && (
+        <div className="fixed inset-x-0 bottom-[calc(6rem+env(safe-area-inset-bottom))] z-50 flex justify-center px-4 md:bottom-6">
+          <button
+            type="button"
+            onClick={() => {
+              setShowHint(false);
+              router.refresh();
+            }}
+            className="flex items-center gap-2 rounded-full border border-border bg-card px-4 py-2 text-sm font-medium text-foreground shadow-lg outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+          >
+            <Megaphone className="h-4 w-4" aria-hidden />
+            {t("liveNewHint")}
+          </button>
+        </div>
+      )}
+    </>,
     document.body,
   );
 }

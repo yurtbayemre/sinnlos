@@ -18,7 +18,9 @@ type Fixtures = {
     inviter: Account;
     privacy: Account;
     leaver: Account & { id: number };
+    a11y: Account;
   };
+  poll: { question: string; documentId: string };
   privacy: { announcement: { title: string; documentId: string }; comment: string };
   teams: { editable: Team; readonly: Team };
   training: TrainingFixture;
@@ -82,19 +84,26 @@ export async function codeAfter(
  * Signs in an account whose role needs a second factor and has none yet:
  * the app sends it to /mfa/setup, where it enrolls with the shown secret.
  * Resolves the secret, the step its code used and the recovery codes.
+ * `atStep` runs on the settled setup form and recovery codes (a11y.spec.ts).
  */
-export async function signInAndEnroll(page: Page, account: Account) {
+export async function signInAndEnroll(
+  page: Page,
+  account: Account,
+  atStep?: (step: "setup" | "recovery") => Promise<void>,
+) {
   await page.goto("/sign-in");
   await page.getByLabel("Email", { exact: true }).fill(account.email);
   await page.getByLabel("Password", { exact: true }).fill(account.password);
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await expect(page).toHaveURL("/mfa/setup");
   const secret = (await page.locator("code").first().innerText()).trim();
+  await atStep?.("setup");
   const step = currentStep();
   await page.getByLabel("Code", { exact: true }).fill(totp(secret, step));
   await page.getByLabel("Current password", { exact: true }).fill(account.password);
   await page.getByRole("button", { name: "Turn on", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Your recovery codes" })).toBeVisible();
+  await atStep?.("recovery");
   const recoveryCodes = await page.getByRole("listitem").allInnerTexts();
   await page.getByRole("button", { name: "I have saved the codes", exact: true }).click();
   await expect(page).toHaveURL("/");

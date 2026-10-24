@@ -9,7 +9,16 @@ import { isSharedErrorCode, startCmsAction, type CommonCode } from "@/lib/action
 import { checkLesson, type TrainingActionError } from "@/lib/training-actions";
 import type { CompletionMode, LearnerQuizQuestion } from "@/lib/training-shared";
 
-/** One answerless player: only the CMS supplies verdicts, including during completed review. */
+/**
+ * One answerless player: only the CMS supplies verdicts, including during completed review.
+ *
+ * Accessibility (S6): each question is a fieldset whose options are visible
+ * native radios (arrow keys, single choice announced, the pick shown by more
+ * than colour); the per-question verdict and
+ * the aggregate status are live regions mounted before they are filled.
+ * When a pass removes the focused "Check answers" button, focus moves to the
+ * aggregate status instead of falling to the page.
+ */
 export function QuizBlock({
   quiz,
   lessonDocumentId,
@@ -30,6 +39,12 @@ export function QuizBlock({
   const [error, setError] = useState<CommonCode | TrainingActionError | null>(null);
   const [isPending, startTransition] = useTransition();
   const revision = useRef(0);
+  // Set by "Check answers": its pass removes the button (which the pending
+  // check disabled, so the browser may already have dropped its focus).
+  const focusOutcome = useRef(false);
+  // Set by "Check again": its success clears the error and removes the button.
+  const focusAfterRetry = useRef(false);
+  const statusRef = useRef<HTMLSpanElement>(null);
   useEffect(
     () => () => {
       // A reset quiz must never be unlocked by a response to its unmounted predecessor.
@@ -37,11 +52,30 @@ export function QuizBlock({
     },
     [],
   );
+  const answeredAllNow = quiz.every((_, qi) => answers[qi] !== undefined);
+  const passedNow = answeredAllNow && feedback?.passed === true;
+  useEffect(() => {
+    // The pass unmounts the focused check button; keep focus on the outcome.
+    if (!passedNow || !focusOutcome.current) return () => {};
+    focusOutcome.current = false;
+    // Only if the removed button still held the focus (the browser then
+    // falls back to the body): a user who moved on keeps their place.
+    const active = document.activeElement;
+    if (active === null || active === document.body) statusRef.current?.focus();
+    return () => {};
+  }, [passedNow]);
+  useEffect(() => {
+    if (error !== null || !focusAfterRetry.current) return () => {};
+    focusAfterRetry.current = false;
+    const active = document.activeElement;
+    if (active === null || active === document.body) statusRef.current?.focus();
+    return () => {};
+  }, [error]);
 
   if (quiz.length === 0) return null;
 
-  const answeredAll = quiz.every((_, qi) => answers[qi] !== undefined);
-  const passed = answeredAll && feedback?.passed === true;
+  const answeredAll = answeredAllNow;
+  const passed = passedNow;
   const verdicts = mode === "exam" ? [] : (feedback?.verdicts ?? []);
   const wrong = verdicts.filter((verdict) => !verdict.correct).length;
 
@@ -62,6 +96,7 @@ export function QuizBlock({
           setError("failed");
           return;
         }
+        setError(null);
         setMode(result.completionMode);
         setFeedback(result);
         onPassedChange?.(
@@ -86,6 +121,7 @@ export function QuizBlock({
     setFeedback(null);
     setError(null);
     onPassedChange?.(null);
+    focusOutcome.current = false;
     if (mode === "confirm") check(next, current);
   };
 
@@ -94,6 +130,7 @@ export function QuizBlock({
     setFeedback(null);
     setError(null);
     onPassedChange?.(null);
+    focusOutcome.current = true;
     check(answers, ++revision.current);
   };
 
@@ -113,20 +150,17 @@ export function QuizBlock({
         const picked = answers[qi];
         const verdict = verdicts.find((entry) => entry.questionIndex === qi);
         return (
-          <div key={qi} className="space-y-2">
-            <div className="text-sm font-medium">{q.question}</div>
-            <div className="grid gap-2" role="group" aria-label={q.question}>
+          <fieldset key={qi} className="space-y-2">
+            <legend className="text-sm font-medium">{q.question}</legend>
+            <div className="grid gap-2">
               {q.options.map((option, oi) => {
                 const isPicked = picked === oi;
                 const state =
                   isPicked && verdict ? (verdict.correct ? "right" : "wrong") : "neutral";
                 return (
-                  <button
+                  <label
                     key={oi}
-                    type="button"
-                    aria-pressed={isPicked}
-                    onClick={() => pick(qi, oi)}
-                    className={`flex items-center justify-between gap-2 rounded-lg border px-3 py-2 text-left text-sm outline-hidden transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background ${
+                    className={`flex cursor-pointer items-center justify-between gap-2 rounded-lg border px-3 py-2 text-left text-sm transition-colors has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring has-[:focus-visible]:ring-offset-2 has-[:focus-visible]:ring-offset-background ${
                       state === "right"
                         ? "border-emerald-500/60 bg-emerald-500/10"
                         : state === "wrong"
@@ -136,7 +170,16 @@ export function QuizBlock({
                             : "hover:bg-muted/50"
                     }`}
                   >
-                    <span>{option}</span>
+                    <span className="flex items-center gap-2">
+                      <input
+                        type="radio"
+                        name={`quiz-${lessonDocumentId}-${qi}`}
+                        checked={isPicked}
+                        onChange={() => pick(qi, oi)}
+                        className="h-4 w-4 shrink-0 accent-primary outline-hidden"
+                      />
+                      <span>{option}</span>
+                    </span>
                     {state === "right" && (
                       <CheckCircle2
                         className="h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400"
@@ -149,19 +192,25 @@ export function QuizBlock({
                         aria-hidden="true"
                       />
                     )}
-                  </button>
+                  </label>
                 );
               })}
             </div>
-            {verdict && (
+            {/* Mounted empty, filled by the verdict, so the change is announced.
+                An exam never shows per-question verdicts, so it has no region. */}
+            {mode !== "exam" && (
               <p
                 role="status"
-                className={`text-xs ${verdict.correct ? "text-emerald-700 dark:text-emerald-400" : "text-red-600 dark:text-red-400"}`}
+                className={
+                  verdict
+                    ? `text-xs ${verdict.correct ? "text-emerald-700 dark:text-emerald-400" : "text-red-600 dark:text-red-400"}`
+                    : "sr-only"
+                }
               >
-                {verdict.correct ? t("quizCorrect") : t("quizWrong")}
+                {verdict ? (verdict.correct ? t("quizCorrect") : t("quizWrong")) : null}
               </p>
             )}
-          </div>
+          </fieldset>
         );
       })}
       <div className="flex flex-wrap items-center gap-3 pt-1">
@@ -181,6 +230,8 @@ export function QuizBlock({
           </>
         )}
         <span
+          ref={statusRef}
+          tabIndex={-1}
           role="status"
           className={
             passed
@@ -199,6 +250,21 @@ export function QuizBlock({
                   : null}
         </span>
       </div>
+      {error && mode === "confirm" && Object.keys(answers).length > 0 && (
+        // Confirm mode checks on each pick; after a failed check, picking
+        // the same answer again fires nothing, so retrying needs a button.
+        <button
+          type="button"
+          onClick={() => {
+            focusAfterRetry.current = true;
+            check(answers, ++revision.current);
+          }}
+          disabled={isPending}
+          className="text-sm font-medium text-primary underline-offset-4 outline-hidden hover:underline focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:opacity-50"
+        >
+          {t("quizRetry")}
+        </button>
+      )}
       {error && (
         <p role="alert" className="text-sm text-destructive">
           {error === QUIZ_CONTENT_INVALID
