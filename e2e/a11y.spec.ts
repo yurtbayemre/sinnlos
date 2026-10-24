@@ -1,6 +1,6 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type BrowserContext, type Page } from "@playwright/test";
-import { loadFixtures, signInAndEnroll } from "./helpers";
+import { loadFixtures, signIn, signInAndEnroll, type Account } from "./helpers";
 
 /**
  * S6 (v0.29): axe's WCAG 2.1 A/AA checks on the main screens, in both
@@ -10,10 +10,11 @@ import { loadFixtures, signInAndEnroll } from "./helpers";
  * Every violation of the selected tags fails. An exception names its
  * screen, its rule and the reason (EXCEPTIONS).
  *
- * The spec signs in once, as its own admin (users.a11y): it enrolls the
- * second factor (scanning the setup form and the recovery codes), and its
- * session is reused for the rest, so no other spec's user changes state
- * and the auth limiter sees one sign-in.
+ * Each screen is scanned in the role that uses it: the member's dashboard,
+ * palette, kudos and poll, the editor's announcement editor, and the
+ * learner's lesson. The learner is the spec's own admin (users.a11y): it
+ * enrolls the second factor (scanning the setup form and the recovery
+ * codes) and completes the lesson, so no other spec's user changes state.
  */
 const TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"];
 const EXCEPTIONS: Record<string, Record<string, string>> = {
@@ -94,39 +95,40 @@ async function signedIn(context: () => Promise<BrowserContext>): Promise<Page> {
   return (await context()).newPage();
 }
 
-test("a11y-app", async ({ browser }) => {
+/** A fresh session for an account without a second factor. */
+async function as(context: () => Promise<BrowserContext>, account: Account): Promise<Page> {
+  const page = await (await context()).newPage();
+  await signIn(page, account);
+  return page;
+}
+
+test("a11y-member", async ({ browser }) => {
   const fixtures = loadFixtures();
-  test.setTimeout(90_000);
-  const page = await signedIn(() => browser.newContext({ storageState: session }));
+  test.setTimeout(60_000);
+  const page = await as(() => browser.newContext(), fixtures.users.member);
   const main = page.getByRole("main");
 
   await test.step("Dashboard", async () => {
-    await page.goto("/");
     await expect(main.getByRole("heading", { level: 1 })).toBeVisible();
     await scan(page, "dashboard");
   });
 
-  await test.step("Command palette with and without results", async () => {
+  await test.step("Command palette: local filter, results, no results", async () => {
     await page.getByRole("button", { name: /^Search/ }).click();
     const dialog = page.getByRole("dialog");
+    const status = dialog.getByRole("status");
+    // One character filters the preloaded entries locally (cmdk); counted too.
+    await dialog.getByRole("combobox").fill("E");
+    await expect(status).toHaveText(/^\d+ results?$/);
     await dialog.getByRole("combobox").fill("E2E");
     await expect(dialog.getByRole("option").first()).toBeVisible();
-    await expect(dialog.getByRole("status")).toHaveText(/\d+ results?/);
+    await expect(status).toHaveText(/^\d+ results?$/);
     await scan(page, "search results");
     await dialog.getByRole("combobox").fill("zzqx-nothing-here");
-    await expect(dialog.getByRole("status")).toHaveText("No results");
+    await expect(status).toHaveText("No results");
     await scan(page, "search no results");
     await page.keyboard.press("Escape");
     await expect(dialog).toHaveCount(0);
-  });
-
-  await test.step("Announcement editor, empty and with a validation error", async () => {
-    await page.goto("/manage/announcements/new");
-    await expect(main.getByRole("heading", { level: 1 })).toBeVisible();
-    await scan(page, "announcement editor");
-    await main.getByRole("button", { name: "Save draft", exact: true }).click();
-    await expect(main.locator('[aria-invalid="true"]').first()).toBeVisible();
-    await scan(page, "announcement editor error");
   });
 
   await test.step("A dialog: give kudos", async () => {
@@ -136,32 +138,6 @@ test("a11y-app", async ({ browser }) => {
     await scan(page, "kudos dialog");
     await page.keyboard.press("Escape");
     await expect(page.getByRole("dialog")).toHaveCount(0);
-  });
-
-  await test.step("Lesson player: unanswered, wrong, passed, completed", async () => {
-    const { course, lesson } = fixtures.training;
-    await page.goto(`/training/${course.slug}/${lesson.documentId}`);
-    const https = main.getByRole("group", { name: "Which port is used for HTTPS?", exact: true });
-    const phishing = main.getByRole("group", {
-      name: "Should you report a phishing email?",
-      exact: true,
-    });
-    const check = main.getByRole("button", { name: "Check answers", exact: true });
-    await expect(check).toBeDisabled();
-    await scan(page, "lesson unanswered");
-    await https.getByRole("radio", { name: "80", exact: true }).check();
-    await phishing.getByRole("radio", { name: "Yes", exact: true }).check();
-    await check.click();
-    await expect(main.getByText("Not quite — try again.", { exact: true })).toBeVisible();
-    await scan(page, "lesson wrong answer");
-    await https.getByRole("radio", { name: "443", exact: true }).check();
-    await check.click();
-    // The pass removes the focused button; the outcome takes the focus.
-    await expect(main.getByRole("status").filter({ hasText: "All correct!" })).toBeFocused();
-    await scan(page, "lesson passed");
-    await main.getByRole("button", { name: "Complete lesson", exact: true }).click();
-    await expect(main.getByText(/^Completed on .+/)).toBeFocused();
-    await scan(page, "lesson completed");
   });
 
   await test.step("Poll card before and after voting", async () => {
@@ -177,6 +153,50 @@ test("a11y-app", async ({ browser }) => {
     await scan(page, "poll voted");
   });
 
+  await page.context().close();
+});
+
+test("a11y-editor", async ({ browser }) => {
+  const fixtures = loadFixtures();
+  const page = await as(() => browser.newContext(), fixtures.users.editor);
+  const main = page.getByRole("main");
+  await page.goto("/manage/announcements/new");
+  await expect(main.getByRole("heading", { level: 1 })).toBeVisible();
+  await scan(page, "announcement editor");
+  await main.getByRole("button", { name: "Save draft", exact: true }).click();
+  await expect(main.locator('[aria-invalid="true"]').first()).toBeVisible();
+  await scan(page, "announcement editor error");
+  await page.context().close();
+});
+
+test("a11y-learner", async ({ browser }) => {
+  const fixtures = loadFixtures();
+  test.setTimeout(60_000);
+  const page = await signedIn(() => browser.newContext({ storageState: session }));
+  const main = page.getByRole("main");
+  const { course, lesson } = fixtures.training;
+  await page.goto(`/training/${course.slug}/${lesson.documentId}`);
+  const https = main.getByRole("group", { name: "Which port is used for HTTPS?", exact: true });
+  const phishing = main.getByRole("group", {
+    name: "Should you report a phishing email?",
+    exact: true,
+  });
+  const check = main.getByRole("button", { name: "Check answers", exact: true });
+  await expect(check).toBeDisabled();
+  await scan(page, "lesson unanswered");
+  await https.getByRole("radio", { name: "80", exact: true }).check();
+  await phishing.getByRole("radio", { name: "Yes", exact: true }).check();
+  await check.click();
+  await expect(main.getByText("Not quite — try again.", { exact: true })).toBeVisible();
+  await scan(page, "lesson wrong answer");
+  await https.getByRole("radio", { name: "443", exact: true }).check();
+  await check.click();
+  // The pass removes the focused button; the outcome takes the focus.
+  await expect(main.getByRole("status").filter({ hasText: "All correct!" })).toBeFocused();
+  await scan(page, "lesson passed");
+  await main.getByRole("button", { name: "Complete lesson", exact: true }).click();
+  await expect(main.getByText(/^Completed on .+/)).toBeFocused();
+  await scan(page, "lesson completed");
   await page.context().close();
 });
 
