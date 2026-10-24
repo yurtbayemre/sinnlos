@@ -42,6 +42,8 @@ export function QuizBlock({
   // Set by "Check answers": its pass removes the button (which the pending
   // check disabled, so the browser may already have dropped its focus).
   const focusOutcome = useRef(false);
+  // Set by "Check again": its success clears the error and removes the button.
+  const focusAfterRetry = useRef(false);
   const statusRef = useRef<HTMLSpanElement>(null);
   useEffect(
     () => () => {
@@ -62,6 +64,13 @@ export function QuizBlock({
     if (active === null || active === document.body) statusRef.current?.focus();
     return () => {};
   }, [passedNow]);
+  useEffect(() => {
+    if (error !== null || !focusAfterRetry.current) return () => {};
+    focusAfterRetry.current = false;
+    const active = document.activeElement;
+    if (active === null || active === document.body) statusRef.current?.focus();
+    return () => {};
+  }, [error]);
 
   if (quiz.length === 0) return null;
 
@@ -87,6 +96,7 @@ export function QuizBlock({
           setError("failed");
           return;
         }
+        setError(null);
         setMode(result.completionMode);
         setFeedback(result);
         onPassedChange?.(
@@ -245,7 +255,10 @@ export function QuizBlock({
         // the same answer again fires nothing, so retrying needs a button.
         <button
           type="button"
-          onClick={() => check(answers, ++revision.current)}
+          onClick={() => {
+            focusAfterRetry.current = true;
+            check(answers, ++revision.current);
+          }}
           disabled={isPending}
           className="text-sm font-medium text-primary underline-offset-4 outline-hidden hover:underline focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:opacity-50"
         >

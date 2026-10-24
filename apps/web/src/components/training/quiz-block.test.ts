@@ -314,6 +314,9 @@ describe("answerless quiz feedback", () => {
       [{ questionIndex: 0, optionIndex: 1 }],
     ]);
     expect(render().colors[1]).toContain("border-emerald");
+    // The recovered check retires the failure and its retry button.
+    expect(render().text).not.toContain("unavailable");
+    expect(render().text).not.toContain("quizRetry");
   });
 
   it.each(["quizContentInvalid", "unavailable"] as const)(
