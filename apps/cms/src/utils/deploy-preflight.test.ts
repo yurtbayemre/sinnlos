@@ -1192,6 +1192,7 @@ function preflightRun(
     shellFunction("url_host"),
     shellFunction("traefik_host_scan"),
     shellFunction("caddy_host_scan"),
+    shellFunction("site_closed"),
     DEPLOY.slice(from, to),
     "",
   ].join("\n");
@@ -1525,6 +1526,46 @@ describe(
     });
   },
 );
+
+describe("preflight: a site closed at the edge (SITE_ALLOW_CIDRS, v0.29)", BASH_BUDGET, () => {
+  const fits = { ENTRA_ENABLED: "0" };
+
+  it.skipIf(!HAS_BASH)("refuses to deploy while the site is closed, naming the restore", () => {
+    for (const ranges of ["203.0.113.7/32", "203.0.113.0/24, 2001:db8::/32"]) {
+      const run = preflightRun({ ...fits, SITE_ALLOW_CIDRS: ranges });
+      expect(run.status, ranges).toBe(1);
+      expect(run.stdout).not.toContain("Preflight OK");
+      expect(run.stderr).toContain(
+        "ERROR: the site is closed (SITE_ALLOW_CIDRS); open it before deploying.",
+      );
+      expect(run.stderr).toContain('(docs/OPERATIONS.md, "Restore")');
+      expect(run.stderr).toContain("Preflight failed. Nothing was changed.");
+    }
+  });
+
+  it.skipIf(!HAS_BASH)("deploys an open site: unset, empty, or with an open range", () => {
+    for (const ranges of [undefined, "", "0.0.0.0/0,::/0", "203.0.113.7/32,::/0"]) {
+      const env = ranges === undefined ? fits : { ...fits, SITE_ALLOW_CIDRS: ranges };
+      const run = preflightRun(env);
+      expect(run.status, `${ranges}: ${run.stderr}`).toBe(0);
+      expect(run.stderr).not.toContain("the site is closed");
+    }
+  });
+
+  it.skipIf(!HAS_BASH)("reads the Traefik middleware range as well", () => {
+    const label = "traefik.http.middlewares.sinnlos-site-allow.ipallowlist.sourcerange";
+    const json = (range: string) =>
+      JSON.stringify({ services: { web: { labels: { [label]: range } } } }, null, 2);
+    const closed = (range: string) =>
+      runBash(
+        [shellFunction("site_closed"), "cat <<'JSON' | site_closed", json(range), "JSON", ""].join(
+          "\n",
+        ),
+      ).status;
+    expect(closed("203.0.113.7/32")).toBe(0);
+    expect(closed("0.0.0.0/0,::/0")).toBe(1);
+  });
+});
 
 describe("preflight: wiki revision draft rows (batch 16, DA03)", BASH_BUDGET, () => {
   const fits = { ENTRA_ENABLED: "0" };

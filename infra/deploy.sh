@@ -13,7 +13,8 @@
 #      no wiki revision draft rows while this release runs wiki revisions
 #      without draft & publish (batch 16: the new cms would refuse to
 #      start; infra/migrations/wiki-revision-dp/migrate.sql first),
-#      and a DOMAIN the edge serves: a bare host name (with Caddy optionally
+#      the site open at the edge (no SITE_ALLOW_CIDRS: a deploy is no
+#      step of the restricted restore), and a DOMAIN the edge serves: a bare host name (with Caddy optionally
 #      with http:// or https://), no placeholder, the host of WEB_PUBLIC_URL
 #      and CMS_PUBLIC_URL (with Traefik: the host every router matches).
 #      With the Caddy edge, no container of the project may carry Traefik
@@ -378,6 +379,35 @@ compose_env_value() {
       print val
       exit
     }'
+}
+
+# v0.29 restore privacy: SITE_ALLOW_CIDRS closes the whole site at the edge
+# for a restricted restore (docs/OPERATIONS.md, "Restore"): the caddy service
+# gets it in its environment, the Traefik routers as the sinnlos-site-allow
+# ipallowlist. Reads `compose config --format json` on stdin; true (0) when a
+# value it renders is a non-empty list without an open range (one ending in
+# /0, as 0.0.0.0/0 and ::/0, the defaults).
+site_closed() {
+  local values value entry open closed=1
+  local -a entries
+  values="$(awk '
+    /^[ \t]*"(SITE_ALLOW_CIDRS|traefik\.http\.middlewares\.sinnlos-site-allow\.ipallowlist\.sourcerange)": / {
+      v = $0; sub(/^[ \t]*"[^"]*":[ \t]*/, "", v); sub(/,[ \t]*$/, "", v)
+      if (v == "null") next
+      if (length(v) >= 2 && substr(v, 1, 1) == "\"" && substr(v, length(v), 1) == "\"") v = substr(v, 2, length(v) - 2)
+      print v
+    }')"
+  while IFS= read -r value; do
+    value="${value//[[:space:]]/}"
+    [[ -n "${value}" ]] || continue
+    open=0
+    IFS=',' read -r -a entries <<<"${value}"
+    for entry in "${entries[@]}"; do
+      if [[ "${entry}" == */0 ]]; then open=1; fi
+    done
+    if ((!open)); then closed=0; fi
+  done <<<"${values}"
+  return "${closed}"
 }
 
 # Traefik host (5A-T1): every router of the Traefik overlay matches
@@ -1238,6 +1268,13 @@ if [[ "${DEPLOY_EDGE}" != traefik ]]; then
     echo "       Set DEPLOY_EDGE=traefik in infra/deploy.env (infra/deploy.env.example) and re-run." >&2
     preflight_failed=1
   fi
+fi
+if "${COMPOSE[@]}" config --format json 2>/dev/null | site_closed; then
+  echo "ERROR: the site is closed (SITE_ALLOW_CIDRS); open it before deploying." >&2
+  echo "       A deploy is no step of the restricted restore (docs/OPERATIONS.md, \"Restore\"): its smoke" >&2
+  echo "       checks would get 503 from this host. Finish the restore, remove SITE_ALLOW_CIDRS from" >&2
+  echo "       infra/.env, recreate the edge, and re-run." >&2
+  preflight_failed=1
 fi
 if checkout_revisions_dp_off; then
   REVISION_DRAFTS="$(revision_draft_rows "${PROBE_TIMEOUT[@]}" || true)"

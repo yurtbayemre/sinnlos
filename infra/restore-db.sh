@@ -571,6 +571,35 @@ db_exists() {
   printf '%s\n' "${n}"
 }
 
+# v0.29 restore privacy: SITE_ALLOW_CIDRS closes the whole site at the edge
+# for a restricted restore (docs/OPERATIONS.md, "Restore"): the caddy service
+# gets it in its environment, the Traefik routers as the sinnlos-site-allow
+# ipallowlist. Reads `compose config --format json` on stdin; true (0) when a
+# value it renders is a non-empty list without an open range (one ending in
+# /0, as 0.0.0.0/0 and ::/0, the defaults).
+site_closed() {
+  local values value entry open closed=1
+  local -a entries
+  values="$(awk '
+    /^[ \t]*"(SITE_ALLOW_CIDRS|traefik\.http\.middlewares\.sinnlos-site-allow\.ipallowlist\.sourcerange)": / {
+      v = $0; sub(/^[ \t]*"[^"]*":[ \t]*/, "", v); sub(/,[ \t]*$/, "", v)
+      if (v == "null") next
+      if (length(v) >= 2 && substr(v, 1, 1) == "\"" && substr(v, length(v), 1) == "\"") v = substr(v, 2, length(v) - 2)
+      print v
+    }')"
+  while IFS= read -r value; do
+    value="${value//[[:space:]]/}"
+    [[ -n "${value}" ]] || continue
+    open=0
+    IFS=',' read -r -a entries <<<"${value}"
+    for entry in "${entries[@]}"; do
+      if [[ "${entry}" == */0 ]]; then open=1; fi
+    done
+    if ((!open)); then closed=0; fi
+  done <<<"${values}"
+  return "${closed}"
+}
+
 stop_apps() { compose stop web cms </dev/null; }
 
 # Every JWT_SECRET Compose hands the cms, as one checksum; fails unless there
@@ -1024,6 +1053,11 @@ cmd_start() {
   require_env_file
   if ! effective="$(effective_jwt_sum)" || [[ "${effective}" != "${sum}" ]]; then
     stop "Compose would not hand the cms the rotated JWT_SECRET (infra/.env or a compose file changed since rotate-jwt): run rotate-jwt again; web and cms not started"
+  fi
+  # Advisory only: a restore that must repeat anonymisations runs with the
+  # site closed first (docs/OPERATIONS.md, "Restore").
+  if ! compose config --format json </dev/null 2>/dev/null | site_closed; then
+    note "The site will be public. If anonymisations must be repeated, close it first (docs/OPERATIONS.md, \"Restore\")."
   fi
   PHASE_NOTE="web and cms may not be (all) up: run start again"
   if ! compose up -d --no-build web cms </dev/null; then

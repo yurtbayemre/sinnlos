@@ -208,7 +208,7 @@ function restoreSteps(steps: readonly Step[], mode: ShellMode): StepReport[] {
     fakeDump("older.dump", ["up_users 2"]),
     "STEP_CWD=",
     `STUB_LABEL_WEB="${TRAEFIK_LABEL}" STUB_LABEL_CMS="${TRAEFIK_LABEL}" STUB_LABEL_DB="${TRAEFIK_LABEL}"`,
-    "export T REPO STUB_LABEL_WEB STUB_LABEL_CMS STUB_LABEL_DB STUB_STOP_FAIL= STUB_UP_FAIL= STUB_ON_STOP= STUB_RM_AS_USER= STUB_KILL_AFTER_STARTED= STUB_PGDUMP_FAIL= STUB_CREATEDB_FAIL= STUB_RESTORE_FAIL= STUB_LOCK_HELD=",
+    "export T REPO STUB_LABEL_WEB STUB_LABEL_CMS STUB_LABEL_DB STUB_STOP_FAIL= STUB_UP_FAIL= STUB_ON_STOP= STUB_RM_AS_USER= STUB_KILL_AFTER_STARTED= STUB_PGDUMP_FAIL= STUB_CREATEDB_FAIL= STUB_RESTORE_FAIL= STUB_LOCK_HELD= STUB_SITE_ALLOW=",
     'S="$REPO/.git/sinnlos-deploy/restore"',
     HARNESS_STUBS,
   ];
@@ -452,6 +452,10 @@ describe.skipIf(!FAST)(`restore-db.sh: a good restore, step by step${FAST_TITLE}
     expect(r[4].apps).toBe("running");
     expect(r[4].startedJwtSum).toBe(await sha256(r[3].jwt[0]));
     expect(r[4].calls).toContainEqual(expect.stringMatching(/ up -d --no-build web cms$/));
+    // The site is open (no SITE_ALLOW_CIDRS): the reminder, before the start.
+    expect(r[4].stdout).toContain(
+      '  The site will be public. If anonymisations must be repeated, close it first (docs/OPERATIONS.md, "Restore").',
+    );
     expect(r[4].state.STARTED_AT).not.toBe("");
     expect(r[4].reserved).toBe(false);
     expect(r[4].stages).toEqual([]);
@@ -1280,8 +1284,8 @@ describe.skipIf(!FAST)(
           /* 1 */ { args: ["rotate-jwt"] },
           /* 2 */ { args: ["start", "--env-only"] },
           /* 3 */ { args: ["rotate-jwt", "--env-only"] },
-          /* 4 */ { args: ["start", "--env-only"] },
-          /* 5 */ { args: ["start", "--env-only"] },
+          /* 4 */ { before: "STUB_SITE_ALLOW=203.0.113.7/32", args: ["start", "--env-only"] },
+          /* 5 */ { before: "STUB_SITE_ALLOW=", args: ["start", "--env-only"] },
           /* 6 */ { args: ["prepare", "good.dump"] },
           /* 7 */ { args: ["start"] },
           /* 8 */ { args: ["apply"] },
@@ -1349,6 +1353,8 @@ describe.skipIf(!FAST)(
       expect(r[4].status, r[4].stderr).toBe(0);
       expect(r[4].apps).toBe("running");
       expect(r[4].envOnly.STARTED_AT).not.toBe("");
+      // Closed at the edge (SITE_ALLOW_CIDRS): no reminder.
+      expect(r[4].stdout).not.toContain("The site will be public");
       expect(r[5].status).toBe(1);
     });
 
