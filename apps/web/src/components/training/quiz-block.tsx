@@ -39,7 +39,9 @@ export function QuizBlock({
   const [error, setError] = useState<CommonCode | TrainingActionError | null>(null);
   const [isPending, startTransition] = useTransition();
   const revision = useRef(0);
-  const checkFocused = useRef(false);
+  // Set by "Check answers": its pass removes the button (which the pending
+  // check had disabled, so the browser may already have moved focus away).
+  const focusOutcome = useRef(false);
   const statusRef = useRef<HTMLSpanElement>(null);
   useEffect(
     () => () => {
@@ -52,8 +54,8 @@ export function QuizBlock({
   const passedNow = answeredAllNow && feedback?.passed === true;
   useEffect(() => {
     // The pass unmounts the focused check button; keep focus on the outcome.
-    if (passedNow && checkFocused.current) {
-      checkFocused.current = false;
+    if (passedNow && focusOutcome.current) {
+      focusOutcome.current = false;
       statusRef.current?.focus();
     }
     return () => {};
@@ -107,6 +109,7 @@ export function QuizBlock({
     setFeedback(null);
     setError(null);
     onPassedChange?.(null);
+    focusOutcome.current = false;
     if (mode === "confirm") check(next, current);
   };
 
@@ -115,6 +118,7 @@ export function QuizBlock({
     setFeedback(null);
     setError(null);
     onPassedChange?.(null);
+    focusOutcome.current = true;
     check(answers, ++revision.current);
   };
 
@@ -203,8 +207,6 @@ export function QuizBlock({
             <button
               type="button"
               onClick={checkAll}
-              onFocus={() => (checkFocused.current = true)}
-              onBlur={() => (checkFocused.current = false)}
               disabled={!answeredAll || isPending}
               className="inline-flex items-center justify-center rounded-xl bg-primary px-4 py-2 text-sm font-medium text-primary-foreground outline-hidden transition-colors hover:bg-primary/90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:opacity-50"
             >
