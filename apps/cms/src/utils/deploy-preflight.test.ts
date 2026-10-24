@@ -911,7 +911,7 @@ const OLD = "5be7dc7a1b2c3d4e5f60718293a4b5c6d7e8f901";
 
 /**
  * print_rollback_hint with docker, `timeout` and git stubbed and the real
- * image_commit and rollback_target_commit of deploy.sh. The docker stub logs
+ * image_field and rollback_target_commit of deploy.sh. The docker stub logs
  * every call to stdout (fd 3) as "bounded docker …" when it runs under the
  * `timeout` stub and "UNBOUNDED docker …" otherwise.
  */
