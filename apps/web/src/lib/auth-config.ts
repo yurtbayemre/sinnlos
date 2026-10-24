@@ -58,7 +58,7 @@ export class EntraWebConfigError extends Error {
         .map(({ variable, message }) => `${variable} ${message}`)
         .join(
           "; ",
-        )}. Fix the web env (docs/DEPLOYMENT.md, "Microsoft Entra ID sign-in"), or unset ENTRA_ENABLED.`,
+        )}. Fix the web env (docs/SSO.md, "Microsoft Entra ID sign-in"), or unset ENTRA_ENABLED.`,
     );
     this.name = "EntraWebConfigError";
     this.variables = problems.map(({ variable }) => variable);
@@ -155,7 +155,9 @@ export class OidcWebConfigError extends Error {
     super(
       `[auth] OIDC_ENABLED=1, but the OIDC configuration is invalid: ${problems
         .map(({ variable, message }) => `${variable} ${message}`)
-        .join("; ")}. Fix the web env (docs/DEPLOYMENT.md, "OIDC sign-in"), or unset OIDC_ENABLED.`,
+        .join(
+          "; ",
+        )}. Fix the web env (docs/SSO.md, "OIDC sign-in (Keycloak, authentik, Zitadel)"), or unset OIDC_ENABLED.`,
     );
     this.name = "OidcWebConfigError";
     this.variables = problems.map(({ variable }) => variable);

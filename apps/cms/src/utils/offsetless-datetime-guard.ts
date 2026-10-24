@@ -11,7 +11,7 @@ import { errors } from "@strapi/utils";
  * forgot to convert "09:00 Berlin" stored 09:00Z, two hours off, without an
  * error. The cms's own code reads instants through utils/time.ts, which
  * refuses such a value; this guard closes the generic content API and the
- * admin panel too (the gap DEPLOYMENT.md §3.10 named).
+ * admin panel too (the gap docs/OPERATIONS.md, "Datetime contract", named).
  *
  * WHERE. First in the Document Service chain (bootstrap/document-
  * middlewares.ts), so it answers before any transaction or lock. It sees

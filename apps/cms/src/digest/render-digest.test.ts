@@ -154,3 +154,22 @@ describe("the digest language fallback (DIGEST_DEFAULT_LOCALE)", () => {
     expect(digestLocale(7, "en")).toBe("en");
   });
 });
+
+/** v0.29 (S1): SITE_NAME replaces the product in the subject; unset keeps today's wording. */
+describe("the digest subject prefix", () => {
+  afterEach(() => vi.unstubAllEnvs());
+  const render = (locale: string, siteName?: string | null) =>
+    renderDigest(CONTENT, { displayName: "Casey", locale, baseUrl: "https://x", siteName });
+
+  it("keeps the product's wording without SITE_NAME", () => {
+    vi.stubEnv("SITE_NAME", "");
+    expect(render("de").subject).toBe("Sinnlos-Intranet: 3 Neuigkeiten für dich");
+    expect(render("en").subject).toBe("Sinnlos intranet: 3 updates for you");
+  });
+
+  it("names the instance", () => {
+    expect(render("de", "Musterfirma").subject).toBe("Musterfirma: 3 Neuigkeiten für dich");
+    vi.stubEnv("SITE_NAME", " Musterfirma ");
+    expect(render("en").subject).toBe("Musterfirma: 3 updates for you");
+  });
+});

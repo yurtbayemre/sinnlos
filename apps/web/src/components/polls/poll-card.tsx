@@ -144,11 +144,13 @@ export function PollCard({
               type="button"
               onClick={() => handleVote(i)}
               disabled={showResults || isPending}
+              // Your vote in words and state, not by colour and icon alone (S6).
+              aria-pressed={isMyVote}
               className={cn(
                 "relative w-full overflow-hidden rounded-lg border px-4 py-2.5 text-left text-sm outline-hidden transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
                 !showResults && "hover:border-primary/40 hover:bg-muted",
                 isPending && !showResults && "opacity-60",
-                isMyVote && "border-primary/40",
+                isMyVote && "border-primary-text",
                 showResults && "cursor-default",
               )}
             >
@@ -165,8 +167,20 @@ export function PollCard({
                 <span className={cn("font-medium", isMyVote && "text-primary")}>
                   {isMyVote && <Check className="mr-1.5 inline h-3.5 w-3.5" />}
                   {option}
+                  {isMyVote && (
+                    <span className="ml-1.5 text-xs font-normal">{tPolls("yourVote")}</span>
+                  )}
                 </span>
-                {showResults && <span className="text-xs text-muted-foreground">{pct}%</span>}
+                {showResults && (
+                  <span
+                    className={cn(
+                      "text-xs",
+                      isMyVote ? "text-foreground" : "text-muted-foreground",
+                    )}
+                  >
+                    {pct}%
+                  </span>
+                )}
               </div>
             </button>
           );

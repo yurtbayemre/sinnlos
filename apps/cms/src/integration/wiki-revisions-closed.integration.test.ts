@@ -79,7 +79,7 @@ const BATCH_15_GRANTS: Readonly<Record<string, readonly string[]>> = {
   authenticated: ["find", "findOne"],
 };
 
-/** docs/DEPLOYMENT.md, "Deploying batch 15.1", step 6: the admin roles' grants on wiki revisions. */
+/** docs/archive/deployment-history.md, "Deploying batch 15.1", step 6: the admin roles' grants on wiki revisions. */
 const RUNBOOK_ADMIN_PERMISSIONS_SQL = `SELECT r.code, p.action, count(*) AS n
   FROM admin_permissions p
   JOIN admin_permissions_role_lnk l ON l.permission_id = p.id
@@ -503,7 +503,7 @@ describe.each(testEngines())("wiki revisions are closed on %s", (engine) => {
       }>("src/bootstrap/sync-permissions");
       await syncRolePermissions({ db: host.db, apis: host.apis, plugins: host.plugins, log });
 
-      // The runbook's expected boot lines (docs/DEPLOYMENT.md, "Deploying
+      // The runbook's expected boot lines (docs/archive/deployment-history.md, "Deploying
       // batch 15.1"): the five wiki-revision actions stay managed, now as
       // revocations, so the drift check covered 142 actions; batch 16 adds
       // 13 wiki actions and 2 learner actions; batch 17 adds 4 training core
@@ -792,7 +792,7 @@ describe.each(testEngines())("wiki revisions are closed on %s", (engine) => {
       // The 60 seeded reads (and the role's own) stay.
       expect(left.length).toBeGreaterThanOrEqual(60);
 
-      // The runbook's read-only check (docs/DEPLOYMENT.md, "Deploying batch
+      // The runbook's read-only check (docs/archive/deployment-history.md, "Deploying batch
       // 15.1", step 6), verbatim: only read rows on wiki revisions.
       const runbook = await t.database.sql<{ code: string; action: string }>(
         RUNBOOK_ADMIN_PERMISSIONS_SQL,

@@ -1,5 +1,6 @@
 import { advanceRevision, lockDocument, type DocumentLockHost } from "./document-lock";
 import { instantMsOrNull } from "./time";
+import { reportRunFailure } from "../cron/run-context";
 
 /**
  * Nightly removal of poll voter links (v0.28, M11; owner decision
@@ -267,6 +268,10 @@ export async function unlinkPollVoters(
           `ballot(s) (${done.deleted} duplicate row(s) deleted); the results are unchanged`,
       );
     } catch (err) {
+      reportRunFailure(
+        err,
+        `poll ${documentId}: ${err instanceof Error ? err.message : String(err)}`,
+      );
       strapi.log.error(
         `${POLL_VOTER_JANITOR_LOG} poll ${documentId} failed, retried next night: ` +
           (err instanceof Error ? err.message : String(err)),

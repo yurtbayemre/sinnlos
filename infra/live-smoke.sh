@@ -35,7 +35,7 @@
 # this run caused (in the database: type comment, actor SMOKE_AUTHOR_EMAIL,
 # created since this run started), so no deploy leaves residue behind.
 #
-# Before that, a datetime-contract check (docs/DEPLOYMENT.md): no column of
+# Before that, a datetime-contract check (docs/OPERATIONS.md, "Datetime contract"): no column of
 # the app schema may still be `timestamp without time zone`, and the cms
 # process must run in UTC: by its boot line in `docker logs`, or, once that
 # line has rotated out of the container's log (json-file, 10 MB x 5; a cms

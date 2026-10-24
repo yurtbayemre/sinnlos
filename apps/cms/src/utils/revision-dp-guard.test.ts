@@ -95,7 +95,7 @@ describe("assertNoRevisionDrafts", () => {
     expect(revisionDraftRowsMessage("wiki_revisions", 4)).toBe(
       "[revision-dp] wiki_revisions still holds 4 draft row(s). Booting would let Strapi delete " +
         "them (draftAndPublish true -> false). Run infra/migrations/wiki-revision-dp/migrate.sql " +
-        'first, see docs/DEPLOYMENT.md "One-time: wiki revisions draft/publish off". Local SQLite: ' +
+        "first, see infra/migrations/wiki-revision-dp/README.md. Local SQLite: " +
         "delete apps/cms/.tmp/data.db and reseed.",
     );
   });

@@ -49,7 +49,7 @@ const pillClass = (active: boolean) =>
   cn(
     "inline-flex items-center rounded-full border px-3 py-1 text-sm outline-hidden transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
     active
-      ? "border-primary/40 bg-primary/10 font-medium text-primary"
+      ? "border-primary-text bg-primary/10 font-medium text-primary"
       : "text-muted-foreground hover:bg-muted/60 hover:text-foreground",
   );
 

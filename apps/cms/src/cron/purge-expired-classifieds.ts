@@ -42,6 +42,7 @@
  */
 import { runWithDeleteAudit } from "../utils/delete-audit";
 import { comparePlainDates, todayIn, tryParsePlainDate, type PlainDate } from "../utils/time";
+import { reportRunFailure } from "./run-context";
 
 /** Days an expired ad is kept after its last listed day (owner default). */
 export const CLASSIFIED_PURGE_DAYS = 90;
@@ -179,6 +180,7 @@ export async function purgeExpiredClassifieds(
         else skipped++;
       } catch (err) {
         failed++;
+        reportRunFailure(err, `ad ${row.id}: ${(err as Error).message}`);
         strapi.log.warn(
           `[classified-janitor] ad ${row.id} could not be deleted: ${(err as Error).message}`,
         );

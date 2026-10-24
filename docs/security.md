@@ -10,7 +10,8 @@ role gating. The grants themselves are the two tables in the README,
 The rules point to the code that enforces them. When this file and the
 code disagree, the code wins: fix this file in the same change. The German
 [architecture map](./architecture.md) has the history and the reasoning
-behind most rules (its §5 conventions and §7 open issues).
+behind most rules (its §5 conventions, kept in
+[architecture/](./architecture/), and §7 open issues).
 
 ## Contents
 
@@ -38,8 +39,10 @@ behind most rules (its §5 conventions and §7 open issues).
   - [Private user fields](#private-user-fields)
   - [Blocked and anonymised people](#blocked-and-anonymised-people)
   - [Module and feature switches](#module-and-feature-switches)
+  - [Course reports](#course-reports)
 - [Upload hardening](#upload-hardening)
 - [Frontend role gating](#frontend-role-gating)
+- [Accessibility](#accessibility)
 - [Tests that pin these rules](#tests-that-pin-these-rules)
 
 ## Principles
@@ -178,8 +181,8 @@ Single sign-on users get their second factor from their identity provider.
 
 Optional and off unless `ENTRA_ENABLED=1` (D-ENTRA-01,
 `apps/cms/src/entra/`). Setup:
-[README](../README.md#microsoft-entra-id-sign-in-optional); runbook:
-[DEPLOYMENT.md](./DEPLOYMENT.md#microsoft-entra-id-sign-in).
+[README](../CONTRIBUTING.md#microsoft-entra-id-sign-in-optional); runbook:
+[SSO.md, Microsoft Entra ID sign-in](./SSO.md#microsoft-entra-id-sign-in).
 
 1. Auth.js runs the OIDC code flow against the one configured tenant
    (scope `openid profile email User.Read`, no refresh token) and refuses an
@@ -196,7 +199,7 @@ Optional and off unless `ENTRA_ENABLED=1` (D-ENTRA-01,
    role (`ENTRA_SYNC_MODE=dry-run`: at most `member`). A local account with the same e-mail is never taken over: the
    sign-in answers "account exists" until an admin who has confirmed the
    account is theirs binds it
-   ([the 409 procedure](./DEPLOYMENT.md#an-e-mail-address-that-already-has-an-account-409)).
+   ([the 409 procedure](./SSO.md#an-e-mail-address-that-already-has-an-account-409)).
 4. With `ENTRA_SYNC_MODE=on` and a successful Graph `/me`, display name,
    job title, phone and office location are synced at every sign-in, and
    department (`ENTRA_SYNC_DEPARTMENT=1`) and manager
@@ -261,14 +264,14 @@ role an admin changes in the Strapi admin, is `manual` and keeps its role.
 `ENTRA_SYNC_MODE=dry-run` (the default) changes no existing user (it logs
 what `on` would do) and creates new users as `member` at most; refusals
 apply in both modes. More in
-[What Entra owns](./DEPLOYMENT.md#what-entra-owns).
+[What Entra owns](./SSO.md#what-entra-owns).
 
 ### OIDC (Keycloak, authentik, Zitadel)
 
 Optional and off unless `OIDC_ENABLED=1` (v0.25.0, `apps/cms/src/oidc/`,
 the shared steps in `apps/cms/src/idp/exchange-core.ts`); never together
 with Entra. Runbook and recipes:
-[DEPLOYMENT.md](./DEPLOYMENT.md#oidc-sign-in-keycloak-authentik-zitadel).
+[SSO.md, OIDC sign-in (Keycloak, authentik, Zitadel)](./SSO.md#oidc-sign-in-keycloak-authentik-zitadel).
 The same exchange pattern as Entra, without Graph:
 
 1. Auth.js runs the OIDC code flow with PKCE against `OIDC_ISSUER`. It
@@ -418,12 +421,12 @@ per-user token version so that a password change can end the older ones:
   `[auth] tokenVersion dropped …`. Only the atomic bump writes it, so it
   never goes down and a revoked JWT never becomes valid again.
 - **Rollback.** A cms from before batch 13 ignores the claim and would
-  accept every revoked JWT again under the same `JWT_SECRET`. A rollback of
-  the cms to such an image therefore rotates `JWT_SECRET` first (owner
-  decision 2026-10-12; everyone signs in again once). The rollback commands
-  `infra/deploy.sh` prints after a failed deploy check the target image for
-  the token version and demand the rotation when it lacks it
-  ([batch 13 rollback](./DEPLOYMENT.md#deploying-batch-13-2026-10-12)).
+  accept every revoked JWT again under the same `JWT_SECRET`. Such images
+  predate v0.25, which `infra/deploy.sh` no longer offers as a rollback
+  target ([UPGRADE.md, Rollback](./UPGRADE.md#rollback)); a rollback to one
+  by hand rotates `JWT_SECRET` first (owner decision 2026-10-12; everyone
+  signs in again once)
+  ([batch 13 rollback](./archive/deployment-history.md#deploying-batch-13-2026-10-12)).
   The same holds for every **restore** of a database dump or of the
   backed-up `infra/.env`, also with the same images: the dump brings back
   older token versions (and the `.env` possibly an older `JWT_SECRET`), so
@@ -431,7 +434,7 @@ per-user token version so that a password change can end the older ones:
   `JWT_SECRET` before the cms starts (`infra/restore-db.sh` rotates it
   between the restore and the start and refuses to start the apps
   without it:
-  [Restoring a database dump](./DEPLOYMENT.md#restoring-a-database-dump)).
+  [Restoring a database dump](./OPERATIONS.md#restoring-a-database-dump)).
 - **Limits.** The web's `/uploads` proxy caches the cms's answer for up to
   60 seconds, so a revoked JWT can fetch file bytes for up to that minute;
   an open live stream keeps its content-free pings until its next rotation
@@ -829,7 +832,7 @@ Department-head and team-lead rights compare
 department and team row ids, which is valid because departments and teams
 have no draft & publish (one row each, stable id). An instance that ran an
 earlier release with org drafts runs the one-time migration first
-([One-time: org draft/publish off](./DEPLOYMENT.md#one-time-org-draftpublish-off));
+([One-time: org draft/publish off](./archive/deployment-history.md#one-time-org-draftpublish-off));
 the cms refuses to boot until then.
 
 ### Read-side filters
@@ -1219,7 +1222,7 @@ Enforced by the cms, not only in the UI:
   poll with linked votes but no published row can no longer be published
   (Codex review of 15A, finding 1). A poll unpublished before batch 15 has
   no such votes: that unpublish deleted its vote links, so it counts as
-  unvoted and its orphaned ballots count nowhere (DEPLOYMENT.md
+  unvoted and its orphaned ballots count nowhere ([deployment history](./archive/deployment-history.md),
   "Deploying batch 15", step 6).
 - Where it is enforced: the `poll-visibility` read policy (list and
   detail), the custom `vote`/`results` actions and the batched
@@ -1254,7 +1257,7 @@ admin or editor opens them, per poll, with two fields (owner decision
 - A cms from before guest access ignores both fields and never removes the
   guest vote grant, so a rollback to one removes it first
   (`infra/rollback/revoke-guest-poll-vote.sql`;
-  [Upgrading to poll department targeting](./DEPLOYMENT.md#upgrading-to-poll-department-targeting),
+  [Upgrading to poll department targeting](./archive/deployment-history.md#upgrading-to-poll-department-targeting),
   Rollback).
 
 ### Private user fields
@@ -1351,6 +1354,29 @@ grant check).
   never switched.
 - The Strapi admin panel is not covered: technical admins still see every
   type.
+
+### Course reports
+
+`GET /api/courses/report` and `GET /api/courses/:id/report` (the named
+training report at `/manage/training/report`) are granted to admins,
+department heads and team leads. The controller checks the role again,
+whatever the grants say (`apps/cms/src/api/course/controllers/course.ts`).
+
+- **Admins** see every published mandatory course and every current,
+  unblocked learner.
+- **Department heads and team leads** see their **whole current
+  department**, not only their team. That means the published mandatory
+  courses whose audience includes that department, and the current,
+  unblocked people of that department with a learner role.
+  - A head or lead without a department gets 403.
+  - A course outside their scope gets 404.
+- **People who left** (blocked or anonymised) appear only through
+  `?leavers=1`, which is for admins only (403 for heads and leads), and in
+  the admin-only training evidence of `/manage/users`.
+- The `training` module and the `training-reports` feature switch
+  (`FEATURES_OFF`) turn both routes off.
+- It is no access to the full training history. Receipts outside these
+  courses and people are not part of the report.
 
 ## Upload hardening
 
@@ -1531,6 +1557,13 @@ account_, the dashboard leaves those sections out, the navigation hides
 them, and the ⌘K search skips them. The admin area lives under
 **`/manage`**: `/admin` is the Strapi admin panel, routed to the cms by the
 reverse proxy.
+
+## Accessibility
+
+Not a security rule, but tested the same way: the browser tests check the
+main screens for WCAG 2.1 A/AA with axe, and a manual keyboard and zoom
+pass covers the same paths. This is no conformance claim
+([README, Accessibility](../README.md#accessibility)).
 
 ## Tests that pin these rules
 

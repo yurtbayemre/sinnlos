@@ -76,17 +76,12 @@ services:
           - sinnlos-cms
     environment:
       NODE_ENV: production
-      # Datetime contract (docs/DEPLOYMENT.md): the cms process runs in UTC
+      # Datetime contract (docs/OPERATIONS.md): the cms process runs in UTC
       # (the image sets it too; a schema-changing boot refuses any other
       # zone). Business dates (today, day/week windows, anniversaries, cron
       # times, all-day events) use APP_TIME_ZONE, never the process zone.
       TZ: UTC
       APP_TIME_ZONE: ${APP_TIME_ZONE:-Europe/Berlin}
-      # Only for a database written by a cms before the datetime contract:
-      # the one-time repair reads them (see infra/.env.example). Fresh
-      # installs leave both empty.
-      DATETIME_LEGACY_ZONE: ${DATETIME_LEGACY_ZONE:-}
-      DATETIME_LEGACY_UTC_UNTIL: ${DATETIME_LEGACY_UTC_UNTIL:-}
       HOST: 0.0.0.0
       PORT: 1337
       # Secrets fail fast when unset/empty (FX13); the cms additionally
@@ -110,7 +105,7 @@ services:
       # (comma list of CIDRs; empty: loopback only, i.e. closed from outside;
       # infra/admin-tunnel.sh opens it through SSH). docs/INSTALL.md.
       ADMIN_ALLOW_CIDRS: ${ADMIN_ALLOW_CIDRS:-}
-      # Microsoft Entra ID sign-in (D-ENTRA-01, docs/DEPLOYMENT.md "Microsoft
+      # Microsoft Entra ID sign-in (D-ENTRA-01, docs/SSO.md "Microsoft
       # Entra ID sign-in"): off unless ENTRA_ENABLED=1, and then validated at
       # boot (an invalid value refuses the start; deploy.sh --check says which).
       # The cms verifies the ID token itself (tenant + client id) and never
@@ -127,7 +122,7 @@ services:
       ENTRA_SYNC_MANAGER: ${ENTRA_SYNC_MANAGER:-0}
       ENTRA_SESSION_TTL: ${ENTRA_SESSION_TTL:-12h}
       # OIDC sign-in with Keycloak, authentik or Zitadel (v0.25.0,
-      # docs/DEPLOYMENT.md "OIDC sign-in"): off unless OIDC_ENABLED=1, then
+      # docs/SSO.md "OIDC sign-in (Keycloak, authentik, Zitadel)"): off unless OIDC_ENABLED=1, then
       # validated at boot like Entra; never together with ENTRA_ENABLED=1.
       # The cms verifies the ID token itself (discovery of OIDC_ISSUER,
       # audience OIDC_CLIENT_ID) and never needs the client secret.
@@ -212,7 +207,10 @@ services:
       # The web's UI language (below); the cms names an anonymised person
       # in it ("Ehemalige Person" / "Former person", v0.28).
       DEFAULT_LOCALE: ${DEFAULT_LOCALE:-en}
-      # Optional search ranking (v0.21, docs/DEPLOYMENT.md "Meilisearch
+      # The instance's name (v0.29) in the digest and account-mail subjects
+      # and new TOTP enrolments; empty = the product's wording.
+      SITE_NAME: ${SITE_NAME:-}
+      # Optional search ranking (v0.21, docs/OPERATIONS.md "Meilisearch
       # (optional search)"): off unless MEILISEARCH_ENABLED=1. The cms keeps
       # the index sinnlos_search current with the write key; it never gets
       # the master key.
@@ -263,13 +261,10 @@ services:
           - sinnlos-web
     environment:
       NODE_ENV: production
-      # Datetime contract (docs/DEPLOYMENT.md §3.10): since its datetime port
+      # Datetime contract (docs/OPERATIONS.md): since its datetime port
       # (phase 2) the web renders and computes every date in APP_TIME_ZONE
       # explicitly, so its process runs in UTC like the cms (the image sets
-      # it too). A web image from BEFORE that port renders in its process
-      # zone and refuses to start in UTC: roll back to one only with
-      # infra/docker-compose.web-legacy-tz.yml on top (infra/deploy.sh prints
-      # it).
+      # it too).
       TZ: UTC
       # Business and display zone: "today", event days, ad expiry, poll
       # deadlines ("closes on D" = D 23:59:59 there), every rendered date;
@@ -338,6 +333,11 @@ services:
       WHISTLEBLOWING_URL: ${WHISTLEBLOWING_URL:-}
       PLAUSIBLE_SCRIPT_URL: ${PLAUSIBLE_SCRIPT_URL:-}
       PLAUSIBLE_DOMAIN: ${PLAUSIBLE_DOMAIN:-}
+      # Branding (v0.29, infra/.env.example), all optional.
+      SITE_NAME: ${SITE_NAME:-}
+      SITE_LOGO_URL: ${SITE_LOGO_URL:-}
+      SITE_ICON_URL: ${SITE_ICON_URL:-}
+      SITE_ACCENT: ${SITE_ACCENT:-}
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/ || exit 1"]
       interval: 15s
@@ -352,7 +352,7 @@ services:
     cap_drop:
       - ALL
 
-  # Optional search ranking (v0.21, docs/DEPLOYMENT.md "Meilisearch
+  # Optional search ranking (v0.21, docs/OPERATIONS.md "Meilisearch
   # (optional search)"): runs only with COMPOSE_PROFILES=search in
   # infra/.env. It ranks search candidates; Strapi still decides who reads
   # what, and the web falls back to its own search while it is off, down or
@@ -400,11 +400,22 @@ services:
     depends_on:
       - web
       - cms
+    # v0.29: the image's own command, after turning SITE_ALLOW_CIDRS (comma-
+    # separated, unset = everyone) into the space-separated
+    # SITE_ALLOW_RANGES the Caddyfile's gate reads.
+    command:
+      - sh
+      - -c
+      - >-
+        export SITE_ALLOW_RANGES="$$(printf '%s' "$${SITE_ALLOW_CIDRS:-0.0.0.0/0,::/0}" | tr ',' ' ')";
+        exec caddy run --config /etc/caddy/Caddyfile --adapter caddyfile
     environment:
       # The site address of infra/Caddyfile: a real host name gets a Let's
       # Encrypt certificate (and HSTS), unset means localhost with Caddy's
       # internal CA, http://localhost plain HTTP.
       DOMAIN: ${DOMAIN:-localhost}
+      # v0.29: closes the site to every other source network (see command).
+      SITE_ALLOW_CIDRS: ${SITE_ALLOW_CIDRS:-}
     ports:
       - "80:80"
       - "443:443"

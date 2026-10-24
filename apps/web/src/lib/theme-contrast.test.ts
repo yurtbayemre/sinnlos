@@ -1,34 +1,35 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { compileTailwind, ruleBody, themeValue } from "./tailwind-css.test.helper";
+import {
+  CONTRAST_PAIRS,
+  DEFAULT_TOKENS,
+  contrast,
+  failingPairs,
+  toRgb,
+  type Hsl,
+} from "./contrast";
 
 /**
- * WCAG contrast of the colour tokens in globals.css, both themes (FX31).
- * Text needs 4.5:1 (AA, normal size). Before FX31 dark `text-destructive`
- * was 1.9:1, white labels on light `bg-destructive` 3.6:1 and on dark
- * `bg-primary` 4.4:1.
+ * WCAG contrast of the colour tokens in globals.css, both themes (FX31,
+ * v0.29). Before FX31 dark `text-destructive` was 1.9:1, white labels on
+ * light `bg-destructive` 3.6:1 and on dark `bg-primary` 4.4:1; before v0.29
+ * the poll percentage on your own vote was 4.06:1, the file-button hover
+ * 4.42:1, the dark KPI bars 2.36:1 and the dark progress fill 2.87:1.
  *
- * The pairs mirror how the UI combines the tokens: `text-primary` and
- * `text-destructive` read the *-text tokens (--text-color-* in the globals.css @theme),
- * fills carry their *-foreground, the error line of the fetch-error
- * banner is `text-destructive/80` on `bg-destructive/5`, and secondary
- * text also sits on the accent/muted fills and the bell's unread tint. The tokens are
- * parsed from the stylesheet itself, so a changed value is checked as it
- * ships.
+ * The pairs (lib/contrast.ts CONTRAST_PAIRS) mirror how the UI combines the
+ * tokens. The tokens are parsed from the stylesheet itself, so a changed
+ * value is checked as it ships, and DEFAULT_TOKENS must equal them.
  */
-type Hsl = [number, number, number];
-type Rgb = [number, number, number];
-type Tokens = Record<string, Hsl>;
-
 const CSS = readFileSync(join(__dirname, "..", "app", "globals.css"), "utf8");
 
 /** The custom properties declared in the first block for `selector`. */
-function tokensOf(selector: string): Tokens {
+function tokensOf(selector: string): Record<string, Hsl> {
   const start = CSS.indexOf(`${selector} {`);
   expect(start, selector).toBeGreaterThanOrEqual(0);
   const block = CSS.slice(start, CSS.indexOf("}", start));
-  const tokens: Tokens = {};
+  const tokens: Record<string, Hsl> = {};
   for (const [, name, h, s, l] of block.matchAll(
     /--([a-z-]+):\s*([\d.]+)\s+([\d.]+)%\s+([\d.]+)%;/g,
   )) {
@@ -36,33 +37,6 @@ function tokensOf(selector: string): Tokens {
   }
   return tokens;
 }
-
-function toRgb([h, s, l]: Hsl): Rgb {
-  const sat = s / 100;
-  const light = l / 100;
-  const a = sat * Math.min(light, 1 - light);
-  const f = (n: number) => {
-    const k = (n + h / 30) % 12;
-    return light - a * Math.max(-1, Math.min(k - 3, 9 - k, 1));
-  };
-  return [f(0), f(8), f(4)];
-}
-
-/** `top` at `alpha` over the opaque `bottom`. */
-const over = (top: Rgb, alpha: number, bottom: Rgb): Rgb =>
-  top.map((c, i) => c * alpha + bottom[i]! * (1 - alpha)) as Rgb;
-
-function luminance(rgb: Rgb): number {
-  const [r, g, b] = rgb.map((v) => (v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4));
-  return 0.2126 * r! + 0.7152 * g! + 0.0722 * b!;
-}
-
-function contrast(a: Rgb, b: Rgb): number {
-  const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x) as [number, number];
-  return (hi + 0.05) / (lo + 0.05);
-}
-
-const AA_TEXT = 4.5;
 
 const themes = { light: tokensOf(":root"), dark: tokensOf(".dark") };
 
@@ -86,6 +60,8 @@ describe("tailwind text colours (FX31)", () => {
       "bg-destructive",
       "border-primary",
       "ring-destructive",
+      "bg-primary-text",
+      "accent-primary-text",
     ]);
     for (const name of ["primary", "destructive"]) {
       expect(ruleBody(css, `.text-${name}`)).toBe(`color: var(--text-color-${name});`);
@@ -101,88 +77,39 @@ describe("tailwind text colours (FX31)", () => {
     }
     expect(ruleBody(css, ".border-primary")).toBe("border-color: var(--color-primary);");
     expect(ruleBody(css, ".ring-destructive")).toBe("--tw-ring-color: var(--color-destructive);");
+    // v0.29: indicators read the verified text token.
+    expect(themeValue(css, "--color-primary-text")).toBe("hsl(var(--primary-text))");
+    expect(ruleBody(css, ".bg-primary-text")).toBe("background-color: var(--color-primary-text);");
+    expect(ruleBody(css, ".accent-primary-text")).toBe("accent-color: var(--color-primary-text);");
   });
 });
 
-describe.each(Object.entries(themes))("%s theme tokens (FX31)", (_name, t) => {
-  const c = (name: string): Rgb => {
-    expect(t[name], `--${name}`).toBeDefined();
-    return toRgb(t[name]!);
-  };
+describe("native controls (v0.29)", () => {
+  // A checked radio or checkbox is an indicator: under a light SITE_ACCENT the
+  // fill (accent-primary) can vanish against the page, the verified text token
+  // cannot. Every native control in apps/web/src uses accent-primary-text.
+  it("never use the bare accent-primary fill", () => {
+    const src = join(__dirname, "..");
+    const offenders = (readdirSync(src, { recursive: true }) as string[])
+      .filter((file) => file.endsWith(".tsx"))
+      .filter((file) => /accent-primary(?!-text)/.test(readFileSync(join(src, file), "utf8")));
+    expect(offenders).toEqual([]);
+  });
+});
 
-  it("declares every token the pairs below use, as bare HSL triplets", () => {
-    for (const name of [
-      "background",
-      "foreground",
-      "card",
-      "card-foreground",
-      "muted",
-      "muted-foreground",
-      "accent",
-      "primary",
-      "primary-foreground",
-      "primary-text",
-      "destructive",
-      "destructive-foreground",
-      "destructive-text",
-    ]) {
-      expect(t[name], `--${name}`).toBeDefined();
+describe.each(Object.entries(themes))("%s theme tokens", (name, parsed) => {
+  it("DEFAULT_TOKENS mirrors globals.css", () => {
+    const defaults = DEFAULT_TOKENS[name as keyof typeof DEFAULT_TOKENS];
+    for (const [token, value] of Object.entries(defaults)) {
+      expect(parsed[token], `--${token}`).toEqual(value);
     }
   });
 
-  it.each([
-    ["foreground", "background"],
-    ["card-foreground", "card"],
-    ["muted-foreground", "background"],
-    ["muted-foreground", "card"],
-    // The selected search result (aria-selected:bg-accent) and chips on
-    // bg-muted carry secondary text (batch 13 review: 4.34:1 before).
-    ["muted-foreground", "accent"],
-    ["muted-foreground", "muted"],
-  ])("%s on %s reaches 4.5:1", (text, surface) => {
-    expect(contrast(c(text), c(surface))).toBeGreaterThanOrEqual(AA_TEXT);
+  it.each(CONTRAST_PAIRS.map((pair) => [pair.id, pair] as const))("%s", (_id, pair) => {
+    expect(contrast(pair.fg(parsed), pair.bg(parsed))).toBeGreaterThanOrEqual(pair.min);
   });
 
-  it.each([
-    ["primary-foreground", "primary"],
-    ["destructive-foreground", "destructive"],
-  ])("%s on the %s fill reaches 4.5:1", (text, fill) => {
-    expect(contrast(c(text), c(fill))).toBeGreaterThanOrEqual(AA_TEXT);
-  });
-
-  it.each(["primary-text", "destructive-text"])(
-    "%s reaches 4.5:1 on background and card",
-    (text) => {
-      for (const surface of ["background", "card"]) {
-        expect(contrast(c(text), c(surface)), surface).toBeGreaterThanOrEqual(AA_TEXT);
-      }
-    },
-  );
-
-  it.each([
-    ["primary-text", "primary", 0.1],
-    ["destructive-text", "destructive", 0.1],
-    ["destructive-text", "destructive", 0.05],
-  ] as const)("%s reaches 4.5:1 on the %s/%s tint", (text, fill, alpha) => {
-    for (const surface of ["background", "card"]) {
-      const tint = over(c(fill), alpha, c(surface));
-      expect(contrast(c(text), tint), surface).toBeGreaterThanOrEqual(AA_TEXT);
-    }
-  });
-
-  it("muted text on the bell's unread row (bg-primary/[0.04]) reaches 4.5:1", () => {
-    // Was 4.49:1 in light mode (batch 13 review).
-    for (const surface of ["background", "card"]) {
-      const tint = over(c("primary"), 0.04, c(surface));
-      expect(contrast(c("muted-foreground"), tint), surface).toBeGreaterThanOrEqual(AA_TEXT);
-    }
-  });
-
-  it("the fetch-error banner line (text-destructive/80 on bg-destructive/5) reaches 4.5:1", () => {
-    for (const surface of ["background", "card"]) {
-      const tint = over(c("destructive"), 0.05, c(surface));
-      const text = over(c("destructive-text"), 0.8, tint);
-      expect(contrast(text, tint), surface).toBeGreaterThanOrEqual(AA_TEXT);
-    }
+  it("has no failing pair", () => {
+    expect(failingPairs(parsed)).toEqual([]);
   });
 });

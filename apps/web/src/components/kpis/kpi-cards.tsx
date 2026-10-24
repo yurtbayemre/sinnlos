@@ -75,7 +75,7 @@ export async function KpiCard({ kpi }: { kpi: KpiView }) {
                         ? "h-px bg-border"
                         : point.value < 0
                           ? "bg-destructive/60"
-                          : "bg-primary/70",
+                          : "bg-primary-text",
                     )}
                     style={
                       point.value === null

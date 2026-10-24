@@ -4,12 +4,14 @@ import type { Route } from "next";
 import { getTranslations } from "next-intl/server";
 import { getSession } from "@/lib/session";
 import { Button } from "@/components/ui/button";
+import { BrandMark } from "@/components/layout/brand-mark";
 import { SiteFooter } from "@/components/layout/site-footer";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { LocalSignInForm } from "@/components/auth/local-sign-in-form";
 import { LOCAL_ENABLED, MICROSOFT_ENABLED, OIDC } from "@/lib/auth-config";
 import { signInWithMicrosoft, signInWithOidc } from "@/lib/auth-actions";
 import { signInErrorKey } from "@/lib/entra-exchange";
+import { brand, DEFAULT_SITE_NAME } from "@/lib/site-config";
 import { safeInternalPath } from "@/lib/utils";
 
 export async function generateMetadata() {
@@ -46,6 +48,8 @@ export default async function SignInPage({
   }
   const t = await getTranslations("auth");
   const tCommon = await getTranslations("common");
+  const { name, logoUrl } = brand(process.env);
+  const siteName = name ?? DEFAULT_SITE_NAME;
   const description = MICROSOFT_ENABLED
     ? LOCAL_ENABLED
       ? t("signInDescBoth")
@@ -63,21 +67,25 @@ export default async function SignInPage({
         aria-hidden="true"
         className="pointer-events-none absolute -top-32 left-1/2 h-96 w-96 -translate-x-1/2 rounded-full bg-primary/10 blur-3xl"
       />
-      <Card className="w-full max-w-md animate-fade-in-up shadow-lg">
+      {/* The card is the page's main landmark; the footer stays outside it (S6). */}
+      <Card role="main" className="w-full max-w-md animate-fade-in-up shadow-lg">
         <CardHeader className="text-center">
-          <div
-            aria-hidden="true"
-            className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-primary text-xl font-bold text-primary-foreground"
-          >
-            S
-          </div>
+          <BrandMark
+            name={siteName}
+            logoUrl={logoUrl}
+            className="mx-auto mb-3 h-12 w-12 rounded-2xl text-xl"
+          />
           <CardTitle as="h1" className="text-2xl">
-            {t("welcome")}
+            {t("welcome", { name: siteName })}
           </CardTitle>
           <CardDescription>{description}</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          {expired && <p className="text-center text-sm text-destructive">{t("sessionExpired")}</p>}
+          {expired && (
+            <p role="status" className="text-center text-sm text-destructive">
+              {t("sessionExpired")}
+            </p>
+          )}
           {passwordSet && (
             <p role="status" className="text-center text-sm text-muted-foreground">
               {t("passwordSet")}

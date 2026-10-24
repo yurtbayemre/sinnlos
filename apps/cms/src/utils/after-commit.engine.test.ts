@@ -2,7 +2,7 @@
  * Post-commit side effects (LF02) against Strapi's real query engine
  * (@strapi/database 5.55.1): on SQLite always, on Postgres 16 with
  * SINNLOS_TEST_PG_URL set (CI job `postgres`; locally a throwaway
- * container, docs/DEPLOYMENT.md "Datetime contract").
+ * container, docs/OPERATIONS.md "Datetime contract").
  *
  * Pinned, with the real transaction context and lifecycles provider:
  *  - a fan-out scheduled inside the publish transaction writes nothing

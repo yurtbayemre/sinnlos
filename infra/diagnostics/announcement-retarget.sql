@@ -13,7 +13,7 @@
 -- team) are listed by announcement-audience-preflight.sql.
 --
 -- WHEN. Before a rollback to a batch-14 image, save the output off the host
--- (DEPLOYMENT.md "Deploying batch 15", rollback step 2): the old image knows
+-- (docs/archive/deployment-history.md, "Deploying batch 15", rollback step 2): the old image knows
 -- neither the marker nor notify_audience, so (1) re-widens to its remaining
 -- criteria and (2) notifies everyone on its next publish, and an old-image
 -- publish or "Discard changes" rewrites rows without these columns (NULL).

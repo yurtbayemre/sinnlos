@@ -33,18 +33,18 @@ async function render(): Promise<string> {
 describe("AppShell bottom room (#71)", () => {
   it("leaves the bottom nav and the home indicator's inset free below md", async () => {
     const html = await render();
-    const main = /<main [^>]*class="([^"]+)"/.exec(html)?.[1] ?? "";
-    expect(main.split(" ")).toEqual(
+    // The column around topbar, main and footer carries the room (S6: the footer left <main>).
+    const column = /<div class="([^"]*pb-\[calc[^"]+)"/.exec(html)?.[1] ?? "";
+    expect(column.split(" ")).toEqual(
       expect.arrayContaining(["pb-[calc(5rem+env(safe-area-inset-bottom))]", "md:pb-8"]),
     );
   });
 });
 
 describe("AppShell footer (v0.26)", () => {
-  it("puts the footer inside <main>, above the bottom nav's room", async () => {
+  it("puts the footer after <main> (its own landmark), above the bottom nav's room", async () => {
     const html = await render();
-    expect(html.indexOf('id="footer"')).toBeGreaterThan(html.indexOf(`<main id="${MAIN_ID}"`));
-    expect(html.indexOf('id="footer"')).toBeLessThan(html.indexOf("</main>"));
+    expect(html.indexOf('id="footer"')).toBeGreaterThan(html.indexOf("</main>"));
   });
 });
 

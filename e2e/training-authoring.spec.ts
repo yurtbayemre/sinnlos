@@ -154,11 +154,11 @@ test("training-authoring", async ({ page, browser }) => {
       await expect(memberMain.getByText(content, { exact: true })).toBeVisible();
       const publishedQuestion = memberMain.getByRole("group", { name: questionText, exact: true });
       const complete = memberMain.getByRole("button", { name: "Complete lesson", exact: true });
-      await publishedQuestion.getByRole("button", { name: "80", exact: true }).click();
+      await publishedQuestion.getByRole("radio", { name: "80", exact: true }).click();
       await memberMain.getByRole("button", { name: "Check answers", exact: true }).click();
       await expect(memberMain.getByText("Not quite — try again.", { exact: true })).toBeVisible();
       await expect(complete).toBeDisabled();
-      await publishedQuestion.getByRole("button", { name: "443", exact: true }).click();
+      await publishedQuestion.getByRole("radio", { name: "443", exact: true }).click();
       await memberMain.getByRole("button", { name: "Check answers", exact: true }).click();
       await expect(memberMain.getByText("All correct!", { exact: true })).toBeVisible();
       await expect(complete).toBeEnabled();

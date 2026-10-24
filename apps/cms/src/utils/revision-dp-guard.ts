@@ -1,7 +1,7 @@
 /**
  * Boot guard for the wiki-revision draft & publish switch (decision 06 §J4,
- * Migration §2; batch 16 lane 16D; docs/DEPLOYMENT.md "One-time: wiki
- * revisions draft/publish off"). The decision-05 pattern of
+ * Migration §2; batch 16 lane 16D; the runbook
+ * infra/migrations/wiki-revision-dp/README.md). The decision-05 pattern of
  * utils/org-dp-guard.ts, for one more type.
  *
  * wiki-revision runs with draftAndPublish OFF from batch 16 on: a revision
@@ -34,8 +34,7 @@ import type { OrgDpGuardHost } from "./org-dp-guard";
 
 export const REVISION_DP_UID = "api::wiki-revision.wiki-revision";
 
-export const REVISION_DP_RUNBOOK =
-  'docs/DEPLOYMENT.md "One-time: wiki revisions draft/publish off"';
+export const REVISION_DP_RUNBOOK = "infra/migrations/wiki-revision-dp/README.md";
 
 /** The column Strapi's own disable hook deletes by. */
 const PUBLISHED_AT_COLUMN = "published_at";

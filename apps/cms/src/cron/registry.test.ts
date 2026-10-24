@@ -9,6 +9,7 @@ import {
   type CronStrapi,
   type CronTaskSpec,
 } from "./registry";
+import { reportRunFailure } from "./run-context";
 
 /**
  * LF03: the task table, the CRON_ENABLED switch and the wrapper every task
@@ -82,7 +83,7 @@ describe("cronRegistry", () => {
       const [minute, hour, ...rest] = rule.split(" ");
       expect(rest, name).toEqual(["*", "*", "*"]);
       const minutes = Number(hour) * 60 + Number(minute);
-      // 03:00 is pg-backup.sh in the host crontab (docs/DEPLOYMENT.md §7.3);
+      // 03:00 is pg-backup.sh in the host crontab (docs/OPERATIONS.md, "Automated daily backups (cron)");
       // anything it deletes must still be in that night's backup.
       if (name.endsWith("-janitor")) {
         expect(minutes, name).toBeGreaterThan(3 * 60);
@@ -172,6 +173,20 @@ describe("guardedTask", () => {
     expect(log.info).toHaveBeenCalledWith("[cron] test-task took 250ms");
     expect(log.warn).not.toHaveBeenCalled();
     expect(log.error).not.toHaveBeenCalled();
+  });
+
+  it("marks the duration line of a run that reported failures", async () => {
+    const { strapi, log } = fakeStrapi();
+    let now = 1_000;
+    const task = guardedTask(
+      spec(async () => {
+        now += 40;
+        reportRunFailure(new Error("smtp down"), "a digest could not be sent");
+      }),
+      () => now,
+    );
+    await task({ strapi });
+    expect(log.info).toHaveBeenCalledWith("[cron] test-task took 40ms (with failures)");
   });
 
   it("passes the Strapi instance to the task", async () => {

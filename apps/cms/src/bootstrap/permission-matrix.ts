@@ -476,7 +476,7 @@ export const CUSTOM_ACTION_GRANTS: Record<string, readonly MatrixRoleType[] | "*
   // and for guests visibleToGuests/guestsCanVote, owner decision
   // 2026-09-27). A cms from before guest access ignores those switches and
   // never removes the guest vote row: a rollback removes it first
-  // (docs/DEPLOYMENT.md, "Upgrading to poll department targeting", Rollback).
+  // (docs/archive/deployment-history.md, "Upgrading to poll department targeting", Rollback).
   "api::poll-vote.poll-vote.vote": "*",
   "api::poll-vote.poll-vote.results": "*",
   // The batched results of GET /api/poll-results (WD04): the roles that

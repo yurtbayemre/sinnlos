@@ -54,7 +54,9 @@ export default async function EventsPage({
     cn(
       "inline-flex items-center gap-1.5 rounded-[10px] px-3 py-1.5 text-sm font-medium transition-colors",
       "outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
-      active ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted",
+      active
+        ? "bg-primary text-primary-foreground ring-1 ring-primary-text"
+        : "text-muted-foreground hover:bg-muted",
     );
 
   return (

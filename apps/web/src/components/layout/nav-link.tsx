@@ -59,7 +59,7 @@ export function NavLink({ href, label, icon }: { href: Route; label: string; ico
       <span
         aria-hidden="true"
         className={cn(
-          "absolute left-0 top-1/2 h-5 w-1 -translate-y-1/2 rounded-r-full bg-primary transition-all duration-200",
+          "absolute left-0 top-1/2 h-5 w-1 -translate-y-1/2 rounded-r-full bg-primary-text transition-all duration-200",
           active ? "opacity-100 scale-y-100" : "opacity-0 scale-y-50",
         )}
       />

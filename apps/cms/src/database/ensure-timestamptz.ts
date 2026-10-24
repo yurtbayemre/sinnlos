@@ -12,13 +12,13 @@
  *  1. register() :326-337 -> prepareDatetimeContract(): logs the zones,
  *     verifies the DB session runs in UTC, remembers the stored schema
  *     marker, and refuses a non-UTC process on a fresh database or while the
- *     legacy repair is still pending.
+ *     datetime user migration has not run yet.
  *  2. db.init, then the beforeSync hook :358-361 -> refuseNonUtcSchemaSync():
  *     in a non-UTC process, refuses a boot whose schema sync would run a
  *     migration or change the schema, before any of that happens.
- *  3. db.schema.sync() :364: user migrations (the one-time legacy repair
- *     converts every legacy column itself), internal migrations, then the
- *     schema diff creates new columns naive.
+ *  3. db.schema.sync() :364: user migrations (the datetime migration refuses
+ *     pre-contract data: upgrade through v0.28.x first), internal migrations,
+ *     then the schema diff creates new columns naive.
  *  4. afterSync hook :391 -> convertNaiveColumns(): one short transaction
  *     per table (SET LOCAL lock_timeout 5s and statement_timeout 60s), ALTER
  *     ... TYPE timestamptz(6) USING col AT TIME ZONE 'UTC'. The hook is an
@@ -35,9 +35,10 @@
  * Conversions read the stored wall clock as UTC. That is only right because
  * every writer that can reach a naive column is UTC: the process must be
  * TZ=UTC whenever there is something to convert (checked), every session
- * runs with TimeZone=UTC (config/database.ts, checked), and legacy values
- * were rewritten by the repair first (interlock: data in a naive app column
- * with the repair not recorded fails the boot).
+ * runs with TimeZone=UTC (config/database.ts, checked), and pre-contract
+ * values were rewritten by the v0.28 repair, or the datetime migration
+ * refuses them (interlock: data in a naive app column with the migration not
+ * recorded fails the boot).
  *
  * SQLite (local development) is skipped entirely: it stores epoch ms.
  */
@@ -161,7 +162,7 @@ export async function prepareDatetimeContract(
     throw new Error(
       `[datetime] The database session runs in "${session}", not UTC. config/database.ts sends ` +
         "-c TimeZone=UTC; a connection pooler or proxy that drops startup options breaks that. " +
-        "Connect the cms to Postgres directly (docs/DEPLOYMENT.md, datetime contract).",
+        "Connect the cms to Postgres directly (docs/OPERATIONS.md, Datetime contract).",
     );
   }
 
@@ -173,7 +174,7 @@ export async function prepareDatetimeContract(
   const repairPending = !(await legacyMigrationRecorded(sql, schema));
   if (fresh || repairPending) {
     throw new Error(
-      `[datetime] This boot ${fresh ? "creates the database schema" : "runs the one-time datetime repair"} ` +
+      `[datetime] This boot ${fresh ? "creates the database schema" : "runs the one-time datetime migration"} ` +
         `and needs a UTC process, but this one runs in ${zone}. Start the cms with TZ=UTC ` +
         "(the Docker image and compose set it; for local Postgres development add TZ=UTC to apps/cms/.env).",
     );
@@ -290,8 +291,8 @@ export async function convertNaiveColumns(
 
   const byTable = groupByTable(naive);
   if (!(await legacyMigrationRecorded(sql, schema))) {
-    // Interlock: before the one-time repair has run, data in an app column
-    // may be a legacy wall clock; reading it as UTC would shift it for good.
+    // Interlock: before the datetime migration has run, data in an app column
+    // may be a pre-contract wall clock; reading it as UTC would shift it for good.
     const withData: string[] = [];
     for (const [table, columns] of byTable) {
       if (BOOKKEEPING_TABLES.includes(table)) continue;
@@ -300,12 +301,13 @@ export async function convertNaiveColumns(
     if (withData.length > 0) {
       throw new Error(
         `[datetime] Naive timestamp columns hold data (${withData.join(", ")}) but the one-time ` +
-          `datetime repair (database/migrations/${LEGACY_MIGRATION_NAME}) has not run. Refusing to ` +
-          "read them as UTC. Check that the migration file is deployed and see docs/DEPLOYMENT.md.",
+          `datetime migration (database/migrations/${LEGACY_MIGRATION_NAME}) has not run. Refusing to ` +
+          "read them as UTC. Check that the migration file is deployed; a database from before v0.25 " +
+          "is upgraded through v0.28.x first (docs/UPGRADE.md).",
       );
     }
   } else {
-    // After the repair a naive app column with data was re-created: by
+    // After the migration a naive app column with data was re-created: by
     // Strapi (a `column` override or a type change, cast in its UTC session:
     // reading it as UTC is right) or by hand. A manual ALTER ... TYPE
     // timestamp in a non-UTC session (psql without PGTZ=UTC) stored that
@@ -319,7 +321,7 @@ export async function convertNaiveColumns(
         `[datetime] ${table} (${columns.join(", ")}) is timestamp without time zone again and holds values in ` +
           `${rowsWithValues} row(s); converting them as UTC wall clocks. That is right when Strapi re-created ` +
           "the column; after a manual ALTER in a non-UTC session the values move by that zone's offset " +
-          "(docs/DEPLOYMENT.md, datetime contract).",
+          "(docs/OPERATIONS.md, Datetime contract).",
       );
     }
   }

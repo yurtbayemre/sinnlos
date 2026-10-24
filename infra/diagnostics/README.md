@@ -35,7 +35,7 @@ Postgres 16 by `apps/cms/src/integration/targeting-fail-closed.integration.test.
 adds: on an older schema they stop with "column … does not exist" and change
 nothing. Before a rollback from batch 15, save the output of the preflight,
 `announcement-retarget.sql` and `schedule-export.sql` off the host
-(DEPLOYMENT.md, "Deploying batch 15", rollback).
+(docs/archive/deployment-history.md, "Deploying batch 15", rollback).
 
 The output contains counts and role/permission names, not personal data.
 Still, treat it as internal operational data and don't post it publicly.

@@ -64,7 +64,7 @@
     "signInDescLocal": "Sign in with your email and password to continue",
     "signInDescSso": "Sign in with your company account to continue",
     "signInDescSsoBoth": "Sign in with your company account or your email and password",
-    "welcome": "Welcome to Sinnlos",
+    "welcome": "Welcome to {name}",
     "email": "Email",
     "emailPlaceholder": "you@company.com",
     "password": "Password",
@@ -282,7 +282,8 @@
     "customerFocus": "Customer Focus",
     "excellence": "Excellence",
     "sendFailed": "Couldn't send kudos — please try again.",
-    "removeRecipient": "Remove selection"
+    "removeRecipient": "Remove selection",
+    "searchResults": "{count, plural, =0 {No colleague found} one {# colleague found} other {# colleagues found}}"
   },
   "marketplace": {
     "title": "Marketplace",
@@ -354,6 +355,7 @@
   },
   "polls": {
     "title": "Polls",
+    "yourVote": "Your vote",
     "description": "Vote on company polls and see results.",
     "active": "Active",
     "closed": "Closed",
@@ -444,7 +446,7 @@
     "ackReportLink": "Read confirmations",
     "ackReportLinkDesc": "Confirmation rate and outstanding users per mandatory announcement and document.",
     "rolesSection": "Roles",
-    "rolesDesc": "Sinnlos ships with six roles. Admins assign them under Manage → Users; with Microsoft or single sign-on, the identity provider's roles assign them at every sign-in.",
+    "rolesDesc": "There are six roles. Admins assign them under Manage → Users; with Microsoft or single sign-on, the identity provider's roles assign them at every sign-in.",
     "roleChangeHint": "Need to change who gets which role?",
     "roleChangeInstruction": "Change the role under Manage → Users. With Microsoft or single sign-on, assign the intranet roles in the identity provider instead; a role set by hand stays as set.",
     "readHandbook": "Read the handbook",
@@ -531,6 +533,7 @@
   },
   "search": {
     "label": "Search (Ctrl+K)",
+    "resultsCount": "{count, plural, =0 {No results} one {# result} other {# results}}",
     "placeholder": "Search wiki, people, teams…",
     "searchPlaceholder": "Search…",
     "globalSearch": "Global search",
@@ -596,6 +599,7 @@
     "quizChecking": "Checking answers…",
     "quizExamNotPassed": "Not passed yet. Review your answers and try again.",
     "quizCheckFailed": "Could not check your answers. Please try again.",
+    "quizRetry": "Check again",
     "quizCheckButton": "Check answers",
     "quizAnswerAll": "Please answer all questions first.",
     "quizAllCorrect": "All correct!",
@@ -612,6 +616,8 @@
     "repeatEvery": "{count, plural, one {Repeat every month} other {Repeat every # months}}",
     "renewCourse": "Renew now",
     "lessonRenew": "renew",
+    "lessonDoneSr": "completed",
+    "lessonOpenSr": "not completed",
     "renewSoon": "Your completion expires on {date}. You can complete this lesson again now.",
     "renewOverdue": "Your completion expired on {date}. Please complete this lesson again.",
     "reload": "Reload"

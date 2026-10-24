@@ -1,7 +1,7 @@
 /**
  * Postgres catalog access shared by the timestamptz guard
- * (ensure-timestamptz.ts), the one-time legacy repair (datetime-legacy.ts)
- * and its read-only report CLI (scripts/datetime-migration-report.ts).
+ * (ensure-timestamptz.ts) and the datetime user migration
+ * (database/migrations/, refuseLegacyDatetimeData below).
  *
  * Why the catalog and not Strapi's inspector: @strapi/database 5.55.1 maps
  * both `timestamp` and `timestamptz` to the root type 'datetime'
@@ -37,30 +37,9 @@ export function knexSqlClient(knex: KnexRawLike): SqlClient {
       sql: string,
       bindings: readonly unknown[] = [],
     ): Promise<Row[]> {
-      // knex expands an array binding into a list, so array values are
-      // always passed as Postgres array literals (pgArrayLiteral) instead.
+      // knex expands an array binding into a list: pass no arrays here.
       const result = (await knex.raw(sql, bindings as unknown[])) as { rows?: Row[] } | undefined;
       return result?.rows ?? [];
-    },
-  };
-}
-
-/** The part of a node-postgres client the adapter uses. */
-export interface PgQueryable {
-  query(sql: string, values?: unknown[]): Promise<{ rows: unknown[] }>;
-}
-
-/** A node-postgres client as a SqlClient (`?` becomes `$1..$n`). */
-export function pgSqlClient(client: PgQueryable): SqlClient {
-  return {
-    async query<Row extends object>(
-      sql: string,
-      bindings: readonly unknown[] = [],
-    ): Promise<Row[]> {
-      let index = 0;
-      const text = sql.replace(/\?/g, () => `$${++index}`);
-      const result = await client.query(text, [...bindings]);
-      return result.rows as Row[];
     },
   };
 }
@@ -68,8 +47,7 @@ export function pgSqlClient(client: PgQueryable): SqlClient {
 /**
  * Strapi's own bookkeeping tables. Their `time` columns are created naive
  * (@strapi/database 5.55.1 migrations/storage.js:6-13,
- * schema/storage.js:12-21) and only order rows. The legacy repair leaves them
- * to the guard, so it never touches the migration runner's own table.
+ * schema/storage.js:12-21) and only order rows; the guard converts them.
  */
 export const BOOKKEEPING_TABLES: readonly string[] = [
   "strapi_migrations",
@@ -77,10 +55,12 @@ export const BOOKKEEPING_TABLES: readonly string[] = [
   "strapi_database_schema",
 ];
 
-/** The repair's audit table (old values as text; it has no naive column). */
-export const AUDIT_TABLE = "datetime_migration_audit";
-
-/** The user migration file that performs the one-time legacy repair. */
+/**
+ * The datetime user migration. Until v0.28 it repaired legacy wall clocks;
+ * since v0.29 (upgrade floor v0.25.x, where it has run) it only refuses
+ * legacy data (refuseLegacyDatetimeData). Its name stays: the guard's
+ * interlock looks for it in strapi_migrations, and a fresh install records it.
+ */
 export const LEGACY_MIGRATION_NAME = "2026.10.05T00.00.00.datetime-timestamptz.js";
 
 export interface NaiveColumn {
@@ -96,16 +76,6 @@ export function quoteIdent(name: string): string {
 /** "schema"."table" */
 export function qualifiedTable(schema: string, table: string): string {
   return `${quoteIdent(schema)}.${quoteIdent(table)}`;
-}
-
-/** A Postgres array literal for a knex/pg binding ('{1,2}' or '{"a","b"}'). */
-export function pgArrayLiteral(values: readonly (string | number)[]): string {
-  const items = values.map((value) =>
-    typeof value === "number"
-      ? String(value)
-      : `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`,
-  );
-  return `{${items.join(",")}}`;
 }
 
 /** Naive timestamp columns of the schema's base tables, in table/column order. */
@@ -125,23 +95,6 @@ export async function listNaiveColumns(sql: SqlClient, schema: string): Promise<
     [schema],
   );
   return rows.map((row) => ({ table: row.table_name, column: row.column_name }));
-}
-
-/** Column name -> Postgres type name for one table. */
-export async function tableColumnTypes(
-  sql: SqlClient,
-  schema: string,
-  table: string,
-): Promise<Map<string, string>> {
-  const rows = await sql.query<{ column_name: string; type_name: string }>(
-    `SELECT a.attname AS column_name, format_type(a.atttypid, a.atttypmod) AS type_name
-       FROM pg_catalog.pg_attribute a
-       JOIN pg_catalog.pg_class c ON c.oid = a.attrelid
-       JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
-      WHERE n.nspname = ? AND c.relname = ? AND a.attnum > 0 AND NOT a.attisdropped`,
-    [schema, table],
-  );
-  return new Map(rows.map((row) => [row.column_name, row.type_name]));
 }
 
 export async function tableExists(sql: SqlClient, schema: string, table: string): Promise<boolean> {
@@ -200,8 +153,7 @@ export function groupByTable(columns: readonly NaiveColumn[]): Map<string, strin
 /**
  * One ALTER TABLE converting the given naive columns to timestamptz(6),
  * reading the stored wall clock as UTC. Only correct for UTC wall-clock
- * values: the guard's (every writer runs in UTC) and the repaired legacy
- * values.
+ * values: every writer runs in UTC (the guard checks).
  */
 export function alterToTimestamptzSql(
   schema: string,
@@ -215,7 +167,7 @@ export function alterToTimestamptzSql(
   return `ALTER TABLE ${qualifiedTable(schema, table)} ${clauses.join(", ")}`;
 }
 
-/** True when the user migration of the legacy repair is recorded as run. */
+/** True when the datetime user migration is recorded as run. */
 export async function legacyMigrationRecorded(sql: SqlClient, schema: string): Promise<boolean> {
   if (!(await tableExists(sql, schema, "strapi_migrations"))) return false;
   const rows = await sql.query<{ found: boolean }>(
@@ -223,4 +175,42 @@ export async function legacyMigrationRecorded(sql: SqlClient, schema: string): P
     [LEGACY_MIGRATION_NAME],
   );
   return rows[0]?.found === true;
+}
+
+export const LEGACY_DATETIME_MESSAGE =
+  "[datetime] This database still has naive timestamp columns with data, written before the datetime " +
+  "contract. This release no longer repairs them: upgrade through v0.28.x first (docs/UPGRADE.md). " +
+  "Nothing was changed.";
+
+/** The part of Strapi's database the migration reads. */
+export interface MigrationDb {
+  dialect: { client: string };
+  getSchemaName(): string | undefined | null;
+}
+
+/**
+ * The datetime user migration's body since v0.29. It runs inside Strapi's
+ * migration transaction, before the internal migrations and the schema sync
+ * (on a fresh install the tables do not exist yet). A naive app column that
+ * holds data is a pre-contract wall clock only the v0.28 repair could read:
+ * refused, which rolls back and stops the boot. Empty naive columns are left
+ * to the guard (afterSync converts them). SQLite stores epoch ms: nothing to do.
+ */
+export async function refuseLegacyDatetimeData(
+  trx: KnexRawLike,
+  db: MigrationDb,
+  log: { info(message: string): void } = console,
+): Promise<void> {
+  if (db.dialect.client !== "postgres") return;
+  const schema = db.getSchemaName() || "public";
+  const sql = knexSqlClient(trx);
+  const columns = (await listNaiveColumns(sql, schema)).filter(
+    ({ table }) => !BOOKKEEPING_TABLES.includes(table),
+  );
+  for (const [table, tableColumns] of groupByTable(columns)) {
+    if (await columnsHoldValues(sql, schema, table, tableColumns)) {
+      throw new Error(`${LEGACY_DATETIME_MESSAGE} (first table: ${table})`);
+    }
+  }
+  log.info("[datetime] no legacy datetimes, nothing to do");
 }

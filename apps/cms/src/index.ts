@@ -22,7 +22,9 @@ import {
   prepareDatetimeContract,
   registerTimestamptzGuard,
 } from "./database/ensure-timestamptz";
+import { recordExpectedCronTasks } from "./cron/cron-status";
 import { assertSearchLogRetention } from "./cron/prune-search-logs";
+import { cronEnabled, cronRegistry } from "./cron/registry";
 import { reportDigestConfig } from "./digest/send-digests";
 import { parseEntraConfig } from "./entra/config";
 import { parseOidcConfig } from "./oidc/config";
@@ -39,6 +41,7 @@ import { assertNoOrgDrafts } from "./utils/org-dp-guard";
 import { backfillPollAudience } from "./utils/poll-audience-backfill";
 import { backfillRevisions } from "./utils/revision-backfill";
 import { assertNoRevisionDrafts } from "./utils/revision-dp-guard";
+import { assertUpgradeFloor } from "./utils/upgrade-floor";
 import { backfillTargetingFlags } from "./utils/targeting-flags-backfill";
 import { trainingEvidenceRetentionYears } from "./utils/training-evidence";
 
@@ -82,6 +85,10 @@ export type { RestrictedRelationGuardHost } from "./bootstrap/restricted-relatio
 
 export default {
   async register({ strapi }: { strapi: any }) {
+    // v0.29 upgrade floor: a database from before v0.25 (no
+    // up_users.oidc_subject) is upgraded through v0.28.x first. FIRST, before
+    // the draft guards and Strapi's sync touch it; see utils/upgrade-floor.ts.
+    await assertUpgradeFloor(strapi);
     // Decision 05: refuse to boot while department/team hold draft rows.
     // Strapi would delete them in the beforeSync hook right after register()
     // (draftAndPublish true -> false). FIRST, so nothing in register() runs
@@ -239,6 +246,17 @@ export default {
     // FX13 review: SMTP set without DIGEST_FROM / PUBLIC_WEB_URL (the owner
     // defaults are gone) → say so at boot, not only at the 07:30 run.
     reportDigestConfig(strapi.log);
+    // v0.29 (S8): the tasks this process schedules, for infra/ops-check.sh
+    // (cron/cron-status.ts); a failed write never fails the boot.
+    try {
+      await recordExpectedCronTasks(
+        strapi,
+        cronRegistry("UTC", process.env),
+        cronEnabled(process.env.CRON_ENABLED),
+      );
+    } catch (err) {
+      strapi.log.error(`[cron] recording the expected tasks failed: ${(err as Error).message}`);
+    }
 
     const { seedDemoData } = await import("./seed-demo");
     await seedDemoData(strapi);

@@ -351,7 +351,7 @@ export async function backfillRevisions(
       `${REVISION_BACKFILL_LOG} could not backfill the wiki revisions (${reason}); nothing was ` +
         "changed (the transaction rolled back), and the cms does not start, because a page saved " +
         "before its baseline exists loses the content it had at the upgrade. Fix the cause and " +
-        "start the cms again (every start retries), or roll back (docs/DEPLOYMENT.md)",
+        "start the cms again (every start retries), or roll back (docs/UPGRADE.md, Rollback)",
     );
   }
   if (counts.anchored + counts.kinds + counts.baselines > 0) {

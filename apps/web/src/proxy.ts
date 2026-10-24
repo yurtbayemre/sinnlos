@@ -13,16 +13,17 @@ import { switchOfPath, switchedOff } from "@/lib/switches";
  * exact allowlist rather than an extension regex: matching on `.png`,
  * `.svg`, `.xml`, … would let any authenticated route that merely ends in
  * one of those extensions (e.g. a wiki page slug or a report id) slip past
- * the guard. `apps/web/public` currently ships only robots.txt; the rest
- * are the well-known root files browsers and crawlers probe even when
- * absent — a 404 there is preferable to a redirect to /sign-in.
+ * the guard. `apps/web/public` ships robots.txt, the touch icons and (v0.29)
+ * the bundled icons the root metadata names on every page, also before
+ * sign-in; the rest are well-known root files browsers and crawlers probe
+ * even when absent — a 404 there is preferable to a redirect to /sign-in.
  * (`favicon.ico` and `/_next/*` are already excluded by the matcher.)
  */
 const PUBLIC_FILES = new Set([
   "/robots.txt",
   "/sitemap.xml",
-  "/site.webmanifest",
-  "/manifest.webmanifest",
+  "/icon.png",
+  "/apple-icon.png",
   "/apple-touch-icon.png",
   "/apple-touch-icon-precomposed.png",
   // The image's third-party notices (v0.26, M1), linked from the footer.
@@ -50,6 +51,8 @@ export function isPublicPath(pathname: string): boolean {
     // Without this entry the CMS POST gets a redirect and live updates die
     // silently (issue #17 plan, WP2).
     pathname === "/api/live/emit" ||
+    // v0.29: the readiness check for monitors (app/healthz/route.ts).
+    pathname === "/healthz" ||
     pathname.startsWith("/_next") ||
     pathname.startsWith("/favicon") ||
     // Known static files served from /public. Exact allowlist (see

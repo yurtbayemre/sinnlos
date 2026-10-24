@@ -717,6 +717,8 @@ interface CaddyModel {
   headerSets: Map<string, CaddyHeaderSet>;
   headerRemovals: CaddyHeaderRemoval[];
   headerBlocks: CaddyHeaderBlock[];
+  /** v0.29: the site gate, `@name not remote_ip <ranges>` + its `respond` */
+  gate?: { matcher: string; ranges: string; respond?: { body: string; status: string } };
 }
 
 type CaddyBlock =
@@ -738,6 +740,7 @@ function parseCaddy(source = readInfraFile("Caddyfile")): CaddyModel {
   const headerSets = new Map<string, CaddyHeaderSet>();
   const headerRemovals: CaddyHeaderRemoval[] = [];
   const headerBlocks: CaddyHeaderBlock[] = [];
+  let gate: CaddyModel["gate"];
   let block: CaddyBlock | undefined;
 
   lines.forEach((raw, line) => {
@@ -801,6 +804,20 @@ function parseCaddy(source = readInfraFile("Caddyfile")): CaddyModel {
       };
       return;
     }
+    const gateMatcher = text.match(/^@(\S+)\s+not\s+remote_ip\s+(.+)$/);
+    if (gateMatcher) {
+      if (gate) throw new Error("Caddyfile has two site gates");
+      gate = { matcher: gateMatcher[1], ranges: gateMatcher[2].trim() };
+      return;
+    }
+    const respond = text.match(/^respond\s+@(\S+)\s+"([^"]*)"\s+(\d{3})$/);
+    if (respond) {
+      if (!gate || gate.matcher !== respond[1] || gate.respond || routes.length > 0) {
+        throw new Error(`unmodelled respond: ${text}`);
+      }
+      gate.respond = { body: respond[2], status: respond[3] };
+      return;
+    }
     const matcher = text.match(/^@(\S+)\s+(\S+)\s+(.+)$/);
     if (matcher) {
       if (matcher[2] !== "path") {
@@ -830,7 +847,7 @@ function parseCaddy(source = readInfraFile("Caddyfile")): CaddyModel {
     }
   }
   expect(routes.length, "reverse_proxy routes in Caddyfile").toBeGreaterThan(0);
-  return { matchers, conditions, routes, headerSets, headerRemovals, headerBlocks };
+  return { matchers, conditions, routes, headerSets, headerRemovals, headerBlocks, gate };
 }
 
 /**
@@ -1090,6 +1107,39 @@ describe("Traefik/Caddy routing parity (issue #22)", () => {
         (cmsRouter?.middlewares ?? []).map((name) => traefik.middlewares.get(name)?.container),
       );
       expect([...containers]).toEqual(["cms"]);
+    });
+
+    // v0.29: SITE_ALLOW_CIDRS closes every router; open unless set, and the
+    // 503 still carries the security headers (the gate follows them).
+    it("puts the site gate on every router, after the headers and before any rate limit", () => {
+      expect([...traefik.routers.keys()].sort()).toEqual([
+        "sinnlos-auth",
+        "sinnlos-cms",
+        "sinnlos-live",
+        "sinnlos-signin",
+        "sinnlos-web",
+      ]);
+      for (const router of traefik.routers.values()) {
+        const gates = router.middlewares.filter((name) => name.endsWith("site-allow"));
+        expect(gates, router.name).toHaveLength(1);
+        const options = traefik.middlewares.get(gates[0]!)?.options;
+        expect(options?.get("ipallowlist.sourcerange"), router.name).toBe("0.0.0.0/0,::/0");
+        expect(options?.get("ipallowlist.rejectstatuscode"), router.name).toBe("503");
+        const at = router.middlewares.indexOf(gates[0]!);
+        expect(router.middlewares[0], router.name).toMatch(/headers$/);
+        expect(
+          router.middlewares.slice(0, at).filter((name) => name.includes("limit")),
+          router.name,
+        ).toEqual([]);
+      }
+    });
+
+    it("gates the Caddy site the same way: every client but the listed ones gets 503", () => {
+      expect(caddy.gate).toEqual({
+        matcher: "closed",
+        ranges: "{$SITE_ALLOW_RANGES:0.0.0.0/0 ::/0}",
+        respond: { body: "maintenance", status: "503" },
+      });
     });
 
     it("defines no middleware that no router uses", () => {

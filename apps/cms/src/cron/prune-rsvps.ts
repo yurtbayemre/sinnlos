@@ -2,6 +2,7 @@ import { EVENT_UID } from "../utils/authoring-uids";
 import { lockDocument, type DocumentLockHost } from "../utils/document-lock";
 import { EXISTING_DOCUMENTS_CHUNK } from "../utils/existing-documents";
 import { instantMsOrNull } from "../utils/time";
+import { reportRunFailure } from "./run-context";
 
 /**
  * Nightly retention of RSVPs (v0.28, M11; plan rev3 R6): the answers to an
@@ -157,6 +158,10 @@ export async function pruneRsvps(
     try {
       deleted += await pruneEvent(strapi, documentId, rows.has(documentId), now);
     } catch (err) {
+      reportRunFailure(
+        err,
+        `event ${documentId}: ${err instanceof Error ? err.message : String(err)}`,
+      );
       strapi.log.error(
         `${RSVP_JANITOR_LOG} event ${documentId} failed, retried next night: ` +
           (err instanceof Error ? err.message : String(err)),

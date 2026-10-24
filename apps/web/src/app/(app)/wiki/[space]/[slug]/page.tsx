@@ -9,6 +9,7 @@ import { formatInstant, LONG_DAY } from "@/lib/date-format";
 import { canEditWikiPage } from "@/lib/manage/wiki-edit-access";
 import { wikiEditPath, wikiHistoryPath } from "@/lib/manage/wiki-paths";
 import { capabilitiesFor } from "@/lib/roles";
+import { tryFetch } from "@/lib/safe-fetch";
 import { api } from "@/lib/strapi";
 import { displayNameOf } from "@/lib/utils";
 import { getViewer } from "@/lib/viewer";
@@ -16,6 +17,15 @@ import { rehypeWikiToc, showsToc, wikiTags } from "@/lib/wiki-content";
 
 interface Props {
   params: Promise<{ space: string; slug: string }>;
+}
+
+export async function generateMetadata({ params }: Props) {
+  const { space, slug } = await params;
+  const t = await getTranslations("wiki");
+  // Same GET as the page's, sent once per render (Next's fetch dedupe).
+  const { data } = await tryFetch(() => api.wiki.page(space, slug), "wiki-page-meta");
+  const entry = data?.data?.[0] as WikiPageDetail | undefined;
+  return { title: entry?.title ?? t("title") };
 }
 
 export default async function WikiPage({ params }: Props) {

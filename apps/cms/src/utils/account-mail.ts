@@ -8,6 +8,7 @@
  */
 import { digestLocale, digestDefaultLocale, type DigestLocale } from "../digest/render-digest";
 import { errorLabel } from "../idp/exchange-core";
+import { siteName } from "./site-name";
 
 export type AccountMailKind = "invite" | "reset";
 
@@ -30,13 +31,14 @@ export function accountMailReady(
 const TEXT = {
   de: {
     invite: {
-      subject: "Einladung ins Intranet",
+      subject: (site: string | null) => (site ? `Einladung zu ${site}` : "Einladung ins Intranet"),
       intro:
         "du wurdest ins Intranet eingeladen. Lege hier dein Passwort fest (der Link gilt 7 Tage):",
       outro: "Wenn du diese Einladung nicht erwartet hast, ignoriere diese Mail.",
     },
     reset: {
-      subject: "Passwort zurücksetzen",
+      subject: (site: string | null) =>
+        site ? `${site}: Passwort zurücksetzen` : "Passwort zurücksetzen",
       intro:
         "für dein Konto wurde ein neues Passwort angefordert. Lege es hier fest (der Link gilt 1 Stunde):",
       outro: "Wenn du das nicht warst, ignoriere diese Mail: dein Passwort bleibt, wie es ist.",
@@ -45,13 +47,15 @@ const TEXT = {
   },
   en: {
     invite: {
-      subject: "Invitation to the intranet",
+      subject: (site: string | null) =>
+        site ? `Invitation to ${site}` : "Invitation to the intranet",
       intro:
         "you have been invited to the intranet. Set your password here (the link is valid for 7 days):",
       outro: "If you did not expect this invitation, ignore this mail.",
     },
     reset: {
-      subject: "Reset your password",
+      subject: (site: string | null) =>
+        site ? `${site}: Reset your password` : "Reset your password",
       intro:
         "a new password was requested for your account. Set it here (the link is valid for 1 hour):",
       outro: "If this was not you, ignore this mail: your password stays as it is.",
@@ -68,12 +72,13 @@ export function renderAccountMail(
   locale: DigestLocale,
   link: string,
   name: string,
+  site: string | null = siteName(),
 ): { subject: string; text: string; html: string } {
   const strings = TEXT[locale];
   const parts = strings[kind];
   const greeting = strings.greeting(name);
   return {
-    subject: parts.subject,
+    subject: parts.subject(site),
     text: `${greeting}\n\n${parts.intro}\n${link}\n\n${parts.outro}\n`,
     html:
       `<p>${escapeHtml(greeting)}</p><p>${escapeHtml(parts.intro)}<br>` +

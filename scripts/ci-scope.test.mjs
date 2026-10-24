@@ -58,6 +58,9 @@ test("CI scopes use the whole change and keep the browser E2E exclusions narrow"
   const docs = commit();
   check("pull_request", pr(base, docs), false);
   check("push", { before: base, after: docs }, false);
+  // INSTALL.md pins the release tag: its unit test runs, the database and E2E suites do not.
+  write("docs/INSTALL.md", "git clone --branch v1\n");
+  check("push", { before: docs, after: commit() }, true, false, false);
 
   // README contracts, new executable docs and all unknown paths keep full CI.
   for (const path of [

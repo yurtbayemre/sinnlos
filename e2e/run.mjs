@@ -88,7 +88,7 @@ export async function main(args) {
   await writeFile(join(runtime, "owner"), runId, { mode: 0o600, flag: "wx" });
   await mkdir(logs, { recursive: true });
   const secret = () => randomBytes(32).toString("hex");
-  const secrets = Array.from({ length: 18 }, secret);
+  const secrets = Array.from({ length: 19 }, secret);
   const [
     dbPassword,
     leadPassword,
@@ -98,6 +98,7 @@ export async function main(args) {
     inviterPassword,
     privacyPassword,
     leaverPassword,
+    a11yPassword,
     appKey1,
     appKey2,
     apiSalt,
@@ -221,6 +222,8 @@ export async function main(args) {
       // anonymises (privacy.spec.ts).
       E2E_PRIVACY_PASSWORD: privacyPassword,
       E2E_LEAVER_PASSWORD: leaverPassword,
+      // v0.29: the accessibility spec's own admin (it enrolls and completes a lesson).
+      E2E_A11Y_PASSWORD: a11yPassword,
       // v0.27: only the admins need a second factor here, so the older specs
       // (editor, lead, member) sign in as before while mfa.spec.ts and
       // invite.spec.ts go through the mandatory enrollment.
@@ -311,6 +314,7 @@ export async function main(args) {
     const cmsAddress = await docker([...compose, "port", "cms", "1337"], "cms-port");
     assert.match(cmsAddress, /^127\.0\.0\.1:\d+$/);
     assert.deepEqual(Object.keys(fixtures.users).sort(), [
+      "a11y",
       "admin",
       "editor",
       "inviter",

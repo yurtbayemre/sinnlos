@@ -30,6 +30,7 @@ export * from "./plain-date.js";
 export * from "./poll-close.js";
 export * from "./roles.js";
 export * from "./search.js";
+export * from "./site-name.js";
 export * from "./training.js";
 export * from "./user-admin.js";
 export * from "./wiki-edit.js";

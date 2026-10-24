@@ -114,7 +114,7 @@ export function ProfileForm({
           type="checkbox"
           name="birthdayVisible"
           defaultChecked={v?.birthdayVisible ?? initial.birthdayVisible ?? false}
-          className="mt-0.5 h-4 w-4 rounded border accent-primary"
+          className="mt-0.5 h-4 w-4 rounded border accent-primary-text"
         />
         <span className="min-w-0">
           <span className="block text-sm font-medium">{tProfile("birthdayVisible")}</span>
@@ -158,7 +158,7 @@ export function ProfileForm({
                 type="checkbox"
                 name={name}
                 defaultChecked={(v ? v[name] : checked) ?? false}
-                className="mt-0.5 h-4 w-4 rounded border accent-primary"
+                className="mt-0.5 h-4 w-4 rounded border accent-primary-text"
               />
               <span className="block text-sm">{tProfile(name)}</span>
             </label>
@@ -177,7 +177,7 @@ export function ProfileForm({
                   defaultChecked={
                     (v?.digestFrequency ?? initial.digestFrequency ?? "weekly") === freq
                   }
-                  className="h-4 w-4 accent-primary"
+                  className="h-4 w-4 accent-primary-text"
                 />
                 {tProfile(`digestFrequency_${freq}`)}
               </label>

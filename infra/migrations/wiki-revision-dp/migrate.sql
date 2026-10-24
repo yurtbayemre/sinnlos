@@ -9,7 +9,7 @@
 -- apps/cms/src/utils/revision-dp-guard.ts refuses to boot before that, and
 -- infra/deploy.sh refuses the deploy before its backup).
 --
--- Runbook: docs/DEPLOYMENT.md "One-time: wiki revisions draft/publish off",
+-- Runbook: docs/archive/deployment-history.md, "One-time: wiki revisions draft/publish off",
 -- notes in infra/migrations/wiki-revision-dp/README.md. Run the read-only
 -- preflight.sql first. Run with cms and web STOPPED, right after a verified
 -- backup, as ONE transaction (the script refuses anything else):

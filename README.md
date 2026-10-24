@@ -16,24 +16,23 @@ with German as the second language.
 
 Further reading:
 
-- **[docs/INSTALL.md](./docs/INSTALL.md)**: a new installation on one host,
-  step by step (configuration, backups, the first admin, the admin panel
-  through an SSH tunnel, upgrades).
-- **[docs/DEPLOYMENT.md](./docs/DEPLOYMENT.md)**: every deployment method
-  (bare metal, Docker, VPS with Caddy or Traefik, Azure VM, Azure Container
-  Apps), upgrades, backup and restore, rollback.
-- **[docs/security.md](./docs/security.md)**: the security model: roles,
-  the fine print of the permission matrix, route policies, global guards,
-  upload hardening and the frontend's role gating.
-- **[docs/architecture.md](./docs/architecture.md)** (German): topology,
-  data model, request flow, the conventions to know before changing code,
-  and the known open issues.
-- **[docs/data-protection.md](./docs/data-protection.md)** (German): the data
-  inventory for the data-protection officer and the works council: every
-  data class, who sees it, when it is deleted, the switches, export and
-  anonymisation, and what restoring a backup means for them.
-- **[docs/v1-release-plan.md](./docs/v1-release-plan.md)**: everything that
-  still has to be done before v1.0.0, with the owner's decisions.
+**Running an instance**
+
+- **[docs/INSTALL.md](./docs/INSTALL.md):** a new installation on one host, step by step: configuration and branding, backups, the first admin, the admin panel through an SSH tunnel, and running behind your own Traefik.
+- **[docs/UPGRADE.md](./docs/UPGRADE.md):** the supported upgrade path from v0.25.x, the release notes, and rollback.
+- **[docs/OPERATIONS.md](./docs/OPERATIONS.md):** monitoring, restore behind closed doors, backups, hardening, the datetime contract, Meilisearch and troubleshooting.
+- **[docs/SSO.md](./docs/SSO.md):** sign-in with Microsoft Entra ID, Keycloak, authentik or Zitadel, AD/LDAP through the identity provider, and the second factor for SSO users.
+
+**How it works**
+
+- **[docs/security.md](./docs/security.md):** the security model: roles, the fine print of the permission matrix, route policies, global guards, upload hardening and the frontend's role gating.
+- **[docs/architecture.md](./docs/architecture.md)** (German): topology, data model, request flow, the conventions to know before changing code (in [docs/architecture/](./docs/architecture/)), and the known open issues.
+- **[docs/data-protection.md](./docs/data-protection.md)** (German): the data inventory for the data-protection officer and the works council. It covers every data class, who sees it and when it is deleted, the switches, export and anonymisation, and what restoring a backup means for them.
+
+**Project**
+
+- **[CONTRIBUTING.md](./CONTRIBUTING.md):** local development and the checks before a pull request.
+- **[docs/v1-release-plan.md](./docs/v1-release-plan.md):** everything that still has to be done before v1.0.0, with the owner's decisions.
 
 ## Contents
 
@@ -44,16 +43,10 @@ Further reading:
   - [Roles and permissions](#roles-and-permissions)
   - [Languages](#languages)
 - [Quick start](#quick-start)
-  - [Prerequisites](#prerequisites)
-  - [Local development (SQLite)](#local-development-sqlite)
-  - [Standalone mode (no Microsoft)](#standalone-mode-no-microsoft)
-  - [Full stack with Docker Compose](#full-stack-with-docker-compose)
-  - [Microsoft Entra ID sign-in (optional)](#microsoft-entra-id-sign-in-optional)
-  - [OIDC sign-in with Keycloak, authentik or Zitadel (optional)](#oidc-sign-in-with-keycloak-authentik-or-zitadel-optional)
 - [Environment reference](#environment-reference)
 - [Deployment](#deployment)
+- [Accessibility](#accessibility)
 - [Scripts](#scripts)
-- [Verification checklist](#verification-checklist)
 
 ## Overview
 
@@ -134,7 +127,7 @@ Further reading:
 │   ├── Caddyfile                   the bundled Caddy (standalone boxes, local full-stack runs)
 │   ├── readme-permissions.test.ts  pins the permission tables of this README to the cms
 │   └── .env.example
-├── docs/                   DEPLOYMENT.md, security.md, architecture.md, ROADMAP.md, screenshots/
+├── docs/                   INSTALL, UPGRADE, OPERATIONS, SSO, security.md, architecture.md (+ architecture/), archive/, screenshots/
 ├── pnpm-workspace.yaml
 └── package.json
 ```
@@ -195,13 +188,13 @@ Strapi's draft & publish (pinned per type in
 `apps/cms/src/content-type-flags.test.ts`): the admin panel edits a draft
 row, readers get the published row. An entry with a published row but no
 draft is given its draft at boot (`apps/cms/src/utils/draft-twins.ts`; see
-[Upgrading to the draft-twin repair](./docs/DEPLOYMENT.md#upgrading-to-the-draft-twin-repair-fx38)).
+[Upgrading to the draft-twin repair](./docs/archive/deployment-history.md#upgrading-to-the-draft-twin-repair-fx38)).
 Departments and teams have no drafts any more; a database from before that
 change needs a one-time migration
-([One-time: org draft/publish off](./docs/DEPLOYMENT.md#one-time-org-draftpublish-off)).
+([One-time: org draft/publish off](./docs/archive/deployment-history.md#one-time-org-draftpublish-off)).
 Wiki revisions have none either since batch 16 (one published row per
 revision; the cms refuses to boot on leftover draft rows, see
-[Deploying batch 16](./docs/DEPLOYMENT.md#deploying-batch-16-v2-authoring-phase-2-documents-with-uploads-the-wiki)).
+[Deploying batch 16](./docs/archive/deployment-history.md#deploying-batch-16-v2-authoring-phase-2-documents-with-uploads-the-wiki)).
 
 ### Roles and permissions
 
@@ -387,298 +380,11 @@ user without a stored language gets digests in `DIGEST_DEFAULT_LOCALE`
 
 ## Quick start
 
-### Prerequisites
-
-- Node.js 22.13+ or 24 (`engines`: `^22.13.0 || ^24.0.0`; CI and the
-  Docker images use 24; Node 20 is end of life)
-- pnpm 10: `corepack enable` gives you the exact version the root
-  `packageManager` names (pnpm 9 is refused)
-- `openssl` (Git Bash or WSL on Windows) for generating secrets
-- Docker with Compose v2, only for the full stack
-- A Microsoft Entra ID tenant where you can register an app and grant admin
-  consent, only for the optional Microsoft sign-in
-
-### Local development (SQLite)
-
-Runs the cms and the web directly with Node on a SQLite file. No database
-server, no Docker, no Microsoft account.
-
-1. Clone and install:
-
-   ```bash
-   git clone https://github.com/yurtbayemre/sinnlos.git
-   cd sinnlos
-   corepack enable
-   pnpm install
-   pnpm build:domain
-   ```
-
-   `corepack enable` writes the `pnpm` shim next to Node.js, so it needs
-   write access there (an administrator shell for a Windows install under
-   `Program Files`). pnpm 10 runs install scripts only for the dependencies
-   listed in the root `pnpm.onlyBuiltDependencies` (better-sqlite3,
-   esbuild, sharp). A
-   `node_modules` that pnpm 9 created is removed and rebuilt on the first
-   pnpm 10 install; answer yes (without a terminal: `CI=true pnpm install`).
-
-2. Create the env files:
-
-   ```bash
-   cp apps/cms/.env.example apps/cms/.env
-   cp apps/web/.env.example apps/web/.env.local
-   ```
-
-   The cms example already selects SQLite (`DATABASE_CLIENT=sqlite`, file
-   `apps/cms/.tmp/data.db`). Fill in the secrets:
-
-   - in `apps/cms/.env`, replace each `toBeModified` value (`APP_KEYS` takes
-     two values, comma-separated), and in `apps/web/.env.local` the
-     `AUTH_SECRET` value, each with its own `openssl rand -base64 32`;
-   - set `REVALIDATE_SECRET` and `INTERNAL_UPLOAD_TOKEN`, each to one
-     `openssl rand -hex 32` value used in **both** files: the first
-     authenticates the live-update pings from the cms to the web, the
-     second the web's `/uploads` proxy.
-
-   In development the cms only warns about a placeholder and runs without
-   the two shared secrets (no live pings, no `/uploads` gate). With
-   `NODE_ENV=production` it refuses to start while a secret holds a
-   placeholder, but it does not check that the two shared secrets are set:
-   without them it starts, sends no live pings and answers every `/uploads`
-   request with 404 (Docker Compose refuses to start without them).
-
-3. Optional, for a first look: in `apps/cms/.env`, set `SEED_DEMO_DATA=1`
-   for demo data, and `STRAPI_ADMIN_EMAIL` / `STRAPI_ADMIN_PASSWORD` for the
-   first Strapi admin (8+ characters with an upper-case letter, a lower-case
-   letter and a digit; without them you register the first admin at
-   `/admin`).
-
-4. Start both apps, each in its own terminal:
-
-   ```bash
-   pnpm cms:dev    # Strapi on http://localhost:1337
-   pnpm web:dev    # Next.js on http://localhost:3000
-   ```
-
-   `pnpm dev` starts both in one terminal (output interleaved). The cms is
-   ready when it logs `Strapi started successfully` (about half a minute);
-   before that it logs `[entra] disabled` while Microsoft sign-in is off,
-   and with the demo data `[seed-demo] done — 10 users, …`. Until the web
-   is up it also logs `[live-emit] keepalive failed: fetch failed` once,
-   and `[live-emit] keepalive reaches the web again` when it is.
-
-5. Open http://localhost:3000. You are sent to `/sign-in`; sign in with
-   e-mail and password (with the demo data:
-   `alex.morgan@sinnlos.local` / `Demo-Passwort-2026!`, an `admin_role`,
-   who enrolls an authenticator app at the first sign-in unless
-   `MFA_REQUIRED_ROLES=none` is in `apps/cms/.env`; see
-   [Standalone mode](#standalone-mode-no-microsoft)). The Strapi admin is
-   at http://localhost:1337/admin.
-
-Notes:
-
-- **Strapi admin vs intranet users.** `/admin` accounts (`admin_users`) are
-  separate from the intranet's users (Content Manager → User). Strapi's
-  community edition has no SSO for `/admin`; Entra ID only signs users into
-  the web.
-- **Keep the dev cms off the network.** The example sets `HOST=0.0.0.0`,
-  and `strapi develop` serves the admin through Vite's dev server, which has
-  open advisories. On a shared network set `HOST=127.0.0.1` in
-  `apps/cms/.env`
-  ([details](./docs/DEPLOYMENT.md#12-create-environment-files)).
-- **Postgres locally:** set `DATABASE_CLIENT=postgres`, uncomment the
-  Postgres block in `apps/cms/.env` with `DATABASE_HOST=localhost`, and add
-  `TZ=UTC` (the cms must run in UTC on Postgres). A one-line Postgres
-  container is in
-  [DEPLOYMENT.md §1.2](./docs/DEPLOYMENT.md#12-create-environment-files).
-- **An older dev database** can still hold department or team drafts; the
-  cms then refuses to boot with `[org-dp] … still holds N draft row(s)`.
-  Delete `apps/cms/.tmp/data.db` and boot again (with `SEED_DEMO_DATA=1` if
-  you want the demo data back). Because that check runs in `register()`,
-  Strapi CLI commands such as `strapi ts:generate-types` and
-  `strapi content-types:list` need the configured database as well.
-
-### Standalone mode (no Microsoft)
-
-Without `ENTRA_ENABLED=1` or `OIDC_ENABLED=1` (the default) both apps offer local e-mail and
-password sign-in against Strapi; leftover `MS_*` or
-`AUTH_MICROSOFT_ENTRA_ID_*` values are ignored. This is how the owner's
-instance runs.
-
-- **Accounts:** admins invite people at `/manage/users`; the invitation
-  e-mail carries a set-password link that stays valid for 7 days (needs
-  SMTP). The first admin, and anyone without e-mail, is created in the
-  Strapi admin (**Content Manager → User**: e-mail, a password of at least
-  12 characters, _confirmed_ on). There is no self-registration any more
-  (v0.27). New local users get the `member` role; role, department,
-  manager and blocking are managed at `/manage/users`.
-- **Passwords:** at least 12 characters and not on a list of common
-  passwords; existing shorter passwords keep working until they are
-  changed. Users change their own on `/profile`, which signs that account
-  out of every other browser and device (the tab that changed it stays
-  signed in). A forgotten password: `/forgot-password` mails a reset link
-  that stays valid for 1 hour, and an admin can send one from
-  `/manage/users` (both need SMTP).
-- **Second factor:** password sign-ins of the roles in
-  `MFA_REQUIRED_ROLES` (default `admin_role`, `editor`) need an
-  authenticator app (TOTP); everyone else can turn it on at `/profile`.
-  Those users enroll at their next sign-in and get ten one-time recovery
-  codes. An admin resets a lost second factor at `/manage/users`; a locked-out
-  sole admin uses `infra/mfa-reset.sh <email>` on the host
-  ([Local sign-in](./docs/security.md#local-sign-in)).
-- **Demo data:** `SEED_DEMO_DATA=1` in `apps/cms/.env` seeds a database
-  that has no department and no user yet (`apps/cms/src/seed-demo.ts`;
-  later boots skip it). It writes **12 of the 24 collection types**:
-  departments, teams, announcements, events, wiki spaces and pages, kudos,
-  polls, poll votes, documents, comments and reactions, plus ten users
-  (password `Demo-Passwort-2026!`): `alex.morgan@sinnlos.local` is `admin_role`;
-  Sam Chen, Jordan Lee, Taylor Swift (`taylor.s@sinnlos.local`) and Riley
-  Kim are `editor`; the other five are `member`. Publishing the seeded
-  announcements and events, and the seeded kudos and comments, also writes
-  their notifications. It seeds no acknowledgements, classifieds, quick
-  links, RSVPs, courses, lessons, lesson progress, search logs or wiki
-  revisions, and no `department_head`, `team_lead` or `guest` user.
-- **`DEMO_MODE=1` (web only)** is a different thing: the web without a
-  cms (DM01). `DEMO_MODE=1 pnpm web:dev` skips sign-in and answers from
-  in-memory fixtures in `apps/web/src/lib/demo/`, signed in as the fixture
-  user Ada Lovelace (a `member` of Engineering). List reads apply their
-  filters, sort and paging; the member actions work and stay until the dev
-  server restarts or the day changes (kudos, RSVPs, comments, reactions,
-  votes, acknowledgements, notifications, the profile, lessons and quizzes,
-  own ads without images). The admin area and uploads need a cms. A path
-  without a fixture logs `[demo] no fixture for …`. A production server with
-  `DEMO_MODE=1` answers every page with a 500
-  ([details](./docs/DEPLOYMENT.md#16-demo-mode-no-microsoft-account-needed)).
-
-To offer local sign-in **next to** Microsoft or OIDC, set `AUTH_LOCAL_ENABLED=1` for
-both apps as well as `ENTRA_ENABLED=1` or `OIDC_ENABLED=1`; the cms mirrors it into its own
-e-mail provider switch.
-
-### Full stack with Docker Compose
-
-The same images as production (Postgres, cms, web) behind the bundled Caddy,
-on one box:
-
-```bash
-cd infra
-cp .env.example .env
-# set DOMAIN, WEB_PUBLIC_URL and CMS_PUBLIC_URL, fill in every empty secret
-docker compose up -d --build
-```
-
-`docker compose` refuses to start while a required secret is empty
-([Environment reference](#environment-reference)). For a local run set
-`DOMAIN=http://localhost` (plain HTTP) and both URLs to `http://localhost`;
-`DOMAIN=localhost` serves HTTPS from Caddy's internal CA, and a real host
-name gets a Let's Encrypt certificate. Caddy sends `/api/*` (except
-`/api/auth/*`), `/admin*`, `/upload*` and the other Strapi admin paths to
-the cms and everything else to the web, including `/uploads/*`, which the
-web serves through its session-gated proxy. The first build takes a few
-minutes; then open the web URL and `/admin`. Step by step:
-[DEPLOYMENT.md §2](./docs/DEPLOYMENT.md#2-docker-local-full-stack) (local)
-and [§3](./docs/DEPLOYMENT.md#3-vps-deployment) (a server).
-
-### Microsoft Entra ID sign-in (optional)
-
-Microsoft sign-in is one codebase with the local sign-in: off unless
-`ENTRA_ENABLED=1` is set for **both** apps, and every `MS_*` / `ENTRA_*`
-value is ignored until then. Auth.js runs the OIDC code flow against one
-tenant; the cms verifies the ID token itself, finds or creates the user by
-tenant id + object id, applies the role of the user's **app role** to the
-accounts Entra owns (an account that existed before, or whose role an admin
-changed, keeps its role) and issues the intranet session (how it works:
-[docs/security.md](./docs/security.md#microsoft-entra-id)). The full
-runbook, with a staging dry run before roles are applied, is
-[DEPLOYMENT.md, "Microsoft Entra ID sign-in"](./docs/DEPLOYMENT.md#microsoft-entra-id-sign-in).
-
-**1. Set up the provider** in the
-[Microsoft Entra admin center](https://entra.microsoft.com):
-
-1. **App registrations → New registration**, _Accounts in this
-   organizational directory only_ (single tenant). Note the **Directory
-   (tenant) ID** and the **Application (client) ID** (both GUIDs; `common`,
-   `organizations` and `consumers` are refused).
-2. **Authentication**, platform _Web_, two redirect URIs:
-   `<web URL>/api/auth/callback/microsoft-entra-id` (sign-in) and
-   `<web URL>/sign-in` (where sign-out returns to), for example
-   `http://localhost:3000/...` locally. There is no cms redirect URI:
-   Strapi's own Microsoft provider is not used and is forced off at every
-   boot. Leave the _Front-channel logout URL_ empty (single sign-out is not
-   implemented).
-3. **Certificates & secrets → New client secret**; copy the value
-   (`MS_CLIENT_SECRET`, used by the web only) and note its expiry.
-4. **API permissions → Microsoft Graph → Delegated**: `openid`, `profile`,
-   `email`, `User.Read`; `User.Read.All` only with `ENTRA_SYNC_MANAGER=1`.
-   **Grant admin consent.** (`GroupMember.Read.All` is not needed.)
-5. **App roles** (allowed member types _Users/Groups_): `Intranet.Admin`,
-   `Intranet.Editor`, `Intranet.DepartmentHead`, `Intranet.TeamLead`,
-   `Intranet.Member`, `Intranet.Guest` (mapped to `admin_role`, `editor`,
-   `department_head`, `team_lead`, `member`, `guest`). Then **Enterprise
-   applications** → the app → _Assignment required_ = **Yes**, and assign
-   the roles to users or security groups (Entra ID P1; nested groups are not
-   expanded). Never assign public Microsoft 365 groups or Teams to a
-   privileged role.
-
-**2. Configure the apps.** With Docker Compose, in `infra/.env` (compose
-hands each app the keys it reads):
-
-```dotenv
-ENTRA_ENABLED=1
-MS_TENANT_ID=<directory-tenant-guid>
-MS_CLIENT_ID=<application-client-guid>
-MS_CLIENT_SECRET=<client-secret-value>
-ENTRA_EXCHANGE_SECRET=<openssl rand -hex 32>
-ENTRA_SYNC_MODE=dry-run
-```
-
-For local development the cms reads `ENTRA_ENABLED`, `MS_TENANT_ID`,
-`MS_CLIENT_ID` and `ENTRA_EXCHANGE_SECRET` from `apps/cms/.env`; the web
-reads `ENTRA_ENABLED`, `AUTH_MICROSOFT_ENTRA_ID_TENANT_ID`,
-`AUTH_MICROSOFT_ENTRA_ID_ID`, `AUTH_MICROSOFT_ENTRA_ID_SECRET` and the same
-`ENTRA_EXCHANGE_SECRET` from `apps/web/.env.local` (both examples carry the
-block, commented out). With `ENTRA_ENABLED=1` an invalid value stops the
-cms at boot and makes the web answer every request with an error, both
-naming the variable; `infra/deploy.sh --check` refuses the deploy first.
-The remaining knobs are in the
-[environment reference](#microsoft-entra-id).
-
-**3. Check it.** The cms logs `[entra] enabled tenant=… mode=dry-run` at
-boot, and the sign-in page shows _Sign in with Microsoft_ (local sign-in is
-off next to it unless `AUTH_LOCAL_ENABLED=1`). Each sign-in writes one
-`[entra] user=… result=…` line. `ENTRA_SYNC_MODE=dry-run` changes no
-existing user (it logs the changes `on` would make) and creates new users at
-most as `member`; refusals (no assignment, `deny`) apply in both modes.
-Switch to `on` once the log looks right
-([Staging dry-run, then on](./docs/DEPLOYMENT.md#staging-dry-run-then-on)).
-Sign-in errors and the procedure for an e-mail address that already has an
-account are in the runbook.
-
-### OIDC sign-in with Keycloak, authentik or Zitadel (optional)
-
-Since v0.25.0 the same pattern works with any standard OpenID Connect
-identity provider: off unless `OIDC_ENABLED=1` is set for **both** apps,
-and never together with `ENTRA_ENABLED=1`. Auth.js runs the OIDC code flow
-against `OIDC_ISSUER`; the cms verifies the ID token itself (discovery and
-signing keys of the issuer, asymmetric algorithms only), finds or creates
-the user by issuer + subject, takes the role from the `Intranet.*` roles in
-the token (without one the sign-in is refused, `OIDC_DEFAULT_ROLE=deny`)
-and issues the intranet session. The token must carry a verified e-mail
-address. Register `<web URL>/api/auth/callback/oidc` as the redirect URI,
-then set in `infra/.env`:
-
-```dotenv
-OIDC_ENABLED=1
-OIDC_ISSUER=<exactly as the provider's discovery document writes it>
-OIDC_CLIENT_ID=<client id>
-OIDC_CLIENT_SECRET=<client secret>
-OIDC_EXCHANGE_SECRET=<openssl rand -hex 32>
-```
-
-The recipes for Keycloak (a client-role mapper into the ID token),
-authentik (signing key, trailing slash in the issuer, an own e-mail
-mapping) and Zitadel (`OIDC_ZITADEL_ORG_ID`, project role assertion), the
-role rules, identity changes and the sign-in errors are in
-[DEPLOYMENT.md, "OIDC sign-in"](./docs/DEPLOYMENT.md#oidc-sign-in-keycloak-authentik-zitadel);
-the remaining knobs in the [environment reference](#oidc-keycloak-authentik-zitadel).
+- **A new installation:** [docs/INSTALL.md](./docs/INSTALL.md).
+- **Local development:** [CONTRIBUTING.md, Development setup](./CONTRIBUTING.md#development-setup). It covers three setups:
+  - SQLite with Node, without Docker or a Microsoft account;
+  - the full stack with Docker Compose;
+  - the optional single sign-on.
 
 ## Environment reference
 
@@ -688,7 +394,6 @@ service the keys it needs, under the names below. "Default" is what the
 code uses when the variable is unset; the `.env.example` files and compose
 set some differently, as noted. `apps/cms/.env.example` lists every setting
 `apps/cms/config` reads (`infra/env-examples.test.ts` keeps it complete).
-More context on each: [docs/DEPLOYMENT.md](./docs/DEPLOYMENT.md).
 
 **Required values and placeholders.** Two different checks:
 
@@ -710,171 +415,45 @@ More context on each: [docs/DEPLOYMENT.md](./docs/DEPLOYMENT.md).
 required value) and runs the placeholder check, plus `AUTH_SECRET`, before
 anything is deployed.
 
-### Shared by cms and web
+Every key, with its default and meaning, is in the example files. `infra/env-examples.test.ts` keeps them complete.
 
-| Variable                | Default         | Meaning                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
-| ----------------------- | --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `REVALIDATE_SECRET`     | (unset)         | Authenticates the cms's live-event pings to the web (`POST /api/live/emit`); the name is historical. Same value on both. Unset: no pings, the web polls.                                                                                                                                                                                                                                                                                                                                                                                                          |
-| `INTERNAL_UPLOAD_TOKEN` | (unset)         | The cms-web internal secret: the web's session-gated `/uploads` proxy and its password-link pages (`/forgot-password`, `/set-password`) present it to the cms. Same value on both. Unset in production: every uploaded file answers 404; in development the uploads gate is off. Unset anywhere: no password link works.                                                                                                                                                                                                                                          |
-| `LIVE_EVENTS_DISABLED`  | `0`             | `1` is the kill switch for live updates (SSE): the cms sends no pings, the web polls. Same value on both.                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| `APP_TIME_ZONE`         | `Europe/Berlin` | IANA zone of every business date: "today", ad expiry, birthdays, digest days, the cron times, all-day events, poll deadlines. A UTC offset (`+02:00`) or unknown name stops the cms and makes the web answer every request with an error. See the [datetime contract](./docs/DEPLOYMENT.md#310-datetime-contract).                                                                                                                                                                                                                                                |
-| `AUTH_LOCAL_ENABLED`    | off             | `1` keeps local sign-in next to Microsoft or OIDC (break-glass). Without `ENTRA_ENABLED=1` or `OIDC_ENABLED=1` local sign-in is always on.                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| `FEATURES_OFF`          | (empty)         | Modules and features to switch off, a comma list, same value on both. Modules: `events`, `training`, `marketplace`, `kudos`, `celebrations`, `polls`, `duty-plans`, `kpis`; features: `read-confirmations`, `training-reports`, `search-logging` (`training` implies `training-reports`). An off module leaves the navigation, the dashboard, search and the digest, and the cms answers its routes with 404; its data stays. An unknown value refuses the start. A change needs a restart ([details](./docs/data-protection.md#6-modul--und-funktionsschalter)). |
+| File                                                   | Read by                                              |
+| ------------------------------------------------------ | ---------------------------------------------------- |
+| [infra/.env.example](./infra/.env.example)             | Docker Compose                                       |
+| [apps/cms/.env.example](./apps/cms/.env.example)       | the cms in development                               |
+| [apps/web/.env.example](./apps/web/.env.example)       | the web in development                               |
+| [infra/deploy.env.example](./infra/deploy.env.example) | `deploy.sh` and the backup script, for host settings |
 
-### cms (`apps/cms/.env`)
+The installation steps that use these keys: [docs/INSTALL.md](./docs/INSTALL.md).
 
-| Variable                                                                                                       | Default                                                     | Meaning                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| -------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `APP_KEYS`, `API_TOKEN_SALT`, `ADMIN_JWT_SECRET`, `TRANSFER_TOKEN_SALT`, `ENCRYPTION_KEY`                      | (none)                                                      | Strapi secrets, `openssl rand -base64 32` each (`APP_KEYS`: two, comma-separated).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| `JWT_SECRET`                                                                                                   | (none)                                                      | Signs the users' Strapi JWTs (7 days for local sign-ins, `ENTRA_SESSION_TTL` for Microsoft). Rotating it signs everyone out once. An instance upgraded from a release before 2026-09-24 must rotate it once ([runbook](./docs/DEPLOYMENT.md#upgrading-from-a-release-before-2026-09-24)); `infra/deploy.sh` enforces it. A rollback of the cms to a release before batch 13 must rotate it as well, so that no JWT a password change revoked works again ([batch 13 rollback](./docs/DEPLOYMENT.md#deploying-batch-13-2026-10-12)); the rollback commands `infra/deploy.sh` prints say so. So must every restore of a database dump or of `infra/.env`, before the cms starts ([restore](./docs/DEPLOYMENT.md#restoring-a-database-dump)).                                     |
-| `HOST`, `PORT`                                                                                                 | `0.0.0.0`, `1337`                                           | Listen address and port. `HOST=127.0.0.1` keeps a dev cms off the network.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| `MFA_REQUIRED_ROLES`                                                                                           | `admin_role,editor`                                         | The roles whose password sign-ins need a second factor (TOTP), a comma list of role types. Unset or empty means the default; `none` means nobody (tests only); an unknown role name refuses the boot. Single sign-on users get their second factor from their identity provider.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
-| `PUBLIC_URL`                                                                                                   | `http://localhost:1337`                                     | Public URL of the cms (admin panel, upload URLs, CSP). Compose: `CMS_PUBLIC_URL`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
-| `CORS_ORIGIN`                                                                                                  | `http://localhost:3000`                                     | Browser origins that may call the cms API, comma-separated. Compose: `WEB_PUBLIC_URL`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| `WEB_INTERNAL_URL`                                                                                             | (unset; example `http://localhost:3000`)                    | Where the cms sends live-event pings. Unset: no pings. Compose: `http://sinnlos-web:3000`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| `DATABASE_CLIENT`                                                                                              | `postgres` (example: `sqlite`)                              | `sqlite` or `postgres`. Compose always uses `postgres`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| `DATABASE_FILENAME`                                                                                            | `.tmp/data.db`                                              | SQLite file, relative to `apps/cms` or absolute. Releases before batch 8 placed an absolute value under `apps/cms`; move such a file before upgrading ([note](./docs/DEPLOYMENT.md#upgrading-to-the-cms-bootstrap-split-batch-8-lane-3b)).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| `DATABASE_HOST`, `DATABASE_PORT`, `DATABASE_NAME`, `DATABASE_USERNAME`, `DATABASE_PASSWORD`, `DATABASE_SCHEMA` | `localhost`, `5432`, `sinnlos`, `sinnlos`, (none), `public` | Postgres connection. Compose sets host `sinnlos-db` and port 5432, and passes `DATABASE_NAME`, `DATABASE_USERNAME` and `DATABASE_PASSWORD` from `infra/.env`, where they also create the database.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| `DATABASE_URL`                                                                                                 | (unset)                                                     | One Postgres connection URL; its values win over the keys above. An `options` parameter is refused unless it sets `-c TimeZone=UTC` itself (the cms pins every session to UTC).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
-| `DATABASE_POOL_MIN`, `DATABASE_POOL_MAX`, `DATABASE_CONNECTION_TIMEOUT`                                        | `2`, `10`, `60000`                                          | Connection pool bounds, and how long (ms) a query waits for a free connection.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| `DATABASE_SSL`, `DATABASE_SSL_KEY`, `DATABASE_SSL_CERT`, `DATABASE_SSL_CA`, `DATABASE_SSL_REJECT_UNAUTHORIZED` | `false`, …, `true`                                          | TLS to Postgres (on only with the exact value `true`); key, certificate and CA take the PEM text. `DATABASE_SSL_CAPATH` and `DATABASE_SSL_CIPHER` are read too but ignored by the Postgres driver.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| `DATABASE_FORCE_MIGRATION`                                                                                     | `false`                                                     | Destructive: `true` lets the next boot drop columns, tables and indexes that removed attributes left behind. Only for a deliberate cleanup after a backup; compose does not pass it.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
-| `TZ`                                                                                                           | (unset)                                                     | On a local Postgres, set `TZ=UTC` (the cms must run in UTC). Never set it for the containers: compose and the images do.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| `DATETIME_LEGACY_ZONE`, `DATETIME_LEGACY_UTC_UNTIL`                                                            | (empty)                                                     | Only for a database written by a cms before the datetime contract: its first boot repairs the stored times once ([runbook](./docs/DEPLOYMENT.md#upgrading-an-existing-instance-to-this-release)). Empty on a fresh install.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| `STRAPI_ADMIN_EMAIL`, `STRAPI_ADMIN_PASSWORD`                                                                  | (empty)                                                     | First Strapi super admin, created when `admin_users` is empty. Template placeholders and passwords failing the admin policy (8+ characters, upper case, lower case, digit) are refused with an error log.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
-| `STRAPI_ADMIN_FIRSTNAME`, `STRAPI_ADMIN_LASTNAME`                                                              | `Admin`, `User`                                             | Name of that admin. Compose does not pass them.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
-| `SEED_DEMO_DATA`                                                                                               | off                                                         | `1` seeds demo data into a database without departments and users ([what it writes](#standalone-mode-no-microsoft)).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
-| `CRON_ENABLED`                                                                                                 | on                                                          | The cms crons, in `APP_TIME_ZONE`: every minute the scheduled publisher, which publishes and withdraws the drafts whose Publish at or Unpublish at has come (and, with Meilisearch, the search-index sync); the nightly janitors 03:20 erasure sweep, 03:25 training evidence, 03:30 uploads, 03:35 search logs, 03:40 notifications, 03:45 ads, 03:50 audit trail, 03:52 read confirmations, 03:54 RSVPs, 03:56 poll voter links ([retention rules](./docs/data-protection.md)); 06:45 training reminders (not while `training` is in `FEATURES_OFF`); 07:30 digest mailer. Unset, empty or a true value (`1`/`true`/`yes`/`on`) runs them; anything else, such as `false` or `0`, switches them off in that process (then nothing scheduled publishes until they run again). |
-| `AUDIT_RETENTION_DAYS`                                                                                         | `365`                                                       | Days the content activity trail (`audit_events`) is kept; the 03:50 audit janitor deletes older rows. A whole number of days, at least 1; any other value deletes nothing and logs an error.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| `SEARCH_LOG_RETENTION_DAYS`                                                                                    | `90`                                                        | Days the search telemetry (`search_logs`: term, result count, time; no user link) is kept; the 03:35 search-log janitor deletes older rows. A whole number of days from 1 to 3650; any other value refuses the boot.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
-| `TRAINING_EVIDENCE_RETENTION_YEARS`                                                                            | `3`                                                         | Years a training receipt is kept after its deadline: the end of its validity, or the anonymisation of the person ([rules](./docs/data-protection.md#4-schulungsnachweise)); the newest receipt of an active person is never deleted. A whole number from 1 to 30; any other value refuses the boot.                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
-| `STRAPI_TELEMETRY_DISABLED`                                                                                    | (unset; example and compose: `true`)                        | `true` (or `1`) sends no usage telemetry to Strapi.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
-| `FLAG_NPS`, `FLAG_PROMOTE_EE`                                                                                  | `false`                                                     | Strapi admin panel survey and Enterprise Edition promotion. Compose does not pass them.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-
-### E-mail digests (cms)
-
-The digest cron is a logged no-op until `SMTP_HOST`, `SMTP_USER` and
-`SMTP_PASS` are set.
-
-| Variable                                           | Default                            | Meaning                                                                                                                                   |
-| -------------------------------------------------- | ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS` | (empty), `587`                     | Authenticated SMTP submission; use a mailbox app password. Port 465 uses implicit TLS, any other port must offer STARTTLS.                |
-| `DIGEST_FROM`                                      | (empty)                            | Sender. Required once SMTP is set: without it every run is skipped and `infra/deploy.sh` refuses to deploy (unless `DIGESTS_DISABLED=1`). |
-| `DIGEST_REPLY_TO`                                  | (empty)                            | Optional reply-to address.                                                                                                                |
-| `PUBLIC_WEB_URL`                                   | (empty; compose: `WEB_PUBLIC_URL`) | Base of the links in the digests; required once SMTP is set.                                                                              |
-| `DIGESTS_DISABLED`                                 | `0`                                | `1` (also `true`, `yes`, `on`) switches the digests off.                                                                                  |
-| `DIGEST_DEFAULT_LOCALE`                            | `en`                               | Digest language (`en` or `de`) of a user whose profile has none.                                                                          |
-
-### web (`apps/web/.env.local`)
-
-| Variable            | Default                            | Meaning                                                                                                                                 |
-| ------------------- | ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| `STRAPI_URL`        | `http://localhost:1337`            | The cms as the web server reaches it. Compose: `http://sinnlos-cms:1337`.                                                               |
-| `STRAPI_PUBLIC_URL` | `STRAPI_URL`                       | Public cms URL, the base of media URLs. Compose: `CMS_PUBLIC_URL`.                                                                      |
-| `AUTH_SECRET`       | (none)                             | Auth.js session secret, `openssl rand -base64 32`.                                                                                      |
-| `AUTH_URL`          | (example: `http://localhost:3000`) | Public URL of the web; its scheme also names the session cookie (`https` → `__Secure-authjs.session-token`). Compose: `WEB_PUBLIC_URL`. |
-| `AUTH_TRUST_HOST`   | (example and compose: `true`)      | Auth.js trusts the request host (behind the reverse proxy).                                                                             |
-| `DEFAULT_LOCALE`    | `en`                               | UI language (`en` or `de`) for a visitor who has not picked one.                                                                        |
-| `DEMO_MODE`         | off                                | `1`: fixture preview without sign-in or cms ([what it is](#standalone-mode-no-microsoft)). Never in production.                         |
-
-### Microsoft Entra ID
-
-Read only with `ENTRA_ENABLED=1`; then an invalid value stops the cms at
-boot and fails every web request.
-In `infra/.env` the `MS_*` names feed both apps; locally the web uses the
-`AUTH_MICROSOFT_ENTRA_ID_*` names.
-
-| `infra/.env` / cms      | web                                 | Default   | Meaning                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| ----------------------- | ----------------------------------- | --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ENTRA_ENABLED`         | `ENTRA_ENABLED`                     | `0`       | The only switch. Anything but `1` turns Microsoft sign-in off in both apps.                                                                                                                                                                                                                                                                                                                                                         |
-| `MS_TENANT_ID`          | `AUTH_MICROSOFT_ENTRA_ID_TENANT_ID` | (none)    | Directory (tenant) GUID.                                                                                                                                                                                                                                                                                                                                                                                                            |
-| `MS_CLIENT_ID`          | `AUTH_MICROSOFT_ENTRA_ID_ID`        | (none)    | Application (client) GUID; the cms checks the ID token's audience against it.                                                                                                                                                                                                                                                                                                                                                       |
-| `MS_CLIENT_SECRET`      | `AUTH_MICROSOFT_ENTRA_ID_SECRET`    | (none)    | Client secret, web only.                                                                                                                                                                                                                                                                                                                                                                                                            |
-| `ENTRA_EXCHANGE_SECRET` | `ENTRA_EXCHANGE_SECRET`             | (none)    | 32+ characters, the same for both apps (`openssl rand -hex 32`); authenticates the web's call to `POST /api/auth/entra/exchange`.                                                                                                                                                                                                                                                                                                   |
-| `ENTRA_SYNC_MODE`       | —                                   | `dry-run` | `on` applies Entra's roles (to the accounts Entra owns), the profile, department and manager; `dry-run` changes no existing user (it logs what `on` would do) and creates new users at most as `member`. Refusals apply in both modes.                                                                                                                                                                                              |
-| `ENTRA_DEFAULT_ROLE`    | —                                   | `member`  | Role of a new or Entra-owned tenant member with no recognised app role or group: `member`, `guest` or `deny`; such a B2B guest is refused. Neither applies to a **manual** account (one that existed before, was bound by an admin, or whose role an admin changed): it keeps its role and signs in, so block it in the Strapi admin to keep it out. With _Assignment required_ = Yes, Entra itself refuses unassigned users first. |
-| `ENTRA_GROUP_ROLES`     | —                                   | (empty)   | `<roleType>:<groupObjectId>,…`, at most 20 groups, for nested groups or tenants without Entra ID P1.                                                                                                                                                                                                                                                                                                                                |
-| `ENTRA_SYNC_DEPARTMENT` | —                                   | `0`       | `1` sets the user's department to the one department whose name equals Entra's `department` (case-insensitive); an empty value, no match or several matches clear it.                                                                                                                                                                                                                                                               |
-| `ENTRA_SYNC_MANAGER`    | `ENTRA_SYNC_MANAGER`                | `0`       | `1` syncs the manager from Graph (`User.Read.All` with admin consent).                                                                                                                                                                                                                                                                                                                                                              |
-| `ENTRA_SESSION_TTL`     | —                                   | `12h`     | Lifetime of a Microsoft sign-in's session, `<n>m`, `<n>h` or `<n>d`, at most `7d`.                                                                                                                                                                                                                                                                                                                                                  |
-
-### OIDC (Keycloak, authentik, Zitadel)
-
-Read only with `OIDC_ENABLED=1`; then an invalid value stops the cms at
-boot and fails every web request (and `ENTRA_ENABLED=1` next to it is
-refused). The same names in `infra/.env` and both apps.
-
-| Variable                | Read by  | Default                | Meaning                                                                                                                                   |
-| ----------------------- | -------- | ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| `OIDC_ENABLED`          | cms, web | `0`                    | The only switch. Anything but `1` turns OIDC sign-in off.                                                                                 |
-| `OIDC_ISSUER`           | cms, web | (none)                 | The issuer exactly as the provider's discovery document writes it (authentik: with the trailing slash), `https:`, at most 255 characters. |
-| `OIDC_CLIENT_ID`        | cms, web | (none)                 | Client id; the cms checks the ID token's audience against it.                                                                             |
-| `OIDC_CLIENT_SECRET`    | web      | (none)                 | Client secret, web only.                                                                                                                  |
-| `OIDC_EXCHANGE_SECRET`  | cms, web | (none)                 | 32+ characters, the same for both apps; authenticates the web's call to `POST /api/auth/oidc/exchange`.                                   |
-| `OIDC_SCOPE`            | web      | `openid profile email` | Must contain `openid`.                                                                                                                    |
-| `OIDC_DISPLAY_NAME`     | web      | `Single Sign-On`       | Sign-in button label, at most 40 characters.                                                                                              |
-| `OIDC_ROLES_CLAIM`      | cms      | `roles`                | Dotted claim path of the `Intranet.*` roles (array, or object keys).                                                                      |
-| `OIDC_DEPARTMENT_CLAIM` | cms      | (empty)                | Optional dotted claim path of the department name; set, the department is synced and read-only at `/manage/users`.                        |
-| `OIDC_ZITADEL_ORG_ID`   | cms, web | (empty)                | Zitadel: the organisation whose users may sign in (digits); required with a `urn:zitadel:` roles claim.                                   |
-| `OIDC_DEFAULT_ROLE`     | cms      | `deny`                 | Role of a user without a recognised role: `deny`, `member` or `guest` (anything but `deny` admits every user of the provider).            |
-| `OIDC_SESSION_TTL`      | cms      | `12h`                  | Lifetime of an OIDC sign-in's session, `<n>m`, `<n>h` or `<n>d`, at most `7d`.                                                            |
-| `OIDC_ALLOW_HTTP`       | cms, web | `0`                    | `1` allows an `http:` issuer: development and staging only.                                                                               |
-
-### Docker Compose only (`infra/.env`)
-
-| Variable                                                  | Meaning                                                                                                                                                                                                                                                                                                                                             |
-| --------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `DOMAIN`                                                  | The bare public host name. The bundled Caddy uses it as its site address (unset: `localhost` with Caddy's internal CA; `http://localhost`: plain HTTP); the Traefik overlay requires it for every router's host rule, and `infra/deploy.sh` refuses a value that is not a bare host name, is a placeholder, or is not the host of both public URLs. |
-| `WEB_PUBLIC_URL`, `CMS_PUBLIC_URL`                        | Public URLs of the web and the cms (`AUTH_URL`, `CORS_ORIGIN`, `PUBLIC_URL`, `STRAPI_PUBLIC_URL`, and the default of `PUBLIC_WEB_URL`).                                                                                                                                                                                                             |
-| `DATABASE_NAME`, `DATABASE_USERNAME`, `DATABASE_PASSWORD` | The Postgres database, user and password (defaults `sinnlos`, `sinnlos`, required). The password is fixed on the first `up`; a later change also needs `ALTER ROLE`.                                                                                                                                                                                |
-
-Compose sets the rest itself: `NODE_ENV=production`, `TZ=UTC`, the
-internal URLs over the `sinnlos-db`, `sinnlos-cms` and `sinnlos-web`
-aliases, `DATABASE_CLIENT=postgres` and `AUTH_TRUST_HOST=true`. It does not
-pass `DATABASE_FORCE_MIGRATION`, `DATABASE_URL`, the pool and TLS settings,
-`STRAPI_ADMIN_FIRSTNAME`/`LASTNAME`, the `FLAG_*` switches or `DEMO_MODE`.
-The infra scripts take their own variables (`SMOKE_URL`, `COMPOSE_PROJECT`,
-`SINNLOS_BACKUP_DIR`, …), listed in each script's header.
+The operator links `PRIVACY_URL`, `IMPRINT_URL` and, optionally, `WHISTLEBLOWING_URL` are reachable before sign-in. The whistleblower entry is only a link to your reporting channel; sinnlos has no channel of its own.
 
 ## Deployment
 
-A new installation: **[docs/INSTALL.md](./docs/INSTALL.md)**. All
-deployment paths, upgrades and operations are in
-**[docs/DEPLOYMENT.md](./docs/DEPLOYMENT.md)**:
+- **A new installation, with the bundled Caddy or behind a host Traefik:** [docs/INSTALL.md](./docs/INSTALL.md). With Traefik, the router names are fixed (`sinnlos-*`), so there is one Sinnlos stack per Traefik; a staging copy needs its own host or its own Traefik.
+- **Upgrading** an existing instance, plus the release notes and rollback: [docs/UPGRADE.md](./docs/UPGRADE.md).
+- **Running it** (monitoring, restore, backups, post-deployment verification, hardening): [docs/OPERATIONS.md](./docs/OPERATIONS.md).
+- **Runbooks of earlier releases, and the Azure notes:** [docs/archive/deployment-history.md](./docs/archive/deployment-history.md).
 
-- **One box with the bundled Caddy** (any VPS or an Azure VM):
-  [§3.6 A](./docs/DEPLOYMENT.md#a-bundled-caddy-standalone-vps), and
-  [§4](./docs/DEPLOYMENT.md#4-azure-vm-deployment) for Azure.
-- **Behind a host Traefik**, as the live production host runs it:
-  `docker-compose.traefik.yml` on top of the base file
-  ([§3.6 B](./docs/DEPLOYMENT.md#b-shared-traefik-live-production-layout)).
-  The router names are fixed (`sinnlos-*`), so it is one Sinnlos stack per
-  Traefik; a staging copy needs its own host or Traefik.
-- **Azure Container Apps**:
-  [§5](./docs/DEPLOYMENT.md#5-azure-container-apps-advanced).
-- **Upgrading** an existing instance: the notes in
-  [§3.8 Updates](./docs/DEPLOYMENT.md#38-updates), newest first, and the
-  [production-safe update procedure](./docs/DEPLOYMENT.md#74-update-procedure-production-safe).
-- **Backups and restore:**
-  [Backup & Restore](./docs/DEPLOYMENT.md#backup--restore).
-- **After a deploy:**
-  [post-deployment verification](./docs/DEPLOYMENT.md#post-deployment-verification).
+Production deploys run **`infra/deploy.sh`** in the checkout, as the user that owns the checkout (from a root shell: `sudo -u <owner> -H infra/deploy.sh`). In order, it:
 
-Production deploys run **`infra/deploy.sh`** in the checkout, as the user
-that owns the checkout (from a root shell: `sudo -u <owner> -H
-infra/deploy.sh`). It checks `infra/.env` against the env contract
-(`--check` runs only that), takes a lock, requires a clean checkout and
-reports the commit's CI result (the runs of this repository's CI;
-Dependabot's own update jobs on the commit are left out;
-`--require-green-ci` refuses a red one), takes a pre-deploy backup, builds
-and restarts (behind the bundled Caddy, or a host Traefik with
-`DEPLOY_EDGE=traefik`; host settings in `infra/deploy.env`), smoke-checks
-the site, runs `infra/live-smoke.sh`, and only
-then tags the images with the commit and records them as the last known
-good; a failure prints the rollback commands, including the mandatory
-`JWT_SECRET` rotation when the target cms image predates batch 13. `--dry-run` prints the plan and changes nothing. The cms trusts
-the `X-Forwarded-For` the edge sets, so the edge must overwrite that header
-from clients ([§3.9 Production hardening](./docs/DEPLOYMENT.md#39-production-hardening)).
+1. checks `infra/.env` against the env contract (`--check` runs only that);
+2. takes a lock and requires a clean checkout;
+3. reports the commit's CI result: the runs of this repository's CI, leaving out Dependabot's own update jobs on the commit. `--require-green-ci` refuses a red one;
+4. takes a pre-deploy backup;
+5. builds and restarts, behind the bundled Caddy or a host Traefik (`DEPLOY_EDGE=traefik`; host settings in `infra/deploy.env`);
+6. smoke-checks the site and runs `infra/live-smoke.sh`;
+7. only then tags the images with the commit and records them as the last known good.
+
+A failure prints the rollback commands for a verified target ([docs/UPGRADE.md, Rollback](./docs/UPGRADE.md#rollback)). `--dry-run` prints the plan and changes nothing.
+
+The cms trusts the `X-Forwarded-For` header the edge sets, so the edge must overwrite that header from clients ([Production hardening](./docs/OPERATIONS.md#production-hardening)).
+
+## Accessibility
+
+Each release checks the main screens for WCAG 2.1 A and AA with axe in the browser tests ([e2e/a11y.spec.ts](./e2e/a11y.spec.ts)), in light and dark mode. The screens are: sign-in and the second factor, the dashboard, search, an editor form, a lesson with its quiz, kudos and polls. A manual keyboard and zoom pass covers the same paths.
+
+This is a test, not a conformance claim. Please report a barrier as an issue.
 
 ## Scripts
 
@@ -928,8 +507,8 @@ relevant web-only changes start its private DB without enabling the other
 database suites. See [E2E scope and artifacts](./docs/e2e-tests.md#ci-execution-and-scope).
 Actions are pinned by commit
 SHA and the base image by digest (`infra/build-pins.test.ts`); Dependabot
-opens weekly grouped updates. `docs/DEPLOYMENT.md` and
-`docs/architecture.md` are hand-formatted and excluded from prettier.
+opens weekly grouped updates. `docs/architecture.md`, `docs/architecture/`
+and `docs/archive/` are hand-formatted and excluded from prettier.
 
 **Tests.** Unit tests live next to their code as `*.test.ts` and run with
 vitest from the root (`vitest.config.ts`, which resolves `@sinnlos/domain`
@@ -948,169 +527,3 @@ Before a `@strapi/*` upgrade run
 deliberate grant change rewrite the permission snapshots with
 `pnpm vitest run apps/cms/src/bootstrap.permissions.test.ts apps/cms/src/prod-perm-diff.test.ts -u`
 and update the tables in [Roles and permissions](#roles-and-permissions).
-
-## Verification checklist
-
-Setup:
-
-- [ ] `pnpm install` completes without an "Ignored build scripts" warning,
-      and `pnpm build:domain` writes `packages/domain/dist/cjs` and
-      `dist/esm`
-- [ ] Strapi admin loads at `:1337/admin`; the first admin exists
-- [ ] Six intranet roles under _Settings → Users & Permissions → Roles_, next
-      to the built-in _Authenticated_ and _Public_ (eight in total)
-- [ ] With `SEED_DEMO_DATA=1` on a fresh database, the seeded
-      announcements, events, wiki pages, polls and documents show in the
-      Content Manager's default list as _Published_, and editing and
-      publishing one keeps its relations (author, department, space, …)
-- [ ] The dashboard at `:3000` shows stat cards and empty states
-- [ ] Local sign-in returns to the dashboard with your display name in the
-      topbar; `/api/auth/session` returns only `user`
-      (name/email/image/id), `provider` and `expires`, no Strapi JWT, role
-      or department
-- [ ] Without `ENTRA_ENABLED=1`: no Microsoft button, the cms logs
-      `[entra] disabled`, and `POST /api/auth/entra/exchange` answers 404
-- [ ] With `ENTRA_ENABLED=1` (a test tenant): the Microsoft sign-in returns
-      to the dashboard, the cms logs one `[entra] user=… result=created`
-      line, the profile shows name, job title, phone and office as
-      read-only, and sign-out goes through Microsoft back to `/sign-in`
-- [ ] `docker compose up -d` brings the full stack up behind the reverse
-      proxy (Caddy locally, Traefik on the production host)
-
-Roles and access:
-
-- [ ] Editing a wiki page as a `member` who is not its author answers 403
-      (only the author, the head of the page's department, the lead of its
-      team, `admin_role` and `editor` may edit it)
-- [ ] Through the API, a team lead can change their team's description,
-      and a payload with `members` (or any other field outside the write
-      allowlist) answers 400 (probe in
-      [DEPLOYMENT.md §6.4](./docs/DEPLOYMENT.md#64-role-enforcement-optional));
-      a department head can change their own department's description; a
-      department member sees the announcements and wiki spaces targeted at
-      their department
-- [ ] An admin and an editor see the _Manage_ link and `/manage` with the
-      announcement, event, poll, quick-link, document and wiki areas (an
-      admin also the reports and the _Organisation_ section: departments,
-      teams and users); a department head with a department sees
-      _Manage_ with announcements, events and documents of their department
-      only; an editor sees _New poll_; a guest sees no RSVP controls and no
-      _New ad_ button
-- [ ] A guest's navigation has no Announcements, Departments, Teams, Kudos,
-      Marketplace or Training; opening one of them by URL shows _Not
-      available for your account_, and neither the web nor the cms logs a
-      403 for it
-- [ ] An editor sees _Moderation_ / _Delete ad_ on someone else's ad and no
-      _Edit_ link; `/marketplace/<id>/edit` sends them back to the ad
-- [ ] Poll targeting: a poll restricted to one department is listed for
-      its members only; an editor outside it sees _Only for: …_, the
-      results and disabled buttons
-- [ ] Poll guest access: a guest sees no poll until an admin or editor
-      turns on _Visible to guests_ (then results, disabled buttons and
-      _Guests can't vote on this poll._); with _Guests can vote_ on as well
-      the guest can vote
-- [ ] ⌘K as a guest finds a colleague by name but not by e-mail; while a new
-      term loads, the previous term's results are not shown (nor the old
-      results of the same term typed again)
-- [ ] A user blocked in the Strapi admin loses `/uploads` files within a
-      minute (401) and is sent to sign-in on the next page load
-- [ ] Changing the password on `/profile` in browser A keeps A signed in;
-      the same account in browser B lands on `/sign-in?expired=1` with its
-      next click; a new password set for that account in the Strapi admin
-      (_Content Manager → User_, which shows no token version field) sends
-      A there too
-- [ ] `/events` shows each upcoming RSVP event's counts, the names of the
-      "yes" answers and your own answer (never who answered maybe or no);
-      as a member, `GET /api/event-rsvps` returns only your own answers,
-      and a `filters[user]…` query or a `Strapi-Response-Format` header
-      answers 400
-
-Live updates, notifications and dates:
-
-- [ ] A comment posted in session A appears in session B in under two
-      seconds without a reload (SSE), or run `infra/live-smoke.sh` (it
-      also requires the stream to report `"emitFresh":true`, i.e. the cms
-      keepalive reaches the web); on `/announcements` the network panel
-      shows one `POST /live/subscribe` with the page's full channel set for
-      all cards, and a comment on one card refreshes that card only
-- [ ] With the cms stopped, the header shows _Live updates delayed_
-      within about 75 s, and the note goes away once the cms is back
-- [ ] Publishing an announcement logs `[notifications] created <n>
-notification(s) for announcement …` and rings the bell of its
-      audience only (no guest, no blocked user)
-- [ ] Digest opt-ins save on `/profile`; without SMTP env the 07:30 cron
-      logs `[digest] skipped` (dark mode); a guest sees no digest options
-- [ ] On Postgres the cms log shows `[datetime] process time zone UTC,
-APP_TIME_ZONE …` and no column is left as `timestamp without time zone`
-      (`infra/live-smoke.sh` checks both); an all-day event's `.ics`
-      download is an all-day entry
-- [ ] The web log shows `[datetime] web process time zone UTC, APP_TIME_ZONE …`;
-      on `/events` an event that is running today is under _Upcoming_ and a
-      multi-day event shows its end day; relative times say "yesterday"
-      for something from late last night
-- [ ] The `.ics` link on `/events` names the event's documentId, the file's
-      `UID` is `event-<documentId>@sinnlos`, and `/events/abc/ics` answers 404
-
-Pages and UI:
-
-- [ ] `/training` lists published courses; on every course a lesson's
-      completion button stays locked until every quiz answer is correct
-      (per answer on `confirm`, collected on `quizGate`, overall-only on `exam`).
-      The browser receives no solution keys; feedback creates no receipt and
-      completion is independently graded by the cms. Completed exam review
-      stays overall-only, and malformed quiz content cannot complete;
-      `/manage/training/report` shows the completion report (admin)
-- [ ] Admins/editors author courses and nested lessons at `/manage/training`;
-      quiz edits are detected, image uploads survive save conflicts, and previous
-      completion receipts remain valid. Department heads/leads edit their permitted
-      descriptions from the detail pages; admins also edit organisation images.
-      `/manage/activity` shows the admin-only filtered activity trail
-- [ ] After a few ⌘K searches, `/manage/analytics` shows the search section
-      (totals, zero-result rate, top terms)
-- [ ] `/people/<id>` of a manager shows _Direct reports_
-- [ ] `/manage/acknowledgements` shows a percentage per mandatory
-      announcement (not "–") while the directory is complete, also with
-      more than 2000 confirmations in total
-- [ ] The kudos picker lists neither you nor blocked accounts; `/people`
-      renders 48 cards and a _+ N people_ button when more match; the bell
-      badge counts every unread notification (99+ above 99), not only the
-      20 in the panel
-- [ ] A lesson with a YouTube video plays (no player "Error 153"); on a
-      real domain, since localhost can hide the Referer effect
-- [ ] `/people/abc`, `/marketplace/abc` and `/marketplace/2147483648`
-      show the _Page not found_ card (like every `notFound()` page here
-      with HTTP status 200 and `noindex`: `loading.tsx` streams the shell
-      first) and send no request to the cms; with the cms stopped,
-      `/profile` shows the error banner and no editable profile form;
-      stopping the cms after a page loaded, a reaction click or _Mark all
-      read_ shows an inline error while the page stays
-- [ ] With the cms stopped after a page loaded, the bell keeps its badge
-      and list and the open panel says the intranet cannot be reached; a
-      page loaded during the stop shows only that note
-- [ ] At 360 px every section is reachable: five tabs plus _More_, whose
-      sheet opens with Enter, keeps Tab inside, closes with Escape and lists
-      _Admin_ for admins only
-- [ ] With network throttling, a clicked nav link shows its pending dot
-      until the route's skeleton (with the progress bar) appears
-- [ ] The first Tab on an app page shows _Skip to content_; the theme
-      toggle switches on the first click also for a user whose system theme
-      is dark
-- [ ] The language menu, the marketplace category and duration selects,
-      the _/people_ department filter and the notification bell open with
-      Enter, move with the arrow keys, jump by typing a letter, close with
-      Escape and give focus back to their button; picking _Deutsch_
-      with the keyboard (Enter, ArrowUp, Enter) leaves the focus on the
-      language button once the page is German; ⌘K logs no "DialogTitle"
-      error in the browser console
-- [ ] _Delete ad_ and _Give kudos_ keep Tab inside the dialog, close with
-      Escape or a click beside it and give focus back to their button;
-      confirming a delete lands on `/marketplace` without a _Page not found_
-      flash
-- [ ] An announcement renders its Markdown (bold, lists, links, images);
-      `<script>` or an `onerror` attribute in a body shows as text, a
-      `javascript:` link as plain text; the dashboard's _Latest news_
-      excerpts show no `**`, `#` or link targets; footnotes in two
-      announcements each jump to their own card's notes
-- [ ] With `DEMO_MODE=1 pnpm web:dev` (no cms running), the dashboard
-      renders the fixtures signed in as Ada Lovelace, and the other pages
-      answer from the fixtures without a `[demo] no fixture` warning

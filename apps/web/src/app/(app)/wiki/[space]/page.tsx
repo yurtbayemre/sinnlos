@@ -7,6 +7,7 @@ import { areaAccess } from "@/lib/manage/access";
 import { areaItemPath } from "@/lib/manage/areas";
 import { WIKI_DRAFTS_PATH, wikiNewPagePath } from "@/lib/manage/wiki-paths";
 import { capabilitiesFor } from "@/lib/roles";
+import { tryFetch } from "@/lib/safe-fetch";
 import { api } from "@/lib/strapi";
 import { getViewer } from "@/lib/viewer";
 import type { WikiSpace } from "@/lib/types";
@@ -17,6 +18,15 @@ import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/ca
 
 interface Props {
   params: Promise<{ space: string }>;
+}
+
+export async function generateMetadata({ params }: Props) {
+  const { space } = await params;
+  const t = await getTranslations("wiki");
+  // Same GET as the page's, sent once per render (Next's fetch dedupe).
+  const { data } = await tryFetch(() => api.wiki.space(space), "wiki-space-meta");
+  const entry = data?.data?.[0] as WikiSpace | undefined;
+  return { title: entry?.name ?? t("title") };
 }
 
 export default async function WikiSpacePage({ params }: Props) {

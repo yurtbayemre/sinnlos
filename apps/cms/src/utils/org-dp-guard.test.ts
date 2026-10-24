@@ -129,7 +129,7 @@ describe("assertNoOrgDrafts", () => {
     const result = assertNoOrgDrafts(strapi);
     await expect(result).rejects.toThrow(/^\[org-dp\] departments still holds 3 draft row\(s\)/);
     await expect(result).rejects.toThrow("infra/migrations/org-dp/migrate.sql");
-    await expect(result).rejects.toThrow('"One-time: org draft/publish off"');
+    await expect(result).rejects.toThrow("see infra/migrations/org-dp/README.md.");
   });
 
   it("rejects when teams holds draft rows (SQLite count as number)", async () => {

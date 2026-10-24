@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { CheckCircle2 } from "lucide-react";
@@ -30,6 +30,12 @@ export function refreshesAfterFailure(code: string): boolean {
  * props. A quiz lesson's completion carries the passing answers, which
  * the cms checks (issue #70); its refusal ("quizFailed") says so and hands
  * the quiz back to the parent.
+ *
+ * Focus (S6): the success replaces the focused button, so once this user's
+ * completion is confirmed by the refreshed props (`completedAtLabel`, which
+ * is null during a renewal), focus moves to the completed text. It never
+ * moves when an already-completed lesson is opened. An authoritative
+ * completion also retires an earlier refusal (completed elsewhere).
  */
 export function CompleteLessonButton({
   lessonDocumentId,
@@ -58,8 +64,17 @@ export function CompleteLessonButton({
   const [justCompleted, setJustCompleted] = useState(false);
   const [error, setError] = useState<CommonCode | TrainingActionError | null>(null);
   const [isPending, startTransition] = useTransition();
+  const doneRef = useRef<HTMLSpanElement>(null);
+  const focused = useRef(false);
 
   const completed = completedAtLabel !== null || justCompleted;
+  const shownError = completedAtLabel === null ? error : null;
+
+  useEffect(() => {
+    if (focused.current || !justCompleted || completedAtLabel === null) return;
+    focused.current = true;
+    doneRef.current?.focus();
+  }, [justCompleted, completedAtLabel]);
 
   const handleComplete = () => {
     if (completed || isPending || disabled) return;
@@ -81,7 +96,11 @@ export function CompleteLessonButton({
   return (
     <div className="flex flex-wrap items-center gap-3">
       {completed ? (
-        <span className="inline-flex items-center gap-1.5 text-sm font-medium text-emerald-700 dark:text-emerald-400">
+        <span
+          ref={doneRef}
+          tabIndex={-1}
+          className="inline-flex items-center gap-1.5 text-sm font-medium text-emerald-700 dark:text-emerald-400"
+        >
           <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
           {completedAtLabel ? t("completedAt", { date: completedAtLabel }) : t("completedNow")}
         </span>
@@ -90,21 +109,21 @@ export function CompleteLessonButton({
           {isPending ? t("completing") : t("completeButton")}
         </Button>
       )}
-      {error === TRAINING_VERSION_CHANGED && (
+      {shownError === TRAINING_VERSION_CHANGED && (
         <Button type="button" variant="outline" size="sm" onClick={() => router.refresh()}>
           {t("reload")}
         </Button>
       )}
-      {error && (
+      {shownError && (
         <span role="alert" className="text-sm text-destructive">
-          {error === "quizFailed"
+          {shownError === "quizFailed"
             ? t("quizNotPassed")
-            : error === QUIZ_CONTENT_INVALID
+            : shownError === QUIZ_CONTENT_INVALID
               ? t("quizContentInvalid")
-              : error === TRAINING_VERSION_CHANGED
+              : shownError === TRAINING_VERSION_CHANGED
                 ? t("versionChanged")
-                : isSharedErrorCode(error)
-                  ? tErrors(error)
+                : isSharedErrorCode(shownError)
+                  ? tErrors(shownError)
                   : t("completeFailed")}
         </span>
       )}

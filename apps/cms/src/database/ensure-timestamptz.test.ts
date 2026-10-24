@@ -157,7 +157,7 @@ describe("prepareDatetimeContract (register)", () => {
     );
     const pending = fakeStrapi({ repairRecorded: false });
     await expect(prepareDatetimeContract(pending.strapi, BERLIN)).rejects.toThrow(
-      /one-time datetime repair/,
+      /one-time datetime migration/,
     );
   });
 
@@ -230,7 +230,7 @@ describe("convertNaiveColumns (afterSync)", () => {
       repairRecorded: false,
       tablesWithData: new Set(["events"]),
     });
-    await expect(convertNaiveColumns(strapi, UTC)).rejects.toThrow(/one-time datetime repair/);
+    await expect(convertNaiveColumns(strapi, UTC)).rejects.toThrow(/one-time datetime migration/);
     expect(transactions).toEqual([]);
   });
 

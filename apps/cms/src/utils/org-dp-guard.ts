@@ -1,6 +1,6 @@
 /**
  * Boot guard for the department/team draft & publish switch (decision 05,
- * docs/DEPLOYMENT.md "One-time: org draft/publish off").
+ * the runbook infra/migrations/org-dp/README.md).
  *
  * department and team run with draftAndPublish OFF: every org unit is ONE
  * row with a stable id (invariant I-ORG, docs/architecture.md §5.35), so the
@@ -54,7 +54,7 @@ export const ORG_DP_UIDS = ["api::department.department", "api::team.team"] as c
 /** The column Strapi's own disable hook deletes by. */
 const PUBLISHED_AT_COLUMN = "published_at";
 
-export const ORG_DP_RUNBOOK = 'docs/DEPLOYMENT.md "One-time: org draft/publish off"';
+export const ORG_DP_RUNBOOK = "infra/migrations/org-dp/README.md";
 
 interface OrgModel {
   collectionName?: string;

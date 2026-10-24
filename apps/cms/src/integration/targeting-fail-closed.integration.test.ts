@@ -831,7 +831,7 @@ describe.each(testEngines())("targeting fails closed on %s", (engine) => {
         expect(legacyDocuments.has(legacy.documentId)).toBe(true);
         expect(legacyDocuments.has(marked.documentId)).toBe(false);
         expect(Number(preflightSummary[0].documents)).toBe(legacyDocuments.size);
-        // on_rollback (the saved list of a rollback, DEPLOYMENT.md R2): hidden
+        // on_rollback (the saved list of a rollback, docs/archive/deployment-history.md, batch 15, R2): hidden
         // for the window, restored after the roll-forward.
         expect(
           preflightRows

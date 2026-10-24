@@ -123,7 +123,7 @@ jobs:
         run: pnpm audit --prod --audit-level=high
         continue-on-error: true
 
-  # Datetime contract (docs/DEPLOYMENT.md): the whole suite once per process
+  # Datetime contract (docs/OPERATIONS.md): the whole suite once per process
   # time zone, with the Postgres 16 integration suites (*.pg.test.ts: the
   # timestamptz guard, the one-time repair through Strapi's own migration
   # runner, the read-only report) switched on by SINNLOS_TEST_PG_URL. Gate
@@ -318,7 +318,7 @@ jobs:
 
       # infra/.env.example leaves the required secrets empty (compose
       # refuses to render without them), so dummy values fill them in.
-      - name: Compose files render (Caddy mode, Traefik mode, rollback overrides)
+      - name: Compose files render (Caddy mode, Traefik mode, search profile)
         run: |
           secrets="${RUNNER_TEMP}/compose-ci.env"
           cat > "${secrets}" <<'EOF'
@@ -361,16 +361,65 @@ jobs:
             exit 1
           fi
           grep -q 'required variable DOMAIN is missing a value' "${RUNNER_TEMP}/domain.err"
-          echo "Traefik mode with both rollback overrides"
-          DATETIME_LEGACY_ZONE=Europe/Berlin compose -f infra/docker-compose.traefik.yml \
-            -f infra/docker-compose.cms-legacy-tz.yml \
-            -f infra/docker-compose.web-legacy-tz.yml config -q
           echo "Optional search: meili only with its profile, on the project network only"
           compose -f infra/docker-compose.traefik.yml config --format json | jq -e '.services.meili == null'
           COMPOSE_PROFILES=search compose -f infra/docker-compose.traefik.yml config --format json | jq -e '
             .services.meili.networks == {"default": {"aliases": ["sinnlos-meili"]}}
             and (.services.meili.ports // []) == []
             and (.services.meili.labels // {}) == {}'
+
+      # v0.29: the site gate (SITE_ALLOW_CIDRS). The Caddyfile validates open
+      # and closed with the caddy service's own command (run → validate),
+      # then serves both states in front of two busybox upstreams named web
+      # and cms: open, a normal answer with the security headers; closed, a
+      # 503 with them, on a web and a cms path. The Traefik override puts the
+      # gate on all five routers, after the headers.
+      - name: Site gate (Caddy open and closed, Traefik routers)
+        run: |
+          secrets="${RUNNER_TEMP}/compose-ci.env"
+          compose() {
+            docker compose --env-file infra/.env.example --env-file "${secrets}" \
+              -f infra/docker-compose.yml "$@"
+          }
+          cmd="$(compose config --format json | jq -r '.services.caddy.command[2]' | sed -e 's/\$\$/$/g')"
+          docker network create gate-ci
+          for upstream in web:3000 cms:1337; do
+            docker run -d --rm --name "gate-${upstream%%:*}" --network gate-ci \
+              --network-alias "${upstream%%:*}" busybox:1.37 httpd -f -p "${upstream##*:}" -h /etc
+          done
+          for cidrs in "" "203.0.113.7/32,2001:db8::/32"; do
+            echo "Caddyfile with SITE_ALLOW_CIDRS='${cidrs}'"
+            docker run --rm -e DOMAIN=intranet.example.com -e "SITE_ALLOW_CIDRS=${cidrs}" \
+              -v "${PWD}/infra/Caddyfile:/etc/caddy/Caddyfile:ro" caddy:2-alpine \
+              sh -c "${cmd/exec caddy run /exec caddy validate }"
+            docker run -d --rm --name gate-caddy --network gate-ci -p 18080:80 \
+              -e DOMAIN=http://localhost -e "SITE_ALLOW_CIDRS=${cidrs}" \
+              -v "${PWD}/infra/Caddyfile:/etc/caddy/Caddyfile:ro" caddy:2-alpine sh -c "${cmd}"
+            for _ in $(seq 20); do curl -s -o /dev/null http://127.0.0.1:18080/ && break; sleep 0.5; done
+            # Open: busybox's own answers (a file, a missing path). Closed: 503.
+            for probe in /hostname:200 /api/x:404; do
+              path="${probe%%:*}"
+              want="${probe##*:}"
+              [[ -z "${cidrs}" ]] || want=503
+              head="$(curl -s -D - -o /dev/null -H 'Host: localhost' -H 'X-Forwarded-For: 203.0.113.7' \
+                "http://127.0.0.1:18080${path}")"
+              printf '%s %s\n' "${path}" "$(head -n 1 <<<"${head}")"
+              grep -q "^HTTP/1.1 ${want} " <<<"${head}"
+              grep -qi '^x-content-type-options: nosniff' <<<"${head}"
+              grep -qi '^x-frame-options: deny' <<<"${head}"
+            done
+            docker stop gate-caddy
+          done
+          docker stop gate-web gate-cms
+          docker network rm gate-ci
+          echo "Traefik: the gate on every router, with the listed range"
+          SITE_ALLOW_CIDRS=203.0.113.7/32 compose -f infra/docker-compose.traefik.yml \
+            config --format json | jq -e '
+            [.services[] | (.labels // {}) | to_entries[]] as $labels
+            | ([$labels[] | select(.key | test("^traefik\\.http\\.routers\\.[^.]+\\.middlewares$"))
+                | .value | split(",") | .[1] | endswith("site-allow")] | length == 5 and all)
+              and ([$labels[] | select(.key | test("site-allow\\.ipallowlist\\.sourcerange$")) | .value]
+                | length == 2 and all(. == "203.0.113.7/32"))'
 
   # Both production images build from a clean checkout, exactly as
   # infra/deploy.sh builds them (context = repo root). Nothing is pushed;

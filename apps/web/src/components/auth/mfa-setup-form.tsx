@@ -11,6 +11,9 @@ const inputClass =
 const buttonClass =
   "inline-flex w-full items-center justify-center rounded-xl bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground outline-hidden transition-colors hover:bg-primary/90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:opacity-50";
 
+/** Takes the focus once, when the element mounts in place of the form (S6). */
+const focusOnMount = (element: HTMLElement | null) => element?.focus();
+
 /**
  * The code from the app and the current password (v0.27: every
  * activation needs it), then the recovery codes, shown this once. The
@@ -25,7 +28,9 @@ export function MfaSetupForm({ enrollment, enrolled }: { enrollment: string; enr
   if (state.recoveryCodes) {
     return (
       <div className="space-y-3">
-        <h2 className="text-base font-semibold">{t("recoveryTitle")}</h2>
+        <h2 tabIndex={-1} ref={focusOnMount} className="text-base font-semibold">
+          {t("recoveryTitle")}
+        </h2>
         <p className="text-sm text-muted-foreground">{t("recoveryDesc")}</p>
         <ul className="grid grid-cols-2 gap-2 rounded-xl border bg-muted/40 p-3 font-mono text-sm">
           {state.recoveryCodes.map((code) => (

@@ -19,7 +19,7 @@
  *   - the identity is (tid, oid): a row with that pair, never an e-mail
  *     match. A new identity whose address a row already uses gets 409
  *     entra_account_exists (an admin binds that row once its owner is
- *     confirmed, or deletes it: docs/DEPLOYMENT.md, the 409 procedure). Concurrent
+ *     confirmed, or deletes it: docs/SSO.md, the 409 procedure). Concurrent
  *     first sign-ins race on up_users_entra_identity_uq: the loser re-reads
  *     and continues with the winner's row, and so does one whose e-mail
  *     check already sees the winner's row (409 only when the identity is

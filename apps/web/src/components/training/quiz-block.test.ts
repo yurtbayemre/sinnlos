@@ -110,13 +110,13 @@ function render(completionMode: TrainingCompletionMode = "confirm", review = fal
     onPassedChange: review ? undefined : gate,
   });
   const all = [...elements(tree)];
-  const options = all.filter((node) => typeof node.props["aria-pressed"] === "boolean");
-  const button = all.find(
-    (node) => node.type === "button" && node.props["aria-pressed"] === undefined,
-  );
+  // Native radios (S6): the input carries the choice, its label the verdict colours.
+  const options = all.filter((node) => node.type === "input" && node.props.type === "radio");
+  const labels = all.filter((node) => node.type === "label");
+  const button = all.find((node) => node.type === "button");
   return {
     pick(qi: number, oi: number) {
-      (options[qi * 2 + oi]!.props.onClick as () => void)();
+      (options[qi * 2 + oi]!.props.onChange as () => void)();
     },
     check() {
       expect(button).toBeDefined();
@@ -127,8 +127,10 @@ function render(completionMode: TrainingCompletionMode = "confirm", review = fal
     text: all
       .map((node) => (typeof node.props.children === "string" ? node.props.children : ""))
       .join(" "),
-    colors: options.map((node) => String(node.props.className)),
-    hasFeedback: options.some((node) => /border-(emerald|red)/.test(String(node.props.className))),
+    colors: labels.map((node) => String(node.props.className)),
+    hasFeedback: labels.some((node) => /border-(emerald|red)/.test(String(node.props.className))),
+    radioNames: options.map((node) => node.props.name),
+    legends: all.filter((node) => node.type === "legend").map((node) => node.props.children),
   };
 }
 
@@ -152,6 +154,19 @@ beforeEach(() => {
   check.mockReset();
   gate.mockReset();
   refresh.mockReset();
+});
+
+describe("quiz semantics (S6)", () => {
+  it("renders each question as a fieldset of native radios, one name per question", () => {
+    const view = render("quizGate");
+    expect(view.legends).toEqual(["First?", "Second?"]);
+    expect(view.radioNames).toEqual([
+      `quiz-${id}-0`,
+      `quiz-${id}-0`,
+      `quiz-${id}-1`,
+      `quiz-${id}-1`,
+    ]);
+  });
 });
 
 describe("answerless quiz feedback", () => {
@@ -285,6 +300,23 @@ describe("answerless quiz feedback", () => {
     expect(refresh).toHaveBeenCalledOnce();
     expect(gate).toHaveBeenLastCalledWith(null);
     expect(render().text).toContain("quizNotPassed");
+  });
+
+  it("offers a retry of the same answers after a failed confirm check (S6: native radios)", async () => {
+    check.mockResolvedValueOnce({ ok: false, code: "unavailable" });
+    render().pick(0, 1);
+    await harness.settle();
+    check.mockResolvedValueOnce(result("confirm", false, [{ questionIndex: 0, correct: true }]));
+    render().check();
+    await harness.settle();
+    expect(check.mock.calls.map((call) => call[1])).toEqual([
+      [{ questionIndex: 0, optionIndex: 1 }],
+      [{ questionIndex: 0, optionIndex: 1 }],
+    ]);
+    expect(render().colors[1]).toContain("border-emerald");
+    // The recovered check retires the failure and its retry button.
+    expect(render().text).not.toContain("unavailable");
+    expect(render().text).not.toContain("quizRetry");
   });
 
   it.each(["quizContentInvalid", "unavailable"] as const)(

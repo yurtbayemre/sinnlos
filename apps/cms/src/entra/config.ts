@@ -40,7 +40,7 @@ export const DEFAULT_SESSION_TTL = "12h";
 /**
  * The fixed Entra app-role table (spec A): the `roles` claim of the signed
  * ID token, always honoured. Define these six app roles in the app
- * registration (docs/DEPLOYMENT.md, Entra tenant setup).
+ * registration (docs/SSO.md, "Microsoft Entra ID sign-in").
  */
 export const APP_ROLE_TABLE: Readonly<Record<string, RoleType>> = {
   "Intranet.Admin": "admin_role",
@@ -110,7 +110,7 @@ export class EntraConfigError extends Error {
         .map(({ variable, message }) => `${variable} ${message}`)
         .join(
           "; ",
-        )}. Fix infra/.env (docs/DEPLOYMENT.md, "Microsoft Entra ID sign-in"), or unset ENTRA_ENABLED.`,
+        )}. Fix infra/.env (docs/SSO.md, "Microsoft Entra ID sign-in"), or unset ENTRA_ENABLED.`,
     );
     this.name = "EntraConfigError";
     this.issues = issues;
@@ -264,7 +264,7 @@ export function entraConfigWarnings(settings: EntraSettings): string[] {
     warnings.push(
       "[entra] LOCAL_REGISTRATION=1 next to Entra sign-in: anyone can register a local account. " +
         "An Entra user whose e-mail was registered first gets 409 entra_account_exists; " +
-        "check who registered that account before an admin binds it (docs/DEPLOYMENT.md, the 409 procedure).",
+        "check who registered that account before an admin binds it (docs/SSO.md, the 409 procedure).",
     );
   }
   return warnings;

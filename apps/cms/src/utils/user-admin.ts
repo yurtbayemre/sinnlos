@@ -20,7 +20,7 @@
  *     an unblocked admin caller, and the caller is never the target;
  *   - a role change makes the role the intranet's (`roleSource: manual`,
  *     `entraAppliedRole` cleared), so the next Entra sign-in keeps it;
- *     "hand back to Entra" undoes that (the DEPLOYMENT.md procedure);
+ *     "hand back to Entra" undoes that (the docs/SSO.md procedure);
  *   - department and manager of an Entra-bound user are refused while
  *     Entra's sync owns them (`entraManaged`);
  *   - a manager is never the user or one of their reports (`managerCycle`);
