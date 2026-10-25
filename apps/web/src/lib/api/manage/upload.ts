@@ -28,6 +28,9 @@ import { StrapiError } from "@/lib/strapi-error";
 /** The multipart field Strapi's upload controller reads. */
 export const UPLOAD_FIELD = "files";
 
+/** v0.30: how long a multipart upload to the cms may take (strapi()'s 15 s is too short). */
+export const UPLOAD_TIMEOUT_MS = 120_000;
+
 /**
  * Sends `file` and resolves to the cms's parsed answer (an array of file
  * rows on a 201), or null without a session token (nothing was sent).
@@ -43,6 +46,7 @@ export async function sendUpload(file: File): Promise<unknown> {
     headers: { Authorization: `Bearer ${token}` },
     body,
     cache: "no-store",
+    signal: AbortSignal.timeout(UPLOAD_TIMEOUT_MS),
   });
 
   if (res.status === 401) redirect("/sign-in?expired=1");
