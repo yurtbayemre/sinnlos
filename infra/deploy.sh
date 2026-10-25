@@ -253,9 +253,23 @@ preflight_scan() {
       v = tolower(trim(v))
       return v == "1" || v == "true" || v == "yes" || v == "on"
     }
+    # The v0.28 boot checks judge plain ASCII only: the JSON whitespace
+    # escapes become blanks, and a value with anything else (another
+    # escape, a non-ASCII character such as a no-break space, which
+    # trim() in JavaScript removes) is left to the cms. So the preflight never
+    # refuses a value the cms would accept.
+    function unjudgeable(v) {
+      gsub(/\\[tnrf]/, " ", v)
+      return v ~ /\\|[^ -~]/
+    }
+    function blanks(v) {
+      gsub(/\\[tnrf]/, " ", v)
+      return v
+    }
     # A whole number from lo to hi, or unset/blank (the default).
     function int_in(v, lo, hi) {
-      v = trim(v)
+      if (unjudgeable(v)) return 1
+      v = trim(blanks(v))
       if (v == "") return 1
       if (v !~ /^[0-9]+$/) return 0
       return v + 0 >= lo && v + 0 <= hi
@@ -263,7 +277,8 @@ preflight_scan() {
     # FEATURES_OFF: a comma list of switch names, any case, blanks around
     # and empty entries ignored (parseFeaturesOff, packages/domain/src/features.ts).
     function switches_ok(v,    n, i, parts, p) {
-      n = split(tolower(v), parts, ",")
+      if (unjudgeable(v)) return 1
+      n = split(tolower(blanks(v)), parts, ",")
       for (i = 1; i <= n; i++) {
         p = trim(parts[i])
         if (p != "" && !(p in switch_name)) return 0

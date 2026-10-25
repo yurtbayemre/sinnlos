@@ -764,6 +764,37 @@ describe("boot-refused values in the preflight (v0.28 keys)", () => {
     }
   });
 
+  it.skipIf(!HAS_AWK)(
+    "never refuses a value the cms accepts (tabs, no-break spaces, other scripts)",
+    () => {
+      const tricky = ["\t7\t", " 7 ", "\n30", "７", '"7"', "7 "];
+      for (const value of tricky) {
+        const years = scan({ TRAINING_EVIDENCE_RETENTION_YEARS: value });
+        if (years.length > 0) {
+          expect(
+            cmsAccepts(() =>
+              trainingEvidenceRetentionYears({ TRAINING_EVIDENCE_RETENTION_YEARS: value }),
+            ),
+            JSON.stringify(value),
+          ).toBe(false);
+        }
+        const days = scan({ SEARCH_LOG_RETENTION_DAYS: value });
+        if (days.length > 0)
+          expect(searchLogRetentionDays(value), JSON.stringify(value)).toBeNull();
+      }
+      // What the cms accepts with blanks around: never refused.
+      expect(scan({ TRAINING_EVIDENCE_RETENTION_YEARS: "\t7\t" })).toEqual([]);
+      expect(scan({ SEARCH_LOG_RETENTION_DAYS: " 30 " })).toEqual([]);
+      for (const value of ["\tevents", "kpis ", "Marketplace,\tPolls"]) {
+        expect(
+          cmsAccepts(() => parseFeaturesOff(value)),
+          JSON.stringify(value),
+        ).toBe(true);
+        expect(scan({ FEATURES_OFF: value }), JSON.stringify(value)).toEqual([]);
+      }
+    },
+  );
+
   it.skipIf(!HAS_AWK)("knows the FEATURES_OFF names of the domain parser", () => {
     const names = [...MODULE_NAMES, ...FEATURE_NAMES];
     // Every name alone, all together, mixed case and blanks: accepted by both.
