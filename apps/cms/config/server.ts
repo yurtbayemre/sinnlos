@@ -52,6 +52,12 @@ export default ({ env }: { env: Env }) => ({
   //    that admin out; now guessing scales with the attacker's IPs, and a
   //    spoofable X-Forwarded-For would leave it unthrottled.
   proxy: { koa: true },
+  // Strapi's remote data transfer (/admin/transfer/runner/*, `strapi transfer`)
+  // is unused here: backups are pg_dump, restores restore-db.sh. Off, its
+  // routes answer 404 (@strapi/admin dist/server/server/src/middlewares/
+  // data-transfer.js), so the stream-json parser behind them is unreachable
+  // (v0.29.1).
+  transfer: { remote: { enabled: false } },
   // Strapi-native cron (croner via @strapi/core since 5.54, node-schedule
   // before; no extra dep). The tasks live in src/cron/registry.ts (LF03):
   // name, 5-field rule and zone per task, each wrapped with duration logging

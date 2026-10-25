@@ -179,6 +179,11 @@ describe("config/server", () => {
     expect(config.proxy).toEqual({ koa: true });
   });
 
+  it("switches Strapi's remote data transfer off (server.transfer.remote.enabled)", () => {
+    const config = serverConfig({ env: makeEnv() });
+    expect(config.transfer).toEqual({ remote: { enabled: false } });
+  });
+
   it("builds the cron tasks from the registry (names, rules, zone)", () => {
     const { tasks } = serverConfig({ env: makeEnv() }).cron;
     expect(Object.entries(tasks).map(([name, { options }]) => ({ name, ...options }))).toEqual([
