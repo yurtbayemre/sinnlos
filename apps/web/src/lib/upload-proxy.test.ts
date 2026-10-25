@@ -170,11 +170,64 @@ describe("downstreamResponseHeaders", () => {
       expect(out.get(name)).toBe(upstream.get(name));
     }
     expect(out.get("cache-control")).toBe("private, max-age=3600");
-    expect([...out.keys()].sort()).toEqual([...FORWARD_RESPONSE_HEADERS, "cache-control"].sort());
+    expect([...out.keys()].sort()).toEqual(
+      [...FORWARD_RESPONSE_HEADERS, "cache-control", "x-content-type-options"].sort(),
+    );
   });
 
   it("sets private caching even when upstream sends no headers", () => {
     const out = downstreamResponseHeaders(new Headers());
-    expect([...out.entries()]).toEqual([["cache-control", "private, max-age=3600"]]);
+    expect(out.get("cache-control")).toBe("private, max-age=3600");
+  });
+
+  it("shows images, PDF, video and audio in place, with nosniff", () => {
+    for (const type of [
+      "image/png",
+      "image/jpeg",
+      "image/webp",
+      "image/avif",
+      "image/gif",
+      "application/pdf",
+      "video/mp4",
+      "audio/mpeg",
+      "IMAGE/PNG; charset=binary",
+    ]) {
+      const out = downstreamResponseHeaders(new Headers({ "content-type": type }));
+      expect(out.get("x-content-type-options"), type).toBe("nosniff");
+      expect(out.get("content-disposition"), type).toBeNull();
+      expect(out.get("content-security-policy"), type).toBeNull();
+    }
+  });
+
+  it("delivers every other type as a sandboxed download (XML, SVG, HTML, Office, unknown)", () => {
+    for (const type of [
+      "application/xml",
+      "text/xml",
+      "image/svg+xml",
+      "text/html",
+      "application/xhtml+xml",
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "application/octet-stream",
+      "",
+    ]) {
+      const upstream = new Headers(type ? { "content-type": type } : {});
+      const out = downstreamResponseHeaders(upstream);
+      expect(out.get("content-disposition"), type).toBe("attachment");
+      expect(out.get("content-security-policy"), type).toBe("sandbox");
+      expect(out.get("x-content-type-options"), type).toBe("nosniff");
+    }
+  });
+
+  it("keeps a video's range answer intact", () => {
+    const out = downstreamResponseHeaders(
+      new Headers({
+        "content-type": "video/mp4",
+        "content-range": "bytes 0-99/1000",
+        "accept-ranges": "bytes",
+      }),
+    );
+    expect(out.get("content-range")).toBe("bytes 0-99/1000");
+    expect(out.get("accept-ranges")).toBe("bytes");
+    expect(out.get("content-disposition")).toBeNull();
   });
 });
