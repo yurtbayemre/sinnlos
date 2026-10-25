@@ -45,9 +45,12 @@
 #      unchanged rebuild keeps its image id; SINNLOS_REVISION = the commit),
 #      or with DEPLOY_IMAGE_SOURCE=registry pull the published images of the
 #      checkout's release tag (both, checked against the commit and the
-#      version, before any local tag moves); then restart the stack (with the
+#      version, before any local tag moves); check APP_TIME_ZONE and
+#      MFA_REQUIRED_ROLES with the cms's own validators in the new cms image
+#      (a refusal stops before the restart); then restart the stack (with the
 #      Traefik override when DEPLOY_EDGE=traefik).
-#   4. Curl smoke check of the live site, then infra/live-smoke.sh.
+#   4. Smoke check of the live site (<SMOKE_URL>/healthz must answer 200
+#      {"status":"ok"}: edge, web, cms and database), then infra/live-smoke.sh.
 #   5. Only after both passed: tag the images <project>-{web,cms}:<sha> (the
 #      first 12 characters of the commit), record them as last-known-good in
 #      the state file, and prune older SHA tags (DEPLOY_KEEP_TAGS, 5). A
@@ -55,9 +58,11 @@
 #      records nothing (--record-without-live-smoke records anyway); one
 #      skipped for LIVE_EVENTS_DISABLED=1, or the datetime check alone on an
 #      identity-provider-only instance (Entra or OIDC), counts as passed.
-# Any failure from step 3 on prints the rollback commands for the target of
-# step 2 (an ERR trap catches the unexpected ones, tagging included); before
-# step 3 the running containers are untouched.
+# Any failure from the restart in step 3 on prints the rollback commands for
+# the target of step 2 (an ERR trap catches the unexpected ones, tagging
+# included), except a failed restart while the new cms still runs and is not
+# healthy yet: that one says to inspect it first. Before the restart the
+# running containers are untouched.
 #
 # Re-run safe. Stops on the first error (set -Eeuo pipefail).
 #
@@ -96,7 +101,8 @@
 #   BACKUP_RUN        project infra only: the host's backup service, run
 #                     through `sudo -n` instead of pg-backup.sh
 #                     (DEPLOY_BACKUP_NO_SUDO=1 runs it without sudo: tests)
-#   GITHUB_TOKEN      optional, for the CI check (public repos need none)
+#   GITHUB_TOKEN      optional, for the CI check (public repos need none;
+#                     a private one needs read access to Actions)
 #
 set -Eeuo pipefail
 
@@ -1049,23 +1055,24 @@ prune_sha_tags() {
 }
 
 # --- CI status of the commit (FX35) ------------------------------------------
-# The check runs of a GitHub check-runs answer (stdin), one line each:
-# name, status, conclusion and the app's slug, separated by \037 (a null is
-# empty). A small JSON scanner in POSIX awk (no jq): it follows strings,
-# escapes and nesting, so a value anywhere else in a run (its output text,
-# its app's name) never counts as the run's own.
-check_runs_of() {
+# The runs of a GitHub workflow-runs answer (stdin), one line each: head_sha,
+# event, head_branch, status, conclusion and html_url, separated by \037 (a
+# null is empty). A small JSON scanner in POSIX awk (no jq): it follows
+# strings, escapes and nesting, so a value anywhere else in a run (its head
+# commit, its actor) never counts as the run's own.
+workflow_runs_of() {
   awk '
     function flush() {
       if (tok != "") { put(tok == "null" ? "" : tok); tok = "" }
     }
     function put(v) {
-      if (!run) return
-      if (depth == 3) {
-        if (key[3] == "name") rname = v
-        else if (key[3] == "status") rstatus = v
-        else if (key[3] == "conclusion") rconclusion = v
-      } else if (depth == 4 && within[4] == "app" && key[4] == "slug") rslug = v
+      if (!run || depth != 3) return
+      if (key[3] == "head_sha") rsha = v
+      else if (key[3] == "event") revent = v
+      else if (key[3] == "head_branch") rbranch = v
+      else if (key[3] == "status") rstatus = v
+      else if (key[3] == "conclusion") rconclusion = v
+      else if (key[3] == "html_url") rurl = v
     }
     { body = body $0 "\n" }
     END {
@@ -1088,15 +1095,15 @@ check_runs_of() {
           within[depth] = (kind[depth - 1] == "{") ? key[depth - 1] : ""
           key[depth] = ""
           wantkey = (c == "{")
-          if (depth == 3 && c == "{" && kind[2] == "[" && within[2] == "check_runs") {
-            run = 1; rname = ""; rstatus = ""; rconclusion = ""; rslug = ""
+          if (depth == 3 && c == "{" && kind[2] == "[" && within[2] == "workflow_runs") {
+            run = 1; rsha = ""; revent = ""; rbranch = ""; rstatus = ""; rconclusion = ""; rurl = ""
           }
           continue
         }
         if (c == "}" || c == "]") {
           flush()
           if (depth == 3 && run) {
-            printf "%s\037%s\037%s\037%s\n", rname, rstatus, rconclusion, rslug
+            printf "%s\037%s\037%s\037%s\037%s\037%s\n", rsha, revent, rbranch, rstatus, rconclusion, rurl
             run = 0
           }
           depth--
@@ -1111,15 +1118,14 @@ check_runs_of() {
   '
 }
 
-# GitHub's check runs for HEAD, read without gh or jq. Prints one of: green,
-# pending, failed, unknown — followed by a reason. Never fails. Only our CI
-# counts: GitHub also attaches Dependabot's own update jobs to the default
-# branch's HEAD (runs named "Dependabot" of the app github-actions, and the
-# app dependabot's ".github/dependabot.yml"), which say nothing about this
-# commit and may still run long after CI passed.
+# GitHub's runs of our CI workflow (.github/workflows/ci.yml) for the push of
+# HEAD to main, read without gh or jq. Prints one of: green, pending, failed,
+# unknown — followed by a reason. Never fails. Only such a run proves the
+# commit: a push to main runs every job (scripts/ci-scope.mjs), a pull
+# request run may skip jobs, and other workflows (Dependabot's update jobs)
+# say nothing about the commit. The newest matching run decides.
 ci_status() {
-  local remote slug body total runs name status conclusion app note=""
-  local ours=0 ignored=0 unfinished=0 failing=0
+  local remote slug body sha event branch status conclusion url
   remote="$("${GIT[@]}" remote get-url origin 2>/dev/null || true)"
   if ! [[ "${remote}" =~ github\.com[:/]([^/]+/[^/]+)$ ]]; then
     echo "unknown: the origin remote is not on github.com"
@@ -1131,43 +1137,24 @@ ci_status() {
     {
       if [[ -n "${GITHUB_TOKEN:-}" ]]; then printf 'header = "Authorization: Bearer %s"\n' "${GITHUB_TOKEN}"; fi
     } | curl -sS -f --max-time 10 --config - -H 'Accept: application/vnd.github+json' \
-      "https://api.github.com/repos/${slug}/commits/${HEAD_SHA}/check-runs?per_page=100" 2>&1
+      "https://api.github.com/repos/${slug}/actions/workflows/ci.yml/runs?head_sha=${HEAD_SHA}&event=push&branch=main&per_page=20" 2>&1
   )"; then
     echo "unknown: no usable answer from the GitHub API (${body##*: })"
     return 0
   fi
-  total="$(grep -oE '"total_count": *[0-9]+' <<<"${body}" | grep -oE '[0-9]+$' | head -n 1)"
-  if [[ -z "${total}" || "${total}" == "0" ]]; then
-    echo "unknown: no CI run for ${HEAD_SHA:0:12} on ${slug} (not pushed yet, or CI has not started)"
-    return 0
-  fi
-  runs="$(check_runs_of <<<"${body}")"
-  while IFS=$'\037' read -r name status conclusion app; do
-    [[ -n "${name}${status}${conclusion}${app}" ]] || continue
-    if [[ "${name}" == "Dependabot" || "${app}" == "dependabot" ]]; then
-      ignored=$((ignored + 1))
-      continue
+  # GitHub lists the newest run first; the filters are checked here again.
+  while IFS=$'\037' read -r sha event branch status conclusion url; do
+    [[ "${sha}" == "${HEAD_SHA}" && "${event}" == push && "${branch}" == main ]] || continue
+    if [[ "${status}" != completed ]]; then
+      echo "pending: CI is still running for ${HEAD_SHA:0:12} (${url})"
+    elif [[ "${conclusion}" == success ]]; then
+      echo "green: the CI run for the push to main passed for ${HEAD_SHA:0:12} (${url})"
+    else
+      echo "failed: CI did not pass for ${HEAD_SHA:0:12} (${conclusion:-no conclusion}: ${url})"
     fi
-    ours=$((ours + 1))
-    case "${status}" in
-      queued | in_progress | waiting | requested | pending) unfinished=$((unfinished + 1)) ;;
-    esac
-    case "${conclusion}" in
-      failure | cancelled | timed_out | action_required | startup_failure | stale) failing=$((failing + 1)) ;;
-    esac
-  done <<<"${runs}"
-  if ((ignored)); then note=" (${ignored} Dependabot run(s) ignored)"; fi
-  if ((ours == 0 && ignored == 0)); then
-    echo "unknown: the GitHub answer lists ${total} check run(s) for ${HEAD_SHA:0:12}, but none could be read"
-  elif ((ours == 0)); then
-    echo "unknown: no CI run for ${HEAD_SHA:0:12} on ${slug}${note} (CI has not started)"
-  elif ((unfinished)); then
-    echo "pending: CI is still running for ${HEAD_SHA:0:12}${note}"
-  elif ((failing)); then
-    echo "failed: CI did not pass for ${HEAD_SHA:0:12}${note} (https://github.com/${slug}/commit/${HEAD_SHA}/checks)"
-  else
-    echo "green: ${ours} CI check(s) passed for ${HEAD_SHA:0:12}${note}"
-  fi
+    return 0
+  done < <(workflow_runs_of <<<"${body}")
+  echo "unknown: no CI run for the push of ${HEAD_SHA:0:12} to main on ${slug} (not pushed to main yet, or CI has not started)"
 }
 
 # --- ERR trap ------------------------------------------------------------------
@@ -1594,12 +1581,12 @@ if ((DRY_RUN)); then
   resolve_rollback_target
   echo "     -> ${ROLLBACK_ORIGIN:-none: nothing ran here before (first install)}"
   if [[ "${DEPLOY_IMAGE_SOURCE}" == registry ]]; then
-    echo "  3. docker pull ${IMAGE_REPO}-{web,cms}:${RELEASE_VERSION}, check their labels, tag them ${PROJECT}-{web,cms}, then ${COMPOSE[*]} up -d --no-build"
+    echo "  3. docker pull ${IMAGE_REPO}-{web,cms}:${RELEASE_VERSION}, check their labels, tag them ${PROJECT}-{web,cms}, check the boot values in the cms image, then ${COMPOSE[*]} up -d --no-build"
   else
-    echo "  3. SINNLOS_VERSION=<package.json> SINNLOS_REVISION=${NEW_TAG} BUILDX_NO_DEFAULT_ATTESTATIONS=1 ${COMPOSE[*]} build, then ${COMPOSE[*]} up -d --no-build"
+    echo "  3. SINNLOS_VERSION=<package.json> SINNLOS_REVISION=${NEW_TAG} BUILDX_NO_DEFAULT_ATTESTATIONS=1 ${COMPOSE[*]} build, check the boot values in the cms image, then ${COMPOSE[*]} up -d --no-build"
   fi
   LIVE_SMOKE_MODE="$(live_smoke_mode)"
-  echo "  4. smoke check ${SMOKE_URL}; live-smoke: ${LIVE_SMOKE_MODE}"
+  echo "  4. smoke check ${SMOKE_URL%/}/healthz; live-smoke: ${LIVE_SMOKE_MODE}"
   if unrecorded_live_smoke_skip; then
     echo "  5. NOT recorded: live-smoke would not run for want of the demo credentials (--record-without-live-smoke records anyway)"
     log "Dry run complete: nothing was changed."
@@ -1679,9 +1666,36 @@ else
   export SINNLOS_VERSION="${SINNLOS_VERSION:-unknown}" SINNLOS_REVISION="${NEW_TAG}"
   BUILDX_NO_DEFAULT_ATTESTATIONS=1 "${COMPOSE[@]}" build
 fi
+# The boot values the preflight cannot judge (APP_TIME_ZONE, MFA_REQUIRED_ROLES),
+# as compose renders them, checked by the cms's own validators in the new cms
+# image: a value the new cms would refuse stops the deploy here, before `up`.
+# A plain docker run without a network: `compose run` creates the project's
+# volumes, and a database volume without its container fails the backup of
+# the next run of a first install.
+log "Checking the boot values in the new cms image"
+json="$("${COMPOSE[@]}" config --format json 2>/dev/null || true)"
+if ! docker run --rm --pull never --network none --entrypoint node \
+  -e "APP_TIME_ZONE=$(compose_env_value APP_TIME_ZONE <<<"${json}")" \
+  -e "MFA_REQUIRED_ROLES=$(compose_env_value MFA_REQUIRED_ROLES <<<"${json}")" \
+  "${PROJECT}-cms:latest" dist/scripts/check-boot-env.js; then
+  echo "ERROR: the new cms image refused these boot values (above), or could not run the check." >&2
+  echo "       The running containers are unchanged. Fix infra/.env (or the cause) and re-run." >&2
+  exit 1
+fi
 PHASE="start"
 log "Starting the stack"
 if ! "${COMPOSE[@]}" up -d --no-build; then
+  # A cms that still runs but is not healthy yet has not failed: a long first
+  # boot or a migration may still be at work, and a rollback would cut it off.
+  cms_state="$(docker inspect --format '{{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{end}}' "${PROJECT}-cms-1" 2>/dev/null || true)"
+  if [[ "${cms_state}" =~ ^running\ (starting|unhealthy)$ ]]; then
+    echo "ERROR: docker compose up failed, but the cms is still running and not healthy yet (${cms_state#running })." >&2
+    echo "       A long first boot or a migration? Inspect it before replacing it:" >&2
+    echo "         ${COMPOSE[*]} ps" >&2
+    echo "         docker logs --tail=100 ${PROJECT}-cms-1" >&2
+    echo "       Once it is healthy or has exited, re-run infra/deploy.sh: it carries on, or prints the rollback." >&2
+    exit 1
+  fi
   echo "ERROR: docker compose up failed. Usually the new cms did not become healthy (a boot guard" >&2
   echo "       refused to start; the new web waits for it and never starts), so the site is down." >&2
   echo "       Inspect logs:  docker logs --tail=100 ${PROJECT}-cms-1" >&2
@@ -1692,37 +1706,36 @@ fi
 
 # --- 4. Smoke check, then the live pipeline -----------------------------------
 PHASE="smoke"
-log "Smoke-checking ${SMOKE_URL}"
+SMOKE_HEALTH="${SMOKE_URL%/}/healthz"
+log "Smoke-checking ${SMOKE_HEALTH}"
 attempts=10
 delay=6
-code=000
-location=
+result=
 smoke_ok=0
 for ((i = 1; i <= attempts; i++)); do
-  # curl writes 000 itself when there is no answer.
-  answer="$(curl -sS -o /dev/null -w '%{http_code} %{redirect_url}' --max-time 15 "${SMOKE_URL}")" || true
-  code="${answer%% *}"
-  code="${code:-000}"
-  location="${answer#"${code}"}"
-  location="${location# }"
-  # A redirect counts only when it goes to the web's sign-in page: Traefik's
-  # own redirects (http to https) and a wrong path prove nothing about the web.
-  if [[ "${code}" == 200 || ("${code}" =~ ^30[1278]$ && "${location}" =~ ^https?://[^/]+/sign-in([?#].*)?$) ]]; then
+  # The web's readiness check (edge, web, cms and database; app/healthz):
+  # only its exact answer counts, and no redirect is followed. curl writes
+  # 000 itself when there is no answer.
+  answer="$(curl -sS -w '\n%{http_code}' --max-time 15 "${SMOKE_HEALTH}")" || true
+  if [[ "${answer}" == $'{"status":"ok"}\n200' ]]; then
     smoke_ok=1
     break
   fi
+  code="${answer##*$'\n'}"
+  result="HTTP ${code:-000}"
+  if [[ "${code}" == 200 ]]; then result+=' without the body {"status":"ok"}'; fi
   if ((i < attempts)); then
-    echo "  attempt ${i}/${attempts}: HTTP ${code} — retrying in ${delay}s"
+    echo "  attempt ${i}/${attempts}: ${result} — retrying in ${delay}s"
     sleep "${delay}"
   fi
 done
 if ! ((smoke_ok)); then
-  echo "ERROR: smoke check failed — ${SMOKE_URL} returned HTTP ${code}${location:+ to ${location}}" >&2
+  echo "ERROR: smoke check failed — ${SMOKE_HEALTH} answered ${result}" >&2
   echo "       Inspect logs:  ${COMPOSE[*]} logs --tail=100 web cms" >&2
   print_rollback_hint
   exit 1
 fi
-log "Smoke check OK (HTTP ${code} after ${i} attempt(s))"
+log "Smoke check OK (HTTP 200 after ${i} attempt(s))"
 
 # The SSE chain is fire-and-forget and can fail silently while every
 # container reports healthy — this probe is the only end-to-end proof

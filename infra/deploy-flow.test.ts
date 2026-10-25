@@ -10,13 +10,15 @@
  *      without a state (the first run of this version) are the running
  *      images tagged :rollback, and re-runs keep that :rollback until a
  *      deploy is recorded (the bootstrap marker);
- *   3. a failed smoke check, live-smoke, build, start or tag prints the
- *      right message (the rollback commands from "start" on) and leaves the
- *      state alone;
+ *   3. a failed smoke check (v0.30: /healthz, exactly 200 {"status":"ok"}),
+ *      live-smoke, build, boot-value check, start or tag prints the right
+ *      message (the rollback commands from "start" on, but not while the
+ *      new cms still starts) and leaves the state alone;
  *   4. flock, the clean-tree check and the CI check (warning by default,
  *      refusal with --require-green-ci; a token never on curl's command
- *      line; Dependabot's own update jobs on the commit do not count) stop
- *      a deploy before anything is touched;
+ *      line; v0.30: only a successful run of the CI workflow for the push
+ *      of the commit to main counts) stop a deploy before anything is
+ *      touched;
  *   5. --dry-run changes nothing; --check stays the env preflight; SHA tags
  *      beyond DEPLOY_KEEP_TAGS go, images and history;
  *   6. the pre-deploy backup runs as `sudo -n "$BACKUP_RUN" --kind
@@ -107,6 +109,8 @@ const composeJson = (host: string) =>
         cms: {
           environment: {
             LIVE_EVENTS_DISABLED: "0",
+            APP_TIME_ZONE: "Europe/Berlin",
+            MFA_REQUIRED_ROLES: "",
             ENTRA_ENABLED: "0",
             AUTH_LOCAL_ENABLED: "0",
             PUBLIC_URL: `https://${host}`,
@@ -127,14 +131,21 @@ const composeJson = (host: string) =>
   );
 const COMPOSE_JSON = composeJson(STUB_HOST);
 
+/** The boot-value check in the new cms image, with the values compose renders. */
+const BOOT_CHECK =
+  "docker run --rm --pull never --network none --entrypoint node -e APP_TIME_ZONE=Europe/Berlin -e MFA_REQUIRED_ROLES= infra-cms:latest dist/scripts/check-boot-env.js";
+
 /**
  * Runs the steps in one bash process, in a fresh checkout ($REPO, one
  * commit) with the real deploy.sh and stub backup/live-smoke scripts
  * (BACKUP_RUN is a stub of backup-run; unset, `sudo` is a stub that logs).
  * Helpers for `before`: `commit` (a new empty commit), `running <web-id>
  * <cms-id>` (containers that run already), `ci <json-body>` (the GitHub
- * check-runs answer), KEEP (DEPLOY_KEEP_TAGS), and the STUB_* switches
- * (STUB_SMOKE_CODE, STUB_LIVE_RC, STUB_BUILD_FAIL, STUB_UP_FAIL,
+ * workflow-runs answer, @HEAD_SHA@ for the asked commit), KEEP
+ * (DEPLOY_KEEP_TAGS), and the STUB_* switches (STUB_SMOKE_CODE and
+ * STUB_SMOKE_BODY: the /healthz answer; STUB_CMS_STATE: the cms's
+ * "<status> <health>" after a failed `up`; STUB_BOOTENV_FAIL: the boot-value
+ * check refuses; STUB_LIVE_RC, STUB_BUILD_FAIL, STUB_UP_FAIL,
  * STUB_TAG_FAIL, STUB_LOCK_HELD, STUB_STATE_WRITE_FAIL,
  * STUB_BOOTSTRAP_WRITE_FAIL; STUB_CONTAINERD: an image id resolves only
  * while a tag references it, as on the containerd image store, else once it
@@ -191,7 +202,7 @@ function deploys(steps: readonly Step[], mode?: ShellMode): StepReport[] {
     // The demo credentials file deploy.sh checks before it runs live-smoke.
     'echo "casey.jones@sinnlos.local pw" > "$T/passwords"',
     'export PASSWORDS_FILE="$T/passwords"',
-    "export T STUB_TRAEFIK= STUB_PS_FAIL= STUB_PULL_FAIL= STUB_LABELS= STUB_SMOKE_CODE=200 STUB_LIVE_RC=0 STUB_LIVE_NOFRAME= STUB_BUILD_FAIL= STUB_UP_FAIL= STUB_TAG_FAIL= STUB_LOCK_HELD= STUB_CI= STUB_NO_VOLUMES= STUB_CONTAINERD= STUB_UP_KEEP= STUB_STATE_WRITE_FAIL= STUB_BOOTSTRAP_WRITE_FAIL= STUB_BACKUP_RC= STUB_REVISION_DRAFTS=0",
+    'export T STUB_TRAEFIK= STUB_PS_FAIL= STUB_PULL_FAIL= STUB_LABELS= STUB_SMOKE_CODE=200 STUB_SMOKE_BODY=\'{"status":"ok"}\' STUB_LIVE_RC=0 STUB_LIVE_NOFRAME= STUB_BUILD_FAIL= STUB_UP_FAIL= STUB_CMS_STATE=exited STUB_BOOTENV_FAIL= STUB_TAG_FAIL= STUB_LOCK_HELD= STUB_CI= STUB_NO_VOLUMES= STUB_CONTAINERD= STUB_UP_KEEP= STUB_STATE_WRITE_FAIL= STUB_BOOTSTRAP_WRITE_FAIL= STUB_BACKUP_RC= STUB_REVISION_DRAFTS=0',
     // Whether an image id resolves: on containerd only while a tag names it.
     "resolvable() {",
     // (No pipe: under deploy.sh's pipefail, grep -q ending early could fail cat.)
@@ -225,8 +236,13 @@ function deploys(steps: readonly Step[], mode?: ShellMode): StepReport[] {
     '            if [[ -z "$STUB_UP_KEEP" || ! -f "$T/ctr/$p-$a-1" ]]; then cp "$T/img/$p-${a}__latest" "$T/ctr/$p-$a-1"; fi',
     "          done ;;",
     "      esac ;;",
+    // The boot-value check in the new cms image (STUB_BOOTENV_FAIL refuses).
+    "    run)",
+    '      [[ -z "$STUB_BOOTENV_FAIL" ]] || { echo "ERROR: APP_TIME_ZONE must be an IANA time zone name" >&2; return 1; } ;;',
     "    inspect)",
     '      ref="${*: -1}"',
+    // The cms's state and health after a failed `up` (STUB_CMS_STATE).
+    '      if [[ "$*" == *.State.Status* ]]; then echo "$STUB_CMS_STATE"; return; fi',
     '      [[ -f "$T/ctr/$ref" ]] || return 1; cat "$T/ctr/$ref" ;;',
     "    image)",
     '      case "$2" in',
@@ -266,9 +282,10 @@ function deploys(steps: readonly Step[], mode?: ShellMode): StepReport[] {
     '  if [[ "$*" == *api.github.com* ]]; then',
     '    cat > "$T/curl-stdin"',
     '    [[ -n "$STUB_CI" ]] || { echo "curl: (22) The requested URL returned error: 404"; return 22; }',
-    '    cat "$STUB_CI"; return 0',
+    // The fixture's @HEAD_SHA@ is the commit the request asks for.
+    '    sha="${*: -1}"; sha="${sha##*head_sha=}"; sed "s/@HEAD_SHA@/${sha%%&*}/g" "$STUB_CI"; return 0',
     "  fi",
-    "  printf '%s' \"$STUB_SMOKE_CODE\"",
+    '  printf \'%s\\n%s\' "$STUB_SMOKE_BODY" "$STUB_SMOKE_CODE"',
     "}",
     'flock() { [[ -z "$STUB_LOCK_HELD" ]]; }',
     'timeout() { while [[ "$1" != docker ]]; do shift; done; "$@"; }',
@@ -366,13 +383,11 @@ describe.skipIf(!RUN_SEQUENCES)(
     beforeAll(() => {
       r = deploys([
         /* 0 */ { before: "STUB_NO_VOLUMES=1" },
-        // A redirect anywhere but the sign-in page fails the smoke check …
-        /* 1 */ {
-          before: `STUB_NO_VOLUMES=; commit; STUB_SMOKE_CODE='308 https://${STUB_HOST}/elsewhere'`,
-        },
-        // … one to the sign-in page passes it (live-smoke then fails).
+        // A redirect fails the smoke check (/healthz never redirects) …
+        /* 1 */ { before: "STUB_NO_VOLUMES=; commit; STUB_SMOKE_CODE=308 STUB_SMOKE_BODY=" },
+        // … its exact answer passes it (live-smoke then fails).
         /* 2 */ {
-          before: `STUB_SMOKE_CODE='307 https://${STUB_HOST}/sign-in?from=%2F'; STUB_LIVE_RC=1`,
+          before: `STUB_SMOKE_CODE=200 STUB_SMOKE_BODY='{"status":"ok"}'; STUB_LIVE_RC=1`,
         },
         /* 3 */ { before: "STUB_LIVE_RC=0; STUB_TAG_FAIL=1" },
         /* 4 */ { before: "STUB_TAG_FAIL=; STUB_BUILD_FAIL=1" },
@@ -400,6 +415,18 @@ describe.skipIf(!RUN_SEQUENCES)(
         /* 14 */ { before: "STUB_BACKUP_RC=; unset DEPLOY_BACKUP_NO_SUDO" },
         // … while without BACKUP_RUN project infra runs pg-backup.sh too (v0.26).
         /* 15 */ { before: "unset BACKUP_RUN; export SINNLOS_BACKUP_DIR=/srv/infra-backups" },
+        // A cms that is not ready, and a 200 with another body, fail the smoke check.
+        /* 16 */ {
+          before: `commit; STUB_SMOKE_CODE=503 STUB_SMOKE_BODY='{"status":"unavailable"}'`,
+        },
+        /* 17 */ { before: `STUB_SMOKE_CODE=200 STUB_SMOKE_BODY='<html>sign in</html>'` },
+        // `up` fails while the new cms still runs and is not healthy yet.
+        /* 18 */ {
+          before: `STUB_SMOKE_BODY='{"status":"ok"}' STUB_UP_FAIL=1 STUB_CMS_STATE='running starting'`,
+        },
+        /* 19 */ { before: "STUB_CMS_STATE='running unhealthy'" },
+        // The new cms image refuses a boot value: no `up`, no rollback.
+        /* 20 */ { before: "STUB_UP_FAIL= STUB_CMS_STATE=exited STUB_BOOTENV_FAIL=1" },
       ]);
     }, SEQUENCE_BUDGET);
 
@@ -418,7 +445,7 @@ describe.skipIf(!RUN_SEQUENCES)(
       expect(first.stdout).toContain(`Traefik host: ${STUB_HOST}; smoke URL: https://${STUB_HOST}`);
       expect(first.stdout).toContain(`live-smoke base=https://${STUB_HOST} cms=infra-cms-1`);
       expect(called(first, /^curl /).filter((c) => !c.includes("api.github.com"))).toEqual([
-        `curl -sS -o /dev/null -w %{http_code} %{redirect_url} --max-time 15 https://${STUB_HOST}`,
+        `curl -sS -w \\n%{http_code} --max-time 15 https://${STUB_HOST}/healthz`,
       ]);
       expect(first.stdout).toContain("none: nothing ran here before (first install)");
       expect(first.state).toMatchObject({
@@ -435,10 +462,13 @@ describe.skipIf(!RUN_SEQUENCES)(
         ]),
       );
       expect(historyTags(first)).toEqual([tagOf(first)]);
-      // build, then up without a build, then the tags.
-      const order = first.calls.filter((c) => / (build|up -d --no-build)$|^docker tag /.test(c));
+      // build, the boot values in the new cms image, up without a build, then the tags.
+      const order = first.calls.filter((c) =>
+        / (build|up -d --no-build)$|^docker (tag|run) /.test(c),
+      );
       expect(order).toEqual([
         expect.stringMatching(/ build$/),
+        BOOT_CHECK,
         expect.stringMatching(/ up -d --no-build$/),
         `docker tag sha256:web1 infra-web:${tagOf(first)}`,
         `docker tag sha256:cms1 infra-cms:${tagOf(first)}`,
@@ -450,7 +480,10 @@ describe.skipIf(!RUN_SEQUENCES)(
       expect(bad.status).toBe(1);
       expect(bad.stdout).toContain(`last-known-good: infra-{web,cms}:${tagOf(good)}`);
       expect(called(bad, /:rollback/)).toEqual([]);
-      expect(bad.stderr).toContain(`returned HTTP 308 to https://${STUB_HOST}/elsewhere`);
+      expect(bad.stdout).toContain("attempt 9/10: HTTP 308 — retrying in 6s");
+      expect(bad.stderr).toContain(
+        `ERROR: smoke check failed — https://${STUB_HOST}/healthz answered HTTP 308`,
+      );
       expect(bad.stderr).toContain(`docker tag infra-web:${tagOf(good)} infra-web:latest`);
       expect(bad.stderr).toContain(`docker tag infra-cms:${tagOf(good)} infra-cms:latest`);
       expect(bad.stderr).toContain("up -d --no-build web cms");
@@ -459,6 +492,20 @@ describe.skipIf(!RUN_SEQUENCES)(
       expect(bad.images.filter((i) => i.endsWith("=sha256:web2"))).toEqual([
         "infra-web:latest=sha256:web2",
       ]);
+    });
+
+    it("fails the smoke check for a cms that is not ready, or a 200 with another body", () => {
+      const [good, unready, other] = [r[15], r[16], r[17]];
+      expect(good.status, good.stderr).toBe(0);
+      expect(unready.status).toBe(1);
+      expect(unready.stderr).toContain(`/healthz answered HTTP 503`);
+      expect(other.status).toBe(1);
+      expect(other.stderr).toContain(`/healthz answered HTTP 200 without the body {"status":"ok"}`);
+      for (const bad of [unready, other]) {
+        expect(bad.state).toEqual(good.state);
+        expect(bad.history).toEqual(good.history);
+        expect(bad.stderr).toContain(`docker tag infra-web:${tagOf(good)} infra-web:latest`);
+      }
     });
 
     it("does not record a deploy whose live-smoke failed, and prints the rollback", () => {
@@ -494,6 +541,37 @@ describe.skipIf(!RUN_SEQUENCES)(
       expect(bad.stderr).toContain("docker compose up failed");
       expect(bad.stderr).toContain(`To roll back to the last-known-good deploy ${tagOf(r[0])}`);
       expect(bad.state).toEqual(r[0].state);
+    });
+
+    it("calls a failed `up` with a cms still starting or unhealthy inconclusive, without a rollback", () => {
+      for (const [bad, health] of [
+        [r[18], "starting"],
+        [r[19], "unhealthy"],
+      ] as const) {
+        expect(bad.status).toBe(1);
+        expect(bad.stderr).toContain(
+          `ERROR: docker compose up failed, but the cms is still running and not healthy yet (${health}).`,
+        );
+        expect(bad.stderr).toContain("docker logs --tail=100 infra-cms-1");
+        expect(bad.stderr).toMatch(/^ {9}docker compose .* ps$/m);
+        expect(bad.stderr).not.toContain("roll back to");
+        expect(bad.stderr).not.toContain("docker tag");
+        expect(bad.state).toEqual(r[15].state);
+      }
+      // An exited cms (step 5) keeps the rollback.
+      expect(r[5].stderr).not.toContain("still running");
+    });
+
+    it("stops before `up` when the new cms image refuses a boot value", () => {
+      const bad = r[20];
+      expect(bad.status).toBe(1);
+      expect(bad.stderr).toContain("ERROR: APP_TIME_ZONE must be an IANA time zone name");
+      expect(bad.stderr).toContain("ERROR: the new cms image refused these boot values (above)");
+      expect(bad.stderr).toContain("The running containers are unchanged.");
+      expect(bad.calls.filter((c) => c === BOOT_CHECK)).toHaveLength(1);
+      expect(called(bad, / up -d/)).toEqual([]);
+      expect(bad.stderr).not.toContain("docker tag");
+      expect(bad.state).toEqual(r[15].state);
     });
 
     it("records a live-smoke that could not check the notification frame, with a warning", () => {
@@ -812,27 +890,17 @@ describe.skipIf(!RUN_SEQUENCES)(
 
 describe.skipIf(!RUN_SEQUENCES)("deploy.sh: checks, dry run and parameters (FX35)", () => {
   let r: StepReport[] = [];
-  const green = JSON.stringify(
-    {
-      total_count: 2,
-      check_runs: [
-        { status: "completed", conclusion: "success" },
-        { status: "completed", conclusion: "skipped" },
-      ],
-    },
-    null,
-    2,
-  );
-  const failed = green.replace('"skipped"', '"failure"');
-  const pending = green.replace(
-    '"completed",\n      "conclusion": "skipped"',
-    '"in_progress",\n      "conclusion": null',
-  );
+  // Our CI's run for the push of the deployed commit (the curl stub fills in its SHA).
+  const ciRun = (patch: object = {}) =>
+    JSON.stringify(
+      { total_count: 1, workflow_runs: [{ ...CI_RUN, head_sha: "@HEAD_SHA@", ...patch }] },
+      null,
+      2,
+    );
+  const green = ciRun();
+  const failed = ciRun({ conclusion: "failure" });
+  const pending = ciRun({ status: "in_progress", conclusion: null });
   const quoted = (json: string) => `'${json.replace(/'/g, `'\\''`)}'`;
-  // CI as GitHub answers on the default branch: our two CI runs plus
-  // Dependabot's own update jobs, still running.
-  const withDependabot = (ours: object[]) =>
-    JSON.stringify({ total_count: ours.length + 2, check_runs: [...ours, ...DEPENDABOT_RUNS] });
   const STAGING = {
     COMPOSE_PROJECT: "b10-5b-staging",
     SMOKE_URL: "http://localhost:8511/",
@@ -893,19 +961,16 @@ describe.skipIf(!RUN_SEQUENCES)("deploy.sh: checks, dry run and parameters (FX35
         ].join("; "),
         args: ["--dry-run"],
       },
-      // CI with Dependabot's update jobs on the commit: they do not count.
+      // A skipped run, and a pull request run only, prove nothing for the commit.
       /* 18 */ {
-        before: `rm -r "$REPO/packages"; ci ${quoted(withDependabot(OUR_CI_GREEN))}`,
+        before: `rm -r "$REPO/packages"; ci ${quoted(ciRun({ conclusion: "skipped" }))}`,
         args: ["--dry-run", "--require-green-ci"],
       },
       /* 19 */ {
-        before: `ci ${quoted(withDependabot([OUR_CI_GREEN[0], { ...OUR_CI_GREEN[1], status: "in_progress", conclusion: null }]))}`,
+        before: `ci ${quoted(ciRun({ event: "pull_request", head_branch: "feat/x" }))}`,
         args: ["--dry-run", "--require-green-ci"],
       },
-      /* 20 */ {
-        before: `ci ${quoted(withDependabot([OUR_CI_GREEN[0], { ...OUR_CI_GREEN[1], conclusion: "failure" }]))}`,
-        args: ["--dry-run", "--require-green-ci"],
-      },
+      /* 20 */ { before: `ci ${quoted(green)}`, args: ["--dry-run", "--require-green-ci"] },
       // The example DOMAIN of infra/.env.example (5A-T1): --check refuses it.
       /* 21 */ {
         before: 'cp "$T/compose-example.json" "$T/compose.json"',
@@ -921,17 +986,20 @@ describe.skipIf(!RUN_SEQUENCES)("deploy.sh: checks, dry run and parameters (FX35
     expect(r[0].stateDir).toBe(false);
   });
 
-  it("ignores Dependabot's update jobs on the commit: green, pending and failed are our CI's", () => {
-    expect(r[18].status, r[18].stderr).toBe(0);
-    expect(r[18].stdout).toMatch(
-      /CI: 2 CI check\(s\) passed for [0-9a-f]{12} \(2 Dependabot run\(s\) ignored\)/,
+  it("needs a successful push run on main: a skipped or a pull request run is refused", () => {
+    expect(r[18].status).toBe(1);
+    expect(r[18].stderr).toContain(
+      "ERROR: --require-green-ci, and CI is failed: CI did not pass for",
     );
+    expect(r[18].stderr).toContain("(skipped: https://github.com/example/sinnlos/actions/runs/");
     expect(r[19].status).toBe(1);
     expect(r[19].stderr).toContain(
-      "ERROR: --require-green-ci, and CI is pending: CI is still running",
+      "ERROR: --require-green-ci, and CI is unknown: no CI run for the push of",
     );
-    expect(r[20].status).toBe(1);
-    expect(r[20].stderr).toContain("ERROR: --require-green-ci, and CI is failed: CI did not pass");
+    expect(r[20].status, r[20].stderr).toBe(0);
+    expect(r[20].stdout).toMatch(
+      /CI: the CI run for the push to main passed for [0-9a-f]{12} \(https:\/\/github\.com\/example\/sinnlos\/actions\/runs\/\d+\)/,
+    );
   });
 
   it("refuses the example DOMAIN in --check, before anything is touched (5A-T1)", () => {
@@ -1045,12 +1113,14 @@ describe.skipIf(!RUN_SEQUENCES)("deploy.sh: checks, dry run and parameters (FX35
     expect(dry.images.sort()).toEqual(good.images.sort());
   });
 
-  it("reads the GitHub check runs of HEAD, with the token on curl's stdin only", () => {
+  it("reads the CI workflow's push runs of HEAD on main, with the token on curl's stdin only", () => {
     const run = r[7];
     expect(run.status, run.stderr).toBe(0);
-    expect(run.stdout).toContain("CI: 2 CI check(s) passed");
+    expect(run.stdout).toContain("CI: the CI run for the push to main passed");
     const apiCall = run.calls.find((c) => c.includes("api.github.com"));
-    expect(apiCall).toContain(`/repos/example/sinnlos/commits/${run.state.SHA}/check-runs`);
+    expect(apiCall).toContain(
+      `/repos/example/sinnlos/actions/workflows/ci.yml/runs?head_sha=${run.state.SHA}&event=push&branch=main&`,
+    );
     expect(apiCall).not.toContain("ghp_testtoken123");
     expect(run.curlStdin).toContain('header = "Authorization: Bearer ghp_testtoken123"');
   });
@@ -1107,46 +1177,21 @@ describe.skipIf(!RUN_SEQUENCES)("deploy.sh: checks, dry run and parameters (FX35
   });
 });
 
-/** Our CI's runs on a commit, as the GitHub API lists them (abridged). */
-const OUR_CI_GREEN = [
-  {
-    id: 11,
-    name: "typecheck · lint · test · build",
-    status: "completed",
-    conclusion: "success",
-    output: { title: null, summary: null, text: null },
-    app: { id: 15368, slug: "github-actions", name: "GitHub Actions" },
-  },
-  {
-    id: 12,
-    name: "integration · SQLite + Postgres 16",
-    status: "completed",
-    conclusion: "success",
-    app: { id: 15368, slug: "github-actions", name: "GitHub Actions" },
-  },
-];
-
-/**
- * Dependabot's own update jobs, which GitHub attaches to the default
- * branch's HEAD: a run named "Dependabot" of the app github-actions, and the
- * app dependabot's check of .github/dependabot.yml. Still running.
- */
-const DEPENDABOT_RUNS = [
-  {
-    id: 21,
-    name: "Dependabot",
-    status: "in_progress",
-    conclusion: null,
-    app: { id: 15368, slug: "github-actions", name: "GitHub Actions" },
-  },
-  {
-    id: 22,
-    name: ".github/dependabot.yml",
-    status: "queued",
-    conclusion: null,
-    app: { id: 29110, slug: "dependabot", name: "Dependabot" },
-  },
-];
+/** Our CI's run for the push of a commit to main, as the GitHub API lists it (abridged). */
+const CI_RUN = {
+  id: 40203856970,
+  name: "CI",
+  head_branch: "main",
+  head_sha: "0123456789abcdef0123456789abcdef01234567",
+  path: ".github/workflows/ci.yml",
+  event: "push",
+  status: "completed",
+  conclusion: "success",
+  html_url: "https://github.com/example/sinnlos/actions/runs/40203856970",
+  pull_requests: [],
+  actor: { login: "example", html_url: "https://github.com/example" },
+  head_commit: { id: "0123456789abcdef0123456789abcdef01234567", message: "Merge #1" },
+};
 
 /**
  * deploy.sh's ci_status with git and curl stubbed, once per body, all in
@@ -1162,7 +1207,7 @@ function ciStatuses(bodies: readonly string[]): string[] {
     "BODIES=()",
     ...bodies.flatMap((body, n) => [`BODIES+=("$(cat <<'BODY_${n}'`, body, `BODY_${n}`, ')")']),
     `curl() { cat > /dev/null; printf '%s\\n' "\${BODIES[ROUND]}"; }`,
-    functionOf("check_runs_of"),
+    functionOf("workflow_runs_of"),
     functionOf("ci_status"),
     'for ROUND in "${!BODIES[@]}"; do ci_status; done',
     "",
@@ -1184,89 +1229,103 @@ function functionOf(name: string): string {
 }
 
 const answer = (runs: object[], pretty = false) =>
-  JSON.stringify({ total_count: runs.length, check_runs: runs }, null, pretty ? 2 : undefined);
+  JSON.stringify({ total_count: runs.length, workflow_runs: runs }, null, pretty ? 2 : undefined);
 
 describe.skipIf(!HAS_BASH)(
-  "deploy.sh: the CI check reads our CI's runs only",
+  "deploy.sh: the CI check needs the CI workflow's push run on main at HEAD",
   { timeout: 30_000 },
   () => {
-    const ours = (patch: object) => [OUR_CI_GREEN[0], { ...OUR_CI_GREEN[1], ...patch }];
+    const run = (patch: object) => ({ ...CI_RUN, ...patch });
+    const SHORT = "0123456789ab";
 
-    it("is green while Dependabot's update jobs on the commit still run", () => {
+    it("is green for a completed, successful run", () => {
       for (const pretty of [false, true]) {
-        expect(ciStatus(answer([...DEPENDABOT_RUNS, ...OUR_CI_GREEN], pretty))).toBe(
-          "green: 2 CI check(s) passed for 0123456789ab (2 Dependabot run(s) ignored)",
+        expect(ciStatus(answer([CI_RUN], pretty))).toBe(
+          `green: the CI run for the push to main passed for ${SHORT} (${CI_RUN.html_url})`,
         );
       }
     });
 
-    it("is pending while our CI runs, whatever Dependabot's jobs do", () => {
-      const done = DEPENDABOT_RUNS.map((run) => ({
-        ...run,
-        status: "completed",
-        conclusion: "success",
-      }));
-      expect(ciStatus(answer([...done, ...ours({ status: "queued", conclusion: null })]))).toBe(
-        "pending: CI is still running for 0123456789ab (2 Dependabot run(s) ignored)",
-      );
-    });
-
-    it("is failed when our CI failed", () => {
-      expect(ciStatus(answer([...DEPENDABOT_RUNS, ...ours({ conclusion: "failure" })]))).toMatch(
-        /^failed: CI did not pass for 0123456789ab \(2 Dependabot run\(s\) ignored\) \(https:\/\/github\.com\/example\/sinnlos\/commit\//,
-      );
-      // A failed Dependabot job is not ours either.
-      const broken = DEPENDABOT_RUNS.map((run) => ({
-        ...run,
-        status: "completed",
-        conclusion: "failure",
-      }));
-      expect(ciStatus(answer([...broken, ...OUR_CI_GREEN]))).toMatch(
-        /^green: 2 CI check\(s\) passed/,
-      );
-    });
-
-    it("reads each run's own fields, not those of its output or its app", () => {
-      const tricky = {
-        ...OUR_CI_GREEN[0],
-        output: {
-          title: 'status "in_progress"',
-          summary: '{"status":"queued","conclusion":"failure","name":"Dependabot"}',
-          text: "a \\ backslash, a } brace and a ] bracket",
-        },
-        app: { id: 1, slug: "github-actions", name: "Dependabot", owner: { login: "failure" } },
-        pull_requests: [{ id: 3, number: 7, head: { ref: "dependabot", sha: "x" } }],
-      };
-      expect(ciStatus(answer([tricky, OUR_CI_GREEN[1]], true))).toBe(
-        "green: 2 CI check(s) passed for 0123456789ab",
-      );
-    });
-
-    it("is unknown with only Dependabot's runs, or none, or an answer it cannot read", () => {
-      expect(ciStatus(answer(DEPENDABOT_RUNS))).toBe(
-        "unknown: no CI run for 0123456789ab on example/sinnlos (2 Dependabot run(s) ignored) (CI has not started)",
-      );
-      expect(ciStatus(answer([]))).toMatch(
-        /^unknown: no CI run for 0123456789ab on example\/sinnlos \(not pushed/,
-      );
-      expect(ciStatus('{"total_count": 3, "check_runs": "elsewhere"}')).toBe(
-        "unknown: the GitHub answer lists 3 check run(s) for 0123456789ab, but none could be read",
-      );
-    });
-
-    it("counts every run of our CI and every non-success conclusion as before", () => {
-      const conclusions = ["cancelled", "timed_out", "action_required", "startup_failure", "stale"];
+    it("is pending while the run is not completed, and failed for every other conclusion", () => {
       const statuses = ["queued", "in_progress", "waiting", "requested", "pending"];
+      const conclusions = [
+        "failure",
+        "cancelled",
+        "timed_out",
+        "action_required",
+        "startup_failure",
+        "stale",
+        "skipped",
+        "neutral",
+        null,
+      ];
       const results = ciStatuses([
-        ...conclusions.map((conclusion) => answer(ours({ conclusion }))),
-        ...statuses.map((status) => answer(ours({ status, conclusion: null }))),
-        answer(ours({ conclusion: "skipped" })),
+        ...statuses.map((status) => answer([run({ status, conclusion: null })])),
+        ...conclusions.map((conclusion) => answer([run({ conclusion })])),
       ]);
-      conclusions.forEach((conclusion, n) => expect(results[n], conclusion).toMatch(/^failed: /));
       statuses.forEach((status, n) =>
-        expect(results[conclusions.length + n], status).toMatch(/^pending: /),
+        expect(results[n], status).toBe(
+          `pending: CI is still running for ${SHORT} (${CI_RUN.html_url})`,
+        ),
       );
-      expect(results.at(-1)).toMatch(/^green: 2 CI check\(s\)/);
+      conclusions.forEach((conclusion, n) =>
+        expect(results[statuses.length + n], String(conclusion)).toBe(
+          `failed: CI did not pass for ${SHORT} (${conclusion ?? "no conclusion"}: ${CI_RUN.html_url})`,
+        ),
+      );
+    });
+
+    it("lets the newest matching run decide", () => {
+      const results = ciStatuses([
+        answer([run({ conclusion: "failure" }), CI_RUN]),
+        answer([run({ status: "in_progress", conclusion: null }), CI_RUN]),
+        answer([CI_RUN, run({ conclusion: "failure" })]),
+      ]);
+      expect(results.map((line) => line.split(":")[0])).toEqual(["failed", "pending", "green"]);
+    });
+
+    it("counts only a push run on main at the exact commit", () => {
+      const others = [
+        run({ head_sha: "f".repeat(40) }),
+        run({ head_sha: SHORT }),
+        run({ event: "pull_request" }),
+        run({ event: "workflow_dispatch" }),
+        run({ head_branch: "feat/x" }),
+      ];
+      const results = ciStatuses([
+        ...others.map((other) => answer([other])),
+        answer([...others, run({ conclusion: "failure" })]),
+      ]);
+      others.forEach((_, n) =>
+        expect(results[n]).toBe(
+          `unknown: no CI run for the push of ${SHORT} to main on example/sinnlos (not pushed to main yet, or CI has not started)`,
+        ),
+      );
+      expect(results.at(-1)).toMatch(/^failed: CI did not pass/);
+    });
+
+    it("reads each run's own fields, not those of its head commit, actor or pull requests", () => {
+      const tricky = run({
+        status: "in_progress",
+        conclusion: null,
+        display_title: 'status "completed"',
+        head_commit: {
+          id: CI_RUN.head_sha,
+          message: '{"status":"completed","conclusion":"success","html_url":"x"}',
+          author: { name: "a \\ backslash, a } brace and a ] bracket" },
+        },
+        actor: { login: "success", html_url: "https://github.com/success" },
+        pull_requests: [{ id: 3, head: { ref: "main", sha: CI_RUN.head_sha } }],
+      });
+      expect(ciStatus(answer([tricky], true))).toBe(
+        `pending: CI is still running for ${SHORT} (${CI_RUN.html_url})`,
+      );
+    });
+
+    it("is unknown without a run, or with an answer it cannot read", () => {
+      for (const body of [answer([]), '{"total_count": 3, "workflow_runs": "elsewhere"}']) {
+        expect(ciStatus(body)).toMatch(/^unknown: no CI run for the push of 0123456789ab to main/);
+      }
     });
   },
 );
@@ -1464,7 +1523,7 @@ describe.skipIf(!RUN_SEQUENCES)(
         `build-rev SINNLOS_VERSION=unknown SINNLOS_REVISION=${tagOf(first)}`,
       );
       expect(called(first, /^curl /).filter((c) => !c.includes("api.github.com"))).toEqual([
-        `curl -sS -o /dev/null -w %{http_code} %{redirect_url} --max-time 15 https://${STUB_HOST}`,
+        `curl -sS -w \\n%{http_code} --max-time 15 https://${STUB_HOST}/healthz`,
       ]);
     });
 
@@ -1534,6 +1593,15 @@ describe.skipIf(!RUN_SEQUENCES)(
           "docker tag ghcr.io/yurtbayemre/sinnlos-cms:0.26.0 infra-cms:latest",
         ]),
       );
+      // The boot values are checked in the retagged cms image, before `up`.
+      const retag = run.calls.indexOf(
+        "docker tag ghcr.io/yurtbayemre/sinnlos-cms:0.26.0 infra-cms:latest",
+      );
+      const check = run.calls.indexOf(BOOT_CHECK);
+      const up = run.calls.findIndex((c) => / up -d --no-build$/.test(c));
+      expect(retag).toBeGreaterThan(-1);
+      expect(check).toBeGreaterThan(retag);
+      expect(up).toBeGreaterThan(check);
       expect(run.state.WEB_IMAGE).toBe("sha256:pulled-sinnlos-web:0.26.0");
       expect(run.state.PULLED).toMatch(
         /^ghcr\.io\/yurtbayemre\/sinnlos-web@sha256:\S+ ghcr\.io\/yurtbayemre\/sinnlos-cms@sha256:\S+$/,
