@@ -1485,6 +1485,51 @@ describe("the Document Service guard of the user type (admin-panel passwords, to
     ]);
   });
 
+  it("a block raises the version, so an unblock later does not revive old sessions (v0.30)", async () => {
+    const h = guardHarness();
+    const before = (await h.jwt.issue({ id: 2 })) as string;
+    await h.documents.update({ documentId: "doc-2", data: { blocked: true } });
+    expect(h.writes()).toEqual([
+      "begin",
+      "bump 2",
+      `save ${JSON.stringify({ blocked: true })}`,
+      "commit",
+    ]);
+    // Unblocking raises nothing, and the token from before the block stays dead.
+    await h.documents.update({ documentId: "doc-2", data: { blocked: false } });
+    expect(h.users.get(2)).toMatchObject({ tokenVersion: 4, blocked: false });
+    await expect(h.jwt.verify(before)).rejects.toThrow("Invalid token.");
+  });
+
+  it("raises only on the active-to-blocked transition, and once with a password in the same write", async () => {
+    const h = guardHarness();
+    await h.documents.update({ documentId: "doc-2", data: { blocked: true } });
+    await h.documents.update({
+      documentId: "doc-2",
+      data: { blocked: true, displayName: "Again" },
+    });
+    expect(h.users.get(2)?.tokenVersion).toBe(4);
+    const g = guardHarness();
+    await g.documents.update({
+      documentId: "doc-2",
+      data: { blocked: true, password: "p-long-enough-1" },
+    });
+    expect(g.writes().filter((q) => q.startsWith("bump"))).toEqual(["bump 2"]);
+    expect(g.users.get(2)?.tokenVersion).toBe(4);
+  });
+
+  it("a failed block write rolls the bump back", async () => {
+    const h = guardHarness();
+    const before = (await h.jwt.issue({ id: 2 })) as string;
+    h.failWrites();
+    await expect(
+      h.documents.update({ documentId: "doc-2", data: { blocked: true } }),
+    ).rejects.toThrow("the Document Service failed");
+    expect(h.writes()).toEqual(["begin", "bump 2", "rollback"]);
+    expect(h.users.get(2)).toMatchObject({ tokenVersion: 3 });
+    await expect(h.jwt.verify(before)).resolves.toMatchObject({ id: 2 });
+  });
+
   it("refuses a password write for a user it cannot find, before writing", async () => {
     const h = guardHarness();
     await expect(
