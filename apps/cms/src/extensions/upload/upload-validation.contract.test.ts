@@ -21,7 +21,7 @@ import {
 
 /**
  * What the upload profile (extensions/upload/strapi-server.ts) and the
- * admin-panel backstop (config/plugins.ts) rely on in @strapi/upload 5.58.0
+ * admin-panel backstop (config/plugins.ts) rely on in @strapi/upload 5.59.0
  * and the file-type it loads (batch 16 plan S6, lane 16A item 0; decision
  * 06 C17, C36, C37, amendment row A10). Re-pinned on 5.57, which
  * restructured validateFile (a "trusted declaration" branch, the zip
@@ -85,8 +85,8 @@ async function validate(
 const XLSX = UPLOAD_FORMAT_SPECS.xlsx.mime;
 
 describe("installed versions", () => {
-  it("@strapi/upload 5.58.0 with file-type 21.3.4 and mime-types 2.1.35", () => {
-    expect(strapiPackageVersion("@strapi/upload")).toBe("5.58.0");
+  it("@strapi/upload 5.59.0 with file-type 21.3.4 and mime-types 2.1.35", () => {
+    expect(strapiPackageVersion("@strapi/upload")).toBe("5.59.0");
     // @strapi/upload's own dependencies, next to it in the pnpm store (file-type
     // exports no package.json).
     const own = (name: string) =>
