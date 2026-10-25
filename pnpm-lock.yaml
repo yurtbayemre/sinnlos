@@ -10,13 +10,14 @@ overrides:
   esbuild@>=0.27.0 <0.28.1: ^0.28.1
   fast-uri@>=3.0.0 <3.1.9: ^3.1.9
   handlebars@>=4.0.0 <4.7.10: ^4.7.10
-  markdown-it@>=14.0.0 <14.3.1: ^14.3.1
+  markdown-it@>=14.0.0 <14.3.3: ^14.3.3
   nodemailer@>=5.0.0 <10.1.4: ^10.1.4
   postcss-selector-parser@>=6.0.0 <7.1.6: ^7.1.6
   postcss@>=8.0.0 <8.5.23: ^8.5.23
   qs@>=6.0.0 <6.16.0: ^6.16.0
   sharp@>=0.35.0 <0.35.5: ^0.35.5
   undici@>=6.5.0 <6.29.1: ^6.29.1
+  undici@>=8.0.0 <8.12.2: ^8.12.2
   vite@>=6.0.0 <6.4.4: ^6.4.4
   webpack-dev-middleware@>=6.0.0 <7.4.6: ^7.4.6
   zod@>=4.0.0 <4.6.6: ^4.6.6
@@ -6457,10 +6458,6 @@ packages:
   markdown-it-sup@1.0.0:
     resolution: {integrity: sha512-E32m0nV9iyhRR7CrhnzL5msqic7rL1juWre6TQNxsnApg7Uf+F97JOKxUijg5YwXz86lZ0mqfOnutoryyNdntQ==}
 
-  markdown-it@14.3.1:
-    resolution: {integrity: sha512-4Ej49aYTDFIQ+uBkfX8GBvJGccoARxxPep+7aWTs55ozbjQJpW9M26Fe53vnGgvLeVzva/amzjQQaQu9w0vMhA==}
-    hasBin: true
-
   markdown-it@14.3.3:
     resolution: {integrity: sha512-L//tDAkjTjJCU6pBUSBTgs3Kg4InVaZuUZog/b6V12UKhcDQ7S78877ibbCanRExwPuYP1CZD7Gd2dxSy1GXRg==}
     hasBin: true
@@ -8414,8 +8411,8 @@ packages:
     resolution: {integrity: sha512-EvRlUt/QqAEvXdQeRMYUfwOQsfzpDztykrG2owGEE/rBOBoYv9uF39ZzsNDh4lTFHhTr2XOZjKkYgueD12ZmGA==}
     engines: {node: '>=18.17'}
 
-  undici@8.12.1:
-    resolution: {integrity: sha512-usz3OVQBeh1LxNn0DzU0voLXMgn5CU/WUdpBsY6Ti5afNao+vTkmn4H/NxoXolc10cOqe2+YIG0Hspq2rsl64w==}
+  undici@8.12.3:
+    resolution: {integrity: sha512-+fdndUTwBP86cVjihTp21hZHo7d6oj1c/47XPA3lL8mM0XHs+C4EkcjmgRsFnFk2f/UONGDy9ItBItmXsLOQHw==}
     engines: {node: '>=22.19.0'}
 
   unified@11.0.5:
@@ -11694,7 +11691,7 @@ snapshots:
       immer: 9.0.21
       koa: 2.16.4
       lodash: 4.18.1
-      markdown-it: 14.3.1
+      markdown-it: 14.3.3
       markdown-it-abbr: 1.0.4
       markdown-it-container: 3.0.0
       markdown-it-deflist: 2.1.0
@@ -11905,7 +11902,7 @@ snapshots:
       resolve.exports: 2.0.2
       semver: 7.7.4
       typescript: 5.9.3
-      undici: 8.12.1
+      undici: 8.12.3
       yup: 0.32.9
       zod: 4.6.7
     transitivePeerDependencies:
@@ -15934,15 +15931,6 @@ snapshots:
 
   markdown-it-sup@1.0.0: {}
 
-  markdown-it@14.3.1:
-    dependencies:
-      argparse: 2.0.1
-      entities: 4.5.0
-      linkify-it: 5.0.2
-      mdurl: 2.1.0
-      punycode.js: 2.3.1
-      uc.micro: 2.1.0
-
   markdown-it@14.3.3:
     dependencies:
       argparse: 2.0.1
@@ -18231,7 +18219,7 @@ snapshots:
 
   undici@6.29.1: {}
 
-  undici@8.12.1: {}
+  undici@8.12.3: {}
 
   unified@11.0.5:
     dependencies:
