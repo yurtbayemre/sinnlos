@@ -7,10 +7,23 @@ import type {
   TrainingReportCourseResponse,
   UserExport,
 } from "@sinnlos/domain";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
-import { createTestStrapi, testEngines, type Row, type TestStrapi } from "./harness.test.helper";
-import { holdTransaction, qualified, settle, waitForLockWait } from "./pg-lock.test.helper";
+import {
+  createTestStrapi,
+  testEngines,
+  type ApiResponse,
+  type Row,
+  type TestStrapi,
+} from "./harness.test.helper";
+import {
+  holdTransaction,
+  qualified,
+  settle,
+  testSchema,
+  waitForLockWait,
+  type Settled,
+} from "./pg-lock.test.helper";
 
 /**
  * v0.28 lane A2 end to end (deep-dive plan-v028-rev2.md §2-§4 with rev3 and
@@ -261,6 +274,10 @@ describe.each(testEngines())("data protection (v0.28, lane A2) on %s", (engine) 
     });
     expect(run.body.data.counts.deleted.notifications).toBeGreaterThanOrEqual(1);
     expect(run.body.data.counts.rewritten.notifications).toBeGreaterThanOrEqual(1);
+    expect(run.body.data.notifications).toEqual({
+      rewritten: run.body.data.counts.rewritten.notifications,
+      remaining: 0,
+    });
     expect(
       await t.strapi.db.query(NOTIFICATION).count({ where: { recipient: { id: bob.id } } }),
     ).toBe(0);
@@ -319,8 +336,13 @@ describe.each(testEngines())("data protection (v0.28, lane A2) on %s", (engine) 
     });
     const audit = (await t.strapi.db.query(AUDIT).findMany({
       where: { action: "anonymise", targetDocumentId: bob.documentId },
+      orderBy: [{ id: "asc" }],
     })) as Row[];
-    expect(audit).toHaveLength(1);
+    // v0.30: step 1's row, then the notification rewrite's.
+    expect(audit.map((a) => String(a.detail))).toEqual([
+      expect.stringContaining("reactions:1"),
+      `notifications rewritten:${run.body.data.notifications.rewritten} remaining:0`,
+    ]);
     expect(String(audit[0].detail)).not.toContain("Bob");
 
     // A second run, the user administration and the Content Manager leave the tombstone alone.
@@ -647,4 +669,229 @@ describe.each(testEngines())("data protection (v0.28, lane A2) on %s", (engine) 
     },
     60_000,
   );
+
+  // v0.30 (plan-v030-rev3.md R3 v3 with rev4/rev5): the notification rewrite
+  // after the commit, page by page, beside the sweep.
+
+  /** `count` notifications to the member naming `actor`, ids ascending. */
+  const naming = (actor: Person, count: number): Promise<number[]> =>
+    t.strapi.db.transaction(async () => {
+      const ids: number[] = [];
+      for (let i = 0; i < count; i++) {
+        const row = (await t.strapi.db.query(NOTIFICATION).create({
+          data: {
+            type: "comment",
+            title: `${actor.username} commented on "P${i}"`,
+            titleParams: { actor: actor.username, subject: `P${i}` },
+            link: "/x",
+            recipient: t.fixtures.users.member.id,
+            actor: actor.id,
+          },
+        })) as Row;
+        ids.push(row.id as number);
+      }
+      return ids;
+    });
+  const stillNaming = (actor: Person) =>
+    t.strapi.db.query(NOTIFICATION).count({ where: { actor: { id: actor.id } } });
+  async function avatarFor(p: Person): Promise<number> {
+    const file = (await t.strapi.db.query(FILE).create({
+      data: {
+        name: "avatar.png",
+        hash: `it_dp_avatar_${p.id}_${engine}`,
+        ext: ".png",
+        mime: "image/png",
+        size: 1,
+        url: `/uploads/it_dp_avatar_${p.id}_${engine}.png`,
+        provider: "local",
+      },
+    })) as Row;
+    await t.strapi.db.query(USER).update({ where: { id: p.id }, data: { avatar: file.id } });
+    return file.id as number;
+  }
+  const sweepAnonymised = () =>
+    t.requireBuilt<Anonymise>("src/utils/anonymise").sweepAnonymised(t.strapi);
+  const LOCK_WAITS =
+    "FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND position(? in query) > 0";
+  const lockWaits = async () =>
+    Number(
+      (
+        await t.database.sql<{ n: string }>(`SELECT count(*) AS n ${LOCK_WAITS}`, [testSchema(t)])
+      )[0]?.n ?? 0,
+    );
+  const lockRow = async (id: number) => {
+    const held = await holdTransaction(t);
+    await held.raw(`SELECT 1 FROM ${qualified(t, "notifications")} WHERE id = ? FOR UPDATE`, [id]);
+    return held;
+  };
+  const log = () => t.strapi.log as unknown as { warn(m: string): void; error(m: string): void };
+  const ran = (outcome: Settled<ApiResponse<Answer<AnonymiseResponse>>>) => {
+    if (!outcome.ok) throw (outcome as { error: unknown }).error;
+    expect(outcome.value.status, outcome.value.text).toBe(200);
+    return outcome.value.body.data;
+  };
+
+  it.runIf(engine === "postgres")(
+    "(a) rewrites the notifications after the commit, outside the directory lock",
+    async () => {
+      const ida = await person("Ida Pages");
+      const ids = await naming(ida, 2);
+      expect((await block(ida.id)).status).toBe(200);
+      // The rewrite's page waits for this row with its transaction open.
+      const held = await lockRow(ids[0]);
+      const run = settle(anonymise(ida.id, ida.username));
+      await waitForLockWait(t);
+      const probe = await holdTransaction(t);
+      try {
+        await probe.raw(
+          `SELECT 1 FROM ${qualified(t, "content_versions")} WHERE target_uid = ? AND target_document_id = ? FOR UPDATE NOWAIT`,
+          ["sinnlos::user-directory", "global"],
+        );
+      } finally {
+        await probe.rollback();
+        await held.commit();
+      }
+      const data = ran(await run);
+      expect(data.notifications).toEqual({ rewritten: 2, remaining: 0 });
+      expect(data.counts.rewritten.notifications).toBe(2);
+      const titles = (await t.strapi.db
+        .query(NOTIFICATION)
+        .findMany({ where: { id: { $in: ids } }, orderBy: [{ id: "asc" }] })) as Row[];
+      expect(titles.map((n) => n.title)).toEqual([
+        'Someone commented on "P0"',
+        'Someone commented on "P1"',
+      ]);
+    },
+    60_000,
+  );
+
+  it.runIf(engine === "postgres")(
+    "(b, d) a rewrite stopped after a committed page leaves the rest to the sweep; the avatar still goes",
+    async () => {
+      const jo = await person("Jo Many");
+      const ids = await naming(jo, 501);
+      const file = await avatarFor(jo);
+      expect((await block(jo.id)).status).toBe(200);
+      // The last row is on the second page: that page waits for it and is cancelled.
+      const held = await lockRow(ids[500]);
+      const warn = vi.spyOn(log(), "warn");
+      try {
+        const run = settle(anonymise(jo.id, jo.username));
+        await waitForLockWait(t);
+        await t.database.sql(`SELECT pg_cancel_backend(pid) ${LOCK_WAITS}`, [testSchema(t)]);
+        await held.rollback();
+        const data = ran(await run);
+        expect(data.notifications).toEqual({ rewritten: 500, remaining: 1 });
+        expect(data.counts.rewritten.notifications).toBe(500);
+        expect(data.avatar).toEqual({ id: file, removed: true });
+        expect(warn).toHaveBeenCalledWith(
+          expect.stringMatching(
+            /^\[anonymise\] notification rewrite stopped after 1 page\(s\): .+; 1 left for the nightly sweep$/,
+          ),
+        );
+      } finally {
+        warn.mockRestore();
+      }
+      expect(await t.strapi.db.query(FILE).count({ where: { id: file } })).toBe(0);
+      expect(await stillNaming(jo)).toBe(1);
+      expect((await sweepAnonymised()).rewritten).toBeGreaterThanOrEqual(1);
+      expect(await stillNaming(jo)).toBe(0);
+    },
+    120_000,
+  );
+
+  it.runIf(engine === "postgres")(
+    "(c) a sweep beside the request's rewrite waits for its row locks and rewrites nothing twice",
+    async () => {
+      const kim = await person("Kim Twice");
+      const ids = await naming(kim, 3);
+      expect((await block(kim.id)).status).toBe(200);
+      // The request's page waits for the held row; the sweep's page then waits for the request's.
+      const held = await lockRow(ids[2]);
+      const run = settle(anonymise(kim.id, kim.username));
+      await waitForLockWait(t);
+      const sweep = settle(sweepAnonymised());
+      await expect.poll(lockWaits, { timeout: 10_000, interval: 50 }).toBeGreaterThanOrEqual(2);
+      await held.commit();
+      expect(ran(await run).notifications).toEqual({ rewritten: 3, remaining: 0 });
+      const swept = await sweep;
+      if (!swept.ok) throw (swept as { error: unknown }).error;
+      expect(swept.value.rewritten).toBe(0);
+      expect(await stillNaming(kim)).toBe(0);
+    },
+    60_000,
+  );
+
+  it.runIf(engine === "postgres")(
+    "a failed audit row for the rewrite is logged and changes nothing else",
+    async () => {
+      const lu = await person("Lu Audit");
+      await naming(lu, 1);
+      const file = await avatarFor(lu);
+      expect((await block(lu.id)).status).toBe(200);
+      await t.database.sql(
+        `CREATE FUNCTION refuse_rewrite_audit() RETURNS trigger LANGUAGE plpgsql AS $$
+         BEGIN
+           IF NEW.detail LIKE 'notifications %' THEN RAISE EXCEPTION 'refused by the test'; END IF;
+           RETURN NEW;
+         END $$`,
+      );
+      await t.database.sql(
+        "CREATE TRIGGER refuse_rewrite_audit BEFORE INSERT ON audit_events FOR EACH ROW EXECUTE FUNCTION refuse_rewrite_audit()",
+      );
+      const error = vi.spyOn(log(), "error");
+      try {
+        const run = await anonymise(lu.id, lu.username);
+        expect(run.status, run.text).toBe(200);
+        expect(run.body.data.notifications).toEqual({ rewritten: 1, remaining: 0 });
+        expect(run.body.data.avatar).toEqual({ id: file, removed: true });
+        expect(error).toHaveBeenCalledWith(
+          expect.stringContaining("[anonymise] audit row for the notification rewrite failed: "),
+        );
+      } finally {
+        error.mockRestore();
+        await t.database.sql("DROP TRIGGER refuse_rewrite_audit ON audit_events");
+        await t.database.sql("DROP FUNCTION refuse_rewrite_audit()");
+      }
+      expect(
+        await t.strapi.db
+          .query(AUDIT)
+          .count({ where: { action: "anonymise", targetDocumentId: lu.documentId } }),
+      ).toBe(1);
+      expect(await t.strapi.db.query(FILE).count({ where: { id: file } })).toBe(0);
+      expect(await stillNaming(lu)).toBe(0);
+    },
+    60_000,
+  );
+
+  it("a final count that fails answers the committed rewrite with remaining null", async () => {
+    const max = await person("Max Count");
+    await naming(max, 1);
+    expect((await block(max.id)).status).toBe(200);
+    // The notifications' count fails once the rewrite has read the actor link table.
+    const db = t.strapi.db as unknown as { query(uid: string): object };
+    const query = db.query.bind(db);
+    let paging = false;
+    const spy = vi.spyOn(db, "query").mockImplementation((uid: string) => {
+      const q = query(uid);
+      if (uid === "notifications_actor_lnk") paging = true;
+      if (!paging || uid !== NOTIFICATION) return q;
+      return Object.assign(Object.create(q) as object, {
+        count: () => Promise.reject(new Error("count refused by the test")),
+      });
+    });
+    try {
+      const run = await anonymise(max.id, max.username);
+      expect(run.status, run.text).toBe(200);
+      expect(run.body.data.notifications).toEqual({ rewritten: 1, remaining: null });
+    } finally {
+      spy.mockRestore();
+    }
+    expect(await stillNaming(max)).toBe(0);
+    const audit = (await t.strapi.db.query(AUDIT).findMany({
+      where: { action: "anonymise", targetDocumentId: max.documentId },
+      orderBy: [{ id: "asc" }],
+    })) as Row[];
+    expect(audit.map((a) => a.detail)).toContain("notifications rewritten:1 remaining:unknown");
+  });
 });
