@@ -5,7 +5,12 @@ import type { CommentControls } from "@/components/comments/live-comment-section
 import type { CommentTarget } from "@/lib/comment-target";
 import type { CommentSectionData } from "@/lib/reaction-summary";
 import type { ReactionSummary } from "@/lib/types";
-import { FakeEventSource, installFakeBrowser, type FakeBrowser } from "./fake-browser.test.helper";
+import {
+  FakeEventSource,
+  installFakeBrowser,
+  type FakeBrowser,
+  type FakeNode,
+} from "./fake-browser.test.helper";
 
 /**
  * The page-level CommentSectionsProvider (WD04, live-comment-section.tsx)
@@ -39,6 +44,7 @@ vi.mock("@/components/reactions/reaction-bar", () => ({
   },
 }));
 vi.mock("@/components/comments/comment-thread", () => ({ CommentThread: () => null }));
+vi.mock("next-intl", () => ({ useTranslations: () => (key: string) => key }));
 
 const { CommentSectionsProvider, LiveCommentSection } =
   await import("@/components/comments/live-comment-section");
@@ -93,6 +99,14 @@ const ping = (documentId: string) =>
 /** The document ids of every getCommentSections call so far. */
 const loads = () =>
   actions.getCommentSections.mock.calls.map(([targets]) => targets.map((t) => t.documentId));
+
+/** How many failed-load notices (v0.30, role="status") the sections show. */
+function notices(): number {
+  const count = (node: FakeNode): number =>
+    (node.getAttribute("role") === "status" ? 1 : 0) +
+    node.childNodes.reduce((sum, child) => sum + count(child), 0);
+  return count(browser.container);
+}
 
 const subscribeBodies = () =>
   browser.calls.filter((call) => call.url === "/live/subscribe").map((call) => call.body);
@@ -195,6 +209,28 @@ describe("CommentSectionsProvider on the live provider", () => {
     await browser.setVisibility("visible");
     await advance(50);
     expect(loads()).toEqual([["a", "b"]]);
+  });
+
+  it("shows a failed first load until a refetch lands, also past a failed refetch (v0.30)", async () => {
+    await mount(
+      createElement(LiveCommentSection, {
+        target: target("a"),
+        initial: data(0),
+        loadFailed: true,
+        controls,
+      }),
+    );
+    await hello();
+    expect(notices()).toBe(1);
+    actions.getCommentSections.mockRejectedValueOnce(new Error("cms down"));
+    await ping("a");
+    await advance(200);
+    expect(loads()).toEqual([["a"]]);
+    expect(notices()).toBe(1);
+    await ping("a");
+    await advance(200);
+    expect(notices()).toBe(0);
+    expect(rendered.get("a")).toBe(1);
   });
 
   it("does not refetch on tab regain with a stream (the hello's catch-up does)", async () => {

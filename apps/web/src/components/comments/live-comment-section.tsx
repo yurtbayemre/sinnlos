@@ -10,6 +10,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { useTranslations } from "next-intl";
 import { getCommentSection, getCommentSections } from "@/lib/comment-actions";
 import type { CommentTarget } from "@/lib/comment-target";
 import { channelFor, type ContentChannel } from "@/lib/live-contract";
@@ -281,6 +282,8 @@ type SectionProps = {
   target: CommentTarget;
   currentUserId?: number;
   initial: CommentSectionData;
+  /** The server could not load the section; a notice shows until a refetch lands. */
+  loadFailed?: boolean;
   controls: CommentControls;
 };
 
@@ -291,9 +294,17 @@ export function LiveCommentSection(props: SectionProps) {
   return registry ? body : <CommentSectionsProvider>{body}</CommentSectionsProvider>;
 }
 
-function CommentSectionBody({ target, currentUserId, initial, controls }: SectionProps) {
+function CommentSectionBody({
+  target,
+  currentUserId,
+  initial,
+  loadFailed,
+  controls,
+}: SectionProps) {
   const registry = useContext(CommentSectionsContext);
+  const t = useTranslations("comments");
   const [data, setData] = useState(initial);
+  const [unloaded, setUnloaded] = useState(loadFailed === true);
 
   // Rebuild the target from its primitives so the registration below does
   // not restart on every render just because the prop object is a new
@@ -312,7 +323,11 @@ function CommentSectionBody({ target, currentUserId, initial, controls }: Sectio
   // (ReactionBar), the new base state and the end of the optimistic state
   // commit together, without a flash of the old state in between.
   const apply = useCallback(
-    (fresh: CommentSectionData) => startTransition(() => setData(fresh)),
+    (fresh: CommentSectionData) =>
+      startTransition(() => {
+        setData(fresh);
+        setUnloaded(false);
+      }),
     [],
   );
 
@@ -336,6 +351,11 @@ function CommentSectionBody({ target, currentUserId, initial, controls }: Sectio
 
   return (
     <div className="space-y-4">
+      {unloaded && (
+        <p role="status" className="text-sm text-muted-foreground">
+          {t("loadFailed")}
+        </p>
+      )}
       {controls.react && (
         <ReactionBar target={stableTarget} reactions={data.reactions} onChanged={refetch} />
       )}

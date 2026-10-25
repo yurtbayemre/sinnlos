@@ -114,6 +114,52 @@ describe("getCommentSection", () => {
  * `meta.pagination.total` says the window overflowed, the caller's rows of
  * the target are read on their own.
  */
+describe("getCommentSection: failed reads and the author shape (v0.30)", () => {
+  it("rejects when the comment window cannot be read, so the client keeps its thread", async () => {
+    strapiMock.mockImplementation(async (url: string) => {
+      if (url.startsWith("/api/comments")) throw new Error("cms unavailable");
+      return { data: [] };
+    });
+    await expect(getCommentSection(target)).rejects.toThrow("cms unavailable");
+  });
+
+  it("rejects when the reaction window cannot be read", async () => {
+    strapiMock.mockImplementation(async (url: string) => {
+      if (url.startsWith("/api/reactions")) throw new Error("cms unavailable");
+      return { data: [] };
+    });
+    await expect(getCommentSection(target)).rejects.toThrow("cms unavailable");
+  });
+
+  it("hands the browser only the author's id and names", async () => {
+    strapiMock.mockImplementation(async (url: string) =>
+      url.startsWith("/api/comments")
+        ? {
+            data: [
+              {
+                ...comment(1, "2026-08-19T08:00:00.000Z"),
+                author: {
+                  id: 7,
+                  username: "ada",
+                  displayName: "Ada",
+                  email: "ada@example.test",
+                  phone: "+49 30 1234",
+                  hireDate: "2020-01-01",
+                },
+              },
+              { ...comment(2, "2026-08-19T09:00:00.000Z"), author: null },
+            ].reverse(),
+          }
+        : { data: [] },
+    );
+    const { comments } = await getCommentSection(target);
+    expect(comments.map((c) => c.author)).toEqual([
+      { id: 7, displayName: "Ada", username: "ada" },
+      null,
+    ]);
+  });
+});
+
 describe("getCommentSection: own reaction outside the reaction window", () => {
   const reactionRow = (id: number, emoji: EmojiType, authorId: number, doc = "doc-a") => ({
     id,
