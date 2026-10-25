@@ -268,6 +268,34 @@ describe("announcement re-publish dedup (issue #12)", () => {
 });
 
 describe("announcement hooks", () => {
+  it("an expired republish reaches nobody new, not even through a fan-out queued before it (v0.30)", async () => {
+    const strapi = setup();
+    const first = publish(strapi, { department: { id: DEPT.engineering } });
+    await lifecycles.afterCreate({ result: first });
+    const engineering = recipientsOf(strapi);
+    const draft = () => {
+      const row = strapi.tables[ANNOUNCEMENT_UID].find(
+        (r) => r.documentId === first.documentId && r.publishedAt === null,
+      );
+      if (!row) throw new Error("no draft");
+      return row;
+    };
+    const republish = async () =>
+      (await strapi.documents(ANNOUNCEMENT_UID).publish({ documentId: String(first.documentId) }))
+        .entries[0];
+    // Opened to everyone (bob was never notified); before that publish's
+    // fan-out ran, a moderator ended it and published again.
+    draft().department = null;
+    const opened = await republish();
+    draft().expiresAt = "2020-01-01T00:00:00.000Z";
+    const ended = await republish();
+
+    await lifecycles.afterCreate({ result: opened });
+    await lifecycles.afterCreate({ result: ended });
+    expect(recipientsOf(strapi)).toEqual(engineering);
+    expect(engineering).not.toContain(USER.bob);
+  });
+
   it("a draft (publishedAt null) touches no data at all", async () => {
     const strapi = setup();
     await lifecycles.afterCreate({ result: { id: 1, documentId: "d1", publishedAt: null } });

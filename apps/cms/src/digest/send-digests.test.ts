@@ -572,28 +572,35 @@ describe("sendDigests orchestrator", () => {
 
   it("reads the earlier notifications in id pages and keeps the earliest across them (v0.30)", async () => {
     // A bulk republish leaves more anchored rows than one read may bind
-    // (the populate binds every row id): the earliest notification of
-    // alice sits on the second page and must still count.
+    // (the populate binds every row id). alice's first notification sits on
+    // page 1 and a later one on page 2; only the earliest says she was told
+    // before her window, and only it makes the republish old news for
+    // carol, the author (decided by the earliest of any recipient). bob's
+    // later window makes the read reach past alice's window start.
     const typoFix = news("Holiday rota (fixed)", minutesAfter(MONDAY_RUN, 30));
-    const notifications: Row[] = Array.from({ length: NOTIFIED_PAGE }, (_, i) => ({
-      id: 20_000 + i,
+    const fresh = news("Canteen menu", minutesAfter(MONDAY_RUN, 40));
+    const told = minutesAfter(WEEK_AGO, -24 * 60);
+    const later = minutesAfter(WEEK_AGO, 24 * 60);
+    const anchored = (id: number, recipient: number, createdAt: string): Row => ({
+      id,
       type: "announcement",
       sourceType: "announcement",
       sourceDocumentId: typoFix.documentId,
-      recipient: { id: USER.bob },
-      createdAt: WEEK_AGO,
-    }));
-    notifications.push({
-      id: 20_000 + NOTIFIED_PAGE,
-      type: "announcement",
-      sourceType: "announcement",
-      sourceDocumentId: typoFix.documentId,
-      recipient: { id: USER.alice },
-      createdAt: WEEK_AGO,
+      recipient: { id: recipient },
+      createdAt,
     });
+    const notifications: Row[] = [
+      anchored(20_000, USER.alice, told),
+      ...Array.from({ length: NOTIFIED_PAGE - 1 }, (_, i) => anchored(20_001 + i, USER.bob, later)),
+      anchored(20_000 + NOTIFIED_PAGE, USER.alice, later),
+    ];
     const { strapi, mails } = digestStub({
-      users: { [USER.alice]: optIn() },
-      announcements: [typoFix],
+      users: {
+        [USER.alice]: optIn({ lastDigestAt: WEEK_AGO }),
+        [USER.carol]: optIn({ lastDigestAt: WEEK_AGO }),
+        [USER.bob]: optIn(),
+      },
+      announcements: [typoFix, fresh],
       notifications,
     });
     const reads: Record<string, unknown>[] = [];
@@ -616,8 +623,11 @@ describe("sendDigests orchestrator", () => {
       0,
       20_000 + NOTIFIED_PAGE - 1,
     ]);
-    // Told last week (page 2): the republish is not news to alice.
-    expect(mailTo(mails(), "alice")?.text ?? "").not.toContain("Holiday rota");
+    for (const username of ["alice", "carol"]) {
+      const text = mailTo(mails(), username)?.text ?? "";
+      expect(text).toContain("Canteen menu");
+      expect(text).not.toContain("Holiday rota");
+    }
   });
 
   it("the author's own republish is not news to them; a user new to the audience gets it once", async () => {
