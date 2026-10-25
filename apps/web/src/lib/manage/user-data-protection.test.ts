@@ -123,7 +123,9 @@ describe("the downloads (v0.28)", () => {
   it("downloads the export as JSON named by the username, never cached", async () => {
     strapi.mockResolvedValue({ meta: {}, account: { username: "casey.jones" }, content: {} });
     const res = await exportDownload("12");
-    expect(strapi).toHaveBeenCalledWith("/api/user-management/12/export");
+    expect(strapi).toHaveBeenCalledWith("/api/user-management/12/export", {
+      signal: expect.any(AbortSignal),
+    });
     expect(res.status).toBe(200);
     expect(res.headers.get("cache-control")).toBe("private, no-store");
     expect(res.headers.get("content-type")).toBe("application/json; charset=utf-8");

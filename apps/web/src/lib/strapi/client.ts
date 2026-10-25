@@ -73,6 +73,13 @@ export const MFA_SETUP_REQUIRED = "MfaSetupRequired";
  */
 export type StrapiInit = Omit<RequestInit, "cache" | "next">;
 
+/**
+ * v0.30: a call without its own `signal` gives up after this, so a hung cms
+ * cannot hold a render or an action open. The long admin calls (the export,
+ * the anonymisation) pass their own bounded signal.
+ */
+export const STRAPI_TIMEOUT_MS = 15_000;
+
 export async function strapi<T>(path: string, init: StrapiInit = {}): Promise<T> {
   // DEMO_MODE answers from fixtures before any session read or fetch.
   if (DEMO_MODE) {
@@ -91,7 +98,12 @@ export async function strapi<T>(path: string, init: StrapiInit = {}): Promise<T>
   if (token) headers.set("Authorization", `Bearer ${token}`);
 
   // `cache` is written LAST so nothing spread before it can override it.
-  const res = await fetch(`${STRAPI_URL}${path}`, { ...rest, headers, cache: "no-store" });
+  const res = await fetch(`${STRAPI_URL}${path}`, {
+    ...rest,
+    signal: rest.signal ?? AbortSignal.timeout(STRAPI_TIMEOUT_MS),
+    headers,
+    cache: "no-store",
+  });
 
   // The session's Strapi JWT was rejected (expired, or the CMS JWT secret
   // was rotated). The only fix is re-authenticating, so send the user to

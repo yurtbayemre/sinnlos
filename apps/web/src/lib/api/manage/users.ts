@@ -20,6 +20,12 @@ import {
 import { strapi } from "@/lib/strapi/client";
 import { strapiQuery, withQuery } from "@/lib/strapi/query";
 
+/** v0.30: the two long admin calls get their own bounds instead of strapi()'s default. */
+export const USER_EXPORT_TIMEOUT_MS = 120_000;
+export const ANONYMISE_TIMEOUT_MS = 300_000;
+/** Above the cms's own 15 s mail budget (account-mail.ts), after its database work. */
+export const ACCOUNT_MAIL_TIMEOUT_MS = 30_000;
+
 export function fetchUserAdminList(query: UserAdminListQuery): Promise<UserAdminListResponse> {
   const params = strapiQuery();
   if (query.q) params.value("q", query.q);
@@ -48,12 +54,16 @@ export function sendUserInvite(data: UserAdminInvite): Promise<UserAdminMailResp
   return strapi(`/api/${USER_ADMIN_PATH}/invite`, {
     method: "POST",
     body: JSON.stringify({ data }),
+    signal: AbortSignal.timeout(ACCOUNT_MAIL_TIMEOUT_MS),
   });
 }
 
 /** v0.27: a new invitation (no password yet) or reset link by mail. */
 export function sendUserLink(id: number): Promise<UserAdminMailResponse> {
-  return strapi(`/api/${USER_ADMIN_PATH}/${id}/send-link`, { method: "POST" });
+  return strapi(`/api/${USER_ADMIN_PATH}/${id}/send-link`, {
+    method: "POST",
+    signal: AbortSignal.timeout(ACCOUNT_MAIL_TIMEOUT_MS),
+  });
 }
 
 /** v0.27: clears the user's second factor; they set it up again at the next sign-in. */
@@ -73,7 +83,9 @@ export function fetchUserTrainingEvidence(id: number): Promise<TrainingEvidenceR
 
 /** v0.28 (Art. 15): everything stored about the person; the cms records an `export` audit row. */
 export function fetchUserExport(id: number): Promise<UserExport> {
-  return strapi(`/api/${USER_ADMIN_PATH}/${id}/export`);
+  return strapi(`/api/${USER_ADMIN_PATH}/${id}/export`, {
+    signal: AbortSignal.timeout(USER_EXPORT_TIMEOUT_MS),
+  });
 }
 
 /** v0.28 (Art. 17): what the anonymisation would delete, rewrite and keep (advisory counts). */
@@ -87,5 +99,6 @@ export function sendAnonymise(id: number, confirm: string): Promise<AnonymiseRes
   return strapi(`/api/${USER_ADMIN_PATH}/${id}/anonymise`, {
     method: "POST",
     body: JSON.stringify(body),
+    signal: AbortSignal.timeout(ANONYMISE_TIMEOUT_MS),
   });
 }
