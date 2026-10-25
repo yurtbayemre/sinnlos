@@ -24,8 +24,9 @@ import { metaOf, useAuthoringEditor } from "./use-authoring-editor";
  *  - A create navigates to the new item's page; a delete (or a discard
  *    that removed a never-published draft) to the list; the message
  *    survives the navigation (ManageFlash).
- *  - A save makes the saved values the new baseline; a discard and a
- *    Reload reset the form to the fresh `editable`.
+ *  - A save makes the saved values the new baseline (`clearOnSave` starts
+ *    empty again in both); a discard and a Reload reset the form to the
+ *    fresh `editable`.
  *  - Unsaved changes ask before the page is left (unsaved-guard.ts).
  *
  * The typed areas take their paths and draft mode from lib/manage/areas.ts;
@@ -84,6 +85,7 @@ export function useItemEditor<V extends object, E extends Omit<EditableBase, "ro
   extraDirty = false,
   busy = false,
   onReset: onResetExtra,
+  clearOnSave,
   drafts = area !== "wiki" && hasDrafts(area),
   itemPath = (data) => areaItemPath(area, data.documentId),
   listPath = AREA_PATH[area],
@@ -108,6 +110,12 @@ export function useItemEditor<V extends object, E extends Omit<EditableBase, "ro
    * change, which keeps every unsaved edit.
    */
   onReset?: () => void;
+  /**
+   * Values that belong to one save (a wiki page's change note): a
+   * successful save sets them in the form and its baseline, so the same
+   * text typed again is a change the next save sends (v0.30).
+   */
+  clearOnSave?: Partial<V>;
   /** The item has drafts (explicit status); false: every save publishes (polls, wiki spaces). */
   drafts?: boolean;
   /** Where a create navigates: the new item's page. */
@@ -158,6 +166,12 @@ export function useItemEditor<V extends object, E extends Omit<EditableBase, "ro
   }, []);
 
   const goToList = useCallback(() => router.push(listPath), [router, listPath]);
+
+  /** Apply a change the cms already holds (a poll closed now) to the values and the baseline. */
+  const rebase = useCallback((patch: Partial<V>) => {
+    setValues((previous) => ({ ...previous, ...patch }));
+    setInitial((previous) => ({ ...previous, ...patch }));
+  }, []);
 
   /**
    * Closes the Schedule… dialog after a refusal that is not about its own
@@ -225,6 +239,7 @@ export function useItemEditor<V extends object, E extends Omit<EditableBase, "ro
               return;
             }
             setInitial(snapshot);
+            if (clearOnSave) rebase(clearOnSave);
             setRetarget(false);
             flash(
               schedule
@@ -255,6 +270,8 @@ export function useItemEditor<V extends object, E extends Omit<EditableBase, "ro
       itemPath,
       leaveSchedule,
       releaseUnsaved,
+      clearOnSave,
+      rebase,
     ],
   );
 
@@ -301,12 +318,6 @@ export function useItemEditor<V extends object, E extends Omit<EditableBase, "ro
     }),
     [save, transition, actions],
   );
-
-  /** Apply a change the cms already holds (a poll closed now) to the values and the baseline. */
-  const rebase = useCallback((patch: Partial<V>) => {
-    setValues((previous) => ({ ...previous, ...patch }));
-    setInitial((previous) => ({ ...previous, ...patch }));
-  }, []);
 
   return {
     values,
