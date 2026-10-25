@@ -27,7 +27,7 @@ import { BackToList, OptionsNotice, RetargetNotice, Section } from "./editor-par
 import { FileField } from "./file-field";
 import { MarkdownEditor } from "./markdown-editor";
 import { SinglePicker } from "./pickers";
-import { PublishBar, type PublishBarHandlers } from "./publish-bar";
+import { draftSubmit, PublishBar, type PublishBarHandlers } from "./publish-bar";
 import { ScheduleDialog } from "./schedule-dialog";
 import type { EditorIntent } from "./use-authoring-editor";
 import { useItemEditor, type ItemActions } from "./use-item-editor";
@@ -142,16 +142,15 @@ export function TrainingCourseEditor({
   };
   const saveSchedule = (schedule: ScheduleValues) =>
     withUpload("schedule", (override) => item.save("draft", schedule, override));
+  // Fail closed (decision 02): no save of a create whose pickers failed.
+  const blocked = editor.meta === null && optionsFailed;
   return (
     <>
       <form
         id={FORM_ID}
         noValidate
         className="space-y-8"
-        onSubmit={(event) => {
-          event.preventDefault();
-          handlers.saveDraft();
-        }}
+        onSubmit={draftSubmit(blocked, handlers.saveDraft)}
       >
         <EditorStatus meta={editor.meta} dirty={item.dirty} showOwner={false} />
         <Section title={t("course.section")}>
@@ -286,6 +285,7 @@ export function TrainingCourseEditor({
           meta={editor.meta}
           dirty={item.dirty}
           pending={pending}
+          blocked={blocked}
           running={uploadIntent ?? editor.running}
           handlers={handlers}
           onInvoke={editor.rememberInvoker}

@@ -25,7 +25,7 @@ import { DateTimeField, DayField } from "./date-fields";
 import { ConflictDialog, EditorStatus, FormAlert, useFieldError } from "./editor-chrome";
 import { MarkdownEditor } from "./markdown-editor";
 import { SinglePicker } from "./pickers";
-import { PublishBar } from "./publish-bar";
+import { draftSubmit, PublishBar } from "./publish-bar";
 import { ScheduleDialog } from "./schedule-dialog";
 import { useItemEditor, type ItemActions } from "./use-item-editor";
 import {
@@ -156,16 +156,15 @@ export function AnnouncementEditor({
     label: tc(`targeting.roles.${role}`),
   }));
 
+  // Fail closed (decision 02): no save of a create whose pickers failed.
+  const blocked = editor.meta === null && optionsFailed;
   return (
     <>
       <form
         id={FORM_ID}
         noValidate
         className="space-y-8"
-        onSubmit={(event) => {
-          event.preventDefault();
-          item.handlers.saveDraft();
-        }}
+        onSubmit={draftSubmit(blocked, item.handlers.saveDraft)}
       >
         <EditorStatus
           meta={editor.meta}
@@ -307,7 +306,7 @@ export function AnnouncementEditor({
           meta={editor.meta}
           dirty={item.dirty}
           pending={editor.pending}
-          blocked={editor.meta === null && optionsFailed}
+          blocked={blocked}
           running={editor.running}
           handlers={item.handlers}
           onInvoke={editor.rememberInvoker}

@@ -7,7 +7,7 @@ import { EditorStatus } from "./editor-chrome";
 import { MarkdownEditor } from "./markdown-editor";
 import { NoDepartmentExplanation } from "./page-parts";
 import { SinglePicker } from "./pickers";
-import { PublishBar, publishBarButtons } from "./publish-bar";
+import { draftSubmit, PublishBar, publishBarButtons } from "./publish-bar";
 import { sameValues } from "./use-item-editor";
 import { metaOf, mergeMeta } from "./use-authoring-editor";
 import { listHref } from "./list";
@@ -403,6 +403,16 @@ describe("the publish bar (§L4, §N2)", () => {
     const save =
       blocked.match(new RegExp(`<button[^>]*>${common.actions.saveDraft}</button>`))?.[0] ?? "";
     expect(isDisabled(save)).toBe(true);
+  });
+
+  it("Enter in a text field of a blocked create saves nothing (fail closed, v0.30)", () => {
+    const saveDraft = vi.fn();
+    const preventDefault = vi.fn();
+    draftSubmit(true, saveDraft)({ preventDefault });
+    expect(preventDefault).toHaveBeenCalledOnce();
+    expect(saveDraft).not.toHaveBeenCalled();
+    draftSubmit(false, saveDraft)({ preventDefault });
+    expect(saveDraft).toHaveBeenCalledOnce();
   });
 });
 
