@@ -447,5 +447,22 @@ jobs:
           context: .
           file: apps/${{ matrix.app }}/Dockerfile
           push: false
+          load: ${{ matrix.app == 'cms' }}
+          tags: sinnlos-${{ matrix.app }}:ci
           cache-from: type=gha,scope=image-${{ matrix.app }}
           cache-to: type=gha,mode=max,scope=image-${{ matrix.app }}
+
+      # The boot-value check infra/deploy.sh runs in the new cms image before
+      # `up` (v0.30): its path and imports in the real image, a valid env
+      # passes and a misspelt zone is refused with the cms's own message.
+      - name: Boot-value check in the cms image
+        if: matrix.app == 'cms'
+        run: |
+          check() { docker run --rm --entrypoint node "$@" sinnlos-cms:ci dist/scripts/check-boot-env.js; }
+          check -e APP_TIME_ZONE=Europe/Berlin -e MFA_REQUIRED_ROLES=
+          if out="$(check -e APP_TIME_ZONE=Europe/Berln 2>&1)"; then
+            echo "::error::check-boot-env.js accepted APP_TIME_ZONE=Europe/Berln"
+            exit 1
+          fi
+          echo "${out}"
+          grep -q 'APP_TIME_ZONE must be an IANA time zone name' <<<"${out}"
