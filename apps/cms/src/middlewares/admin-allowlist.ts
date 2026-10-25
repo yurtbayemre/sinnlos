@@ -17,7 +17,7 @@
  * panel, every client behind an edge does not. A malformed entry fails the
  * boot; a /0 entry (open to everyone) logs a warning.
  *
- * The roots are the admin route prefixes Strapi 5.58 mounts (the panel's own
+ * The roots are the admin route prefixes Strapi 5.59 mounts (the panel's own
  * /admin/content-api/* included under /admin; review-workflows and
  * content-releases are EE-gated but listed so the gate stays whole), checked
  * on segment boundaries. Fail-closed: a request is an admin request when ANY

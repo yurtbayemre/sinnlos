@@ -1,14 +1,15 @@
 # Road to v1.0.0
 
-Status: 2026-10-24, owner-approved. Baseline was v0.25.0 (`0c26656e`). This file lists **everything that still has to be done before v1.0.0**. Each item gets ticked when its release ships.
+Status: 2026-10-25, owner-approved. Baseline was v0.25.0 (`0c26656e`). This file lists **everything that still has to be done before v1.0.0**. Each item gets ticked when its release ships.
 
-**Current state (2026-10-24):**
+**Current state (2026-10-25):**
 
 - **v0.26.0 "portable"** is shipped and live since 2026-10-23 03:26 CEST.
 - **v0.27.0 "accounts"** is shipped and live since 2026-10-23 12:47 CEST; the owner's browser check passed.
 - **v0.28.0 "data protection"** is shipped and live since 2026-10-23 18:06 CEST. The data inventory for the data-protection officer and the works council is `docs/data-protection.md`.
 - **v0.29.0 "polish"** is shipped and live since 2026-10-24 09:55 CEST: branding by config, the accessibility pass, `/healthz` and `infra/ops-check.sh`, the closed-door restore, the v0.25 upgrade floor and the docs split (INSTALL, UPGRADE, OPERATIONS, SSO).
-- **Next is v1.0.0-rc.1** (below). v1.0.0 itself waits for the lawyer review (S5 and the GHCR publication; owner decision 2026-10-24).
+- **v0.29.1** (dependency fixes, live since 2026-10-25 11:35 CET) and **v0.29.2** (Strapi 5.59.0) follow it.
+- **Next is v1.0.0-rc.1** (below). v1.0.0 itself waits for the lawyer review of the packages (S5 and the GHCR publication; owner decisions 2026-10-24 and 2026-10-25).
 
 ## What v1.0.0 means
 
@@ -61,6 +62,13 @@ The owner rule still applies: **no bloat**. Every item below has the smallest sc
 | Docs (v0.29, S4)               | INSTALL, UPGRADE, OPERATIONS and SSO; DEPLOYMENT.md a pointer page; the history in `docs/archive/`. **architecture.md is split too.**                                                                 |
 | Alerts on the owner's instance | **Both:** Uptime Kuma (`/healthz` and an `ops-check.sh` push monitor) and cron mail.                                                                                                                  |
 | v1.0.0 and the lawyer          | **v1.0.0 waits for the lawyer review** (S5 and the GHCR publication). The release candidate runs on the owner's instance until then.                                                                  |
+
+## Owner decisions (2026-10-25)
+
+| Question | Decision                                                                                                                                                                 |
+| -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| CLA      | **Later, decoupled from v1.0.0.** Until a CLA text exists, outside pull requests are not merged. The lawyer review before the GHCR publication covers the packages only. |
+| Strapi   | **Update to the newest release** (5.59.0, in v0.29.2).                                                                                                                   |
 
 ## Must be done before v1.0.0
 
@@ -163,7 +171,8 @@ The owner rule still applies: **no bloat**. Every item below has the smallest sc
 - [ ] Remove the leftover folders on the development machine (the merged worktrees are gone since 2026-10-23).
 - [ ] Alerts on the owner's instance: an Uptime Kuma monitor on `/healthz` (no redirects) and a push monitor, `infra/ops-check.sh` hourly from root's crontab, and the host's mail relay repointed before cron mail is used.
 - [ ] The owner's accessibility check in a real browser: keyboard only with MFA, a screen reader, 200 % zoom.
-- [ ] A lawyer checks the CLA text, the two Strapi Enterprise packages in the cms image, and the review list of packages without a license file (printed by `scripts/third-party-notices.mjs` in the image build). GHCR publication waits for it.
+- [ ] A lawyer checks the two Strapi Enterprise packages in the cms image and the review list of packages without a license file (printed by `scripts/third-party-notices.mjs` in the image build). GHCR publication waits for it.
+- [ ] The CLA text, later and not a v1.0.0 condition (owner decision 2026-10-25). Until it exists, no outside contributions are merged.
 
 ## After v1.0.0
 
