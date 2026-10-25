@@ -244,9 +244,50 @@ export function selectAnnouncements(
 }
 
 interface NotifiedRow {
+  id?: number;
   sourceDocumentId?: string | null;
   createdAt?: string | null;
   recipient?: { id?: number } | null;
+}
+
+/**
+ * Rows per read of the earlier announcement notifications (v0.30). Strapi's
+ * populate of `recipient` binds every row id of a read as its own
+ * parameter, so one unpaged read after a bulk republish (66 announcements to
+ * about 1,000 people) passed Postgres's 65,535-parameter limit and failed
+ * every run in the window. Keyset pages by id keep each read small; the
+ * index still takes the earliest instant over all pages.
+ */
+export const NOTIFIED_PAGE = 1000;
+
+/** The notifications anchoring `documentIds` from before `before`, page by page. */
+async function loadNotified(
+  strapi: DigestStrapi,
+  documentIds: readonly string[],
+  before: Date,
+): Promise<NotifiedRow[]> {
+  const rows: NotifiedRow[] = [];
+  let cursor = 0;
+  for (;;) {
+    const page = listOf<NotifiedRow>(
+      await strapi.db.query(NOTIFICATION_UID).findMany({
+        where: {
+          sourceType: "announcement",
+          sourceDocumentId: { $in: [...documentIds] },
+          createdAt: { $lt: before.toISOString() },
+          id: { $gt: cursor },
+        },
+        select: ["id", "sourceDocumentId", "createdAt"],
+        populate: { recipient: { select: ["id"] } },
+        orderBy: { id: "asc" },
+        limit: NOTIFIED_PAGE,
+      }),
+    );
+    rows.push(...page);
+    const last = page[page.length - 1]?.id;
+    if (page.length < NOTIFIED_PAGE || typeof last !== "number") return rows;
+    cursor = last;
+  }
 }
 
 interface NotifiedIndex {
@@ -345,17 +386,7 @@ async function loadAnnouncementWindow(
     ...new Set(rows.map((row) => row.documentId).filter((id): id is string => !!id)),
   ];
   if (documentIds.length === 0) return { rows, notified: none() };
-  const notifications = listOf<NotifiedRow>(
-    await strapi.db.query(NOTIFICATION_UID).findMany({
-      where: {
-        sourceType: "announcement",
-        sourceDocumentId: { $in: documentIds },
-        createdAt: { $lt: latest.toISOString() },
-      },
-      select: ["sourceDocumentId", "createdAt"],
-      populate: { recipient: { select: ["id"] } },
-    }),
-  );
+  const notifications = await loadNotified(strapi, documentIds, latest);
   return { rows, notified: notifiedIndex(notifications) };
 }
 

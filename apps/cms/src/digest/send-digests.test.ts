@@ -22,6 +22,7 @@ import {
 import { stubDocumentId, type Row, type StrapiStub } from "../test/strapi-stub.test.helper";
 import {
   DIGEST_ANNOUNCEMENT_CAP,
+  NOTIFIED_PAGE,
   DIGEST_EXCLUDED_ROLE_TYPES,
   digestsEnabled,
   isDigestRecipient,
@@ -567,6 +568,56 @@ describe("sendDigests orchestrator", () => {
     expect(alice.match(/Canteen menu/g)).toHaveLength(1);
     // bob never got the first notification (joined later): it is news to him.
     expect(mailTo(mails(), "bob")?.text).toContain("Holiday rota (fixed)");
+  });
+
+  it("reads the earlier notifications in id pages and keeps the earliest across them (v0.30)", async () => {
+    // A bulk republish leaves more anchored rows than one read may bind
+    // (the populate binds every row id): the earliest notification of
+    // alice sits on the second page and must still count.
+    const typoFix = news("Holiday rota (fixed)", minutesAfter(MONDAY_RUN, 30));
+    const notifications: Row[] = Array.from({ length: NOTIFIED_PAGE }, (_, i) => ({
+      id: 20_000 + i,
+      type: "announcement",
+      sourceType: "announcement",
+      sourceDocumentId: typoFix.documentId,
+      recipient: { id: USER.bob },
+      createdAt: WEEK_AGO,
+    }));
+    notifications.push({
+      id: 20_000 + NOTIFIED_PAGE,
+      type: "announcement",
+      sourceType: "announcement",
+      sourceDocumentId: typoFix.documentId,
+      recipient: { id: USER.alice },
+      createdAt: WEEK_AGO,
+    });
+    const { strapi, mails } = digestStub({
+      users: { [USER.alice]: optIn() },
+      announcements: [typoFix],
+      notifications,
+    });
+    const reads: Record<string, unknown>[] = [];
+    const query = strapi.db.query.bind(strapi.db);
+    vi.spyOn(strapi.db, "query").mockImplementation((uid: string) => {
+      const real = query(uid);
+      if (uid !== NOTIFICATION_UID) return real;
+      return {
+        ...real,
+        findMany: async (params: Record<string, unknown>) => {
+          if ((params.where as Record<string, unknown>).sourceType) reads.push(params);
+          return real.findMany(params as never);
+        },
+      };
+    });
+    await sendDigests(strapi, NOW);
+
+    expect(reads.map((params) => params.limit)).toEqual([NOTIFIED_PAGE, NOTIFIED_PAGE]);
+    expect(reads.map((params) => (params.where as { id: { $gt: number } }).id.$gt)).toEqual([
+      0,
+      20_000 + NOTIFIED_PAGE - 1,
+    ]);
+    // Told last week (page 2): the republish is not news to alice.
+    expect(mailTo(mails(), "alice")?.text ?? "").not.toContain("Holiday rota");
   });
 
   it("the author's own republish is not news to them; a user new to the audience gets it once", async () => {
