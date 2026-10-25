@@ -44,7 +44,11 @@
  * relation stay as they are. A root sort through a relation
  * onto such a field is refused with the core's `Invalid key` 400 (the web
  * sends none; a sort inside a populate may follow no relation at all,
- * utils/restricted-relations.ts).
+ * utils/restricted-relations.ts). So is a root sort through a DIRECTORY
+ * relation, whatever it names (v0.30): `sort=head.id`, `sort=head.blocked`
+ * or `sort=manager.id` would order the rows by a hidden head or manager, so
+ * a department with a blocked head would sort apart from one with none.
+ * For every caller, like the filters.
  *
  * Pure: the schema comes in through `getModel` (see user-visibility.test.ts).
  */
@@ -363,7 +367,10 @@ function constrainPopulate(
   return out ?? value;
 }
 
-/** Refuses a root sort that follows a relation onto a withheld user field. */
+/**
+ * Refuses a root sort that follows a relation onto a withheld user field, or
+ * that goes through a directory relation at all.
+ */
 function assertSort(sort: unknown, model: VisibilityModel | undefined, getModel: GetModel): void {
   const paths: string[][] = [];
   const collect = (value: unknown, prefix: string[]) => {
@@ -389,6 +396,13 @@ function assertSort(sort: unknown, model: VisibilityModel | undefined, getModel:
     for (const [index, segment] of path.entries()) {
       const attr = current?.attributes?.[segment];
       if (!attr) break;
+      if (isDirectory(current, segment)) {
+        const at = path.slice(0, index + 1).join(".");
+        throw new errors.ValidationError(`Invalid key ${segment} at ${at}`, {
+          key: segment,
+          path: at,
+        });
+      }
       if (throughRelation && current?.uid === USER_UID && !BLOCKED_USER_FIELDS.includes(segment)) {
         const at = path.slice(0, index + 1).join(".");
         throw new errors.ValidationError(`Invalid key ${segment} at ${at}`, {
