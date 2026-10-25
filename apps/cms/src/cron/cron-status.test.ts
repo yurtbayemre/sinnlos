@@ -127,23 +127,27 @@ describe("recordExpectedCronTasks", () => {
     });
   });
 
-  it("expects nothing with CRON_ENABLED off; switching back on starts a fresh grace", async () => {
+  it("leaves the expected set alone in a process with CRON_ENABLED off (a one-off next to the cms)", async () => {
     const { strapi, rows } = fakeStore();
     await recordExpectedCronTasks(strapi, specs, true, at(0));
+    const before = rows.get("plugin_sinnlos_cron:expected");
     await recordExpectedCronTasks(strapi, specs, false, at(10));
-    expect(rows.get("plugin_sinnlos_cron:expected")).toEqual({
-      bootedAt: at(10).toISOString(),
-      cronEnabled: false,
-      tasks: [],
-    });
+    expect(rows.get("plugin_sinnlos_cron:expected")).toEqual(before);
+    // The next scheduling boot keeps the first-expected times.
     await recordExpectedCronTasks(strapi, specs, true, at(20));
     const value = rows.get("plugin_sinnlos_cron:expected") as {
       tasks: { firstExpectedAt: string }[];
     };
     expect(value.tasks.map((t) => t.firstExpectedAt)).toEqual([
-      at(20).toISOString(),
-      at(20).toISOString(),
+      at(0).toISOString(),
+      at(0).toISOString(),
     ]);
+  });
+
+  it("writes nothing on a first boot with CRON_ENABLED off", async () => {
+    const { strapi, rows } = fakeStore();
+    await recordExpectedCronTasks(strapi, specs, false, at(0));
+    expect(rows.has("plugin_sinnlos_cron:expected")).toBe(false);
   });
 });
 

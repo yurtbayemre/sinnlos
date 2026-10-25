@@ -35,7 +35,7 @@ Everyday operation of an installed instance: monitoring, restore, backups, harde
 
 - **Disk.** A problem when free space is below `OPS_DISK_MIN_PERCENT` (default 15) on any of: the Docker root directory, the backup directory, `infra/backups`, the database volume, the uploads volume.
 - **Nightly jobs.** The cms records every job run in its database. A problem when:
-  - cron is switched off (`CRON_ENABLED=false`);
+  - cron does not run. A cms started with `CRON_ENABLED=false` schedules nothing, so its jobs turn overdue (below; the minute jobs after 16 minutes). A one-off process with cron off, such as a console next to the running cms, changes nothing here. Three cases look different: a fresh install that has never booted with cron on has no expected set yet (`UNKNOWN`); a status written by v0.29.0 to v0.29.2 with cron off still reads "cron off" until the next boot with cron on; and during a restore behind closed doors (below) the overdue lines are expected until cron is back on;
   - a job failed, either in its last run or within `OPS_CRON_LOOKBACK_MINUTES` (default 120), even if a later run succeeded;
   - a job has not run for longer than its schedule allows: its interval plus the larger of 15 minutes and a tenth of the interval (16 minutes for the minute jobs, 26 hours 24 minutes for the daily ones), counted from when the job first became expected.
 

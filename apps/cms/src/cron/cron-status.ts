@@ -11,10 +11,14 @@
  *    minutes old, so the two minute tasks write about every ten minutes.
  *    `lastFailedAt` survives later successes, so a failure that recovered
  *    before the hourly check is still reported.
- *  - `cron:expected`: written at boot, the tasks this process schedules
- *    (none with CRON_ENABLED off), each with the time it first became
- *    expected; a restart keeps that time, so a task that never runs is
- *    reported once its grace has passed instead of after every boot.
+ *  - `cron:expected`: written at boot by a process that schedules the
+ *    tasks, each with the time it first became expected; a restart keeps
+ *    that time, so a task that never runs is reported once its grace has
+ *    passed instead of after every boot. A process with CRON_ENABLED off
+ *    (a one-off script or console next to the running cms) leaves it as it
+ *    is: it schedules nothing, so it has nothing to say about the tasks the
+ *    running cms expects. A cms that runs with cron off shows up as overdue
+ *    tasks instead (16 minutes for the minute tasks).
  *
  * The rows: `strapi_core_store_settings`, key `plugin_sinnlos_cron:<task>`,
  * type `object`, environment and tag NULL, the value JSON. No error text is
@@ -132,7 +136,7 @@ export async function recordExpectedCronTasks(
   now: Date = new Date(),
 ): Promise<void> {
   const store = storeFor(strapi, "cron:expected");
-  if (!store) return;
+  if (!store || !enabled) return;
   const previous = (await store.get({})) as Partial<ExpectedCronTasks> | null;
   const firstSeen = new Map<string, string>();
   for (const task of Array.isArray(previous?.tasks) ? previous.tasks : []) {
@@ -142,14 +146,12 @@ export async function recordExpectedCronTasks(
   }
   const value: ExpectedCronTasks = {
     bootedAt: now.toISOString(),
-    cronEnabled: enabled,
-    tasks: enabled
-      ? specs.map((spec) => ({
-          name: spec.name,
-          everyMinutes: everyMinutes(spec.rule),
-          firstExpectedAt: firstSeen.get(spec.name) ?? now.toISOString(),
-        }))
-      : [],
+    cronEnabled: true,
+    tasks: specs.map((spec) => ({
+      name: spec.name,
+      everyMinutes: everyMinutes(spec.rule),
+      firstExpectedAt: firstSeen.get(spec.name) ?? now.toISOString(),
+    })),
   };
   await store.set({ value });
 }
