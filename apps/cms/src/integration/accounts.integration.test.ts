@@ -42,6 +42,7 @@ type Answer<T = Record<string, unknown>> = ApiResponse<
 describe.each(testEngines())("accounts (v0.27) on %s", (engine) => {
   let t: TestStrapi;
   let totp: Totp;
+  let mfa: { hashRecoveryCode(code: string): string };
   const mails: { to: string; subject: string; text: string }[] = [];
 
   beforeAll(async () => {
@@ -58,6 +59,7 @@ describe.each(testEngines())("accounts (v0.27) on %s", (engine) => {
       },
     });
     totp = t.requireBuilt<Totp>("src/utils/totp");
+    mfa = t.requireBuilt<{ hashRecoveryCode(code: string): string }>("src/utils/mfa-core");
     const email = t.strapi.plugin("email").service("email") as unknown as {
       send(mail: { to: string; subject: string; text: string }): Promise<void>;
     };
@@ -229,6 +231,18 @@ describe.each(testEngines())("accounts (v0.27) on %s", (engine) => {
     expect([c.status, d.status].sort()).toEqual([200, 401]);
     expect(errorCode(await signIn(user.username, user.password, codes[0]))).toBe("mfa_invalid");
     expect(((await row(user.id)).totpRecoveryCodes as string[]).length).toBe(7);
+    // v0.30: 80-bit codes; a 10-character code issued before keeps working once.
+    for (const issued of codes) expect(issued).toMatch(/^[a-z2-7]{4}(-[a-z2-7]{4}){3}$/);
+    const stored = (await row(user.id)).totpRecoveryCodes as string[];
+    await t.strapi.db.query(USER).update({
+      where: { id: user.id },
+      data: { totpRecoveryCodes: [...stored, mfa.hashRecoveryCode("abcde-23456")] },
+    });
+    const old = await signIn(user.username, user.password, "ABCDE23456");
+    expect(old.status, old.text).toBe(200);
+    expect(errorCode(await signIn(user.username, user.password, "abcde-23456"))).toBe(
+      "mfa_invalid",
+    );
   });
 
   it("disable: password and code, only when no role requires it; ends the other sessions", async () => {
