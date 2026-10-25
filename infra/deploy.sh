@@ -213,7 +213,9 @@ PREFLIGHT_WARN_KEYS="DATABASE_PASSWORD"
 # (MS_* values left in infra/.env without ENTRA_ENABLED=1: ignored), "oidc-invalid KEY" (v0.25.0:
 # OIDC_ENABLED=1 and KEY fails the check the cms (apps/cms/src/oidc/config.ts)
 # or the web (apps/web/src/lib/auth-config.ts) runs at start; ENTRA_ENABLED
-# when both are on), "meili-invalid KEY" (v0.21:
+# when both are on), "boot-invalid KEY" (v0.28: a value the cms refuses to
+# boot with: TRAINING_EVIDENCE_RETENTION_YEARS, SEARCH_LOG_RETENTION_DAYS,
+# FEATURES_OFF), "meili-invalid KEY" (v0.21:
 # MEILISEARCH_ENABLED=1 without the search profile or a key of the
 # optional Meilisearch, or the profile on with a master key the meili
 # container refuses to start with).
@@ -251,6 +253,23 @@ preflight_scan() {
       v = tolower(trim(v))
       return v == "1" || v == "true" || v == "yes" || v == "on"
     }
+    # A whole number from lo to hi, or unset/blank (the default).
+    function int_in(v, lo, hi) {
+      v = trim(v)
+      if (v == "") return 1
+      if (v !~ /^[0-9]+$/) return 0
+      return v + 0 >= lo && v + 0 <= hi
+    }
+    # FEATURES_OFF: a comma list of switch names, any case, blanks around
+    # and empty entries ignored (parseFeaturesOff, packages/domain/src/features.ts).
+    function switches_ok(v,    n, i, parts, p) {
+      n = split(tolower(v), parts, ",")
+      for (i = 1; i <= n; i++) {
+        p = trim(parts[i])
+        if (p != "" && !(p in switch_name)) return 0
+      }
+      return 1
+    }
     # ENTRA_SESSION_TTL: <n>m, <n>h or <n>d, more than zero, at most 7d.
     function ttl_ok(v,    n, unit) {
       v = trim(v)
@@ -282,6 +301,8 @@ preflight_scan() {
     BEGIN {
       n = split(fatal_keys, k, " "); for (i = 1; i <= n; i++) fatal[k[i]] = 1
       n = split(warn_keys, k, " "); for (i = 1; i <= n; i++) warn[k[i]] = 1
+      n = split("events training marketplace kudos celebrations polls duty-plans kpis read-confirmations training-reports search-logging", k, " ")
+      for (i = 1; i <= n; i++) switch_name[k[i]] = 1
     }
     # Environment entries, one per line: "KEY": "value", (or null).
     /^[ \t]*"[A-Z][A-Z0-9_]*": / {
@@ -344,6 +365,12 @@ preflight_scan() {
         if (scope != "" && (" " scope " ") !~ /[ \t]openid[ \t]/) print "oidc-invalid OIDC_SCOPE"
         if (length(trim(env["OIDC_DISPLAY_NAME"])) > 40) print "oidc-invalid OIDC_DISPLAY_NAME"
       }
+      # v0.28: the cms refuses to boot with these (register(): utils/
+      # training-evidence.ts, cron/prune-search-logs.ts, the FEATURES_OFF
+      # parser), so they fail here, before the backup and the build.
+      if (!int_in(env["TRAINING_EVIDENCE_RETENTION_YEARS"], 1, 30)) print "boot-invalid TRAINING_EVIDENCE_RETENTION_YEARS"
+      if (!int_in(env["SEARCH_LOG_RETENTION_DAYS"], 1, 3650)) print "boot-invalid SEARCH_LOG_RETENTION_DAYS"
+      if (!switches_ok(env["FEATURES_OFF"])) print "boot-invalid FEATURES_OFF"
       # v0.21 Meilisearch: compose renders MEILI_MASTER_KEY (the meili
       # service) only while the search profile is on (COMPOSE_PROFILES in
       # infra/.env). In production Meilisearch does not start without a
@@ -1167,6 +1194,7 @@ entra_invalid_keys="$(keys_of entra-invalid)"
 entra_inert_keys="$(keys_of entra-inert)"
 oidc_invalid_keys="$(keys_of oidc-invalid)"
 meili_invalid_keys="$(keys_of meili-invalid)"
+boot_invalid_keys="$(keys_of boot-invalid)"
 if [[ -n "${entra_inert_keys}" ]]; then
   echo "NOTE: MS_CLIENT_ID/MS_CLIENT_SECRET are set in infra/.env, but ENTRA_ENABLED is not 1:" >&2
   echo "      Microsoft sign-in stays off and the MS_* values are ignored (safe to delete)." >&2
@@ -1234,6 +1262,14 @@ if [[ -n "${meili_invalid_keys}" ]]; then
   echo "       infra/meilisearch/provision-keys.sh) and a MEILISEARCH_URL; the search profile alone" >&2
   echo "       needs the master key. docs/OPERATIONS.md, \"Meilisearch (optional search)\"." >&2
   echo "       Or unset MEILISEARCH_ENABLED and COMPOSE_PROFILES." >&2
+  preflight_failed=1
+fi
+if [[ -n "${boot_invalid_keys}" ]]; then
+  echo "ERROR: the cms would refuse to boot with these settings in infra/.env: ${boot_invalid_keys}" >&2
+  echo "       TRAINING_EVIDENCE_RETENTION_YEARS: a whole number of years, 1 to 30 (unset: 3)." >&2
+  echo "       SEARCH_LOG_RETENTION_DAYS: a whole number of days, 1 to 3650 (unset: 90)." >&2
+  echo "       FEATURES_OFF: a comma list of events, training, marketplace, kudos, celebrations, polls," >&2
+  echo "       duty-plans, kpis, read-confirmations, training-reports, search-logging." >&2
   preflight_failed=1
 fi
 # 5A-T1: the host the edge serves: with Traefik the host every router

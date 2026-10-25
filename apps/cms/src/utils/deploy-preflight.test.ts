@@ -2,7 +2,9 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { FEATURE_NAMES, MODULE_NAMES, parseFeaturesOff } from "@sinnlos/domain";
 import { afterAll, describe, expect, it } from "vitest";
+import { searchLogRetentionDays } from "../cron/prune-search-logs";
 import { digestsEnabled } from "../digest/send-digests";
 import { EntraConfigError, parseEntraConfig } from "../entra/config";
 import { OidcConfigError, parseOidcConfig } from "../oidc/config";
@@ -12,6 +14,7 @@ import {
   WARN_ONLY_SECRET_KEYS,
   findPlaceholderSecrets,
 } from "./env-guard";
+import { trainingEvidenceRetentionYears } from "./training-evidence";
 
 /**
  * infra/deploy.sh re-implements the cms boot guards in awk, so a bad
@@ -714,6 +717,74 @@ describe("OIDC preflight (v0.25.0)", () => {
     }
     // The cms verifies the token itself and never needs the client secret.
     expect(cms).not.toContain("OIDC_CLIENT_SECRET");
+  });
+});
+
+describe("boot-refused values in the preflight (v0.28 keys)", () => {
+  const scan = (env: Record<string, string>) =>
+    runAwk(PREFLIGHT_AWK, { fatal_keys: "", warn_keys: "" }, composeJson(env));
+  const cmsAccepts = (check: () => unknown) => {
+    try {
+      check();
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  it.skipIf(!HAS_AWK)("refuses exactly the retention values the cms refuses", () => {
+    for (const value of [
+      "",
+      " ",
+      "1",
+      "3",
+      "30",
+      "031",
+      "0",
+      "31",
+      "-1",
+      "2.5",
+      "3y",
+      "abc",
+      " 7 ",
+    ]) {
+      const years = scan({ TRAINING_EVIDENCE_RETENTION_YEARS: value });
+      const ok = cmsAccepts(() =>
+        trainingEvidenceRetentionYears({ TRAINING_EVIDENCE_RETENTION_YEARS: value }),
+      );
+      expect(years, `years ${JSON.stringify(value)}`).toEqual(
+        ok ? [] : ["boot-invalid TRAINING_EVIDENCE_RETENTION_YEARS"],
+      );
+    }
+    for (const value of ["", "1", "90", "3650", "0", "3651", "1e3", "90d", " 30 "]) {
+      const days = scan({ SEARCH_LOG_RETENTION_DAYS: value });
+      expect(days, `days ${JSON.stringify(value)}`).toEqual(
+        searchLogRetentionDays(value) === null ? ["boot-invalid SEARCH_LOG_RETENTION_DAYS"] : [],
+      );
+    }
+  });
+
+  it.skipIf(!HAS_AWK)("knows the FEATURES_OFF names of the domain parser", () => {
+    const names = [...MODULE_NAMES, ...FEATURE_NAMES];
+    // Every name alone, all together, mixed case and blanks: accepted by both.
+    for (const value of [...names, names.join(","), " Marketplace , KPIS ,", ""]) {
+      expect(
+        cmsAccepts(() => parseFeaturesOff(value)),
+        value,
+      ).toBe(true);
+      expect(scan({ FEATURES_OFF: value }), value).toEqual([]);
+    }
+    // A typo or an unknown name: refused by both.
+    for (const value of ["marketplce", "kudos,wiki", "events;polls"]) {
+      expect(
+        cmsAccepts(() => parseFeaturesOff(value)),
+        value,
+      ).toBe(false);
+      expect(scan({ FEATURES_OFF: value }), value).toEqual(["boot-invalid FEATURES_OFF"]);
+    }
+    // The awk list is the domain list, nothing more.
+    const literal = PREFLIGHT_AWK.match(/split\("([a-z -]+)", k, " "\)/);
+    expect(sorted(words(literal?.[1] ?? ""))).toEqual(sorted(names));
   });
 });
 
@@ -1588,6 +1659,37 @@ describe("preflight: retired legacy-zone overrides (v0.29)", BASH_BUDGET, () => 
       );
     },
   );
+});
+
+describe("preflight: values the cms refuses to boot with (v0.28 keys)", BASH_BUDGET, () => {
+  const fits = { ENTRA_ENABLED: "0" };
+
+  it.skipIf(!HAS_BASH)("refuses before the backup and the build, naming each key", () => {
+    const run = preflightRun({
+      ...fits,
+      TRAINING_EVIDENCE_RETENTION_YEARS: "99",
+      SEARCH_LOG_RETENTION_DAYS: "0",
+      FEATURES_OFF: "marketplce",
+    });
+    expect(run.status).toBe(1);
+    expect(run.stdout).not.toContain("Preflight OK");
+    expect(run.stderr).toContain(
+      "ERROR: the cms would refuse to boot with these settings in infra/.env: FEATURES_OFF SEARCH_LOG_RETENTION_DAYS TRAINING_EVIDENCE_RETENTION_YEARS",
+    );
+    expect(run.stderr).toContain("Preflight failed. Nothing was changed.");
+  });
+
+  it.skipIf(!HAS_BASH)("passes valid and unset values", () => {
+    for (const env of [
+      fits,
+      { ...fits, TRAINING_EVIDENCE_RETENTION_YEARS: "10", SEARCH_LOG_RETENTION_DAYS: "365" },
+      { ...fits, FEATURES_OFF: "marketplace, kpis" },
+    ]) {
+      const run = preflightRun(env);
+      expect(run.status, run.stderr).toBe(0);
+      expect(run.stderr).not.toContain("would refuse to boot");
+    }
+  });
 });
 
 describe("preflight: a site closed at the edge (SITE_ALLOW_CIDRS, v0.29)", BASH_BUDGET, () => {
