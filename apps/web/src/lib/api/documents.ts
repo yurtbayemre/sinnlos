@@ -8,28 +8,26 @@ import { strapi, type StrapiListResponse } from "@/lib/strapi/client";
 import { strapiQuery, withQuery } from "@/lib/strapi/query";
 import type { Document } from "@/lib/types";
 
+/** Documents per library page. */
+export const DOCUMENTS_PAGE_SIZE = 100;
+
 /**
- * Walks every page (issue #26 follow-up): the documents page is a complete
- * library grouped by category with no pagination UI, so the old pageSize=50
- * render cap silently hid document #51+. Secondary sort on id keeps the
- * walk stable — `updatedAt` is not unique. Hard cap: 10 pages x 100 = 1000
- * documents.
+ * One page of the library, newest change first (v0.30): the documents page
+ * pages with prev/next. The old walk of every page stopped at 1,000
+ * documents without saying so. Secondary sort on id keeps the pages stable
+ * — `updatedAt` is not unique.
  */
-export function listDocuments(): Promise<WalkResult<Document>> {
-  return walkAllPages<Document>(
-    (page) =>
-      strapi<StrapiListResponse<Document>>(
-        withQuery(
-          "/api/documents",
-          strapiQuery()
-            .populate("file")
-            .populate("departments")
-            .populate("uploadedBy")
-            .sort(["updatedAt:desc", "id:desc"])
-            .page(page, 100),
-        ),
-      ),
-    { maxPages: 10, label: "documents" },
+export function listDocuments(page = 1): Promise<StrapiListResponse<Document>> {
+  return strapi<StrapiListResponse<Document>>(
+    withQuery(
+      "/api/documents",
+      strapiQuery()
+        .populate("file")
+        .populate("departments")
+        .populate("uploadedBy")
+        .sort(["updatedAt:desc", "id:desc"])
+        .page(page, DOCUMENTS_PAGE_SIZE),
+    ),
   );
 }
 
