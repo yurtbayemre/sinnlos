@@ -540,6 +540,13 @@ export function SearchCommand() {
           />
         </div>
         <ResultStatus ready={searching ? settled : !loading} />
+        {/* Outside the List (S6): inside, cmdk's presentation div was the empty
+            listbox's only child, which axe reports; an empty listbox is fine. */}
+        {!loading && (
+          <Command.Empty className="py-6 text-center text-sm text-muted-foreground">
+            {tCommon("noResults")}
+          </Command.Empty>
+        )}
         <Command.List className="max-h-80 overflow-y-auto p-2">
           {loading && (
             <Command.Loading>
@@ -547,11 +554,6 @@ export function SearchCommand() {
                 {tCommon("loading")}
               </div>
             </Command.Loading>
-          )}
-          {!loading && (
-            <Command.Empty className="py-6 text-center text-sm text-muted-foreground">
-              {tCommon("noResults")}
-            </Command.Empty>
           )}
           {[...grouped].map(([kind, groupItems]) => (
             <Command.Group

@@ -17,13 +17,7 @@ import { loadFixtures, signIn, signInAndEnroll, type Account } from "./helpers";
  * codes) and completes the lesson, so no other spec's user changes state.
  */
 const TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"];
-const EXCEPTIONS: Record<string, Record<string, string>> = {
-  // cmdk renders its "no results" text inside its role=listbox (no option
-  // child is left); the palette's polite status says "No results" instead.
-  "search no results": {
-    "aria-required-children": "cmdk keeps the empty listbox; the status announces it",
-  },
-};
+const EXCEPTIONS: Record<string, Record<string, string>> = {};
 
 /** Animations and transitions settle colours before axe measures them. */
 const STILL = "*,*::before,*::after{transition:none!important;animation:none!important}";
