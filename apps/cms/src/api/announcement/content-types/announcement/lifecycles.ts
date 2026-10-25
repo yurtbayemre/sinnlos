@@ -3,6 +3,7 @@ import {
   scheduleSourceFanout,
   type SourceAudience,
 } from "../../../../utils/notify";
+import { isAnnouncementExpired } from "../../../../utils/announcement-expiry";
 import {
   ANNOUNCEMENT_FIND,
   announcementRecipients,
@@ -92,6 +93,13 @@ async function loadAnnouncementAudience(
     return { source: null, recipients: [], actorId: null };
   }
   const authorId: number | null = full.author?.id ?? null;
+  // Past its end (DA02) the announcement is hidden from every reader below
+  // the moderators (policies/announcement-visibility.ts), so a publish
+  // after `expiresAt` notifies nobody: the bell entry would lead nowhere
+  // (v0.30).
+  if (isAnnouncementExpired(full, new Date())) {
+    return { source: full, recipients: [], actorId: authorId };
+  }
   // The flag and the marker read again after the relations (batch 15): a
   // department or team delete between the statements must not pair an old
   // marker with the new links (utils/visible-ids.ts).

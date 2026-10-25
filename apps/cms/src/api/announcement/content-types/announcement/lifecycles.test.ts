@@ -142,6 +142,20 @@ describe("announcement afterCreate: audience = targeting AND read grant AND acti
     expect(recipientsOf(strapi)).toEqual([USER.dave, USER.anna]);
   });
 
+  it("an announcement published after its end notifies nobody (v0.30)", async () => {
+    const strapi = setup();
+    const row = publish(strapi, { expiresAt: "2020-01-01T00:00:00.000Z" });
+    await lifecycles.afterCreate({ result: row });
+    expect(notificationRows(strapi)).toEqual([]);
+  });
+
+  it("an end still ahead notifies as usual", async () => {
+    const strapi = setup();
+    const row = publish(strapi, { expiresAt: "2999-01-01T00:00:00.000Z" });
+    await lifecycles.afterCreate({ result: row });
+    expect(recipientsOf(strapi)).toEqual(READERS.filter((id) => id !== USER.carol));
+  });
+
   it("a user whose blocked flag is NULL is active", async () => {
     const strapi = setup();
     for (const user of strapi.tables["plugin::users-permissions.user"]) {
