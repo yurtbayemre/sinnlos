@@ -268,6 +268,7 @@
     "unknownAuthor": "Unknown"
   },
   "editor": {
-    "unsavedHint": "You have unsaved changes."
+    "unsavedHint": "You have unsaved changes.",
+    "leaveUnsaved": "You have unsaved changes. Leave this page and discard them?"
   }
 }

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import type { Route } from "next";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { Bell, Megaphone, MessageCircle, Calendar, Award, GraduationCap } from "lucide-react";
+import { confirmLeave } from "@/components/manage/unsaved-guard";
 import { cn } from "@/lib/utils";
 import {
   isSharedErrorCode,
@@ -147,6 +148,8 @@ export function NotificationBell({
   // Selecting an item closes the menu (Radix calls onOpenChange); the
   // explicit close keeps that true for any caller of the handler.
   const handleClick = (notif: Notification) => {
+    // An editor with unsaved changes asks first; Cancel stays on the page.
+    if (notif.link && !confirmLeave()) return;
     if (!notif.readAt) runAction(() => markNotificationsRead([notif.id]));
     setOpen(false);
     // Server-authored notification links ("/announcements", …) — data-

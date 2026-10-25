@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { useTranslations } from "next-intl";
 import { ROLE_PRIVILEGE_ORDER, type UserAdminDetail } from "@sinnlos/domain";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -14,6 +14,7 @@ import { ActionBar, FormAlert, useFieldError } from "./editor-chrome";
 import { CheckboxField, Field, inputClass } from "./form-controls";
 import { SinglePicker } from "./pickers";
 import { useAuthoringEditor } from "./use-authoring-editor";
+import { useUnsavedGuard } from "./unsaved-guard";
 import { sameValues } from "./use-item-editor";
 
 const FIELDS = ["role", "department", "manager", "blocked"];
@@ -52,12 +53,7 @@ export function UserEditor({ user, options }: { user: UserAdminDetail; options: 
     setValues((previous) => ({ ...previous, [key]: value }));
     setSaved(false);
   };
-  useEffect(() => {
-    if (!dirty) return;
-    const warn = (event: BeforeUnloadEvent) => event.preventDefault();
-    window.addEventListener("beforeunload", warn);
-    return () => window.removeEventListener("beforeunload", warn);
-  }, [dirty]);
+  useUnsavedGuard(dirty);
 
   const off = editor.pending;
   const pickersOff = off || options.failed;

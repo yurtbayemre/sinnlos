@@ -17,6 +17,7 @@ import {
   Megaphone,
 } from "lucide-react";
 import { useTranslations } from "next-intl";
+import { confirmLeave } from "@/components/manage/unsaved-guard";
 import type { PreloadKind, SearchItem, SearchKind } from "@/lib/search-action";
 
 /*
@@ -438,6 +439,8 @@ export function SearchCommand() {
 
   const select = useCallback(
     (href: Route) => {
+      // An editor with unsaved changes asks first; Cancel keeps the palette.
+      if (!confirmLeave()) return;
       // A selection is the strongest "this query settled" signal.
       schedulerRef.current?.flushLog();
       schedulerRef.current?.query("");

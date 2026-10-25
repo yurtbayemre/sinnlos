@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { Route } from "next";
 import { useTranslations } from "next-intl";
@@ -10,6 +10,7 @@ import { AREA_PATH, areaItemPath, hasDrafts, type ManageArea } from "@/lib/manag
 import type { SaveInput } from "@/lib/manage/save";
 import type { ScheduleValues } from "@/lib/manage/values";
 import { useManageFlash } from "./flash";
+import { useUnsavedGuard } from "./unsaved-guard";
 import type { PublishBarHandlers } from "./publish-bar";
 import { metaOf, useAuthoringEditor } from "./use-authoring-editor";
 
@@ -25,7 +26,7 @@ import { metaOf, useAuthoringEditor } from "./use-authoring-editor";
  *    survives the navigation (ManageFlash).
  *  - A save makes the saved values the new baseline; a discard and a
  *    Reload reset the form to the fresh `editable`.
- *  - Unsaved changes ask before the tab is closed or reloaded.
+ *  - Unsaved changes ask before the page is left (unsaved-guard.ts).
  *
  * The typed areas take their paths and draft mode from lib/manage/areas.ts;
  * an editor outside them (a wiki space, a wiki page) passes its own
@@ -149,13 +150,8 @@ export function useItemEditor<V extends object, E extends Omit<EditableBase, "ro
   // The Schedule… button that opened the dialog, for the focus on close.
   const scheduleOpener = useRef<HTMLElement | null>(null);
 
-  // Unsaved changes: ask before the tab closes or reloads.
-  useEffect(() => {
-    if (!dirty) return;
-    const warn = (event: BeforeUnloadEvent) => event.preventDefault();
-    window.addEventListener("beforeunload", warn);
-    return () => window.removeEventListener("beforeunload", warn);
-  }, [dirty]);
+  // Unsaved changes: ask before leaving the page (unsaved-guard.ts).
+  const releaseUnsaved = useUnsavedGuard(dirty);
 
   const setValue = useCallback(<K extends keyof V>(key: K, value: V[K]) => {
     setValues((previous) => ({ ...previous, [key]: value }));
@@ -224,6 +220,7 @@ export function useItemEditor<V extends object, E extends Omit<EditableBase, "ro
             if (schedule) setScheduleOpen(false);
             if (creating && data) {
               flash(status === "published" ? t("createdPublished") : t("created"));
+              releaseUnsaved();
               router.replace(itemPath(data));
               return;
             }
@@ -257,6 +254,7 @@ export function useItemEditor<V extends object, E extends Omit<EditableBase, "ro
       drafts,
       itemPath,
       leaveSchedule,
+      releaseUnsaved,
     ],
   );
 
@@ -271,6 +269,7 @@ export function useItemEditor<V extends object, E extends Omit<EditableBase, "ro
         onSuccess: (data) => {
           if (intent === "delete" || (intent === "discard" && data === null)) {
             flash(t("deleted"));
+            releaseUnsaved();
             goToList();
             return;
           }
@@ -283,7 +282,7 @@ export function useItemEditor<V extends object, E extends Omit<EditableBase, "ro
         },
       });
     },
-    [meta, run, flash, t, goToList, requestReset],
+    [meta, run, flash, t, goToList, requestReset, releaseUnsaved],
   );
 
   const handlers: PublishBarHandlers = useMemo(

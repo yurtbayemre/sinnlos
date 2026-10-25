@@ -268,6 +268,7 @@
     "unknownAuthor": "Unbekannt"
   },
   "editor": {
-    "unsavedHint": "Sie haben ungespeicherte Änderungen."
+    "unsavedHint": "Sie haben ungespeicherte Änderungen.",
+    "leaveUnsaved": "Sie haben ungespeicherte Änderungen. Seite verlassen und Änderungen verwerfen?"
   }
 }
