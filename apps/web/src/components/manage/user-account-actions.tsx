@@ -5,6 +5,7 @@ import { useTranslations } from "next-intl";
 import type { UserAdminDetail } from "@sinnlos/domain";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { startCmsAction } from "@/lib/action-result";
 import { resetUserMfa, sendLink } from "@/lib/manage/user-actions";
 
 const LINK_ERRORS = [
@@ -38,23 +39,26 @@ export function UserAccountActions({
   const canLink = localSignIn && user.idp === null && !user.blocked;
   const canResetMfa = user.mfa && !user.self;
 
+  // startCmsAction: a call that does not get through (a deploy restart, a
+  // lost connection) shows the inline failure instead of the error page.
   const run = (kind: "link" | "mfa") => {
     setConfirm(null);
-    startTransition(async () => {
-      if (kind === "link") {
-        const result = await sendLink(user.id);
-        setMessage(
-          result.ok
-            ? { ok: true, text: t(user.invited ? "link.invitationSent" : "link.resetSent") }
-            : {
-                ok: false,
-                text: t(`link.error.${linkError(result.code)}`),
-              },
-        );
-      } else {
-        const result = await resetUserMfa(user.id);
-        setMessage({ ok: result.ok, text: t(result.ok ? "mfaReset.done" : "mfaReset.failed") });
-      }
+    if (kind === "link") {
+      startCmsAction(startTransition, {
+        action: () => sendLink(user.id),
+        onSuccess: () =>
+          setMessage({
+            ok: true,
+            text: t(user.invited ? "link.invitationSent" : "link.resetSent"),
+          }),
+        onFailure: (code) => setMessage({ ok: false, text: t(`link.error.${linkError(code)}`) }),
+      });
+      return;
+    }
+    startCmsAction(startTransition, {
+      action: () => resetUserMfa(user.id),
+      onSuccess: () => setMessage({ ok: true, text: t("mfaReset.done") }),
+      onFailure: () => setMessage({ ok: false, text: t("mfaReset.failed") }),
     });
   };
 

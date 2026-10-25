@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import { useTranslations } from "next-intl";
 import { RotateCw } from "lucide-react";
+import { unstable_rethrow } from "next/navigation";
 import { renewClassified } from "@/lib/classified-actions";
 
 /**
@@ -23,8 +24,15 @@ export function RenewButton({ id }: { id: number }) {
         onClick={() =>
           startTransition(async () => {
             setError(false);
-            const result = await renewClassified(id);
-            if (result?.error) setError(true);
+            try {
+              const result = await renewClassified(id);
+              if (result?.error) setError(true);
+            } catch (e) {
+              // A call that does not get through shows the same inline
+              // failure; Next's redirects pass through (v0.30).
+              unstable_rethrow(e);
+              setError(true);
+            }
           })
         }
         className="inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium outline-hidden transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:opacity-50"

@@ -11,6 +11,7 @@ import {
 } from "@sinnlos/domain";
 import { Button } from "@/components/ui/button";
 import { ModalDialog } from "@/components/ui/confirm-dialog";
+import { startCmsAction } from "@/lib/action-result";
 import {
   anonymiseUser,
   previewAnonymisation,
@@ -58,28 +59,38 @@ export function UserDataProtection({
     setPreview(null);
     setTyped("");
     setError(null);
-    startTransition(async () => {
-      const result = await previewAnonymisation(user.id);
-      if (result.ok && result.data) setPreview(result.data);
-      else setError(errorText(result.ok ? "failed" : result.code));
+    // startCmsAction: a call that does not get through shows the inline
+    // failure instead of the error page (v0.30).
+    startCmsAction(startTransition, {
+      action: () => previewAnonymisation(user.id),
+      onSuccess: (data) => (data ? setPreview(data) : setError(errorText("failed"))),
+      onFailure: (code) => setError(errorText(code)),
     });
   };
 
   const run = () => {
     if (!preview) return;
     setError(null);
-    startTransition(async () => {
-      const result = await anonymiseUser(user.id, typed);
-      if (result.ok && result.data) {
-        setDone(result.data);
+    startCmsAction(startTransition, {
+      action: () => anonymiseUser(user.id, typed),
+      onSuccess: (data) => {
+        if (!data) {
+          setError(errorText("failed"));
+          return;
+        }
+        setDone(data);
         setOpen(false);
-      } else {
-        setError(errorText(result.ok ? "failed" : result.code));
-      }
+      },
+      onFailure: (code) => setError(errorText(code)),
     });
   };
 
   const anonymisedAt = done?.anonymisedAt ?? user.anonymisedAt;
+  // Notifications still naming the person when the request finished (v0.30:
+  // the rewrite runs after the anonymisation committed; the nightly sweep
+  // repeats what is left). A snapshot count, read as it comes.
+  const remaining =
+    (done as { notifications?: { remaining?: number } } | null)?.notifications?.remaining ?? 0;
 
   return (
     <section aria-labelledby="user-data-protection" className="space-y-3 rounded-xl border p-4">
@@ -172,6 +183,7 @@ export function UserDataProtection({
           {done.avatar && !done.avatar.removed
             ? t("anonymise.doneAvatarKept", { id: done.avatar.id })
             : t("anonymise.done")}
+          {remaining > 0 && <> {t("anonymise.remaining", { count: remaining })}</>}
         </p>
       )}
     </section>
