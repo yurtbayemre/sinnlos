@@ -125,8 +125,8 @@ jobs:
 
   # Datetime contract (docs/OPERATIONS.md): the whole suite once per process
   # time zone, with the Postgres 16 integration suites (*.pg.test.ts: the
-  # timestamptz guard, the one-time repair through Strapi's own migration
-  # runner, the read-only report) switched on by SINNLOS_TEST_PG_URL. Gate
+  # timestamptz guard and the datetime migration stub through Strapi's own
+  # migration runner) switched on by SINNLOS_TEST_PG_URL. Gate
   # for every Strapi, knex or pg upgrade.
   datetime:
     needs: changes
