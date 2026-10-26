@@ -9,7 +9,9 @@ import type { DutyPlanValues } from "@/lib/manage/values";
  * the component is called as a function under a shallow hook shim, a field's
  * render callback is called for its input, and the shifts the handler writes
  * are read from setValue. Europe/Berlin, with both 2026 clock changes
- * (29 March: 02:00 → 03:00; 25 October: 03:00 → 02:00).
+ * (29 March: 02:00 → 03:00; 25 October: 03:00 → 02:00). Since v0.32 (#183)
+ * a wall time a clock change skips or repeats is refused, not guessed: it
+ * stays as typed, and the save names it (duty-plan-payload.test.ts).
  */
 vi.mock("react", async (importOriginal) => ({
   ...(await importOriginal<typeof import("react")>()),
@@ -111,8 +113,11 @@ function type(shift: DutyShift, part: string, value: string): DutyShift {
 }
 
 /** Picks template `label` for row 0 and returns row 0 as written. */
-function pick(shift: DutyShift, label: string): DutyShift {
-  const picker = find(render([shift]), (props) => props.id === "duty-plan-shifts-0-template");
+function pick(shift: DutyShift, label: string, templates?: DutyShiftTemplate[]): DutyShift {
+  const picker = find(
+    render([shift], templates),
+    (props) => props.id === "duty-plan-shifts-0-template",
+  );
   (picker.onChange as (label: string) => void)(label);
   return written()[0]!;
 }
@@ -208,15 +213,46 @@ describe("the duty editor's time math (Europe/Berlin)", () => {
     });
   });
 
-  describe("a wall time in a clock change", () => {
-    it("moves March's missing 02:30 forward to 03:30 CEST", () => {
+  describe("a wall time in a clock change is refused and kept as typed (#183)", () => {
+    it("March's missing 02:30, shown again as typed; the end keeps its instant", () => {
       const sunday = shift("2026-03-29T04:00:00.000Z", "2026-03-29T12:00:00.000Z");
-      expect(type(sunday, "start", "02:30").startsAt).toBe("2026-03-29T01:30:00.000Z");
+      const typed = type(sunday, "start", "02:30");
+      expect(typed).toEqual({ ...sunday, startsAt: "2026-03-29T02:30" });
+      const tree = render([typed]);
+      expect(control(tree, 0, "startDay").value).toBe("2026-03-29");
+      expect(control(tree, 0, "start").value).toBe("02:30");
     });
 
-    it("takes the earlier of October's two 02:30 (CEST)", () => {
+    it("October's twice-occurring 02:30", () => {
       const sunday = shift("2026-10-25T05:00:00.000Z", "2026-10-25T13:00:00.000Z");
-      expect(type(sunday, "start", "02:30").startsAt).toBe("2026-10-25T00:30:00.000Z");
+      expect(type(sunday, "start", "02:30").startsAt).toBe("2026-10-25T02:30");
+    });
+
+    it("a template whose start the day skips", () => {
+      const sunday = shift("2026-03-29T04:00:00.000Z", "2026-03-29T12:00:00.000Z");
+      expect(pick(sunday, "Lücke", [{ label: "Lücke", start: "02:30", end: "10:00" }])).toEqual(
+        shift("2026-03-29T02:30", "2026-03-29T08:00:00.000Z"),
+      );
+    });
+
+    it("copy week into the spring change keeps that start as typed", () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2026-03-18T10:00:00Z")); // the week from Monday 16 March
+      try {
+        // Sunday 22 March, 02:30–10:30 CET.
+        const sunday = shift("2026-03-22T01:30:00.000Z", "2026-03-22T09:30:00.000Z");
+        const copy = find(
+          render([sunday]),
+          (props) =>
+            Array.isArray(props.children) &&
+            props.children.includes("fields.shifts.copyWeek") &&
+            typeof props.onClick === "function",
+        );
+        (copy.onClick as () => void)();
+        expect(written()).toEqual([sunday, shift("2026-03-29T02:30", "2026-03-29T08:30:00.000Z")]);
+      } finally {
+        vi.useRealTimers();
+      }
     });
   });
 

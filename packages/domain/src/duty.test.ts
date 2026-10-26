@@ -151,6 +151,21 @@ describe("templates, copying and pruning in APP_TIME_ZONE", () => {
     );
   });
 
+  it("refuses a wall time the clock change skips or repeats on the new day, kept as typed (#183)", () => {
+    // Sunday 21 March 2027, 02:30–10:30 CET → 28 March: 02:30 does not exist.
+    expect(
+      copyDutyWeek(
+        [shift(1, "2027-03-21T01:30:00.000Z", "2027-03-21T09:30:00.000Z")],
+        "2027-03-15",
+        BERLIN,
+      ),
+    ).toEqual([shift(1, "2027-03-28T02:30", "2027-03-28T08:30:00.000Z")]);
+    // Sunday 18 October 2026, 02:30 CEST → 25 October: 02:30 occurs twice.
+    expect(
+      moveDutyShift(shift(2, "2026-10-18T00:30:00.000Z", "2026-10-18T06:00:00.000Z"), 7, BERLIN),
+    ).toEqual(shift(2, "2026-10-25T02:30", "2026-10-25T07:00:00.000Z"));
+  });
+
   it("drops shifts that ended more than four weeks ago", () => {
     const now = new Date("2026-10-30T12:00:00Z");
     expect(

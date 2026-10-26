@@ -29,6 +29,24 @@ const plan = (patch: Partial<DutyPlanValues> = {}): DutyPlanValues => ({
 });
 
 describe("buildDutyPlanPayload", () => {
+  it("names a clock-change wall time kept as typed: timeSkipped or timeRepeated (#183)", () => {
+    const at = (startsAt: string, endsAt: string) =>
+      buildDutyPlanPayload(plan({ shifts: [{ userId: 7, startsAt, endsAt }] }), null, ctx());
+    expect(at("2027-03-28T02:30", "2027-03-28T08:00:00.000Z")).toEqual({
+      ok: false,
+      fields: { shifts: "timeSkipped" },
+    });
+    expect(at("2026-10-25T05:00:00.000Z", "2026-10-25T02:30")).toEqual({
+      ok: false,
+      fields: { shifts: "timeRepeated" },
+    });
+    // Still being typed: the generic refusal, as before.
+    expect(at("T06:00", "2026-10-25T13:00:00.000Z")).toEqual({
+      ok: false,
+      fields: { shifts: "invalid" },
+    });
+  });
+
   it("sends every field on create, the department pinned to the author's", () => {
     expect(buildDutyPlanPayload(plan(), null, ctx({ mode: "create" }))).toEqual({
       ok: true,

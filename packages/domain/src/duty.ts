@@ -3,6 +3,7 @@ import { isRowId } from "./entry-id.js";
 import {
   addDaysToKey,
   instantEpochMs,
+  isWallTimeError,
   zonedDateKey,
   zonedTimeOfDay,
   zonedWallTimeToInstant,
@@ -188,14 +189,24 @@ export function dutyShiftFromTemplate(
   };
 }
 
-/** The same shift `days` calendar days later, at the same wall times (never 24-hour steps: clock changes). */
+/**
+ * The same shift `days` calendar days later, at the same wall times (never
+ * 24-hour steps: clock changes). A wall time the clock change skips or
+ * repeats on the new day is refused, not guessed (#183, as every /manage
+ * form): that endpoint stays the typed 'YYYY-MM-DDTHH:mm', which the editor
+ * shows as typed and the save refuses with timeSkipped or timeRepeated.
+ */
 export function moveDutyShift(shift: DutyShift, days: number, timeZone: string): DutyShift {
-  const move = (instant: string) =>
-    zonedWallTimeToInstant(
-      addDaysToKey(zonedDateKey(instant, timeZone), days),
-      zonedTimeOfDay(instant, timeZone),
-      timeZone,
-    ).toISOString();
+  const move = (instant: string) => {
+    const day = addDaysToKey(zonedDateKey(instant, timeZone), days);
+    const time = zonedTimeOfDay(instant, timeZone);
+    try {
+      return zonedWallTimeToInstant(day, time, timeZone, "reject").toISOString();
+    } catch (error) {
+      if (isWallTimeError(error)) return `${day}T${time}`;
+      throw error;
+    }
+  };
   return { userId: shift.userId, startsAt: move(shift.startsAt), endsAt: move(shift.endsAt) };
 }
 

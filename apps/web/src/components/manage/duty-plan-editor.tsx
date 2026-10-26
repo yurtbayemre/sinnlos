@@ -88,10 +88,15 @@ function partsOf(shift: DutyShift, timeZone: string): ShiftParts {
   return { startDay, start, endDay, end };
 }
 
-/** The instant of a day and a time; an incomplete input stays as typed, and the save refuses it. */
+/**
+ * The instant of a day and a time; an incomplete input stays as typed, and
+ * the save refuses it. So does a wall time the clock change skips or repeats
+ * (#183): refused like in every /manage form (timeSkipped, timeRepeated),
+ * never moved to 03:30 or the first 02:30.
+ */
 function instantOf(day: string, time: string, timeZone: string): string {
   try {
-    return zonedWallTimeToInstant(day, time, timeZone).toISOString();
+    return zonedWallTimeToInstant(day, time, timeZone, "reject").toISOString();
   } catch {
     return `${day}T${time}`;
   }
