@@ -36,12 +36,13 @@ const EVENT_UID = "api::event.event";
 interface RsvpEntry extends EntryRow {
   status?: string | null;
   targetDocumentId?: string | null;
+  user?: { id?: number } | null;
 }
 
 /**
  * Count how many users currently hold a seat for the event, excluding
- * `excludeUserId` (the caller — their own switch to "yes" must not count
- * against themselves). Per user only the newest row counts, the rule the
+ * `excludeUserId` (the RSVP's owner — their own switch to "yes" must not
+ * count against themselves; null excludes nobody). Per user only the newest row counts, the rule the
  * summary counts by (utils/rsvp.ts seatHolders, summarizeRsvps): the
  * accepted check-then-insert race (below) can leave duplicate rows per
  * user until the next upsert heals them, and an older "yes" next to a
@@ -50,7 +51,7 @@ interface RsvpEntry extends EntryRow {
 async function countYesUsers(
   strapi: any,
   targetDocumentId: string,
-  excludeUserId: number,
+  excludeUserId: number | null,
 ): Promise<number> {
   const rows: RsvpRow[] = await strapi.db.query(RSVP_UID).findMany({
     where: { targetDocumentId },
@@ -89,7 +90,7 @@ function refusesLegacyFormat(ctx: {
   return requestsLegacyFormat(ctx.headers);
 }
 
-async function isAtCapacity(strapi: any, event: any, userId: number): Promise<boolean> {
+async function isAtCapacity(strapi: any, event: any, userId: number | null): Promise<boolean> {
   // Without a limit no user count can fill the event: skip the query.
   if (capacityDecision(event.capacity, Number.MAX_SAFE_INTEGER) === "open") return false;
   const yesUsers = await countYesUsers(strapi, event.documentId, userId);
@@ -251,7 +252,11 @@ export default factories.createCoreController(RSVP_UID, ({ strapi }) => ({
     // controller resolves by documentId — translate before delegating
     // (comment controller gotcha). A malformed id is an unknown RSVP and
     // never reaches the query (findByRef, utils/entry-id.ts).
-    const entity = await findByRef<RsvpEntry>(strapi, RSVP_UID, ctx.params.id);
+    // With its owner: an admin's edit of someone else's RSVP is gated
+    // against that person's seat, not the admin's (v0.32, #180).
+    const entity = await findByRef<RsvpEntry>(strapi, RSVP_UID, ctx.params.id, {
+      populate: { user: { select: ["id"] } },
+    });
     if (!entity) return ctx.notFound();
 
     const body = (ctx.request.body ?? {}) as any;
@@ -266,7 +271,9 @@ export default factories.createCoreController(RSVP_UID, ({ strapi }) => ({
       if (!event || !event.rsvpEnabled) {
         return ctx.badRequest("Event not available for RSVP");
       }
-      if (await isAtCapacity(strapi, event, user.id)) {
+      // An ownerless row (its user deleted) excludes nobody, never the caller.
+      const owner = typeof entity.user?.id === "number" ? entity.user.id : null;
+      if (await isAtCapacity(strapi, event, owner)) {
         return ctx.badRequest("Event is at capacity");
       }
     }

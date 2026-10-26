@@ -282,6 +282,7 @@ const DIRECT_READS: Record<string, () => Promise<unknown>> = {
   "training.trainingReport": () => trainingApi.trainingReport(),
   "training.courseTrainingReport": () => trainingApi.courseTrainingReport("course doc/1"),
   "training.fetchMyProgress": () => training.fetchMyProgress(),
+  "training.fetchMyProgress(lesson)": () => training.fetchMyProgress("lesson/doc 1"),
   "viewer.getViewer": () => getViewer(),
   "topbar.getNotifications": () => getNotifications(),
   ...Object.fromEntries(

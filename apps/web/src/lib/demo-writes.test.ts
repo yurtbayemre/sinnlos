@@ -85,6 +85,15 @@ describe("DEMO_MODE writes change what the reads show", () => {
       to: { id: 2, displayName: "Grace Hopper" },
     });
     expect(await sendKudos(1, "Me!", "teamwork")).toMatchObject({ ok: false, code: "invalid" });
+    // v0.32 (#198): the cms limit, counted on the message as sent (a trailing
+    // blank included), refused like the cms does
+    expect(await sendKudos(2, "x".repeat(1000), "teamwork")).toEqual({ ok: true });
+    for (const message of ["x".repeat(1001), `${"x".repeat(1000)} `]) {
+      expect(await sendKudos(2, message, "teamwork")).toMatchObject({
+        ok: false,
+        code: "invalid",
+      });
+    }
   });
 
   it("RSVP: the answer replaces the demo user's own; an event without RSVP refuses", async () => {

@@ -251,6 +251,12 @@ export function createSearchScheduler({
     query(term) {
       if (disposed) return;
       cancel();
+      // A new term drops the previous one's pending log: it was a step on
+      // the way, not a settled search, even when the next answer is slow
+      // or fails (#185). Selection and close still flush the current term.
+      if (logTimer) clearTimeout(logTimer);
+      logTimer = null;
+      pendingLog = null;
       if (term.length < MIN_QUERY_LENGTH) return;
       onStart?.(term);
       debounce = setTimeout(() => run(term), debounceMs);

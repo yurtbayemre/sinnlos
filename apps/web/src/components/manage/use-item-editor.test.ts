@@ -15,7 +15,7 @@ vi.mock("next/navigation", async (importOriginal) => ({
   useRouter: () => router,
 }));
 vi.mock("next-intl", () => ({ useTranslations: () => (key: string) => key }));
-vi.mock("./flash", () => ({ useManageFlash: () => () => {} }));
+vi.mock("./flash", () => ({ showFlash: () => {} }));
 const { useItemEditor } = await import("./use-item-editor");
 
 interface Values {

@@ -50,8 +50,9 @@ function host(): ExchangeHost & { log: { info: LogSpy; warn: LogSpy; error: LogS
     db: {
       query: unexpected,
       transaction: unexpected,
-      queryBuilder: unexpected,
       dialect: { client: "sqlite" },
+      getSchemaName: unexpected,
+      metadata: { get: unexpected },
     },
     documents: unexpected,
     plugin: unexpected,

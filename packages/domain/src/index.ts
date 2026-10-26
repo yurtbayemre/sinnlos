@@ -26,6 +26,7 @@ export * from "./notification-title.js";
 export * from "./password.js";
 export * from "./duty.js";
 export * from "./kpi.js";
+export * from "./kudos.js";
 export * from "./plain-date.js";
 export * from "./poll-close.js";
 export * from "./roles.js";

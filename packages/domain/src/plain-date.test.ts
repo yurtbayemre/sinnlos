@@ -42,6 +42,8 @@ describe("plain-date", () => {
     ]) {
       expect(isPlainDate(bad), String(bad)).toBe(false);
     }
+    // #188 widened only the instant check: plain dates keep their range.
+    expect(isPlainDate("0099-01-01")).toBe(false);
   });
 
   it("zone names are validated and canonicalised by Intl", () => {
@@ -77,6 +79,14 @@ describe("plain-date", () => {
     expect(instantEpochMs("2026-10-01T00:00Z")).toBe(Date.UTC(2026, 9, 1));
     expect(instantEpochMs(" 2026-10-01T02:00:00+02:00 ")).toBe(Date.UTC(2026, 9, 1));
     expect(instantEpochMs(new Date(Number.NaN))).toBeNull();
+    // #188: no rollover of an impossible day; an early year stays as before
+    expect(instantEpochMs("2026-02-30T06:00:00Z")).toBeNull();
+    expect(instantEpochMs("2027-02-29T00:00Z")).toBeNull();
+    expect(instantEpochMs("+002026-02-30T06:00:00Z")).toBeNull();
+    expect(instantEpochMs("+002026-02-28T06:00:00Z")).toBe(Date.UTC(2026, 1, 28, 6));
+    expect(instantEpochMs("2028-02-29T00:00Z")).toBe(Date.UTC(2028, 1, 29));
+    expect(instantEpochMs("0099-01-01T06:00:00Z")).toBe(Date.parse("0099-01-01T06:00:00Z"));
+    expect(new Date(instantEpochMs("0099-01-01T06:00:00Z")!).getUTCFullYear()).toBe(99);
   });
 
   it("addDaysToKey crosses month, year and leap-day boundaries", () => {

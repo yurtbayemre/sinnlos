@@ -56,9 +56,7 @@ updates:
 
   # The base image of both Dockerfiles (node:24-alpine, pinned by digest):
   # new digests of the same tag. Moving to another Node major is a planned
-  # change (engines, CI, both images), not a weekly bump. The compose images
-  # (postgres:16-alpine, caddy:2-alpine) are deliberately not covered: a
-  # Postgres major needs a dump and restore.
+  # change (engines, CI, both images), not a weekly bump.
   - package-ecosystem: docker
     directories: ["/apps/cms", "/apps/web"]
     schedule:
@@ -78,6 +76,27 @@ updates:
     ignore:
       - dependency-name: node
         update-types: ["version-update:semver-major"]
+
+  # The compose images, pinned by digest (v0.32): new digests of the same
+  # tag. Never a Postgres major (it needs a dump and restore) or a Caddy
+  # major (a new config format); Meilisearch stays as pinned (a new version
+  # may not open the old index files).
+  - package-ecosystem: docker-compose
+    directory: /infra
+    schedule:
+      interval: weekly
+      day: monday
+      time: "05:00"
+      timezone: Europe/Berlin
+    commit-message:
+      prefix: build
+      include: scope
+    ignore:
+      - dependency-name: postgres
+        update-types: ["version-update:semver-major"]
+      - dependency-name: caddy
+        update-types: ["version-update:semver-major"]
+      - dependency-name: getmeili/meilisearch
 
   # The actions used in .github/workflows, in one pull request. They are
   # pinned to commit SHAs with the tag in a trailing comment

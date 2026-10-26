@@ -16,6 +16,9 @@
  *   5. one pnpm version everywhere (packageManager, CI, both images), and
  *      pnpm 10's build-script allowlist names the dependencies that need
  *      their install scripts.
+ *   6. every compose image runs at a digest (v0.32), CI's edge check runs
+ *      the caddy the compose file pins, and Dependabot proposes new digests
+ *      of the same tags, never a Postgres or Caddy major.
  */
 import { readFileSync, readdirSync } from "node:fs";
 import { describe, expect, it } from "vitest";
@@ -187,5 +190,60 @@ describe(".dockerignore", () => {
     ".e2e",
   ])("excludes %s", (pattern) => {
     expect(patterns).toContain(pattern);
+  });
+});
+
+describe("compose images (v0.32, #196)", () => {
+  const compose = read("./docker-compose.yml");
+  const images = [...compose.matchAll(/^ {4}image: (\S+)$/gm)].map((match) => match[1]);
+
+  it("pins every image of the compose file by digest, postgres on its 16 line", () => {
+    expect(images.length).toBeGreaterThanOrEqual(3);
+    for (const image of images) expect(image).toMatch(/^[\w./-]+:[\w.-]+@sha256:[0-9a-f]{64}$/);
+    // A digest bump of the same tag (Dependabot) passes; another tag does not.
+    expect(images.some((image) => /^postgres:16-alpine@sha256:[0-9a-f]{64}$/.test(image))).toBe(
+      true,
+    );
+    expect(images.some((image) => /^caddy:2-alpine@sha256:[0-9a-f]{64}$/.test(image))).toBe(true);
+  });
+
+  it("lets CI's edge check run the caddy the compose file pins, never a floating tag", () => {
+    const ci = read("../.github/workflows/ci.yml");
+    expect(ci).not.toMatch(/caddy:2-alpine(?!@)/);
+    expect(ci).toContain(`image="$(jq -er '.services.caddy.image' <<<"\${config}")"`);
+    expect(ci.match(/Caddyfile:ro" "\$\{image\}"/g)).toHaveLength(2);
+  });
+
+  it("lets CI and the e2e stack run the postgres the compose file pins, read from it", () => {
+    // A Dependabot digest bump of /infra then reaches both without a second copy.
+    const ci = read("../.github/workflows/ci.yml");
+    expect(ci).not.toMatch(/postgres:16/);
+    expect(ci).toContain("postgres: ${{ steps.pins.outputs.postgres }}");
+    expect(ci).toContain(
+      "image=\"$(sed -n 's/^    image: \\(postgres:[^ ]*\\)$/\\1/p' infra/docker-compose.yml)\"",
+    );
+    expect(ci.match(/needs\.changes\.outputs\.postgres/g)).toHaveLength(2);
+    expect(read("../e2e/compose.yaml")).toContain("image: ${E2E_POSTGRES_IMAGE:?}");
+    const runner = read("../e2e/run.mjs");
+    expect(runner).toContain("E2E_POSTGRES_IMAGE: await pinnedPostgres(),");
+    expect(runner).toContain("/^ {4}image: (postgres:\\S+)$/m.exec(compose)");
+    // Both readers find the pinned image in the compose file.
+    expect(/^ {4}image: (postgres:\S+)$/m.exec(compose)?.[1]).toMatch(
+      /^postgres:16-alpine@sha256:[0-9a-f]{64}$/,
+    );
+  });
+
+  it("has Dependabot propose new digests of the same tags, never a Postgres or Caddy major", () => {
+    const dependabot = read("../.github/dependabot.yml");
+    const entry = dependabot.slice(dependabot.indexOf("package-ecosystem: docker-compose"));
+    expect(entry).toMatch(/^package-ecosystem: docker-compose\n {4}directory: \/infra\n/);
+    const block = entry.slice(0, entry.indexOf("\n\n"));
+    for (const name of ["postgres", "caddy"]) {
+      expect(block).toContain(
+        `- dependency-name: ${name}\n        update-types: ["version-update:semver-major"]`,
+      );
+    }
+    // Meilisearch not at all: a new version may not open the old index files.
+    expect(block).toMatch(/- dependency-name: getmeili\/meilisearch\n?$/);
   });
 });

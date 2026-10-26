@@ -3,7 +3,6 @@ import { ROLE_PRIVILEGE_ORDER } from "../bootstrap/roles";
 import {
   APP_ROLE_TABLE,
   EntraConfigError,
-  entraConfigWarnings,
   entraIssuer,
   entraJwksUrl,
   entraStatusLine,
@@ -67,10 +66,8 @@ describe("parseEntraConfig: disabled", () => {
     expect(parseEntraConfig({ OIDC_ENABLED: "1" }).localEnabled).toBe(false);
   });
 
-  it("logs a single disabled status line and no warnings", () => {
-    const settings = parseEntraConfig({ LOCAL_REGISTRATION: "1" });
-    expect(entraStatusLine(settings)).toBe("[entra] disabled");
-    expect(entraConfigWarnings(settings)).toEqual([]);
+  it("logs a single disabled status line", () => {
+    expect(entraStatusLine(parseEntraConfig({}))).toBe("[entra] disabled");
   });
 });
 
@@ -90,7 +87,6 @@ describe("parseEntraConfig: enabled", () => {
       sessionTtl: "12h",
       sessionTtlSeconds: 12 * 3600,
       localEnabled: false,
-      localRegistration: false,
     });
   });
 
@@ -223,17 +219,6 @@ describe("parseEntraConfig: enabled", () => {
       expect(message).not.toContain("tiny-secret-value");
       expect(message).not.toContain("sometimes");
     }
-  });
-
-  it("warns once about LOCAL_REGISTRATION=1 next to Entra", () => {
-    expect(entraConfigWarnings(parseEntraConfig(enabled()))).toEqual([]);
-    const warnings = entraConfigWarnings(parseEntraConfig(enabled({ LOCAL_REGISTRATION: "1" })));
-    expect(warnings).toHaveLength(1);
-    expect(warnings[0]).toMatch(/^\[entra\] LOCAL_REGISTRATION=1/);
-    // A self-registered address is not verified: the warning sends the
-    // admin to check the account before binding it, never to bind it outright.
-    expect(warnings[0]).toContain("check who registered that account before an admin binds it");
-    expect(warnings[0]).not.toContain("until an admin binds");
   });
 });
 

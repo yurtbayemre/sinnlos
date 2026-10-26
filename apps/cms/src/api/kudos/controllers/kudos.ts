@@ -1,4 +1,5 @@
 import { factories } from "@strapi/strapi";
+import { MAX_KUDOS_MESSAGE } from "@sinnlos/domain";
 
 import { parseWindowDays, planCelebrations } from "../../../utils/celebrations";
 import { isRowId } from "../../../utils/entry-id";
@@ -10,7 +11,9 @@ export default factories.createCoreController("api::kudos.kudos", ({ strapi }) =
    * integer, which is what the web's sendKudos sends) and not the caller
    * (FX27): a missing `to` created kudos for nobody, and kudos to oneself
    * were stored and listed. Nor to a blocked person (v0.28): they left the
-   * directory, so the 400 carries `details.code: "recipient"`.
+   * directory, so the 400 carries `details.code: "recipient"`. A message
+   * over MAX_KUDOS_MESSAGE is refused whole, `details.code: "message"`
+   * (#198); the schema still checks that one is there.
    */
   async create(ctx) {
     const user = ctx.state.user;
@@ -20,6 +23,11 @@ export default factories.createCoreController("api::kudos.kudos", ({ strapi }) =
     const to: unknown = body?.to;
     if (!isRowId(to)) return ctx.badRequest("to must be a user id");
     if (to === user.id) return ctx.badRequest("Kudos cannot be sent to yourself");
+    if (typeof body?.message === "string" && body.message.length > MAX_KUDOS_MESSAGE) {
+      return ctx.badRequest(`message is longer than ${MAX_KUDOS_MESSAGE} characters`, {
+        code: "message",
+      });
+    }
     const recipient = await strapi.db
       .query("plugin::users-permissions.user")
       .findOne({ where: { id: to }, select: ["id", "blocked"] });

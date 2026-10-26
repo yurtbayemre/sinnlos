@@ -18,7 +18,8 @@ export type InviteLine = { email: string; name: string; valid: boolean };
 /**
  * One person per line, `email` or `email;name` (S3): one address is a
  * single invitation, many are the bulk form. Blank lines are skipped, a
- * repeated address is invalid the second time.
+ * repeated address is invalid the second time. Nothing is cut: the form
+ * refuses more than INVITE_MAX_LINES lines (#184).
  */
 export function parseInviteLines(text: string): InviteLine[] {
   const seen = new Set<string>();
@@ -26,7 +27,6 @@ export function parseInviteLines(text: string): InviteLine[] {
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter(Boolean)
-    .slice(0, INVITE_MAX_LINES)
     .map((line) => {
       const [rawEmail = "", ...rest] = line.split(";");
       const email = rawEmail.trim();
@@ -76,6 +76,8 @@ export function UserInviteForm({ options }: { options: OrgOptionsView }) {
   const [department, setDepartment] = useState("");
   const [rows, setRows] = useState<Row[] | null>(null);
   const [sending, setSending] = useState(false);
+  /** The line count of a list over INVITE_MAX_LINES, refused as a whole. */
+  const [tooMany, setTooMany] = useState<number | null>(null);
   const openCount = rows?.filter(isOpen).length ?? 0;
   const done = rows !== null && openCount === 0;
 
@@ -170,15 +172,33 @@ export function UserInviteForm({ options }: { options: OrgOptionsView }) {
       onSubmit={(event) => {
         event.preventDefault();
         const lines = parseInviteLines(text);
+        if (lines.length > INVITE_MAX_LINES) {
+          setTooMany(lines.length);
+          return;
+        }
+        setTooMany(null);
         if (lines.length > 0) setRows(lines);
       }}
     >
-      <Field id="invite-lines" label={t("invite.lines")} hint={t("invite.linesHint")} required>
+      <Field
+        id="invite-lines"
+        label={t("invite.lines")}
+        hint={t("invite.linesHint")}
+        error={
+          tooMany === null
+            ? undefined
+            : t("invite.tooMany", { count: tooMany, max: INVITE_MAX_LINES })
+        }
+        required
+      >
         {(a11y) => (
           <textarea
             {...a11y}
             value={text}
-            onChange={(event) => setText(event.target.value)}
+            onChange={(event) => {
+              setText(event.target.value);
+              setTooMany(null);
+            }}
             rows={6}
             placeholder={t("invite.linesPlaceholder")}
             className={`${inputClass} h-auto min-h-32 py-2 font-mono`}

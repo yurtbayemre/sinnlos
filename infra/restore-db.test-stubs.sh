@@ -16,9 +16,9 @@
 # Switches: STUB_LABEL_WEB, STUB_LABEL_CMS, STUB_LABEL_DB (the compose
 # config_files label of that service's container; empty: none), STUB_STOP_FAIL,
 # STUB_UP_FAIL, STUB_ON_STOP (bash run when web and cms stop),
-# STUB_RM_AS_USER, STUB_KILL_AFTER_STARTED (below), STUB_PGDUMP_FAIL,
-# STUB_CREATEDB_FAIL (dropdb runs, createdb fails), STUB_RESTORE_FAIL,
-# STUB_LOCK_HELD.
+# STUB_RM_AS_USER, STUB_KILL_AFTER_STARTED, STUB_KILL_AFTER_ARCHIVE and
+# STUB_STATE_WRITE_FAIL (below), STUB_PGDUMP_FAIL, STUB_CREATEDB_FAIL (dropdb
+# runs, createdb fails), STUB_RESTORE_FAIL, STUB_LOCK_HELD.
 : "${T:?}" "${REPO:?}"
 
 # What compose hands the cms: an exported JWT_SECRET, else a compose file
@@ -212,11 +212,31 @@ rm() {
 
 # STUB_KILL_AFTER_STARTED: the script is interrupted (TERM) right after it
 # saved a state with STARTED_AT, before anything after that.
+# STUB_STATE_WRITE_FAIL: the rename that would save a new attempt over the
+# current state fails (a full disk); saving the current attempt still works.
 mv() {
+  if [[ -n "${STUB_STATE_WRITE_FAIL:-}" && "${*: -1}" == */infra.state && -f "${*: -1}" ]] &&
+    [[ "$(grep '^ATTEMPT=' "${@: -2:1}")" != "$(grep '^ATTEMPT=' "${*: -1}")" ]]; then
+    return 1
+  fi
   command mv "$@" || return
   if [[ -n "${STUB_KILL_AFTER_STARTED:-}" && "${*: -1}" == *.state ]] && grep -q '^STARTED_AT=.' "${*: -1}"; then
     kill -TERM "$$"
   fi
+  stub_kill_after_archive "${*: -1}"
 }
 
-export -f docker stub_db stub_effective_jwt flock rm mv
+# STUB_KILL_AFTER_ARCHIVE: the script is interrupted (TERM) right after it
+# archived the state of the attempt before (by copy or by move), before it
+# saves the new one.
+stub_kill_after_archive() {
+  if [[ -n "${STUB_KILL_AFTER_ARCHIVE:-}" && "$1" == */infra.[0-9]*.state ]]; then
+    kill -TERM "$$"
+  fi
+}
+cp() {
+  command cp "$@" || return
+  stub_kill_after_archive "${*: -1}"
+}
+
+export -f docker stub_db stub_effective_jwt stub_kill_after_archive flock rm mv cp

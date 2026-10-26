@@ -12,8 +12,13 @@ x-logging: &default-logging
     max-file: "5"
 
 services:
+  # The images are pinned by digest (v0.32, #196): every host runs the same
+  # bytes, and CI's edge check runs this caddy. postgres is the 16.15
+  # manifest list production ran when it was pinned. Dependabot proposes new
+  # digests of the same tag (.github/dependabot.yml); a Postgres major needs a
+  # dump and restore.
   db:
-    image: postgres:16-alpine
+    image: postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
     restart: unless-stopped
     logging: *default-logging
     environment:
@@ -394,7 +399,7 @@ services:
       - ALL
 
   caddy:
-    image: caddy:2-alpine
+    image: caddy:2-alpine@sha256:eb4d35b7452d1ab6171fbdbe8d9275b2301dad6dad92115d91e19fb9b24d510f
     restart: unless-stopped
     logging: *default-logging
     depends_on:

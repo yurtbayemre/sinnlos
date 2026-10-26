@@ -209,7 +209,7 @@ function restoreSteps(steps: readonly Step[], mode: ShellMode): StepReport[] {
     fakeDump("older.dump", ["up_users 2"]),
     "STEP_CWD=",
     `STUB_LABEL_WEB="${TRAEFIK_LABEL}" STUB_LABEL_CMS="${TRAEFIK_LABEL}" STUB_LABEL_DB="${TRAEFIK_LABEL}"`,
-    "export T REPO STUB_LABEL_WEB STUB_LABEL_CMS STUB_LABEL_DB STUB_STOP_FAIL= STUB_UP_FAIL= STUB_ON_STOP= STUB_RM_AS_USER= STUB_KILL_AFTER_STARTED= STUB_PGDUMP_FAIL= STUB_CREATEDB_FAIL= STUB_RESTORE_FAIL= STUB_LOCK_HELD= STUB_SITE_ALLOW=",
+    "export T REPO STUB_LABEL_WEB STUB_LABEL_CMS STUB_LABEL_DB STUB_STOP_FAIL= STUB_UP_FAIL= STUB_ON_STOP= STUB_RM_AS_USER= STUB_KILL_AFTER_STARTED= STUB_KILL_AFTER_ARCHIVE= STUB_STATE_WRITE_FAIL= STUB_PGDUMP_FAIL= STUB_CREATEDB_FAIL= STUB_RESTORE_FAIL= STUB_LOCK_HELD= STUB_SITE_ALLOW=",
     'S="$REPO/.git/sinnlos-deploy/restore"',
     HARNESS_STUBS,
   ];
@@ -783,6 +783,52 @@ describe.skipIf(!FAST)(
       expect(r[14].status, r[14].stderr).toBe(0);
       expect(r[15].status, r[15].stderr).toBe(0);
       expect(r[15].apps).toBe("running");
+    });
+  },
+);
+
+describe.skipIf(!FAST)(
+  `restore-db.sh: an interrupted or failed save of the next attempt keeps the way back (v0.32)${FAST_TITLE}`,
+  () => {
+    let r: StepReport[] = [];
+    beforeAll(() => {
+      r = restoreSteps(
+        [
+          /* 0 */ { args: ["prepare", "good.dump"] },
+          /* 1 */ { before: "STUB_RESTORE_FAIL=1", args: ["apply"] },
+          /* 2 */ { before: "STUB_RESTORE_FAIL= STUB_KILL_AFTER_ARCHIVE=1", args: ["back"] },
+          /* 3 */ { before: "STUB_KILL_AFTER_ARCHIVE= STUB_STATE_WRITE_FAIL=1", args: ["back"] },
+          /* 4 */ { before: "STUB_STATE_WRITE_FAIL=", args: ["back"] },
+          /* 5 */ { args: ["apply"] },
+        ],
+        MODE as ShellMode,
+      );
+    }, 300_000);
+
+    it("an interruption right after the archive copy leaves the attempt before current", () => {
+      // Before the fix the state was moved into the archive here, and the next
+      // back found no attempt to go back from.
+      expect(r[1].status).toBe(1);
+      expect(r[1].db).toEqual([]);
+      expect(r[2].status).toBe(143);
+      expect(stopLine(r[2])).toContain("STOP: back interrupted; ");
+      expect(r[2].state.ATTEMPT).toBe(r[0].state.ATTEMPT);
+      expect(r[2].archived).toBe(1);
+    });
+
+    it("a failed save of the next attempt leaves the attempt before current", () => {
+      expect(r[3].status).toBe(1);
+      expect(stopLine(r[3])).toContain("STOP: back failed unexpectedly ");
+      expect(r[3].state.ATTEMPT).toBe(r[0].state.ATTEMPT);
+    });
+
+    it("back then still leads to the copy taken before the failed restore", () => {
+      expect(r[4].status, r[4].stderr).toBe(0);
+      expect(r[4].state.SOURCE).toBe(copyOf(r[4], r[0].state.ATTEMPT));
+      expect(r[4].state.BACK_OF).toBe(r[0].state.ATTEMPT);
+      expect(r[4].state.ORIGIN_ATTEMPT).toBe(r[0].state.ATTEMPT);
+      expect(r[5].status, r[5].stderr).toBe(0);
+      expect(r[5].db).toEqual(["up_users 3", "posts 5", "rsvps 2"]);
     });
   },
 );
