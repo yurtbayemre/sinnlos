@@ -56,6 +56,31 @@ describe("fetchMyProgress", () => {
   });
 });
 
+describe("fetchMyProgress of one lesson (#181, the lesson page)", () => {
+  it("reads that lesson's own receipts only, newest kept over a renewal and a null", async () => {
+    // Whatever the caller completed elsewhere (2,000 receipts or more), the
+    // cms answers this lesson's rows only.
+    strapiMock.mockResolvedValueOnce(
+      page(
+        [
+          { id: 4001, targetDocumentId: "l1", completedAt: "2025-10-01T08:00:00.000Z" },
+          { id: 4002, targetDocumentId: "l1", completedAt: null },
+          { id: 4003, targetDocumentId: "l1", completedAt: "2026-10-01T08:00:00.000Z" },
+        ],
+        1,
+        1,
+      ),
+    );
+    const { completed, truncated } = await fetchMyProgress("l1");
+    expect(truncated).toBe(false);
+    expect([...completed]).toEqual([["l1", "2026-10-01T08:00:00.000Z"]]);
+    // The caller's own (an admin may read everyone's) and this lesson's.
+    expect(strapiMock.mock.calls[0]).toEqual([
+      "/api/lesson-progresses?filters[user][id][$eq]=5&filters[targetDocumentId][$eq]=l1&fields[0]=targetDocumentId&fields[1]=completedAt&sort[0]=id:asc&pagination[page]=1&pagination[pageSize]=100",
+    ]);
+  });
+});
+
 describe("fetchMyProgress without an identity", () => {
   it("fails closed instead of reading everyone's receipts (admin_role may)", async () => {
     viewer.id = null;

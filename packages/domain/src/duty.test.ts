@@ -76,6 +76,7 @@ describe("validateDutyShifts", () => {
       [[shift(1, "2026-10-21T06:00:00", "2026-10-21T14:00:00")], "invalid"],
       // #188: an impossible day is refused, not stored as March 2
       [[shift(1, "2026-02-30T06:00:00Z", "2026-02-30T14:00:00Z")], "invalid"],
+      [[shift(1, "+002026-02-30T06:00:00Z", "+002026-02-30T14:00:00Z")], "invalid"],
       [[shift(1, "2026-10-21T12:00:00Z", "2026-10-21T04:00:00Z")], "endBeforeStart"],
       [[shift(1, "2026-10-01T00:00:00Z", "2026-10-16T00:00:00Z")], "endBeforeStart"],
       [
@@ -119,6 +120,15 @@ describe("who is on duty", () => {
       ).map((s) => s.userId),
     ).toEqual([2, 3]);
     expect(dutyShiftOverlaps(shifts)).toEqual([[0, 1]]);
+    // #183: a copy kept as typed at the clock change overlaps nothing, in any
+    // process zone; the rows keep their indices.
+    expect(
+      dutyShiftOverlaps([
+        shift(1, "2026-10-25T01:00:00.000Z", "2026-10-25T02:00:00.000Z"),
+        shift(2, "2026-10-25T02:30", "2026-10-25T09:00:00.000Z"),
+        shift(3, "2026-10-25T01:30:00.000Z", "2026-10-25T03:00:00.000Z"),
+      ]),
+    ).toEqual([[0, 2]]);
   });
 });
 

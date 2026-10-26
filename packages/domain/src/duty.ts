@@ -158,17 +158,22 @@ export function dutyShiftsBetween(shifts: readonly DutyShift[], from: Date, to: 
   );
 }
 
-/** Index pairs of shifts that run at the same time (allowed; the form shows a hint). */
+/**
+ * Index pairs of shifts that run at the same time (allowed; the form shows a
+ * hint). A shift still being typed, or kept as typed at a clock change
+ * (#183), has no instant and overlaps nothing: Date.parse would read its
+ * offset-less text in the browser's zone.
+ */
 export function dutyShiftOverlaps(shifts: readonly DutyShift[]): [number, number][] {
+  const spans = shifts.map((s) => [instantEpochMs(s.startsAt), instantEpochMs(s.endsAt)]);
   const pairs: [number, number][] = [];
-  for (let i = 0; i < shifts.length; i++) {
-    for (let j = i + 1; j < shifts.length; j++) {
-      if (
-        Date.parse(shifts[i].startsAt) < Date.parse(shifts[j].endsAt) &&
-        Date.parse(shifts[j].startsAt) < Date.parse(shifts[i].endsAt)
-      ) {
-        pairs.push([i, j]);
-      }
+  for (let i = 0; i < spans.length; i++) {
+    const [startI, endI] = spans[i];
+    if (startI === null || endI === null) continue;
+    for (let j = i + 1; j < spans.length; j++) {
+      const [startJ, endJ] = spans[j];
+      if (startJ === null || endJ === null) continue;
+      if (startI < endJ && startJ < endI) pairs.push([i, j]);
     }
   }
   return pairs;

@@ -10,6 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const shim = vi.hoisted(() => ({
   effects: [] as (() => (() => void) | void)[],
   streaming: true,
+  healthy: true,
   hello: null as (() => void) | null,
 }));
 
@@ -24,9 +25,13 @@ vi.mock("react", async (importOriginal) => ({
 vi.mock("@/components/live/live-events-provider", () => ({
   useLiveChannel: (_channel: string, refetch: () => void) => {
     shim.hello = refetch;
-    return true;
+    return shim.healthy;
   },
-  useLiveRegistry: () => ({ register: () => () => {}, healthy: true, streaming: shim.streaming }),
+  useLiveRegistry: () => ({
+    register: () => () => {},
+    healthy: shim.healthy,
+    streaming: shim.streaming,
+  }),
 }));
 const getNotifications = vi.hoisted(() => vi.fn(async () => ({ items: [], unreadTotal: 0 })));
 vi.mock("@/lib/notification-actions", () => ({ getNotifications }));
@@ -53,9 +58,10 @@ function fakeDocument() {
 }
 
 /** Mounts the bell: renders it and runs its effects; the fake document and the cleanups. */
-function mount(streaming: boolean) {
+function mount(streaming: boolean, healthy = streaming) {
   shim.effects = [];
   shim.streaming = streaming;
+  shim.healthy = healthy;
   const doc = fakeDocument();
   vi.stubGlobal("document", doc);
   LiveNotificationBell({ initial: { items: [], unreadTotal: 0 } });
@@ -74,15 +80,21 @@ afterEach(() => {
 });
 
 describe("the bell on tab regain (#193)", () => {
-  it("with a push stream, fetches once: the stream's hello, no listener of its own", async () => {
-    const { doc, cleanups } = mount(true);
-    expect(doc.listeners.size).toBe(0);
-    doc.show();
-    shim.hello?.(); // the reconnected stream's catch-up
-    await vi.advanceTimersByTimeAsync(0);
-    expect(getNotifications).toHaveBeenCalledTimes(1);
-    for (const cleanup of cleanups) cleanup?.();
-  });
+  it.each([
+    ["healthy", true],
+    ["degraded, reconnecting", false],
+  ])(
+    "with a push stream (%s), fetches once: the stream's hello, no listener of its own",
+    async (_state, healthy) => {
+      const { doc, cleanups } = mount(true, healthy);
+      expect(doc.listeners.size).toBe(0);
+      doc.show();
+      shim.hello?.(); // the reconnected stream's catch-up
+      await vi.advanceTimersByTimeAsync(0);
+      expect(getNotifications).toHaveBeenCalledTimes(1);
+      for (const cleanup of cleanups) cleanup?.();
+    },
+  );
 
   it("without a stream, the regain itself fetches", async () => {
     const { doc, cleanups } = mount(false);

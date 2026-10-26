@@ -369,7 +369,15 @@ describe("/training/[slug]/[lessonId] (#181)", () => {
     const tree = elements(await lesson.default(lessonParams));
     expect(progressMock).toHaveBeenCalledWith("l1");
     const completion = tree.find((el) => el.type === LessonCompletion);
-    expect(completion?.props.completedAtLabel).not.toBeNull();
+    expect(completion).toBeDefined();
+    // Done: a label (the formatter mock answers ""), never null.
+    expect(completion!.props.completedAtLabel).toBe("");
+
+    progressMock.mockResolvedValue({ completed: new Map(), truncated: false });
+    const open = elements(await lesson.default(lessonParams)).find(
+      (el) => el.type === LessonCompletion,
+    );
+    expect(open!.props.completedAtLabel).toBeNull();
   });
 
   it("shows the error banner, not the completion, when that read is cut short", async () => {

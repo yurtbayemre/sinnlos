@@ -42,7 +42,8 @@ const OFFSET_INSTANT =
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,9})?)?(?:Z|[+-]\d{2}:\d{2})$/;
 
 /**
- * False when `value` starts with a 'YYYY-MM-DD' that is no calendar day of
+ * False when `value` starts with a 'YYYY-MM-DD' (or an expanded '±YYYYYY-MM-DD')
+ * that is no calendar day of
  * that year (#188): Date.parse rolls 2026-02-30 over into March 2, the cms's
  * Temporal parser refuses it. isOffsetInstant and plain-date.ts's
  * instantEpochMs check with it. Unlike isPlainDate's Date.UTC probe it keeps
@@ -51,7 +52,7 @@ const OFFSET_INSTANT =
  * without that prefix: the caller's own format check decides.
  */
 export function startsWithRealDay(value: string): boolean {
-  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(value);
+  const match = /^([+-]\d{6}|\d{4})-(\d{2})-(\d{2})/.exec(value);
   if (!match) return true;
   const [year, month, day] = [Number(match[1]), Number(match[2]), Number(match[3])];
   if (month < 1 || month > 12 || day < 1) return false;

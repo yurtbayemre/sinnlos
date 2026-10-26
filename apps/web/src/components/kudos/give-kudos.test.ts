@@ -33,15 +33,24 @@ vi.mock("react", async (importOriginal) => ({
   useId: () => "id",
 }));
 vi.mock("next-intl", () => ({ useTranslations: () => (key: string) => key }));
-const send = vi.hoisted(() => ({ result: { ok: true } as unknown }));
-vi.mock("@/lib/kudos-actions", () => ({ sendKudos: vi.fn(async () => send.result) }));
+const send = vi.hoisted(() => ({
+  result: { ok: true } as unknown,
+  /** When set, the send waits for this promise (a delayed response). */
+  delay: null as Promise<void> | null,
+}));
+vi.mock("@/lib/kudos-actions", () => ({
+  sendKudos: vi.fn(async () => {
+    if (send.delay) await send.delay;
+    return send.result;
+  }),
+}));
 
 const { GiveKudos } = await import("./give-kudos");
 
 type Props = Record<string, unknown> & { children?: ReactNode };
 
-/** Every element in `node` (props.children, depth first) that `match` accepts. */
-function findAll(node: ReactNode, match: (props: Props) => boolean): Props[] {
+/** Every element in `node` (props.children, depth first) that `match` accepts, by props and type. */
+function findAll(node: ReactNode, match: (props: Props, type: unknown) => boolean): Props[] {
   const out: Props[] = [];
   const queue: ReactNode[] = [node];
   while (queue.length > 0) {
@@ -49,7 +58,7 @@ function findAll(node: ReactNode, match: (props: Props) => boolean): Props[] {
     if (Array.isArray(next)) queue.unshift(...next);
     else if (isValidElement(next)) {
       const props = (next as ReactElement<Props>).props;
-      if (match(props)) out.push(props);
+      if (match(props, next.type)) out.push(props);
       queue.unshift(props.children);
     }
   }
@@ -78,15 +87,15 @@ beforeEach(() => {
   shim.transitions = [];
   shim.pending = false;
   send.result = { ok: true };
+  send.delay = null;
 });
 
 describe("the kudos draft while sending (#182)", () => {
-  /** The one fieldset around the draft, and the controls inside it. */
+  /** The one native fieldset with `disabled` around the draft, and the controls inside it. */
   const draft = (tree: ReactNode) => {
-    const [fieldset] = findAll(
-      content(tree),
-      (p) => "disabled" in p && "className" in p && !("type" in p),
-    );
+    const fieldsets = findAll(content(tree), (p, type) => type === "fieldset" && "disabled" in p);
+    expect(fieldsets).toHaveLength(1);
+    const [fieldset] = fieldsets;
     const inside = (match: (props: Props) => boolean) => findAll(fieldset.children, match);
     return { fieldset, inside };
   };
@@ -107,6 +116,22 @@ describe("the kudos draft while sending (#182)", () => {
 
   it("is open again once the send is no longer pending", () => {
     expect(draft(render({ selected: ada, message: "Thanks" })).fieldset.disabled).toBe(false);
+  });
+
+  it("a delayed answer: nothing is cleared while it waits, the draft is fixed, then the success clears it", async () => {
+    let answer = () => {};
+    send.delay = new Promise<void>((resolve) => (answer = resolve));
+    const tree = render({ selected: ada, message: "Thanks" });
+    const [form] = findAll(content(tree), (p) => "onSubmit" in p);
+    (form.onSubmit as (event: object) => void)({ preventDefault: () => {} });
+    await Promise.resolve();
+    expect(shim.sets).toEqual([[5, null]]); // only the old error cleared so far
+    shim.pending = true; // the re-render while the transition runs
+    expect(draft(render({ selected: ada, message: "Thanks, again" })).fieldset.disabled).toBe(true);
+    answer();
+    await Promise.all(shim.transitions);
+    expect(shim.sets).toContainEqual([3, ""]);
+    expect(shim.sets).toContainEqual([0, false]);
   });
 
   it("a success clears and closes; a failure keeps the draft and shows the error", async () => {
