@@ -41,6 +41,9 @@ const save = vi.fn(async (input: SaveInput) => ({
   data: { ...editable, version: String(Number(input.version) + 1), status: "modified" as const },
 }));
 
+/** A delete, or a discard of a never-published draft: the item is gone. */
+const removed = vi.fn(async () => ({ ok: true as const, data: null }));
+
 function Harness({
   expose,
   source = editable,
@@ -55,7 +58,7 @@ function Harness({
     toValues,
     emptyValues: empty,
     fieldOrder: [],
-    actions: { save },
+    actions: { save, remove: removed, discard: removed },
     drafts: true,
     clearOnSave,
   });
@@ -69,6 +72,7 @@ beforeEach(async () => {
   vi.stubGlobal("HTMLElement", class {});
   save.mockClear();
   router.replace.mockClear();
+  router.push.mockClear();
   await browser.render(createElement(Harness, { expose: (item) => (editor = item) }));
 });
 afterEach(async () => {
@@ -113,6 +117,18 @@ describe("a save's clearOnSave values (the wiki change note, v0.30)", () => {
     await edit({ body: "New page, more" });
     expect(editor.dirty).toBe(true);
   });
+
+  it.each(["delete", "discard"] as const)(
+    "a %s that removed the item leaves a clean form while the list is on its way",
+    async (verb) => {
+      await edit({ body: "Second" });
+      await browser.act(() => editor.handlers[verb]());
+      expect(router.push).toHaveBeenCalledOnce();
+      expect(editor.dirty).toBe(false);
+      await edit({ body: "Third" });
+      expect(editor.dirty).toBe(true);
+    },
+  );
 
   it("stay in the form when the save fails", async () => {
     save.mockResolvedValueOnce({ ok: false, code: "failed" } as never);

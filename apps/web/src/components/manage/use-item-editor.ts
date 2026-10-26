@@ -289,6 +289,12 @@ export function useItemEditor<V extends object, E extends Omit<EditableBase, "ro
         onSuccess: (data) => {
           if (intent === "delete" || (intent === "discard" && data === null)) {
             flash(t("deleted"));
+            // Nothing is left to save: the form is clean, also while the
+            // navigation to the list is on its way (an edit typed
+            // meanwhile is unsaved again and asks).
+            setInitial(values);
+            setRetarget(false);
+            onResetExtra?.();
             releaseUnsaved();
             goToList();
             return;
@@ -302,7 +308,7 @@ export function useItemEditor<V extends object, E extends Omit<EditableBase, "ro
         },
       });
     },
-    [meta, run, flash, t, goToList, requestReset, releaseUnsaved],
+    [meta, run, flash, t, goToList, requestReset, releaseUnsaved, values, onResetExtra],
   );
 
   const handlers: PublishBarHandlers = useMemo(
