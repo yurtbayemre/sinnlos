@@ -18,9 +18,10 @@ on:
         type: boolean
         default: false
 
-# The jobs only read the repository; publish also writes its two packages.
-# The buildx layer cache (type=gha) uses the runner's own cache token, not
-# GITHUB_TOKEN.
+# The jobs only read the repository; publish writes its two packages with
+# the owner's token. No image job uses the Actions cache: a fork's pull
+# request may read main's caches, and the layers belong to the private
+# images (v0.33 review).
 permissions:
   contents: read
 
@@ -466,8 +467,6 @@ jobs:
           push: false
           load: ${{ matrix.app == 'cms' }}
           tags: sinnlos-${{ matrix.app }}:ci
-          cache-from: type=gha,scope=image-${{ matrix.app }}
-          cache-to: type=gha,mode=max,scope=image-${{ matrix.app }}
 
       # The boot-value check infra/deploy.sh runs in the new cms image before
       # `up` (v0.30), fed a compose config's cms environment on stdin: its
@@ -504,7 +503,7 @@ jobs:
   # The packages stay PRIVATE: publication waits for the lawyer review of the
   # notices and the Strapi Enterprise packages (owner decision 2026-10-22,
   # release-images.yml). The owner created both packages once by hand, private,
-  # and gave this repository write access. The job reads each package's
+  # and keeps the repository OUT of their Actions access. The job reads each package's
   # visibility before it pushes anything and fails unless it is "private" (a
   # missing package, an error or any other answer fail too), and reads it again
   # after the push.
@@ -514,12 +513,16 @@ jobs:
       (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
       (github.event_name == 'workflow_dispatch' && inputs.publish)
     name: publish · ${{ matrix.app }} (arm64, private)
+    # The owner's token is a secret of this environment, which only runs on
+    # main may use: neither a fork nor a run dispatched on another branch
+    # gets it.
+    environment: ghcr-publish
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 45
     # No package permission for GITHUB_TOKEN, and the repository has no
     # Actions access to the packages: a fork's pull request could otherwise
     # change a workflow to read the private images with GITHUB_TOKEN. The
-    # owner's token lives in a repository secret, which fork runs never get.
+    # owner's token lives in the environment below.
     permissions:
       contents: read
     strategy:
@@ -541,7 +544,7 @@ jobs:
           GHCR_TOKEN: ${{ secrets.GHCR_PUBLISH_TOKEN }}
         run: |
           if [[ -z "${GHCR_TOKEN}" ]]; then
-            echo "::error::the repository secret GHCR_PUBLISH_TOKEN (a classic token with write:packages) is missing: nothing is pushed"
+            echo "::error::the ghcr-publish environment secret GHCR_PUBLISH_TOKEN (a classic token with write:packages) is missing, or this run is not on main: nothing is pushed"
             exit 1
           fi
           visibility="$(curl -fsS -H "Authorization: Bearer ${GHCR_TOKEN}" -H "Accept: application/vnd.github+json" \
@@ -570,8 +573,6 @@ jobs:
           tags: ${{ env.IMAGE }}
           load: true
           provenance: false
-          cache-from: type=gha,scope=image-${{ matrix.app }}-arm64
-          cache-to: type=gha,mode=max,scope=image-${{ matrix.app }}-arm64
 
       # The full boot-value matrix runs on amd64 (images); here the arm64 image
       # that is pushed next must start the check and refuse a bad value.
@@ -606,7 +607,7 @@ jobs:
           GHCR_TOKEN: ${{ secrets.GHCR_PUBLISH_TOKEN }}
         run: |
           if [[ -z "${GHCR_TOKEN}" ]]; then
-            echo "::error::the repository secret GHCR_PUBLISH_TOKEN (a classic token with write:packages) is missing: nothing is pushed"
+            echo "::error::the ghcr-publish environment secret GHCR_PUBLISH_TOKEN (a classic token with write:packages) is missing, or this run is not on main: nothing is pushed"
             exit 1
           fi
           visibility="$(curl -fsS -H "Authorization: Bearer ${GHCR_TOKEN}" -H "Accept: application/vnd.github+json" \

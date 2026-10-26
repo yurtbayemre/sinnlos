@@ -193,7 +193,9 @@ describe("CI's arm64 images for the registry deploy (v0.33)", () => {
     expect(job).toContain("SINNLOS_REVISION=${{ github.sha }}");
     expect(job).toContain("          load: true\n");
     expect(job).not.toMatch(/^\s+push: true$/m);
-    expect(job).toContain("scope=image-${{ matrix.app }}-arm64");
+    // No Actions cache for image layers: a fork's pull request may read main's caches.
+    expect(ci).not.toContain("type=gha");
+    expect(job).toContain("    environment: ghcr-publish\n");
     // Only the exact answer "private" lets the push happen.
     expect(job.match(/if \[\[ "\$\{visibility\}" != private \]\]; then/g)).toHaveLength(2);
     expect(job.match(/curl -fsS /g)).toHaveLength(2);
