@@ -93,6 +93,8 @@ Die Anonymisierung ist **endgültig**. Das Konto lässt sich danach weder entspe
 - die Abteilungs- und Teamzuordnung am anonymisierten Konto (im Intranet ausgeblendet);
 - **Sicherungen**, bis sie rotieren.
 
+**Ablauf seit v0.30:** Sperre prüfen, Konto ersetzen und die Löschungen laufen in einer Transaktion. Danach werden die Benachrichtigungen anderer Personen, die die Person nannten, in derselben Anfrage seitenweise umgeschrieben, ohne andere Anmeldungen aufzuhalten; das Profilbild wird in jedem Fall entfernt. Die Antwort nennt, wie viele Benachrichtigungen beim letzten Zählen noch ausstanden; der nächtliche Löschlauf erledigt den Rest. Ein zweiter Eintrag im Aktivitätsprotokoll hält das fest.
+
 **Nächtlicher Löschlauf (03:20):** Er wiederholt für alle anonymisierten Konten das Löschen von Reaktionen, Umfragestimmen, Zusagen, Kudos an die Person, ihren Benachrichtigungen, Lesebestätigungen und Marktplatz-Anzeigen (mit ihren Bildern) sowie die Namensersetzung. So verschwindet auch, was in den Sekunden um die Anonymisierung noch entstand, etwa eine Benachrichtigung aus einem gerade laufenden Versand oder eine Anzeige, deren Speichern noch vor der Sperre begann: spätestens in der folgenden Nacht. Das Profilbild wiederholt er nicht.
 
 **Rückkehr zu einer älteren Version:** Versionen vor v0.28 kennen die Anonymisierung nicht. Ob nach der ersten Anonymisierung auf eine ältere Version zurückgewechselt wird, entscheidet der Betreiber; solange sie läuft, dürfen Konten „Ehemalige Person“ nicht entsperrt werden ([UPGRADE.md](UPGRADE.md#release-notes), „Upgrading to v0.28“).

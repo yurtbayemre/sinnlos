@@ -94,6 +94,10 @@ refuses password sign-ins in the cms as well, not only in the web form.
   Manager, the user-write guard of the Document Service, the plugin's
   change-password validator and the set-password link. Sign-in never
   re-checks it, so older, shorter passwords keep working until changed.
+- **Input bounds** (v0.30): an identifier longer than 254 characters or a
+  password longer than 1,024 is answered as wrong credentials before the
+  web's sign-in limiter and before the cms is asked, and it is not echoed
+  back; it does not count towards the limiter.
 - **Password links** (invitation and reset): the plugin's own
   `forgotPassword` and `resetPassword` answer 404 at the controller and stay
   revoked for `public`. Instead the web's `/forgot-password` and
@@ -164,7 +168,10 @@ Single sign-on users get their second factor from their identity provider.
   Activation needs a valid code **and the current password**, also in a
   restricted session; it stores the secret encrypted with Strapi's
   `admin::encryption` (`ENCRYPTION_KEY`), returns ten recovery codes once
-  (stored as hashes) and a JWT with `mfa: 1`.
+  (stored as hashes) and a JWT with `mfa: 1`. A recovery code has 80 bits
+  (`xxxx-xxxx-xxxx-xxxx`, v0.30); codes issued before v0.30 have 50 bits
+  (`xxxxx-xxxxx`) and keep working until the next enrolment. New codes come
+  only with an enrolment: after an admin reset, or a disable and enable.
 - **Resets.** An admin resets a user's second factor at `/manage/users`;
   a locked-out sole admin runs `infra/mfa-reset.sh <email>` on the host.
   Both clear the factor and raise the token version, so every session of
@@ -375,6 +382,13 @@ the form to it again; a Strapi 401 inside a render or an action redirects
 the same way.
 
 ### Token versions
+
+> **Since v0.30 a block raises the version too:** `/manage/users` did
+> already, and a block through the Content Manager or the Document Service
+> (`blocked` set to any value Strapi stores as true) now does as well, on
+> the active → blocked transition and inside the write's transaction. So a
+> block ends every session, password link and enrolment of that user, and
+> an unblock does not bring them back.
 
 users-permissions runs its legacy JWT mode (`jwtManagement:
 'legacy-support'`, pinned in `apps/cms/config/plugins.ts`): a Strapi JWT is
@@ -1303,6 +1317,9 @@ Since v0.28 ([data-protection.md](data-protection.md) describes the result in Ge
   `lead`/`members`) populate active people only, in every populate form
   and depth, counts included (the relation guard's query wrapper).
   `/api/me` drops a blocked manager. `/manage/users` still lists them.
+  A root sort through a directory relation (`manager`, `directReports`,
+  `head`, `members`, `lead`) answers 400 for every caller (v0.30), so the
+  order of a list cannot tell a hidden person from an empty slot.
 - **Attribution.** Every other populated user (authors, organisers,
   `uploadedBy`, kudos `from`/`to`, notification actors) that is blocked
   is cut to `{ id, documentId, displayName, username, blocked }` for every
@@ -1322,9 +1339,18 @@ Since v0.28 ([data-protection.md](data-protection.md) describes the result in Ge
   `anonymisedAt` from every write and refuses update, delete and clone of
   an anonymised row under its row lock (Content Manager and
   `PUT /api/users/:id` alike); user administration refuses it with
-  `anonymised`. A nightly erasure sweep (03:20) repeats the row deletions
-  (the ads too, through the Document Service; not the avatar) and the notification rewrite for every
-  anonymised account.
+  `anonymised`. Since v0.30 the rewrite of other people's notifications
+  that named the person runs **after** that transaction committed, in the
+  same request, in pages of 500, each page its own short transaction
+  without the directory lock (so SSO sign-ins never wait for it): each
+  page locks its `notifications` rows, re-reads the actor link, and
+  rewrites only rows still linked. The avatar removal runs regardless. The
+  response reports `notifications: { rewritten, remaining }`: `remaining`
+  is the count still linked at the final count (`null` when that count
+  failed), and a second `anonymise` audit row records it. A nightly erasure
+  sweep (03:20) repeats the row deletions (the ads too, through the
+  Document Service; not the avatar) and the paged notification rewrite for
+  every anonymised account, without one outer transaction per person.
 - **Export** (`GET /api/user-management/:id/export`, `admin_role`):
   explicit projections, never a secret; `export-coverage.test.ts` fails on
   a relation to the user model that is neither exported nor listed as not
@@ -1436,8 +1462,12 @@ routes: its uploads are bound only by `deniedTypes` (below).
   scanner, not the reader's machine); that the file is free of other active
   content (PDF JavaScript, embedded OLE objects, ActiveX, external
   relationships, DDE fields). An image that is also a zip is stored as the
-  image. Files are served as downloads behind the session gate with
-  `X-Content-Type-Options: nosniff`.
+  image. Every file behind the session gate is served with
+  `X-Content-Type-Options: nosniff`. Since v0.30 only PNG, JPEG, GIF,
+  WebP, AVIF, PDF, video and audio are shown inline; every other type (SVG,
+  HTML, XML, Office files, anything unknown) goes out as `Content-Disposition:
+attachment` with `Content-Security-Policy: sandbox`, so a file uploaded
+  through the admin panel cannot run script on the intranet's origin.
 - **Canonical name and mime:** the stored name becomes `<stem><extension of
 the sniffed format>` and the mime the table's (core stores and serves by
   extension, so a JPEG named `x.pdf` was served as `application/pdf`). A
@@ -1493,7 +1523,8 @@ the sniffed format>` and the mime the table's (core stores and serves by
   decision: it commits with the reservation, right before the bytes go; a
   failed byte removal is retried by the janitor, not recorded again.
 - **Admin-panel backstop:** `security.deniedTypes` (`config/plugins.ts`)
-  adds `application/vnd.ms-{word,excel,powerpoint}.*macroenabled*`. Strapi
+  adds `application/vnd.ms-{word,excel,powerpoint}.*macroenabled*` and,
+  since v0.30, the XML types (`application/xml`, `text/xml`). Strapi
   matches them against the declared type, the extension's type and
   file-type's guess from the first 4100 bytes, so the panel refuses
   macro-enabled Office files by extension and, renamed, when file-type

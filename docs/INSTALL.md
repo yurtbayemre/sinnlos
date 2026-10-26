@@ -244,9 +244,9 @@ docker compose -p infra -f infra/docker-compose.yml -f infra/docker-compose.trae
 The smoke checks follow `DOMAIN`: `deploy.sh` curls `SMOKE_URL`, by default
 `https://$DOMAIN` (the host its preflight checked; `--check` prints both),
 and hands the same URL to `infra/live-smoke.sh` as `BASE_URL`. The smoke
-check passes on a 200 or on a redirect to the web's `/sign-in` page; any
-other redirect (Traefik's http-to-https one, for instance) fails it,
-because it proves nothing about the web. Run by hand,
+check (v0.30) asks `<SMOKE_URL>/healthz` and passes only on HTTP 200 with
+the body `{"status":"ok"}` and a complete transfer; it follows no
+redirect, so it proves the chain edge → web → cms → database. Run by hand,
 live-smoke takes `BASE_URL`, or else `https://$DOMAIN`, with `DOMAIN` from
 the environment or from the `infra/.env` next to it. Until batch 10 both
 defaulted to the owner's `https://sinnlos.yurtbay.dev`, so on another
@@ -333,15 +333,15 @@ sudoers rule for the pre-deploy backup (step 1,
    removing anything; other untracked files only earn a note) and the GitHub CI
    result of the commit (a warning by default; `--require-green-ci` refuses a commit
    without green CI; `GITHUB_TOKEN` is optional, public repositories need
-   none). Only the CI workflow's check runs count: GitHub also attaches
-   Dependabot's own update jobs to the default branch's newest commit (runs
-   named `Dependabot` of the app `github-actions`, and the app `dependabot`'s
-   `.github/dependabot.yml`), which say nothing about the commit and may
-   still run long after CI passed; they are left out and counted
-   (`CI: 2 CI check(s) passed for <sha> (2 Dependabot run(s) ignored)`).
-   Before batch 13 they made a green commit read `CI is pending`. The
-   script reads the answer per check run with a small awk JSON scanner (no
-   `jq` or `gh` on the host).
+   none, a private one needs read access to Actions). Since v0.30 it looks
+   for the run of the CI workflow (`ci.yml`) for the **push to `main` at the
+   exact commit**; the newest such run decides, and only a completed,
+   successful one passes (skipped, neutral, failed or pull-request runs do
+   not). Every push to `main` runs the whole CI, so a deploy right after a
+   merge reads pending until that run finishes. The line reads
+   `CI: the CI run for the push to main passed for <sha12> (<run url>)`.
+   The script reads the answer with a small awk JSON scanner (no `jq` or
+   `gh` on the host).
 1. A pre-deploy Postgres + uploads + `.env` backup. Project `infra`
    (production, since 2026-10-07): the host's `backup-run` from the
    `srv-prod-01-ops` repo, as
@@ -378,9 +378,16 @@ sudoers rule for the pre-deploy backup (step 1,
    re-run after a deploy that failed after `up` could not tag what runs.
 3. Builds web and cms with `BUILDX_NO_DEFAULT_ATTESTATIONS=1` (without
    BuildKit's default provenance attestation an unchanged rebuild keeps its
-   image id), then restarts the stack with the Traefik override
-   (`up -d --no-build`).
-4. Curl smoke-checks `https://$DOMAIN`, the host the preflight checked
+   image id). Before anything is replaced it runs the boot-value check of
+   the new cms image (v0.30: `dist/scripts/check-boot-env.js` on the
+   rendered compose config, in a container without network); a value the
+   cms would refuse to boot with (`APP_TIME_ZONE`, `MFA_REQUIRED_ROLES`)
+   stops the deploy with the cms's own message and the running containers
+   unchanged. Then it restarts the stack with the Traefik override
+   (`up -d --no-build`). If `up` fails while the cms is still running but
+   not healthy (a long first boot or migration), deploy.sh prints how to
+   inspect it instead of rollback commands.
+4. Curl smoke-checks `https://$DOMAIN/healthz`, the host the preflight checked
    (override with `SMOKE_URL=`, which live-smoke gets as `BASE_URL`, see
    [Behind your own Traefik](#behind-your-own-traefik)), then runs `infra/live-smoke.sh`: first the
    [datetime contract](OPERATIONS.md#datetime-contract) check (no
