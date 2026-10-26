@@ -105,13 +105,8 @@ describe.each(testEngines())("the search-index minute with the probe (v0.31) on 
     expect(state.probe).not.toBe(probe);
   });
 
-  it("rebuilds after an unpublish", async () => {
-    await announcements().unpublish({ documentId });
-    expect(await minute()).toBe(true);
-    expect(indexed()).toEqual([]);
-  });
-
   it("rebuilds after a draft change that kept updatedAt is published", async () => {
+    // Still published from the step before: the count stays 1.
     const draft = async () =>
       (await t.strapi.db
         .query(ANNOUNCEMENT)
@@ -126,6 +121,12 @@ describe.each(testEngines())("the search-index minute with the probe (v0.31) on 
     await announcements().publish({ documentId });
     expect(await minute()).toBe(true);
     expect(indexed().map((document) => document.text)).toEqual(["Ohne Zeitstempel"]);
+  });
+
+  it("rebuilds after an unpublish", async () => {
+    await announcements().unpublish({ documentId });
+    expect(await minute()).toBe(true);
+    expect(indexed()).toEqual([]);
   });
 
   it("follows the newest of several rows, and never a NULL updatedAt", async () => {

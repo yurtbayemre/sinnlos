@@ -81,7 +81,7 @@ describe.each(testEngines())("the anchor indexes (v0.31) on %s", (engine) => {
     for (const [name, columns] of Object.entries(ANCHORS)) {
       expect(await columnsOf(database, name), name).toEqual(columns);
     }
-  });
+  }, 300_000); // two boots
 });
 
 /**
