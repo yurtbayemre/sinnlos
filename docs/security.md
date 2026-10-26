@@ -923,11 +923,14 @@ In `apps/cms/src/utils/`:
   never read), `narrowFilters` (a policy's clause is always `$and`-composed
   with the client filter, never spread-merged, so a client filter can only
   narrow), `restrictiveIdFilter` (an empty id list becomes
-  `{ id: { $eq: -1 } }`), `boundedIdFilter` (a list longer than one SQL
-  statement can bind answers with nothing and logs a `[policy]` error line
-  instead of a 500; it covers the loaders that bind only an id list: wiki
-  pages and revisions, lessons and the comment and reaction wiki anchors)
-  and `forcePublishedStatus` (after the bypass: pins `status=published` and
+  `{ id: { $eq: -1 } }`), `oneParamIn` and the Document Service middleware
+  `visibility-narrowing` (v0.33: a policy stores its server-owned id or
+  anchor list for the request, and the middleware ANDs it into the root
+  read's `params.filters` (findMany, findOne, count) as **one** SQL
+  parameter, a Postgres array or a SQLite JSON list, so a visible set of
+  any size answers rows instead of hitting the bind limit; a gated request
+  without a request context is refused, and a non-object client filter
+  answers 400) and `forcePublishedStatus` (after the bypass: pins `status=published` and
   drops `publicationFilter`, `hasPublishedVersion` and the v4
   `publicationState`, so a reader can neither fetch drafts nor learn which
   published entries have pending edits).

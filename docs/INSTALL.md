@@ -20,7 +20,7 @@ Every command below runs on the host as the **deploy user**, the user that owns 
 ## 2. The code
 
 ```sh
-git clone --branch v0.32.0 https://github.com/yurtbayemre/sinnlos.git
+git clone --branch v0.33.0 https://github.com/yurtbayemre/sinnlos.git
 cd sinnlos
 ```
 
@@ -173,9 +173,17 @@ smoke-author@intranet.example.com <password>
 
 Each deploy then runs the check and no longer needs `--record-without-live-smoke`.
 
-### Published images (later)
+### Images from CI (registry mode)
 
-Once the project publishes release images, `DEPLOY_IMAGE_SOURCE=registry` in `infra/deploy.env` pulls `ghcr.io/yurtbayemre/sinnlos-{web,cms}:<version>` of the checked-out tag instead of building. `deploy.sh` refuses images whose labels name another commit or version. Before publication starts, the third-party notices and the Strapi Enterprise packages in the cms image are under review, so until then build mode is the only path. Verify a published image with:
+Since v0.33, CI builds the cms and web images natively for arm64 on every push to `main` and pushes them as `ghcr.io/yurtbayemre/sinnlos-{web,cms}:<full commit SHA>`. The packages are **private**: the job refuses to push unless both report `private`, before and after the push. They are not a publication. The third-party notices and the Strapi Enterprise packages in the cms image are still under review, so only the owner's instance can pull them. Every other installation builds (the default, `DEPLOY_IMAGE_SOURCE=build`).
+
+With `DEPLOY_IMAGE_SOURCE=registry` in `infra/deploy.env`, `deploy.sh` pulls the images of the checked-out commit instead of building:
+
+- The host needs a `docker login ghcr.io` as the deploy user, with a classic personal access token that has only `read:packages`. The token is stored in that user's `~/.docker/config.json`. Note its expiry date: an expired token makes the next deploy stop at the pull.
+- It pulls both images and checks both labels (revision = the commit, version = `package.json`) before any tag moves. It does not fall back to a build: a failed pull stops with the hint `DEPLOY_IMAGE_SOURCE=build`.
+- A deploy from the registry takes minutes instead of the host build's half hour.
+
+Once the project publishes release images (`release-images.yml`, after the review), verify a published image with:
 
 ```sh
 gh attestation verify oci://ghcr.io/yurtbayemre/sinnlos-cms:<version> --owner yurtbayemre
