@@ -23,7 +23,7 @@ import { WIKI_REVISION_UID } from "../utils/wiki-revisions";
  *     source_document_id), comments and reactions (target_type,
  *     target_document_id): the anchors the fan-out dedup, the digest and
  *     the janitors (utils/notification-source.ts), and every thread and
- *     reaction read go by (v0.31, #171). These tables only grow. Plain.
+ *     reaction read go by (v0.31, #171). Plain.
  *
  * `CREATE … INDEX IF NOT EXISTS`, on Postgres and SQLite. Strapi's schema
  * sync never drops an index it did not create (@strapi/database

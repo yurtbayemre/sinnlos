@@ -288,8 +288,8 @@ function pick(row: Row, keys: string[]): Row {
 /**
  * The rows of `uid` matching `where`, in id pages. `keep` (v0.31, #168)
  * drops the rows that are not the person's on each page, before they are
- * held or counted, so a source read whole (files, duty plans) costs one
- * page of memory and the cap counts the person's rows only.
+ * held or counted, so a source read whole (files, duty plans) holds one
+ * page plus the kept rows, and the cap counts the person's rows only.
  */
 async function walk(
   strapi: ExportHost,

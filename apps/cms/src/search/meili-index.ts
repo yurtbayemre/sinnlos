@@ -30,13 +30,13 @@ import {
  * probe moved, the live index is missing, it is the process's first run, or
  * the last successful full check is FULL_CHECK_MS old. Every Document
  * Service publish (edits, the scheduler, a republish that keeps updatedAt)
- * writes a new published row, so it moves max(id) and max(publishedAt);
- * unpublish and delete move the count; FEATURES_OFF changes the kinds. So
- * those show within a minute; a raw write that changes indexed text in
- * place (updateMany, a restore that keeps the ids) shows at the next
- * hourly full check.
- * shortcut: changes are findable within about a minute; add after-commit
- * upserts in the Document Service chain if that is ever too slow.
+ * writes a new published row with a new id; unpublish and delete move the
+ * count; FEATURES_OFF changes the kinds. Those show within a minute; a raw
+ * write that changes indexed text in place (updateMany, a restore that
+ * keeps the ids) shows at the next hourly full check.
+ * shortcut: publication changes are findable within about a minute; add
+ * after-commit upserts in the Document Service chain if that is ever too
+ * slow.
  * Plain fetch against Meilisearch's HTTP API, no SDK.
  */
 
@@ -150,8 +150,8 @@ export async function loadSearchDocuments(
  * A fingerprint of exactly what the index holds: it changes with every
  * published change and with nothing else (a draft save, a republish that
  * keeps the draft's updatedAt, a raw write all count only by their effect).
- * It reads every published row, so a minute computes it only when
- * searchProbe moved (see the module comment).
+ * It reads every published row, so a minute computes it only for a full
+ * check (syncSearchIndex).
  */
 export function searchFingerprint(documents: readonly SearchIndexDocument[]): string {
   return createHash("sha256").update(JSON.stringify(documents)).digest("hex");
@@ -281,7 +281,7 @@ export interface SyncState {
   signature: string | null;
   /** The probe read before that check's content (v0.31). */
   probe: string | null;
-  /** When that check succeeded (ms since the epoch). */
+  /** When that check started (ms since the epoch); the hour counts from it. */
   checkedAt: number;
 }
 

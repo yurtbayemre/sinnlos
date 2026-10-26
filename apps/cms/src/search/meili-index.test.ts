@@ -117,16 +117,30 @@ function db(
           expect(where).toEqual({ publishedAt: { $notNull: true } });
           return (rows[uid] ?? []).length;
         }),
-        findOne: vi.fn(async ({ select: [field] }: { select: string[] }) => {
-          const list = rows[uid] ?? [];
-          if (list.length === 0) return null;
-          if (field === "updatedAt") return { updatedAt: new Date(updatedAt) };
-          const values = list.map(
-            (row, i) => row[field] ?? (field === "id" ? i + 1 : "2026-10-21T09:00:00.000Z"),
-          ) as (number | string)[];
-          const sorted = values.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
-          return { [field]: sorted[sorted.length - 1] };
-        }),
+        findOne: vi.fn(
+          async ({
+            select: [field],
+            where,
+            orderBy,
+          }: {
+            select: string[];
+            where: unknown;
+            orderBy: unknown;
+          }) => {
+            // The newest published row with a value: a NULL never wins (Postgres
+            // sorts NULLS FIRST in a descending order).
+            expect(where).toEqual({ publishedAt: { $notNull: true }, [field]: { $notNull: true } });
+            expect(orderBy).toEqual({ [field]: "desc" });
+            const list = rows[uid] ?? [];
+            if (list.length === 0) return null;
+            if (field === "updatedAt") return { updatedAt: new Date(updatedAt) };
+            const values = list.map(
+              (row, i) => row[field] ?? (field === "id" ? i + 1 : "2026-10-21T09:00:00.000Z"),
+            ) as (number | string)[];
+            const sorted = values.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+            return { [field]: sorted[sorted.length - 1] };
+          },
+        ),
       }),
     },
   };

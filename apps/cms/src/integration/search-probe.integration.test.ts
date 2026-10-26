@@ -60,6 +60,13 @@ describe.each(testEngines())("the search-index minute with the probe (v0.31) on 
       meili.swaps[meili.swaps.length - 1] as { documentId: string; text: string; kind: string }[]
     ).filter((document) => document.kind === "announcement");
   const announcements = () => t.strapi.documents(ANNOUNCEMENT);
+  /** A raw write past the Document Service (the harness types no updateMany). */
+  const rawWrite = (params: { where: unknown; data: unknown }) =>
+    (
+      t.strapi.db.query(ANNOUNCEMENT) as unknown as {
+        updateMany(params: { where: unknown; data: unknown }): Promise<unknown>;
+      }
+    ).updateMany(params);
 
   beforeAll(async () => {
     t = await createTestStrapi({ engine, fixtures: false });
@@ -102,6 +109,53 @@ describe.each(testEngines())("the search-index minute with the probe (v0.31) on 
     await announcements().unpublish({ documentId });
     expect(await minute()).toBe(true);
     expect(indexed()).toEqual([]);
+  });
+
+  it("rebuilds after a draft change that kept updatedAt is published", async () => {
+    const draft = async () =>
+      (await t.strapi.db
+        .query(ANNOUNCEMENT)
+        .findOne({ where: { documentId, publishedAt: { $null: true } } }))!.updatedAt;
+    const before = await draft();
+    // An object-form updateMany: Strapi's timestamp subscriber leaves updatedAt.
+    await rawWrite({
+      where: { documentId, publishedAt: { $null: true } },
+      data: { body: "Ohne Zeitstempel" },
+    });
+    expect(await draft()).toEqual(before);
+    await announcements().publish({ documentId });
+    expect(await minute()).toBe(true);
+    expect(indexed().map((document) => document.text)).toEqual(["Ohne Zeitstempel"]);
+  });
+
+  it("follows the newest of several rows, and never a NULL updatedAt", async () => {
+    const publish = async (title: string) => {
+      const created = await announcements().create({
+        data: { title, body: title, audience: "all" },
+      });
+      await announcements().publish({ documentId: created.documentId });
+      return created.documentId;
+    };
+    const older = await publish("Older");
+    const newer = await publish("Newer");
+    expect(await minute()).toBe(true);
+    // Republishing the newer one moves only the newest id: count and the
+    // oldest row's values stay, so an ascending probe would miss it.
+    await announcements().update({ documentId: newer, data: { body: "Newer, edited" } });
+    await announcements().publish({ documentId: newer });
+    expect(await minute()).toBe(true);
+    expect(indexed().map((document) => document.text)).toContain("Newer, edited");
+    // A published row without updatedAt, then a raw write that moves only
+    // updatedAt: a probe that let the NULL win (Postgres) would not move.
+    const published = (id: string) => ({ documentId: id, publishedAt: { $notNull: true } });
+    await rawWrite({ where: published(older), data: { updatedAt: null } });
+    await minute();
+    await rawWrite({
+      where: published(newer),
+      data: { body: "Raw", updatedAt: new Date(now + 3_600_000) },
+    });
+    expect(await minute()).toBe(true);
+    expect(indexed().map((document) => document.text)).toContain("Raw");
   });
 
   it("rebuilds when a module with indexed content is switched off", async () => {
