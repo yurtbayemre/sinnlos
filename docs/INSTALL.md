@@ -20,7 +20,7 @@ Every command below runs on the host as the **deploy user**, the user that owns 
 ## 2. The code
 
 ```sh
-git clone --branch v0.30.1 https://github.com/yurtbayemre/sinnlos.git
+git clone --branch v0.31.0 https://github.com/yurtbayemre/sinnlos.git
 cd sinnlos
 ```
 

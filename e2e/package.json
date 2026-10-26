@@ -1,7 +1,7 @@
 {
   "name": "@sinnlos/e2e",
   "private": true,
-  "version": "0.30.1",
+  "version": "0.31.0",
   "license": "AGPL-3.0-only",
   "description": "Browser E2E tests for the Sinnlos intranet",
   "scripts": {
