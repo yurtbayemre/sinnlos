@@ -1,8 +1,9 @@
-import { createElement } from "react";
+import { Fragment, createElement, memo } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { installFakeBrowser, type FakeBrowser } from "../live/fake-browser.test.helper";
 
-vi.mock("next-intl", () => ({ useTranslations: () => (key: string) => key }));
+const intl = vi.hoisted(() => ({ prefix: "" }));
+vi.mock("next-intl", () => ({ useTranslations: () => (key: string) => intl.prefix + key }));
 const { confirmLeave, leavesPage, useUnsavedGuard } = await import("./unsaved-guard");
 
 const HERE = "https://intranet.example.test/manage/announcements/a1?tab=2";
@@ -76,6 +77,7 @@ describe("useUnsavedGuard", () => {
   beforeEach(() => {
     browser = installFakeBrowser();
     navigate = null;
+    intl.prefix = "";
     confirm.mockClear();
     Object.assign(window, {
       confirm,
@@ -130,6 +132,31 @@ describe("useUnsavedGuard", () => {
     confirm.mockReturnValueOnce(true);
     expect(confirmLeave()).toBe(true);
     expect(unload()).not.toHaveBeenCalled();
+    // The departure did not happen (Back to a fragment): the next key press
+    // on the page means the tab close asks again.
+    (browser.document as unknown as { fire(type: string): void }).fire("keydown");
+    expect(unload()).toHaveBeenCalledOnce();
+  });
+
+  it("asks in the language of an editor that still holds changes", async () => {
+    // The memo keeps the first editor's render (and its prompt) as it was.
+    const Kept = memo(Editor);
+    const tree = (second: boolean) =>
+      createElement(
+        Fragment,
+        null,
+        createElement(Kept, { key: "a", dirty: true }),
+        second ? createElement(Editor, { key: "b", dirty: true }) : null,
+      );
+    intl.prefix = "en:";
+    await browser.render(tree(false));
+    intl.prefix = "de:";
+    await browser.render(tree(true));
+    confirmLeave();
+    expect(confirm).toHaveBeenLastCalledWith("de:leaveUnsaved");
+    await browser.render(tree(false));
+    confirmLeave();
+    expect(confirm).toHaveBeenLastCalledWith("en:leaveUnsaved");
   });
 
   it("asks before Back or Forward and cancels the traversal on Cancel", async () => {

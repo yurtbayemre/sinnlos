@@ -26,16 +26,18 @@ import { useTranslations } from "next-intl";
  * A save or delete releases the guard before its own navigation.
  */
 
-const dirtyEditors = new Set<symbol>();
-let message = "";
+/** Each dirty editor's prompt, in its own locale; the newest one asks. */
+const dirtyEditors = new Map<symbol, string>();
 // The person chose to leave: a document navigation that follows (a plain
 // link, a hard redirect) does not ask a second time in `beforeunload`.
+// Until the next key or pointer press on the page: a departure that did
+// not happen (Back to a fragment, a failed request) asks again after it.
 let leaving = false;
 
 /** Asks before leaving while an editor holds unsaved changes; true = leave. */
 export function confirmLeave(): boolean {
   if (dirtyEditors.size === 0) return true;
-  leaving = window.confirm(message);
+  leaving = window.confirm([...dirtyEditors.values()].at(-1)!);
   return leaving;
 }
 
@@ -90,6 +92,10 @@ function onBeforeUnload(event: BeforeUnloadEvent) {
   if (!leaving) event.preventDefault();
 }
 
+function onPress() {
+  leaving = false;
+}
+
 type NavigationLike = {
   addEventListener(type: "navigate", listener: (event: NavigateLike) => void): void;
   removeEventListener(type: "navigate", listener: (event: NavigateLike) => void): void;
@@ -104,6 +110,8 @@ function listen(on: boolean) {
   leaving = false;
   window[method]("beforeunload", onBeforeUnload);
   document[method]("click", onClick, true);
+  document[method]("keydown", onPress, true);
+  document[method]("pointerdown", onPress, true);
   navigationApi()?.[method]("navigate", onNavigate);
 }
 
@@ -122,10 +130,9 @@ export function useUnsavedGuard(dirty: boolean): () => void {
 
   useEffect(() => {
     if (!dirty) return;
-    message = text;
     const self = token.current;
     if (dirtyEditors.size === 0) listen(true);
-    dirtyEditors.add(self);
+    dirtyEditors.set(self, text);
     return () => {
       if (dirtyEditors.delete(self) && dirtyEditors.size === 0) listen(false);
     };
