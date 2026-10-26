@@ -1667,17 +1667,14 @@ else
   BUILDX_NO_DEFAULT_ATTESTATIONS=1 "${COMPOSE[@]}" build
 fi
 # The boot values the preflight cannot judge (APP_TIME_ZONE, MFA_REQUIRED_ROLES),
-# as compose renders them, checked by the cms's own validators in the new cms
-# image: a value the new cms would refuse stops the deploy here, before `up`.
-# A plain docker run without a network: `compose run` creates the project's
-# volumes, and a database volume without its container fails the backup of
-# the next run of a first install.
+# checked by the cms's own validators in the new cms image against the
+# rendered compose config (on stdin, never on a command line): a value the new
+# cms would refuse stops the deploy here, before `up`. A plain docker run
+# without a network: `compose run` creates the project's volumes, and a
+# database volume without its container fails the next first-install backup.
 log "Checking the boot values in the new cms image"
-json="$("${COMPOSE[@]}" config --format json 2>/dev/null || true)"
-if ! docker run --rm --pull never --network none --entrypoint node \
-  -e "APP_TIME_ZONE=$(compose_env_value APP_TIME_ZONE <<<"${json}")" \
-  -e "MFA_REQUIRED_ROLES=$(compose_env_value MFA_REQUIRED_ROLES <<<"${json}")" \
-  "${PROJECT}-cms:latest" dist/scripts/check-boot-env.js; then
+if ! "${COMPOSE[@]}" config --format json | docker run --rm -i --pull never --network none \
+  --entrypoint node "${PROJECT}-cms:latest" dist/scripts/check-boot-env.js; then
   echo "ERROR: the new cms image refused these boot values (above), or could not run the check." >&2
   echo "       The running containers are unchanged. Fix infra/.env (or the cause) and re-run." >&2
   exit 1
@@ -1714,16 +1711,20 @@ result=
 smoke_ok=0
 for ((i = 1; i <= attempts; i++)); do
   # The web's readiness check (edge, web, cms and database; app/healthz):
-  # only its exact answer counts, and no redirect is followed. curl writes
-  # 000 itself when there is no answer.
-  answer="$(curl -sS -w '\n%{http_code}' --max-time 15 "${SMOKE_HEALTH}")" || true
-  if [[ "${answer}" == $'{"status":"ok"}\n200' ]]; then
+  # only its exact answer over a complete transfer counts, and no redirect
+  # is followed. curl writes 000 itself when there is no answer.
+  if answer="$(curl -sS -w '\n%{http_code}' --max-time 15 "${SMOKE_HEALTH}")"; then curl_rc=0; else curl_rc=$?; fi
+  if ((curl_rc == 0)) && [[ "${answer}" == $'{"status":"ok"}\n200' ]]; then
     smoke_ok=1
     break
   fi
   code="${answer##*$'\n'}"
   result="HTTP ${code:-000}"
-  if [[ "${code}" == 200 ]]; then result+=' without the body {"status":"ok"}'; fi
+  if ((curl_rc)); then
+    result+=" (curl exit ${curl_rc})"
+  elif [[ "${code}" == 200 ]]; then
+    result+=' without the body {"status":"ok"}'
+  fi
   if ((i < attempts)); then
     echo "  attempt ${i}/${attempts}: ${result} — retrying in ${delay}s"
     sleep "${delay}"

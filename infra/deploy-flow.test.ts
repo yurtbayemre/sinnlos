@@ -133,7 +133,7 @@ const COMPOSE_JSON = composeJson(STUB_HOST);
 
 /** The boot-value check in the new cms image, with the values compose renders. */
 const BOOT_CHECK =
-  "docker run --rm --pull never --network none --entrypoint node -e APP_TIME_ZONE=Europe/Berlin -e MFA_REQUIRED_ROLES= infra-cms:latest dist/scripts/check-boot-env.js";
+  "docker run --rm -i --pull never --network none --entrypoint node infra-cms:latest dist/scripts/check-boot-env.js";
 
 /**
  * Runs the steps in one bash process, in a fresh checkout ($REPO, one
@@ -202,7 +202,7 @@ function deploys(steps: readonly Step[], mode?: ShellMode): StepReport[] {
     // The demo credentials file deploy.sh checks before it runs live-smoke.
     'echo "casey.jones@sinnlos.local pw" > "$T/passwords"',
     'export PASSWORDS_FILE="$T/passwords"',
-    'export T STUB_TRAEFIK= STUB_PS_FAIL= STUB_PULL_FAIL= STUB_LABELS= STUB_SMOKE_CODE=200 STUB_SMOKE_BODY=\'{"status":"ok"}\' STUB_LIVE_RC=0 STUB_LIVE_NOFRAME= STUB_BUILD_FAIL= STUB_UP_FAIL= STUB_CMS_STATE=exited STUB_BOOTENV_FAIL= STUB_TAG_FAIL= STUB_LOCK_HELD= STUB_CI= STUB_NO_VOLUMES= STUB_CONTAINERD= STUB_UP_KEEP= STUB_STATE_WRITE_FAIL= STUB_BOOTSTRAP_WRITE_FAIL= STUB_BACKUP_RC= STUB_REVISION_DRAFTS=0',
+    'export T STUB_TRAEFIK= STUB_PS_FAIL= STUB_PULL_FAIL= STUB_LABELS= STUB_SMOKE_CODE=200 STUB_SMOKE_BODY=\'{"status":"ok"}\' STUB_SMOKE_RC= STUB_LIVE_RC=0 STUB_LIVE_NOFRAME= STUB_BUILD_FAIL= STUB_UP_FAIL= STUB_CMS_STATE=exited STUB_BOOTENV_FAIL= STUB_TAG_FAIL= STUB_LOCK_HELD= STUB_CI= STUB_NO_VOLUMES= STUB_CONTAINERD= STUB_UP_KEEP= STUB_STATE_WRITE_FAIL= STUB_BOOTSTRAP_WRITE_FAIL= STUB_BACKUP_RC= STUB_REVISION_DRAFTS=0',
     // Whether an image id resolves: on containerd only while a tag names it.
     "resolvable() {",
     // (No pipe: under deploy.sh's pipefail, grep -q ending early could fail cat.)
@@ -236,8 +236,10 @@ function deploys(steps: readonly Step[], mode?: ShellMode): StepReport[] {
     '            if [[ -z "$STUB_UP_KEEP" || ! -f "$T/ctr/$p-$a-1" ]]; then cp "$T/img/$p-${a}__latest" "$T/ctr/$p-$a-1"; fi',
     "          done ;;",
     "      esac ;;",
-    // The boot-value check in the new cms image (STUB_BOOTENV_FAIL refuses).
+    // The boot-value check in the new cms image: it gets the rendered compose
+    // config on stdin (logged when it is the stub's); STUB_BOOTENV_FAIL refuses.
     "    run)",
+    '      if cmp -s - "$T/compose.json"; then echo "boot-check stdin: compose config" >> "$T/calls"; fi',
     '      [[ -z "$STUB_BOOTENV_FAIL" ]] || { echo "ERROR: APP_TIME_ZONE must be an IANA time zone name" >&2; return 1; } ;;',
     "    inspect)",
     '      ref="${*: -1}"',
@@ -285,7 +287,8 @@ function deploys(steps: readonly Step[], mode?: ShellMode): StepReport[] {
     // The fixture's @HEAD_SHA@ is the commit the request asks for.
     '    sha="${*: -1}"; sha="${sha##*head_sha=}"; sed "s/@HEAD_SHA@/${sha%%&*}/g" "$STUB_CI"; return 0',
     "  fi",
-    '  printf \'%s\\n%s\' "$STUB_SMOKE_BODY" "$STUB_SMOKE_CODE"',
+    // STUB_SMOKE_RC: curl's exit code (18: the transfer broke off).
+    '  printf \'%s\\n%s\' "$STUB_SMOKE_BODY" "$STUB_SMOKE_CODE"; return "${STUB_SMOKE_RC:-0}"',
     "}",
     'flock() { [[ -z "$STUB_LOCK_HELD" ]]; }',
     'timeout() { while [[ "$1" != docker ]]; do shift; done; "$@"; }',
@@ -427,6 +430,8 @@ describe.skipIf(!RUN_SEQUENCES)(
         /* 19 */ { before: "STUB_CMS_STATE='running unhealthy'" },
         // The new cms image refuses a boot value: no `up`, no rollback.
         /* 20 */ { before: "STUB_UP_FAIL= STUB_CMS_STATE=exited STUB_BOOTENV_FAIL=1" },
+        // Its exact answer, but the transfer broke off (curl exit 18).
+        /* 21 */ { before: "STUB_BOOTENV_FAIL= STUB_SMOKE_RC=18" },
       ]);
     }, SEQUENCE_BUDGET);
 
@@ -464,11 +469,12 @@ describe.skipIf(!RUN_SEQUENCES)(
       expect(historyTags(first)).toEqual([tagOf(first)]);
       // build, the boot values in the new cms image, up without a build, then the tags.
       const order = first.calls.filter((c) =>
-        / (build|up -d --no-build)$|^docker (tag|run) /.test(c),
+        / (build|up -d --no-build)$|^docker (tag|run) |^boot-check /.test(c),
       );
       expect(order).toEqual([
         expect.stringMatching(/ build$/),
         BOOT_CHECK,
+        "boot-check stdin: compose config",
         expect.stringMatching(/ up -d --no-build$/),
         `docker tag sha256:web1 infra-web:${tagOf(first)}`,
         `docker tag sha256:cms1 infra-cms:${tagOf(first)}`,
@@ -494,14 +500,16 @@ describe.skipIf(!RUN_SEQUENCES)(
       ]);
     });
 
-    it("fails the smoke check for a cms that is not ready, or a 200 with another body", () => {
-      const [good, unready, other] = [r[15], r[16], r[17]];
+    it("fails the smoke check for a cms that is not ready, a 200 with another body or a broken transfer", () => {
+      const [good, unready, other, broken] = [r[15], r[16], r[17], r[21]];
       expect(good.status, good.stderr).toBe(0);
       expect(unready.status).toBe(1);
       expect(unready.stderr).toContain(`/healthz answered HTTP 503`);
       expect(other.status).toBe(1);
       expect(other.stderr).toContain(`/healthz answered HTTP 200 without the body {"status":"ok"}`);
-      for (const bad of [unready, other]) {
+      expect(broken.status).toBe(1);
+      expect(broken.stderr).toContain(`/healthz answered HTTP 200 (curl exit 18)`);
+      for (const bad of [unready, other, broken]) {
         expect(bad.state).toEqual(good.state);
         expect(bad.history).toEqual(good.history);
         expect(bad.stderr).toContain(`docker tag infra-web:${tagOf(good)} infra-web:latest`);

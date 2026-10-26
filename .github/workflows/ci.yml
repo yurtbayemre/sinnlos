@@ -453,16 +453,26 @@ jobs:
           cache-to: type=gha,mode=max,scope=image-${{ matrix.app }}
 
       # The boot-value check infra/deploy.sh runs in the new cms image before
-      # `up` (v0.30): its path and imports in the real image, a valid env
-      # passes and a misspelt zone is refused with the cms's own message.
+      # `up` (v0.30), fed a compose config's cms environment on stdin: its
+      # path and imports in the real image; what the cms accepts passes, and
+      # a misspelt zone or an unknown role is refused with the cms's message.
       - name: Boot-value check in the cms image
         if: matrix.app == 'cms'
         run: |
-          check() { docker run --rm --entrypoint node "$@" sinnlos-cms:ci dist/scripts/check-boot-env.js; }
-          check -e APP_TIME_ZONE=Europe/Berlin -e MFA_REQUIRED_ROLES=
-          if out="$(check -e APP_TIME_ZONE=Europe/Berln 2>&1)"; then
-            echo "::error::check-boot-env.js accepted APP_TIME_ZONE=Europe/Berln"
-            exit 1
-          fi
-          echo "${out}"
-          grep -q 'APP_TIME_ZONE must be an IANA time zone name' <<<"${out}"
+          check() {
+            printf '{"services":{"cms":{"environment":%s}}}' "$1" |
+              docker run --rm -i --network none --entrypoint node sinnlos-cms:ci dist/scripts/check-boot-env.js
+          }
+          check '{}'
+          check '{"APP_TIME_ZONE":"Europe/Berlin\t","MFA_REQUIRED_ROLES":"none\t"}'
+          check '{"APP_TIME_ZONE":"europe/berlin","MFA_REQUIRED_ROLES":"admin_role, editor"}'
+          refused() {
+            if out="$(check "$1" 2>&1)"; then
+              echo "::error::check-boot-env.js accepted $1"
+              exit 1
+            fi
+            echo "${out}"
+            grep -qF "$2" <<<"${out}"
+          }
+          refused '{"APP_TIME_ZONE":"Europe/Berln"}' 'APP_TIME_ZONE must be an IANA time zone name'
+          refused '{"MFA_REQUIRED_ROLES":"admin_role,Bogus"}' 'MFA_REQUIRED_ROLES: unknown role Bogus'
