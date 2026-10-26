@@ -232,15 +232,18 @@ export function useItemEditor<V extends object, E extends Omit<EditableBase, "ro
           },
           onSuccess: (data) => {
             if (schedule) setScheduleOpen(false);
+            // The saved values are the new baseline, also while a create's
+            // navigation is still on its way: an edit typed meanwhile is
+            // unsaved again and asks before the page is left.
+            setInitial(snapshot);
+            if (clearOnSave) rebase(clearOnSave);
+            setRetarget(false);
             if (creating && data) {
               flash(status === "published" ? t("createdPublished") : t("created"));
               releaseUnsaved();
               router.replace(itemPath(data));
               return;
             }
-            setInitial(snapshot);
-            if (clearOnSave) rebase(clearOnSave);
-            setRetarget(false);
             flash(
               schedule
                 ? t("scheduled")

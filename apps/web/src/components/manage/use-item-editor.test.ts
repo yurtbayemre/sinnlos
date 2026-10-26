@@ -41,11 +41,17 @@ const save = vi.fn(async (input: SaveInput) => ({
   data: { ...editable, version: String(Number(input.version) + 1), status: "modified" as const },
 }));
 
-function Harness({ expose }: { expose: (item: typeof editor) => void }) {
+function Harness({
+  expose,
+  source = editable,
+}: {
+  expose: (item: typeof editor) => void;
+  source?: typeof editable | null;
+}) {
   const item = useItemEditor<Values, typeof editable>({
     area: "wiki",
     formId: "wiki-page",
-    editable,
+    editable: source,
     toValues,
     emptyValues: empty,
     fieldOrder: [],
@@ -62,6 +68,7 @@ beforeEach(async () => {
   // The run records the control that started it (an HTMLElement check).
   vi.stubGlobal("HTMLElement", class {});
   save.mockClear();
+  router.replace.mockClear();
   await browser.render(createElement(Harness, { expose: (item) => (editor = item) }));
 });
 afterEach(async () => {
@@ -91,6 +98,20 @@ describe("a save's clearOnSave values (the wiki change note, v0.30)", () => {
     // What the payload compares: the note differs from the baseline, so it is sent.
     expect(second.values).toMatchObject({ body: "Third", revisionSummary: "Typo" });
     expect(second.initial).toMatchObject({ revisionSummary: "" });
+  });
+
+  it("of a create are the baseline while its navigation is still on its way", async () => {
+    await browser.unmount();
+    await browser.render(
+      createElement(Harness, { expose: (item) => (editor = item), source: null }),
+    );
+    await edit({ body: "New page", revisionSummary: "First" });
+    await browser.act(() => editor.save("draft"));
+    expect(router.replace).toHaveBeenCalledOnce();
+    expect(editor.dirty).toBe(false);
+    // An edit typed before the item page arrives is unsaved again.
+    await edit({ body: "New page, more" });
+    expect(editor.dirty).toBe(true);
   });
 
   it("stay in the form when the save fails", async () => {
