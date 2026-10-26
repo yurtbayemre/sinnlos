@@ -18,7 +18,12 @@ import { WIKI_REVISION_UID } from "../utils/wiki-revisions";
  *     every-minute "what is due" reads touch the few scheduled rows only;
  *   - wiki_revisions_page_document_id_idx: (page_document_id), the anchor
  *     every history read and the boot backfill's baseline check go by
- *     (batch 16, DA03; utils/wiki-revisions.ts). Plain, not unique.
+ *     (batch 16, DA03; utils/wiki-revisions.ts). Plain, not unique;
+ *   - <table>_<type>_<document id>_idx on notifications (source_type,
+ *     source_document_id), comments and reactions (target_type,
+ *     target_document_id): the anchors the fan-out dedup, the digest and
+ *     the janitors (utils/notification-source.ts), and every thread and
+ *     reaction read go by (v0.31, #171). These tables only grow. Plain.
  *
  * `CREATE … INDEX IF NOT EXISTS`, on Postgres and SQLite. Strapi's schema
  * sync never drops an index it did not create (@strapi/database
@@ -123,6 +128,22 @@ export function documentIndexSpecs(strapi: DocumentIndexHost): IndexSpec[] {
     columns: [anchor],
     unique: false,
   });
+  const pair = (uid: string, prefix: "source" | "target") => {
+    const meta = metaOf(strapi, uid);
+    const columns = [
+      columnOf(meta, `${prefix}Type`, `${prefix}_type`),
+      columnOf(meta, `${prefix}DocumentId`, `${prefix}_document_id`),
+    ];
+    specs.push({
+      name: `${meta.tableName}_${columns.join("_")}_idx`,
+      table: meta.tableName,
+      columns,
+      unique: false,
+    });
+  };
+  pair("api::notification.notification", "source");
+  pair("api::comment.comment", "target");
+  pair("api::reaction.reaction", "target");
   return specs;
 }
 
@@ -182,7 +203,8 @@ export async function ensureDocumentIndexes(strapi: DocumentIndexHost): Promise<
         `${DOCUMENT_INDEXES_LOG} could not create the index ${spec.name} on ${spec.table}: ` +
           `${(error as Error).message}. The cms does not start without it (the document lock ` +
           "needs content_versions_target_uq; the scheduler reads through the partial indexes; " +
-          "the wiki history through the revision anchor index).",
+          "the wiki history through the revision anchor index; notifications, comments and " +
+          "reactions through their anchor indexes).",
       );
     }
     created.push(spec.name);
