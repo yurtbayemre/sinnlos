@@ -38,6 +38,18 @@ export type PublishBarHandlers = {
 
 type ConfirmKind = "publish" | "saveAndPublish" | "unpublish" | "discard" | "delete";
 
+/**
+ * The editor form's own submit (Enter in a text field saves a draft): the
+ * same refusal as the publish bar's `blocked`, so a create whose targeting
+ * pickers failed cannot save for everyone by pressing Enter (v0.30).
+ */
+export function draftSubmit(blocked: boolean, saveDraft: () => void) {
+  return (event: { preventDefault(): void }) => {
+    event.preventDefault();
+    if (!blocked) saveDraft();
+  };
+}
+
 export function PublishBar({
   area,
   verbs,

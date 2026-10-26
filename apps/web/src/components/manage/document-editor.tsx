@@ -40,7 +40,7 @@ import {
 } from "./editor-parts";
 import { FileField } from "./file-field";
 import { SinglePicker } from "./pickers";
-import { PublishBar, type PublishBarHandlers } from "./publish-bar";
+import { draftSubmit, PublishBar, type PublishBarHandlers } from "./publish-bar";
 import { ScheduleDialog } from "./schedule-dialog";
 import type { EditorIntent } from "./use-authoring-editor";
 import { useItemEditor, type ItemActions } from "./use-item-editor";
@@ -227,16 +227,15 @@ export function DocumentEditor({
     label: tCategories(category),
   }));
 
+  // Fail closed (decision 02): no save of a create whose pickers failed.
+  const blocked = editor.meta === null && !departmentAuthor && optionsFailed;
   return (
     <>
       <form
         id={FORM_ID}
         noValidate
         className="space-y-8"
-        onSubmit={(event) => {
-          event.preventDefault();
-          handlers.saveDraft();
-        }}
+        onSubmit={draftSubmit(blocked, handlers.saveDraft)}
       >
         <EditorStatus
           meta={editor.meta}
@@ -351,7 +350,7 @@ export function DocumentEditor({
           meta={editor.meta}
           dirty={item.dirty}
           pending={pending}
-          blocked={editor.meta === null && !departmentAuthor && optionsFailed}
+          blocked={blocked}
           running={uploading ? uploadIntent : editor.running}
           handlers={handlers}
           onInvoke={editor.rememberInvoker}

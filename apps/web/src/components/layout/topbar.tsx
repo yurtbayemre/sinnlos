@@ -5,13 +5,13 @@ import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { LocaleSwitcher } from "@/components/locale-switcher";
 import { SearchCommand } from "@/components/search-command";
-import { signOutAction } from "@/lib/auth-actions";
 import { DEMO_MODE } from "@/lib/config";
 import { initials } from "@/lib/utils";
 import { getNotifications } from "@/lib/notification-actions";
 import { getSession } from "@/lib/session";
 import { LiveNotificationBell } from "@/components/notifications/live-notification-bell";
 import { LiveStatus } from "@/components/live/live-status";
+import { SignOutForm } from "./sign-out-form";
 import { getTranslations } from "next-intl/server";
 
 export async function Topbar() {
@@ -89,11 +89,11 @@ export async function Topbar() {
 
 function SignOutButton({ label }: { label: string }) {
   return (
-    <form action={signOutAction}>
+    <SignOutForm>
       <Button variant="ghost" size="sm" type="submit" className={PHONE_ICON_BUTTON}>
         <PhoneIconLabel icon={LogOut} label={label} />
       </Button>
-    </form>
+    </SignOutForm>
   );
 }
 

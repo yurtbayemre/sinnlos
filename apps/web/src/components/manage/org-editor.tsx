@@ -3,7 +3,7 @@
 import Link from "next/link";
 import type { Route } from "next";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
+import { useCallback, useMemo, useState, useTransition } from "react";
 import { useTranslations } from "next-intl";
 import {
   ORG_PATHS,
@@ -30,6 +30,7 @@ import { Field, FieldGroup, inputClass } from "./form-controls";
 import { MarkdownEditor } from "./markdown-editor";
 import { SinglePicker } from "./pickers";
 import { metaOf, useAuthoringEditor } from "./use-authoring-editor";
+import { useUnsavedGuard } from "./unsaved-guard";
 import { sameValues } from "./use-item-editor";
 
 const DEPARTMENT_FIELDS = ["name", "description", "color", "headerImage", "head"];
@@ -96,12 +97,7 @@ export function OrgEditor({
     setValues((previous) => ({ ...previous, [key]: value }));
     setSaved(false);
   };
-  useEffect(() => {
-    if (!dirty) return;
-    const warn = (event: BeforeUnloadEvent) => event.preventDefault();
-    window.addEventListener("beforeunload", warn);
-    return () => window.removeEventListener("beforeunload", warn);
-  }, [dirty]);
+  const releaseUnsaved = useUnsavedGuard(dirty);
 
   // Names of everyone the form can show: the directory plus the stored
   // head, lead and members (a blocked member is not in the directory).
@@ -129,6 +125,7 @@ export function OrgEditor({
         onSuccess: () => {
           setInitial(snapshot);
           showFlash(t(type === "department" ? "createdDepartment" : "createdTeam"));
+          releaseUnsaved();
           router.push(LIST_PATH[type]);
         },
       });
@@ -156,8 +153,12 @@ export function OrgEditor({
     setConfirmDelete(false);
     editor.run("delete", (version) => deleteOrg(type, editable.documentId, version), {
       onSuccess: () => {
+        // Clean also while the list is on its way: a picked image goes too.
         setInitial(values);
+        setPicked(null);
+        setPickError(null);
         showFlash(tc("success.deleted"));
+        releaseUnsaved();
         router.push(LIST_PATH[type]);
       },
     });

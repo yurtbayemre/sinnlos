@@ -25,7 +25,7 @@ import { ConflictDialog, EditorStatus, FormAlert, useFieldError } from "./editor
 import { BackToList, OptionsNotice, PinnedDepartment, Section } from "./editor-parts";
 import { Field, FieldError, inputClass } from "./form-controls";
 import { SinglePicker } from "./pickers";
-import { PublishBar } from "./publish-bar";
+import { draftSubmit, PublishBar } from "./publish-bar";
 import { useItemEditor, type ItemActions } from "./use-item-editor";
 
 const FORM_ID = "kpi";
@@ -116,16 +116,15 @@ export function KpiEditor({
     ...departments.map((department) => ({ value: department.documentId, label: department.name })),
   ];
 
+  // Fail closed (decision 02): no save of a create whose pickers failed.
+  const blocked = editor.meta === null && optionsFailed && !departmentAuthor;
   return (
     <>
       <form
         id={FORM_ID}
         noValidate
         className="space-y-8"
-        onSubmit={(event) => {
-          event.preventDefault();
-          item.handlers.saveDraft();
-        }}
+        onSubmit={draftSubmit(blocked, item.handlers.saveDraft)}
       >
         <EditorStatus
           meta={editor.meta}
@@ -290,7 +289,7 @@ export function KpiEditor({
           meta={editor.meta}
           dirty={item.dirty}
           pending={editor.pending}
-          blocked={editor.meta === null && optionsFailed && !departmentAuthor}
+          blocked={blocked}
           running={editor.running}
           handlers={item.handlers}
           onInvoke={editor.rememberInvoker}

@@ -71,6 +71,9 @@ const ACTIONS: ItemActions = {
   remove: deleteWikiPage,
 };
 
+/** The change note describes one revision: empty again after each save. */
+const CLEAR_ON_SAVE: Partial<WikiPageValues> = { revisionSummary: "" };
+
 export interface WikiEditorSpace {
   documentId: string;
   name: string;
@@ -164,6 +167,7 @@ export function WikiPageEditor({
     drafts: true,
     itemPath,
     listPath: wikiSpacePath(space.slug),
+    clearOnSave: CLEAR_ON_SAVE,
   });
   const { values, setValue, editor } = item;
   const error = useFieldError("wiki", editor.fieldErrors, "editor");

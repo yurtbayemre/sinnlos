@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { Route } from "next";
 import { useTranslations } from "next-intl";
@@ -10,6 +10,7 @@ import { AREA_PATH, areaItemPath, hasDrafts, type ManageArea } from "@/lib/manag
 import type { SaveInput } from "@/lib/manage/save";
 import type { ScheduleValues } from "@/lib/manage/values";
 import { useManageFlash } from "./flash";
+import { useUnsavedGuard } from "./unsaved-guard";
 import type { PublishBarHandlers } from "./publish-bar";
 import { metaOf, useAuthoringEditor } from "./use-authoring-editor";
 
@@ -23,9 +24,10 @@ import { metaOf, useAuthoringEditor } from "./use-authoring-editor";
  *  - A create navigates to the new item's page; a delete (or a discard
  *    that removed a never-published draft) to the list; the message
  *    survives the navigation (ManageFlash).
- *  - A save makes the saved values the new baseline; a discard and a
- *    Reload reset the form to the fresh `editable`.
- *  - Unsaved changes ask before the tab is closed or reloaded.
+ *  - A save makes the saved values the new baseline (`clearOnSave` starts
+ *    empty again in both); a discard and a Reload reset the form to the
+ *    fresh `editable`.
+ *  - Unsaved changes ask before the page is left (unsaved-guard.ts).
  *
  * The typed areas take their paths and draft mode from lib/manage/areas.ts;
  * an editor outside them (a wiki space, a wiki page) passes its own
@@ -83,6 +85,7 @@ export function useItemEditor<V extends object, E extends Omit<EditableBase, "ro
   extraDirty = false,
   busy = false,
   onReset: onResetExtra,
+  clearOnSave,
   drafts = area !== "wiki" && hasDrafts(area),
   itemPath = (data) => areaItemPath(area, data.documentId),
   listPath = AREA_PATH[area],
@@ -107,6 +110,12 @@ export function useItemEditor<V extends object, E extends Omit<EditableBase, "ro
    * change, which keeps every unsaved edit.
    */
   onReset?: () => void;
+  /**
+   * Values that belong to one save (a wiki page's change note): a
+   * successful save sets them in the form and its baseline, so the same
+   * text typed again is a change the next save sends (v0.30).
+   */
+  clearOnSave?: Partial<V>;
   /** The item has drafts (explicit status); false: every save publishes (polls, wiki spaces). */
   drafts?: boolean;
   /** Where a create navigates: the new item's page. */
@@ -149,19 +158,20 @@ export function useItemEditor<V extends object, E extends Omit<EditableBase, "ro
   // The Schedule… button that opened the dialog, for the focus on close.
   const scheduleOpener = useRef<HTMLElement | null>(null);
 
-  // Unsaved changes: ask before the tab closes or reloads.
-  useEffect(() => {
-    if (!dirty) return;
-    const warn = (event: BeforeUnloadEvent) => event.preventDefault();
-    window.addEventListener("beforeunload", warn);
-    return () => window.removeEventListener("beforeunload", warn);
-  }, [dirty]);
+  // Unsaved changes: ask before leaving the page (unsaved-guard.ts).
+  const releaseUnsaved = useUnsavedGuard(dirty);
 
   const setValue = useCallback(<K extends keyof V>(key: K, value: V[K]) => {
     setValues((previous) => ({ ...previous, [key]: value }));
   }, []);
 
   const goToList = useCallback(() => router.push(listPath), [router, listPath]);
+
+  /** Apply a change the cms already holds (a poll closed now) to the values and the baseline. */
+  const rebase = useCallback((patch: Partial<V>) => {
+    setValues((previous) => ({ ...previous, ...patch }));
+    setInitial((previous) => ({ ...previous, ...patch }));
+  }, []);
 
   /**
    * Closes the Schedule… dialog after a refusal that is not about its own
@@ -222,13 +232,18 @@ export function useItemEditor<V extends object, E extends Omit<EditableBase, "ro
           },
           onSuccess: (data) => {
             if (schedule) setScheduleOpen(false);
+            // The saved values are the new baseline, also while a create's
+            // navigation is still on its way: an edit typed meanwhile is
+            // unsaved again and asks before the page is left.
+            setInitial(snapshot);
+            if (clearOnSave) rebase(clearOnSave);
+            setRetarget(false);
             if (creating && data) {
               flash(status === "published" ? t("createdPublished") : t("created"));
+              releaseUnsaved();
               router.replace(itemPath(data));
               return;
             }
-            setInitial(snapshot);
-            setRetarget(false);
             flash(
               schedule
                 ? t("scheduled")
@@ -257,6 +272,9 @@ export function useItemEditor<V extends object, E extends Omit<EditableBase, "ro
       drafts,
       itemPath,
       leaveSchedule,
+      releaseUnsaved,
+      clearOnSave,
+      rebase,
     ],
   );
 
@@ -271,6 +289,13 @@ export function useItemEditor<V extends object, E extends Omit<EditableBase, "ro
         onSuccess: (data) => {
           if (intent === "delete" || (intent === "discard" && data === null)) {
             flash(t("deleted"));
+            // Nothing is left to save: the form is clean, also while the
+            // navigation to the list is on its way (an edit typed
+            // meanwhile is unsaved again and asks).
+            setInitial(values);
+            setRetarget(false);
+            onResetExtra?.();
+            releaseUnsaved();
             goToList();
             return;
           }
@@ -283,7 +308,7 @@ export function useItemEditor<V extends object, E extends Omit<EditableBase, "ro
         },
       });
     },
-    [meta, run, flash, t, goToList, requestReset],
+    [meta, run, flash, t, goToList, requestReset, releaseUnsaved, values, onResetExtra],
   );
 
   const handlers: PublishBarHandlers = useMemo(
@@ -302,12 +327,6 @@ export function useItemEditor<V extends object, E extends Omit<EditableBase, "ro
     }),
     [save, transition, actions],
   );
-
-  /** Apply a change the cms already holds (a poll closed now) to the values and the baseline. */
-  const rebase = useCallback((patch: Partial<V>) => {
-    setValues((previous) => ({ ...previous, ...patch }));
-    setInitial((previous) => ({ ...previous, ...patch }));
-  }, []);
 
   return {
     values,
