@@ -110,15 +110,24 @@ export async function classifiedImageFileIds(
   return [...new Set(fileIds)];
 }
 
+/** File ids per link lookup: one `WHERE IN` stays below Postgres's 65,535 parameters (v0.32, #178). */
+export const LINK_LOOKUP_CHUNK = 10_000;
+
 /** Which of the given files any row links (any related type, any field). */
 export async function linkedFileIds(
   strapi: any,
   fileIds: number[],
   trx: unknown,
 ): Promise<Set<number>> {
-  if (fileIds.length === 0) return new Set();
-  const rows: number[] = await links(strapi, trx).whereIn("file_id", fileIds).pluck("file_id");
-  return new Set(rows.map(Number));
+  const linked = new Set<number>();
+  for (let start = 0; start < fileIds.length; start += LINK_LOOKUP_CHUNK) {
+    // A fresh builder per chunk: a reused one would pile up the WHERE INs.
+    const rows: number[] = await links(strapi, trx)
+      .whereIn("file_id", fileIds.slice(start, start + LINK_LOOKUP_CHUNK))
+      .pluck("file_id");
+    for (const id of rows) linked.add(Number(id));
+  }
+  return linked;
 }
 
 /** A row linking a file (`files_related_mph`): its type and row id. */

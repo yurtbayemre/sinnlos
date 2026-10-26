@@ -9,6 +9,7 @@ import {
   isReservedRemoval,
   isTombstoned,
   linkedFileIds,
+  LINK_LOOKUP_CHUNK,
   mediaReferences,
   reserveRemoval,
   resolveFileIds,
@@ -326,5 +327,51 @@ describe("raw link reads join the caller's transaction (K12)", () => {
     // Outside a transaction (the janitor's pre-filter) the pool is used.
     await linkedFileIds(linkStrapi(log), [3], undefined);
     expect(log).toHaveLength(2);
+  });
+
+  interface LinkQuery {
+    transacting(trx: unknown): LinkQuery;
+    whereIn(column: string, ids: number[]): LinkQuery;
+    pluck(column: string): Promise<number[]>;
+  }
+
+  it("linkedFileIds asks in chunks of LINK_LOOKUP_CHUNK, each a fresh query in `trx` (v0.32, #178)", async () => {
+    const linkedRows = [1, 1, LINK_LOOKUP_CHUNK, LINK_LOOKUP_CHUNK + 1, 2 * LINK_LOOKUP_CHUNK + 5];
+    const queries: { ids: number[]; trx: unknown }[] = [];
+    const strapi = {
+      db: {
+        getConnection: () => {
+          const query: { ids: number[]; trx: unknown } = { ids: [], trx: undefined };
+          queries.push(query);
+          const builder: LinkQuery = {
+            transacting: (trx: unknown) => {
+              query.trx = trx;
+              return builder;
+            },
+            whereIn: (_column: string, ids: number[]) => {
+              query.ids.push(...ids);
+              return builder;
+            },
+            pluck: async () => linkedRows.filter((id) => query.ids.includes(id)),
+          };
+          return builder;
+        },
+      },
+    };
+    const ids = Array.from({ length: 2 * LINK_LOOKUP_CHUNK + 10 }, (_, i) => i + 1);
+    const linked = await linkedFileIds(strapi, ids, "T");
+    expect([...linked].sort((a, b) => a - b)).toEqual([
+      1,
+      LINK_LOOKUP_CHUNK,
+      LINK_LOOKUP_CHUNK + 1,
+      2 * LINK_LOOKUP_CHUNK + 5,
+    ]);
+    expect(queries.map((query) => query.ids.length)).toEqual([
+      LINK_LOOKUP_CHUNK,
+      LINK_LOOKUP_CHUNK,
+      10,
+    ]);
+    expect(queries.every((query) => query.trx === "T")).toBe(true);
+    expect(await linkedFileIds(strapi, [], "T")).toEqual(new Set());
   });
 });
