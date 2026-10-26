@@ -214,6 +214,17 @@ describe("compose images (v0.32, #196)", () => {
     expect(ci.match(/Caddyfile:ro" "\$\{image\}"/g)).toHaveLength(2);
   });
 
+  it("lets CI and the e2e stack test the postgres the compose file pins", () => {
+    const postgres = images.find((image) => image.startsWith("postgres:"));
+    const ci = read("../.github/workflows/ci.yml");
+    const e2e = read("../e2e/compose.yaml");
+    for (const text of [ci, e2e]) {
+      const refs = [...text.matchAll(/postgres:16-alpine[^\s']*/g)].map((match) => match[0]);
+      expect(refs.length).toBeGreaterThan(0);
+      for (const ref of refs) expect(ref).toBe(postgres);
+    }
+  });
+
   it("has Dependabot propose new digests of the same tags, never a Postgres or Caddy major", () => {
     const dependabot = read("../.github/dependabot.yml");
     const entry = dependabot.slice(dependabot.indexOf("package-ecosystem: docker-compose"));
