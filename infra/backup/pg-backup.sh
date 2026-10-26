@@ -235,21 +235,38 @@ finalize() {  # <file(uncompressed)> <stem> <ext> <label>
 STEP="keyid"
 KEYID="$(cat "$KEYID_FILE")"
 
-# ---- Postgres ----
+# ---- Postgres and Strapi uploads ----
+# Both are captured first, one right after the other, and only then
+# compressed and encrypted (v0.32, #187): a file deleted between the two
+# captures is in the dump but not in the tar, and that gap now holds the
+# dump's integrity check, no longer its compression and encryption.
+# Narrowed, not closed: the cms keeps running. Both plaintexts need room in
+# $BK at the same time.
 STEP="sinnlos-db"
 OUT="$BK/sinnlos-db-$TS$TAG.dump"
 PU=$(docker exec "$DB_C" printenv POSTGRES_USER)
 PD=$(docker exec "$DB_C" printenv POSTGRES_DB)
 docker exec "$DB_C" pg_dump -U "$PU" -d "$PD" -Fc --no-owner > "$OUT"
 docker exec -i "$DB_C" pg_restore --list < "$OUT" >/dev/null   # integrity check
+
+STEP="sinnlos-uploads"
+UPLOADS_RC=0
+if docker volume inspect "$UPLOADS_VOL" >/dev/null 2>&1; then
+  UOUT="$BK/sinnlos-uploads-$TS$TAG.tar"
+  # No network: the tar reads every uploaded file and needs none (#195).
+  docker run --rm --network none -v "$UPLOADS_VOL":/u:ro alpine tar -cf - -C /u . > "$UOUT" \
+    || UPLOADS_RC=$?
+fi
+
+STEP="sinnlos-db"
 finalize "$OUT" sinnlos-db dump sinnlos-db
 DB_ARTIFACT="sinnlos-db-$TS$TAG.dump.gz.gpg"
 
-# ---- Strapi uploads ----
 STEP="sinnlos-uploads"
-if docker volume inspect "$UPLOADS_VOL" >/dev/null 2>&1; then
-  UOUT="$BK/sinnlos-uploads-$TS$TAG.tar"
-  docker run --rm -v "$UPLOADS_VOL":/u:ro alpine tar -cf - -C /u . > "$UOUT"
+# A failed tar fails the run here, once the database artifact is safe, as
+# it did before the reorder; the EXIT trap removes the cut tar.
+if ((UPLOADS_RC)); then FAILED_LINE=$LINENO; exit "$UPLOADS_RC"; fi
+if [[ -n "$UOUT" ]]; then
   finalize "$UOUT" sinnlos-uploads tar sinnlos-uploads
 else
   log_line "skip sinnlos-uploads volume $UPLOADS_VOL not found"

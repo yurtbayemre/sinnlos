@@ -22,7 +22,8 @@ import {
  * Kept current by the `search-index` cron (every minute, only registered
  * with MEILISEARCH_ENABLED=1): a fingerprint of the published content
  * (searchFingerprint); when it changed, or the live index is missing, the
- * whole index is rebuilt into SEARCH_BUILD_INDEX_UID and swapped in.
+ * whole index is rebuilt into SEARCH_BUILD_INDEX_UID, in batches of at most
+ * SEARCH_BATCH_BYTES (v0.32), and swapped in.
  *
  * v0.31 (#169): a minute first reads a cheap probe (searchProbe: per
  * enabled kind the count and the newest id, updatedAt and publishedAt of
@@ -241,13 +242,57 @@ async function settle(
   }
 }
 
-/** Fills the build index with `documents` and swaps it in; returns the document count. */
+/**
+ * The largest document upload of a rebuild, in bytes (v0.32, #177):
+ * Meilisearch refuses a request body over its payload limit (100 MB by
+ * default), so the index goes up in batches well below it.
+ */
+export const SEARCH_BATCH_BYTES = 10_000_000;
+
+/**
+ * `documents` in order, cut into batches whose JSON request body (brackets
+ * and commas included) stays within `maxBytes` of UTF-8. A single document
+ * over that throws: it is never left out silently.
+ */
+export function searchBatches(
+  documents: readonly SearchIndexDocument[],
+  maxBytes: number = SEARCH_BATCH_BYTES,
+): SearchIndexDocument[][] {
+  const batches: SearchIndexDocument[][] = [];
+  let batch: SearchIndexDocument[] = [];
+  let bytes = 2;
+  for (const document of documents) {
+    const size = Buffer.byteLength(JSON.stringify(document), "utf8");
+    if (size + 2 > maxBytes) {
+      throw new Error(
+        `[search] ${document.id} is ${size} bytes, over the ${maxBytes}-byte upload limit`,
+      );
+    }
+    if (batch.length > 0 && bytes + 1 + size > maxBytes) {
+      batches.push(batch);
+      batch = [];
+      bytes = 2;
+    }
+    bytes += (batch.length > 0 ? 1 : 0) + size;
+    batch.push(document);
+  }
+  if (batch.length > 0) batches.push(batch);
+  return batches;
+}
+
+/**
+ * Fills the build index with `documents`, batch by batch (searchBatches),
+ * and swaps it in; returns the document count. Any failed step, a batch
+ * included, throws before the swap: the live index stays as it was.
+ */
 export async function rebuildSearchIndex(
   documents: readonly SearchIndexDocument[],
   config: MeiliConfig,
   fetchImpl: Fetch = fetch,
   sleep: (ms: number) => Promise<void> = (ms) => new Promise((r) => setTimeout(r, ms)),
+  batchBytes: number = SEARCH_BATCH_BYTES,
 ): Promise<number> {
+  const batches = searchBatches(documents, batchBytes);
   const call = (method: string, path: string, body?: unknown, allowMissing = false) =>
     meili(config, fetchImpl, method, path, body, allowMissing);
   const run = async (method: string, path: string, body?: unknown) =>
@@ -264,8 +309,9 @@ export async function rebuildSearchIndex(
   await dropBuild();
   await run("POST", "/indexes", { uid: SEARCH_BUILD_INDEX_UID, primaryKey: "id" });
   await run("PATCH", `/indexes/${SEARCH_BUILD_INDEX_UID}/settings`, SEARCH_INDEX_SETTINGS);
-  if (documents.length)
-    await run("POST", `/indexes/${SEARCH_BUILD_INDEX_UID}/documents`, documents);
+  for (const batch of batches) {
+    await run("POST", `/indexes/${SEARCH_BUILD_INDEX_UID}/documents`, batch);
+  }
   // A swap needs both indexes: the very first rebuild creates an empty live one.
   if (!(await call("GET", `/indexes/${SEARCH_INDEX_UID}`, undefined, true))) {
     await run("POST", "/indexes", { uid: SEARCH_INDEX_UID, primaryKey: "id" });
