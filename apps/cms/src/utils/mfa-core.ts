@@ -175,10 +175,9 @@ export function unseal(seal: SealService, value: unknown): string | null {
 }
 
 /**
- * Ten new recovery codes, `xxxx-xxxx-xxxx-xxxx` in lowercase base32 (80 bits
- * each, v0.30; the stored hash stays an unsalted sha256, which 80 bits keep
- * out of reach of an offline search). Codes issued before v0.30 have 50 bits
- * (`xxxxx-xxxxx`) and keep working until the next enrolment.
+ * Ten new recovery codes, `xxxx-xxxx-xxxx-xxxx` in lowercase base32 (v0.30).
+ * Codes issued before v0.30 (`xxxxx-xxxxx`) keep working until the next
+ * enrolment.
  */
 export function newRecoveryCodes(): string[] {
   return Array.from({ length: RECOVERY_CODE_COUNT }, () => {

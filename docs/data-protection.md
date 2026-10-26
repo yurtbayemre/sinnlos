@@ -96,7 +96,7 @@ Die Anonymisierung ist **endgültig**. Das Konto lässt sich danach weder entspe
 **Ablauf seit v0.30:**
 
 1. Sperre prüfen, Konto ersetzen und die Löschungen: eine Transaktion, ganz oder gar nicht.
-2. Danach, in derselben Anfrage: Die Benachrichtigungen anderer Personen, die die Person nannten, werden seitenweise umgeschrieben, jede Seite für sich gespeichert und ohne andere Anmeldungen aufzuhalten. Bricht das ab, bleibt das Konto trotzdem anonymisiert.
+2. Danach, in derselben Anfrage: Die Benachrichtigungen anderer Personen, die die Person nannten, werden seitenweise umgeschrieben, jede Seite für sich gespeichert, nachdem die Sperre des Verzeichnisses schon freigegeben ist. Bricht das ab, bleibt das Konto trotzdem anonymisiert.
 3. Das Profilbild wird entfernt, auch wenn Schritt 2 abbrach, sofern keine andere Stelle es verwendet (sonst wie oben). Schlägt das Löschen fehl, meldet die Seite das ebenso.
 4. Die Antwort nennt, wie viele Benachrichtigungen beim letzten Zählen noch ausstanden, oder dass diese Zählung fehlschlug. Ein zweiter Eintrag im Aktivitätsprotokoll hält das fest, wenn er sich schreiben lässt.
 

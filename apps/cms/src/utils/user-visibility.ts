@@ -45,10 +45,7 @@
  * onto such a field is refused with the core's `Invalid key` 400 (the web
  * sends none; a sort inside a populate may follow no relation at all,
  * utils/restricted-relations.ts). So is a root sort through a DIRECTORY
- * relation, whatever it names (v0.30): `sort=head.id`, `sort=head.blocked`
- * or `sort=manager.id` would order the rows by a hidden head or manager, so
- * a department with a blocked head would sort apart from one with none.
- * For every caller, like the filters.
+ * relation, whatever it names (v0.30), for every caller, like the filters.
  *
  * Pure: the schema comes in through `getModel` (see user-visibility.test.ts).
  */

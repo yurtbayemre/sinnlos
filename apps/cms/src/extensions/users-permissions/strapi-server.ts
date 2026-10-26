@@ -811,9 +811,8 @@ export type DocumentMiddleware = (
  *    (passwordSave): that is how a password the admin panel sets revokes
  *    the older JWTs;
  *  - v0.30: an update that blocks a user who was not blocked raises the
- *    version in the same transaction, as /manage/users does: a block in the
- *    admin panel ends the sessions and open links for good, and a later
- *    unblock does not bring them back;
+ *    version in the same transaction: a block ends the sessions and open
+ *    links for good, and a later unblock does not bring them back;
  *  - v0.28: `anonymisedAt` is dropped like them, and an update, delete or
  *    clone of an ANONYMISED user is refused (400 `anonymised`): the Content
  *    Manager and PUT /api/users/:id cannot unblock, refill or remove the

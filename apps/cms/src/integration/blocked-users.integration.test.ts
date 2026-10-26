@@ -253,9 +253,8 @@ describe.each(testEngines())("blocked people hidden on %s", (engine) => {
     await empty(`/api/teams?filters[lead]=${gone.id}`);
     await empty(`/api/teams?filters[lead][$eq]=${gone.id}`);
 
-    // Nor through a sort (v0.30): ordering departments by their head would
-    // set one with a blocked head apart from one with none. Refused for
-    // every caller, at the root and inside a populate.
+    // Nor a sort through a directory relation (v0.30): refused for every
+    // caller, at the root and inside a populate.
     for (const caller of ["member", "admin_role"] as const) {
       for (const path of [
         "/api/departments?sort=head.id:asc",

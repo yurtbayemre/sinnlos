@@ -82,10 +82,7 @@ async function notifyAnnouncementAuthor(commentId: number | string): Promise<voi
 }
 
 /**
- * Whether the announcement's author can still read it (v0.30). The
- * notification names the current title, and a moderator may have
- * retargeted the announcement away from its author since it was written.
- * Every role needs the announcement.find grant (the route checks it before
+ * Whether the announcement's author can still read it (v0.30). Every role needs the announcement.find grant (the route checks it before
  * the read policy). Then the read policy's rule
  * (policies/announcement-visibility.ts): admin_role and editor read every
  * announcement; anyone else needs a published row that has not ended and

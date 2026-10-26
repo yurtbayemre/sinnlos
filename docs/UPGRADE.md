@@ -166,7 +166,7 @@ Newest first. Older releases: [archive/deployment-history.md](archive/deployment
 - **Second factor:** new recovery codes have 80 bits (`xxxx-xxxx-xxxx-xxxx`). Codes issued before keep working; admins and editors get new ones by re-enrolling (an admin MFA reset, or disable and enable).
 - **Sessions:** a block ends the person's sessions and links wherever it is set, the Strapi admin panel included.
 - **Uploads:** PNG, JPEG, GIF, WebP and AVIF images, PDF, video and audio open in the browser; other files download. The cms refuses XML uploads; XML files uploaded before stay and download.
-- **Anonymisation** cleans other people's notifications after it committed, page by page, and reports what is still pending; the nightly sweep finishes the rest ([data-protection.md](data-protection.md)).
+- **Anonymisation** cleans other people's notifications after it committed, page by page, and reports what is still pending; the nightly sweep repeats the rest while `CRON_ENABLED` is on ([data-protection.md](data-protection.md)).
 - **Time limits** web → cms ([OPERATIONS.md](OPERATIONS.md#time-limits-web--cms)): the edge must allow 300 s for the anonymisation.
 - **Editors** ask before leaving with unsaved changes (links, search, the bell, sign-out; Back and Forward in browsers with the Navigation API).
 - **Rollback** to v0.29.3 is a plain retag. Recovery codes issued under v0.30 (16 characters) are refused there: those users need an admin MFA reset after a rollback.

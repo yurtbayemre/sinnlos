@@ -86,8 +86,7 @@ export function upstreamRequestHeaders(
 /**
  * The types a browser may show in place (v0.30): raster images, PDF, video
  * and audio. Everything else, SVG and unknown types included, is delivered
- * as a download in a sandbox, so a file never runs as a page of the
- * intranet's own origin.
+ * as a download in a sandbox.
  */
 const INLINE_TYPES = new Set([
   "image/png",

@@ -1341,15 +1341,17 @@ Since v0.28 ([data-protection.md](data-protection.md) describes the result in Ge
   `anonymised`. Since v0.30 the rewrite of other people's notifications
   that named the person runs **after** that transaction committed, in the
   same request, in pages of 500, each page its own short transaction
-  without the directory lock (so SSO sign-ins never wait for it): each
+  after the directory lock is released: each
   page locks its `notifications` rows, re-reads the actor link, and
   rewrites only rows still linked. The avatar removal runs regardless. The
   response reports `notifications: { rewritten, remaining }`: `remaining`
   is the count still linked at the final count (`null` when that count
-  failed), and a second `anonymise` audit row records it. A nightly erasure
-  sweep (03:20) repeats the row deletions (the ads too, through the
-  Document Service; not the avatar) and the paged notification rewrite for
-  every anonymised account, without one outer transaction per person.
+  failed), and a second `anonymise` audit row records it when it can be
+  written (a failure is logged). A nightly erasure
+  sweep (03:20, while `CRON_ENABLED` is on) repeats the row deletions (the
+  ads too, through the Document Service; not the avatar) and the paged
+  notification rewrite for every anonymised account, without one outer
+  transaction per person.
 - **Export** (`GET /api/user-management/:id/export`, `admin_role`):
   explicit projections, never a secret; `export-coverage.test.ts` fails on
   a relation to the user model that is neither exported nor listed as not

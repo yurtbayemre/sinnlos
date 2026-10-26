@@ -64,8 +64,7 @@ export const LOCAL_SIGN_IN_TIMEOUT_MS = 5_000;
 /**
  * The longest identifier and password a sign-in accepts (v0.30): an email
  * address is at most 254 characters, and no password manager makes 1,024.
- * Anything longer is refused before the limiter keeps a key for it or the
- * cms sees it.
+ * Anything longer is refused at once, before the limiter and the cms.
  */
 export const MAX_IDENTIFIER_LENGTH = 254;
 export const MAX_PASSWORD_LENGTH = 1024;
