@@ -48,8 +48,8 @@
  * id; `vl2.voter = vl.voter` is never true for a row without a voter, so
  * each of those counts. Table and column names come from the query
  * engine's metadata (never guessed), schema-qualified on Postgres
- * (Strapi's DATABASE_SCHEMA, which it applies per query, not through a
- * search_path).
+ * (Strapi's DATABASE_SCHEMA; Strapi also sets it as the search_path of
+ * every new pooled connection, the qualification stays explicit anyway).
  */
 
 /** A poll-vote row as the results query reads it: its id, option and voter id. */

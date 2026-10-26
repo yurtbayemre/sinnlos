@@ -481,8 +481,13 @@ manual snippets above:
 
 - dumps Postgres from `infra-db-1` (`pg_dump -Fc --no-owner`) and **verifies**
   the dump with `pg_restore --list` before keeping it;
-- tars the `infra_cms_uploads` volume, and copies `infra/.env` (every
-  secret; the dumps do not hold it);
+- tars the `infra_cms_uploads` volume right after the dump check, before
+  either is compressed or encrypted (v0.32), and copies `infra/.env` (every
+  secret; the dumps do not hold it). The tar container runs with
+  `--network none`. The window between the two captures is now about the
+  dump check, not the dump's compression and encryption: narrowed, not
+  closed (the cms keeps running). The backup directory needs room for the
+  plaintext dump and tar at the same time;
 - gzips each artifact, then **GPG-encrypts** it to the VPS backup public key
   (asymmetric — a host/NAS compromise can't decrypt; the private key lives
   off-box). gpg runs with `--no-random-seed-file`, so it never reads or
@@ -1300,7 +1305,8 @@ minute it reads a small probe (per kind the count and the newest id,
 `updatedAt` and `publishedAt` of the published rows). Only when the probe
 moved, the live index is missing, the cms just started, or an hour has passed
 since the last full check does it load the published content, compare it with
-the last build and, if it changed, rebuild into `sinnlos_search_build` and
+the last build and, if it changed, rebuild into `sinnlos_search_build` (in
+uploads of at most 10 MB each, v0.32) and
 swap it in (v0.31). So publishing, unpublishing, deleting and scheduled runs
 show within a minute; a raw database write that changes text in place shows
 within the hour. A failed check is retried the next minute. The index holds published content only and is rebuilt from

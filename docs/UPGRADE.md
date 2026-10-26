@@ -160,6 +160,17 @@ format`: a scanner posted to a page with a made-up Server Action id,
 
 Newest first. Older releases: [archive/deployment-history.md](archive/deployment-history.md).
 
+**Upgrading to v0.32 (tidy).** No required env, no edge change, no schema change.
+
+- **Pinned images:** `infra/docker-compose.yml` pins `postgres:16-alpine` and `caddy:2-alpine` by digest (Postgres 16.15, Caddy 2.11.7; Dependabot proposes new digests of the same tags). The changed image reference can make the first deploy recreate the db container even when the image is the one already running: a short database restart during that deploy. The `pgdata` volume and its data stay. A host whose Postgres differs from the pinned digest gets the pinned 16.x on that deploy.
+- **Duty plans:** a start or end time that the clock change skips or repeats (02:00–02:59 on those two nights) is refused with the usual clock-change message, in the editor and in "copy week". It stays as typed until corrected; existing shifts are unchanged.
+- **Dates:** an instant on an impossible day (`2026-02-30T…`) is refused everywhere, as the cms parser already did.
+- **Kudos:** a message has at most 1,000 characters (the cms answers 400 above it).
+- **Invitations:** more than 100 addresses are refused as a whole, with the text kept; blank lines do not count.
+- **Backup** (`infra/backup/pg-backup.sh`, hosts without `backup-run`): the uploads are captured right after the database dump, before either is encrypted, and the tar runs without network. The backup directory needs room for both plaintext artifacts at once ([OPERATIONS.md](OPERATIONS.md)).
+- **Search:** the index is uploaded in parts of at most 10 MB.
+- **Rollback** to v0.31.0 is a plain retag. The compose pins live in the checkout, not in the images: a retag keeps the pinned Postgres.
+
 **Upgrading to v0.31 (scale).** No required env, no edge change, no schema change.
 
 - **Indexes:** the first boot creates four plain indexes, `notifications (source_type, source_document_id)` and `(target_type, target_document_id)` on `comments`, `reactions` and `acknowledgements`, and logs `[document-indexes] created 4 index(es): …` once. While one builds, writes to its table wait; on a large notifications table that can take minutes, so upgrade a big installation outside working hours. Later boots create and log nothing.
