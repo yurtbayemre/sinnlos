@@ -160,6 +160,12 @@ format`: a scanner posted to a page with a made-up Server Action id,
 
 Newest first. Older releases: [archive/deployment-history.md](archive/deployment-history.md).
 
+**Upgrading to v0.33.1.** No required env, no edge change, no schema change.
+
+- **Registry mode** (`DEPLOY_IMAGE_SOURCE=registry`): `deploy.sh` drops the `ghcr.io/…:<sha>` tag once the local tags hold a pulled image, so the prune of old SHA tags removes old pulled images too (#210). Images pulled by v0.33.0 keep their `ghcr.io` tag: list them with `docker images ghcr.io/yurtbayemre/sinnlos-*` and remove those no container uses with `docker image rm <ref>` (only untags while a local tag still names the image).
+- **Tests only:** the `token-version` integration test counts only its own schema's lock waits (#209).
+- **Rollback** to v0.33.0 is a plain retag.
+
 **Upgrading to v0.33.** No required env, no edge change, no schema change.
 
 - **Visibility at any size (#175):** the read rules (announcements, documents, quick links, polls, wiki, courses and lessons, comments and reactions) no longer stop at about 64,500 visible rows of one type (Postgres; about 31,700 on SQLite). The visible list now reaches the database as one parameter, and the rule loaders read in pages of 5,000. Who sees what is unchanged.
