@@ -16,6 +16,9 @@
  *   5. one pnpm version everywhere (packageManager, CI, both images), and
  *      pnpm 10's build-script allowlist names the dependencies that need
  *      their install scripts.
+ *   6. every compose image runs at a digest (v0.32), CI's edge check runs
+ *      the caddy the compose file pins, and Dependabot proposes new digests
+ *      of the same tags, never a Postgres or Caddy major.
  */
 import { readFileSync, readdirSync } from "node:fs";
 import { describe, expect, it } from "vitest";
@@ -187,5 +190,38 @@ describe(".dockerignore", () => {
     ".e2e",
   ])("excludes %s", (pattern) => {
     expect(patterns).toContain(pattern);
+  });
+});
+
+describe("compose images (v0.32, #196)", () => {
+  const compose = read("./docker-compose.yml");
+  const images = [...compose.matchAll(/^ {4}image: (\S+)$/gm)].map((match) => match[1]);
+
+  it("pins every image of the compose file by digest, postgres to production's 16.15", () => {
+    expect(images.length).toBeGreaterThanOrEqual(3);
+    for (const image of images) expect(image).toMatch(/^[\w./-]+:[\w.-]+@sha256:[0-9a-f]{64}$/);
+    expect(images).toContain(
+      "postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea",
+    );
+    expect(images.some((image) => image.startsWith("caddy:2-alpine@sha256:"))).toBe(true);
+  });
+
+  it("lets CI's edge check run the caddy the compose file pins, never a floating tag", () => {
+    const ci = read("../.github/workflows/ci.yml");
+    expect(ci).not.toMatch(/caddy:2-alpine(?!@)/);
+    expect(ci).toContain(`image="$(jq -er '.services.caddy.image' <<<"\${config}")"`);
+    expect(ci.match(/Caddyfile:ro" "\$\{image\}"/g)).toHaveLength(2);
+  });
+
+  it("has Dependabot propose new digests of the same tags, never a Postgres or Caddy major", () => {
+    const dependabot = read("../.github/dependabot.yml");
+    const entry = dependabot.slice(dependabot.indexOf("package-ecosystem: docker-compose"));
+    expect(entry).toMatch(/^package-ecosystem: docker-compose\n {4}directory: \/infra\n/);
+    const block = entry.slice(0, entry.indexOf("\n\n"));
+    for (const name of ["postgres", "caddy"]) {
+      expect(block).toContain(
+        `- dependency-name: ${name}\n        update-types: ["version-update:semver-major"]`,
+      );
+    }
   });
 });
