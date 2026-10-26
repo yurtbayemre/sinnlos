@@ -169,7 +169,7 @@ Newest first. Older releases: [archive/deployment-history.md](archive/deployment
 - **/manage lists:** without a status filter, a moderator's list reads only the shown page in full.
 - **Search** (Meilisearch on): each minute reads a cheap probe and loads the content only when it moved, at least once an hour. Publishing, unpublishing, deleting and scheduled runs still show within a minute; a raw database write that changes text in place shows within the hour ([OPERATIONS.md](OPERATIONS.md#meilisearch-optional-search)).
 - **Data export:** unrelated files and duty plans no longer count against the 100,000-row limit; only the person's rows do.
-- **Rollback** to v0.30.1 is a plain retag. The indexes stay (v0.30.1 ignores them); the two new routes answer 404 there, and the next forward boot grants them again.
+- **Rollback** to v0.30.1 is a plain retag. The indexes stay (v0.30.1 ignores them); the two new routes do not exist there (404 or 405), each v0.30.1 boot removes one stored permission row per unknown action, and the next forward boot grants the missing rows again.
 
 **Upgrading to v0.30.1.** No required env, no edge change, no schema change.
 
