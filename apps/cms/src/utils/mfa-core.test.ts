@@ -43,20 +43,15 @@ describe("recovery codes", () => {
     expect(hashRecoveryCode("abcd-efgh-ijkl-mnop")).toBe(hashRecoveryCode(" ABCDEFGHIJKLMNOP "));
   });
 
-  it("recognises the new codes and the 10-character ones issued before v0.30, in any spelling", () => {
-    expect(hashRecoveryCode("abcde-fghij")).toBe(hashRecoveryCode(" ABCDEFGHIJ "));
+  it("recognises the codes in any spelling and refuses the 10-character ones of before v0.30", () => {
     expect(secondFactorKind("123456")).toBe("totp");
-    for (const code of [
-      "ABCDE-23456",
-      "abcde23456",
-      "abcd-efgh-ijkl-mnop",
-      "ABCDEFGHIJKLMNOP",
-      "abcd efgh ijkl mnop",
-    ]) {
+    for (const code of ["abcd-efgh-ijkl-mnop", "ABCDEFGHIJKLMNOP", "abcd efgh ijkl mnop"]) {
       expect(secondFactorKind(code), code).toBe("recovery");
     }
     for (const code of [
       "1234567",
+      "ABCDE-23456",
+      "abcde23456",
       "abcde-2345",
       "abcd-efgh-ijkl-mno",
       "abcd-efgh-ijkl-mnop-q",
