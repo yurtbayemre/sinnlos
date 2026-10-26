@@ -57,7 +57,6 @@ export interface OidcConfig {
   /** OIDC_ALLOW_HTTP=1: http issuer and endpoints (development and staging only). */
   allowHttp: boolean;
   localEnabled: boolean;
-  localRegistration: boolean;
 }
 
 export type OidcSettings = OidcConfig | { enabled: false };
@@ -181,7 +180,6 @@ export function parseOidcConfig(env: Env = process.env): OidcSettings {
     sessionTtlSeconds: sessionTtlSeconds as number,
     allowHttp,
     localEnabled: localSignInEnabled(env),
-    localRegistration: env.LOCAL_REGISTRATION === "1",
   };
 }
 
@@ -192,13 +190,6 @@ export function oidcConfigWarnings(settings: OidcSettings): string[] {
   if (settings.allowHttp) {
     warnings.push(
       "[oidc] OIDC_ALLOW_HTTP=1: the issuer, its discovery document and its signing keys may be fetched over plain http. Development and staging only.",
-    );
-  }
-  if (settings.localRegistration) {
-    warnings.push(
-      "[oidc] LOCAL_REGISTRATION=1 next to OIDC sign-in: anyone can register a local account. " +
-        "An OIDC user whose e-mail was registered first gets 409 oidc_account_exists; " +
-        "check who registered that account before an admin binds it (docs/SSO.md, the 409 procedure).",
     );
   }
   return warnings;

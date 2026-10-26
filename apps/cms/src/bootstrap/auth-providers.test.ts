@@ -133,18 +133,12 @@ describe("syncAuthProviders", () => {
 
 describe("checkEntraConfig / reportEntraStatus", () => {
   it("throws for an enabled but invalid configuration", () => {
-    const log = { info: vi.fn(), warn: vi.fn() };
-    expect(() => checkEntraConfig(log, { ...ENABLED, MS_TENANT_ID: "common" })).toThrow(
+    expect(() => checkEntraConfig({ ...ENABLED, MS_TENANT_ID: "common" })).toThrow(
       EntraConfigError,
     );
-    expect(() => checkEntraConfig(log, { MS_TENANT_ID: "common" })).not.toThrow();
-  });
-
-  it("warns about LOCAL_REGISTRATION=1 next to Entra", () => {
-    const log = { info: vi.fn(), warn: vi.fn() };
-    checkEntraConfig(log, { ...ENABLED, LOCAL_REGISTRATION: "1" });
-    expect(log.warn).toHaveBeenCalledTimes(1);
-    expect(log.warn).toHaveBeenCalledWith(expect.stringMatching(/^\[entra\] LOCAL_REGISTRATION=1/));
+    expect(() => checkEntraConfig({ MS_TENANT_ID: "common" })).not.toThrow();
+    // LOCAL_REGISTRATION is bootstrap's obsolete-variable warning only (v0.32, #189).
+    expect(checkEntraConfig({ ...ENABLED, LOCAL_REGISTRATION: "1" }).enabled).toBe(true);
   });
 
   it("logs exactly one status line", () => {
