@@ -90,7 +90,11 @@ interface FakeHost extends ExchangeHost {
     transactions: number;
     /** Row ids locked FOR UPDATE. */
     locks: unknown[];
+    /** The statements of every lock (schema, table, column). */
+    lockSql: string[];
   };
+  /** Runs before each row lock (tests hook ordering here). */
+  beforeLock?: () => void;
 }
 
 /** The slice of Strapi the exchange uses, over an array of user rows. */
@@ -102,6 +106,7 @@ function fakeHost(seed: Row[] = [], options: FakeOptions = {}): FakeHost {
     createInTransaction: 0,
     transactions: 0,
     locks: [],
+    lockSql: [],
   };
   let identityMisses = options.identityMisses ?? 0;
   let nextId = 100;
@@ -165,7 +170,7 @@ function fakeHost(seed: Row[] = [], options: FakeOptions = {}): FakeHost {
     update: () => Promise.reject(new Error("fake db: roles.update")),
   };
 
-  return {
+  const host: FakeHost = {
     users,
     calls,
     db: {
@@ -174,38 +179,37 @@ function fakeHost(seed: Row[] = [], options: FakeOptions = {}): FakeHost {
         if (uid === ROLE_UID) return roleQuery;
         throw new Error(`fake db: no model ${uid}`);
       },
-      async transaction<T>(callback: () => Promise<T>): Promise<T> {
+      async transaction<T>(
+        callback: (scope: {
+          trx: { raw(sql: string, bindings: readonly unknown[]): unknown };
+        }) => Promise<T>,
+      ): Promise<T> {
         calls.transactions += 1;
         depth += 1;
+        // The transaction's runner: the user row lock (utils/mfa-core.ts lockUserRow) runs on it.
+        const trx = {
+          raw: async (sql: string, bindings: readonly unknown[]) => {
+            if (depth === 0) throw new Error("fake trx: a lock outside a transaction");
+            host.beforeLock?.();
+            calls.lockSql.push(sql);
+            calls.locks.push(bindings[0]);
+            return [];
+          },
+        };
         try {
-          return await callback();
+          return await callback({ trx });
         } finally {
           depth -= 1;
         }
       },
-      queryBuilder(uid: string) {
-        if (uid !== USER_UID) throw new Error(`fake queryBuilder: ${uid}`);
-        let id: unknown;
-        let lock = false;
-        const builder = {
-          select: () => builder,
-          where: (where: Where) => {
-            id = where.id;
-            return builder;
-          },
-          forUpdate: () => {
-            lock = true;
-            return builder;
-          },
-          execute: async () => {
-            if (depth === 0) throw new Error("fake queryBuilder: a lock outside a transaction");
-            if (lock) calls.locks.push(id);
-            return [];
-          },
-        };
-        return builder;
-      },
       dialect: { client: options.dialect ?? "sqlite" },
+      getSchemaName: () => "intranet",
+      metadata: {
+        get: (uid: string) => {
+          if (uid !== USER_UID) throw new Error(`fake metadata: ${uid}`);
+          return { tableName: "up_users", attributes: { id: { columnName: "id" } } };
+        },
+      },
     },
     documents(uid: string) {
       if (uid !== DEPARTMENT_UID && uid !== USER_UID) throw new Error(`fake documents: ${uid}`);
@@ -229,6 +233,7 @@ function fakeHost(seed: Row[] = [], options: FakeOptions = {}): FakeHost {
       error: vi.fn<(message: string) => void>(),
     },
   };
+  return host;
 }
 
 const ENV = {
@@ -452,6 +457,14 @@ describe("runEntraExchange: role writes are atomic (spec I)", () => {
       // transaction under the row lock, utils/unblocked-write.ts; never the role's,
       // so a failing profile write cannot abort the admission).
       expect(host.calls.locks, dialect).toEqual(dialect === "postgres" ? [7, 7] : []);
+      // One lock for both (v0.32, #190): schema-qualified, on the transaction it was given.
+      expect(new Set(host.calls.lockSql), dialect).toEqual(
+        new Set(
+          dialect === "postgres"
+            ? ['SELECT 1 FROM "intranet"."up_users" WHERE "id" = ? FOR UPDATE']
+            : [],
+        ),
+      );
       expect(host.calls.transactions, dialect).toBeGreaterThan(1);
     }
   });
@@ -497,16 +510,7 @@ describe("runEntraExchange: role writes are atomic (spec I)", () => {
     });
     try {
       const host = fakeHost([entraRow()], { dialect: "postgres" });
-      const queryBuilder = host.db.queryBuilder.bind(host.db);
-      host.db.queryBuilder = (uid: string) => {
-        const builder = queryBuilder(uid);
-        const execute = builder.execute;
-        builder.execute = async () => {
-          order.push("row");
-          return execute();
-        };
-        return builder;
-      };
+      host.beforeLock = () => order.push("row");
       expect((await run(host, { ...PERSON, roles: ["Intranet.Editor"] })).status).toBe(200);
       // Then the profile sync's own row lock (v0.28, utils/unblocked-write.ts).
       expect(order).toEqual(["directory", "row", "row"]);

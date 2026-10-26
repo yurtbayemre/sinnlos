@@ -1,13 +1,16 @@
 import { describe, expect, it } from "vitest";
 
 import { Refusal, answerRefusals } from "./refusal";
+import { claimedVersion } from "../extensions/users-permissions/strapi-server";
 import {
   hashRecoveryCode,
+  lockUserRow,
   newRecoveryCodes,
   parseMfaRequiredRoles,
   requiredMfa,
   roleRequiresMfa,
   secondFactorKind,
+  versionOf,
 } from "./mfa-core";
 import { isLocalUnbound, linkMatches, linkPurpose, linkUserId } from "./password-link";
 import { accountMailReady, renderAccountMail } from "./account-mail";
@@ -142,5 +145,38 @@ describe("answerRefusals", () => {
         throw new Error("boom");
       }),
     ).rejects.toThrow("boom");
+  });
+});
+
+describe("one user row lock and one version reading (v0.32, #190)", () => {
+  const host = (client: string, schema: string | null) => ({
+    db: {
+      dialect: { client },
+      getSchemaName: () => schema,
+      metadata: {
+        get: () => ({ tableName: "up_users", attributes: { id: { columnName: "id" } } }),
+      },
+    },
+  });
+
+  it("locks the row on the transaction it is given, schema-qualified, on Postgres only", async () => {
+    const statements: [string, readonly unknown[]][] = [];
+    const trx = {
+      raw: async (sql: string, bindings: readonly unknown[]) => statements.push([sql, bindings]),
+    };
+    await lockUserRow(host("postgres", "intranet"), trx, 7);
+    await lockUserRow(host("postgres", null), trx, 8);
+    await lockUserRow(host("sqlite", null), trx, 9);
+    expect(statements).toEqual([
+      ['SELECT 1 FROM "intranet"."up_users" WHERE "id" = ? FOR UPDATE', [7]],
+      ['SELECT 1 FROM "public"."up_users" WHERE "id" = ? FOR UPDATE', [8]],
+    ]);
+  });
+
+  it("reads a version the same way everywhere: digits as a string count", () => {
+    expect(versionOf("3")).toBe(3);
+    expect(versionOf(3)).toBe(3);
+    for (const value of [-1, 1.5, "x", null, undefined]) expect(versionOf(value)).toBe(0);
+    expect(claimedVersion({ tv: "3" })).toBe(3);
   });
 });

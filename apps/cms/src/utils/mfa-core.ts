@@ -200,10 +200,26 @@ export function secondFactorKind(input: string): "totp" | "recovery" | null {
   return null;
 }
 
-/** Locks the user row for the rest of the transaction (Postgres); SQLite has one writer anyway. */
+/** What a user row lock reads of the Strapi instance (#190: every caller fits it). */
+export interface UserLockHost {
+  db: Pick<MfaHost["db"], "dialect" | "getSchemaName" | "metadata">;
+}
+
+/** The transaction the lock runs in (`db.transaction(({ trx }) => …)`). */
+export interface UserLockTrx {
+  raw(sql: string, bindings: readonly unknown[]): unknown;
+}
+
+/**
+ * Locks the user row for the rest of the transaction `trx` (Postgres);
+ * SQLite has one writer anyway. The one copy of this lock (v0.32, #190):
+ * the second factor, the password, the block and anonymisation, the
+ * tombstone guard of user writes, the identity-provider role write and the
+ * own-row write while unblocked all take it.
+ */
 export async function lockUserRow(
-  strapi: MfaHost,
-  trx: { raw(sql: string, bindings: unknown[]): unknown },
+  strapi: UserLockHost,
+  trx: UserLockTrx,
   id: number,
 ): Promise<void> {
   if (strapi.db.dialect.client !== "postgres") return;
