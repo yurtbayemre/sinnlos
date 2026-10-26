@@ -89,8 +89,11 @@ export function UserDataProtection({
   // Notifications still naming the person when the request finished (v0.30:
   // the rewrite runs after the anonymisation committed; the nightly sweep
   // repeats what is left). A snapshot count, read as it comes.
-  const remaining =
-    (done as { notifications?: { remaining?: number } } | null)?.notifications?.remaining ?? 0;
+  // null: the final count failed (some may be pending). Typed locally
+  // until the cms contract (lane H1) is merged.
+  const notifications = (done as { notifications?: { remaining: number | null } } | null)
+    ?.notifications;
+  const remaining = notifications ? notifications.remaining : 0;
 
   return (
     <section aria-labelledby="user-data-protection" className="space-y-3 rounded-xl border p-4">
@@ -181,7 +184,11 @@ export function UserDataProtection({
       {done && (
         <p role="status" className="text-sm text-muted-foreground">
           {t("anonymise.done")}
-          {remaining > 0 && <> {t("anonymise.remaining", { count: remaining })}</>}
+          {remaining === null ? (
+            <> {t("anonymise.remainingUnknown")}</>
+          ) : (
+            remaining > 0 && <> {t("anonymise.remaining", { count: remaining })}</>
+          )}
           {done.avatar && !done.avatar.removed && (
             <> {t("anonymise.avatarKept", { id: done.avatar.id })}</>
           )}

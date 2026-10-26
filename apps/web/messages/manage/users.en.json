@@ -163,7 +163,8 @@
       "blockFirst": "To anonymise this person, block them first (in the form above).",
       "done": "The person is anonymised.",
       "avatarKept": "The profile picture (file {id}) is still used elsewhere or could not be removed: please check the Media Library.",
-      "remaining": "{count, plural, one {One notification is} other {# notifications are}} still pending; the nightly clean-up repeats it."
+      "remaining": "{count, plural, one {One notification is} other {# notifications are}} still pending; the nightly clean-up repeats it.",
+      "remainingUnknown": "Some notifications may still be pending; the nightly clean-up repeats it."
     },
     "error": {
       "notBlocked": "The person is not blocked. Block them first.",

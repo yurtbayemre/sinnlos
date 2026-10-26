@@ -22,6 +22,8 @@ const shim = vi.hoisted(() => ({
   index: 0,
   seed: new Map<number, unknown>(),
   updates: [] as unknown[],
+  /** [state index, value] of every update. */
+  sets: [] as [number, unknown][],
   transitions: [] as unknown[],
 }));
 
@@ -30,7 +32,13 @@ vi.mock("react", async (importOriginal) => ({
   useState: (initial: unknown) => {
     const index = shim.index++;
     const value = shim.seed.has(index) ? shim.seed.get(index) : initial;
-    return [value, (next: unknown) => shim.updates.push(next)];
+    return [
+      value,
+      (next: unknown) => {
+        shim.updates.push(next);
+        shim.sets.push([index, next]);
+      },
+    ];
   },
   useTransition: () => [false, (run: () => unknown) => shim.transitions.push(run())],
   useCallback: (fn: unknown) => fn,
@@ -56,7 +64,7 @@ vi.mock("./unsaved-guard", () => ({
   confirmLeave: () => guard.leave,
   useUnsavedGuard: () => () => {},
 }));
-vi.mock("./flash", () => ({ useManageFlash: () => () => {} }));
+vi.mock("./flash", () => ({ useManageFlash: () => () => {}, showFlash: () => {} }));
 const failure = () => Promise.reject(new TypeError("fetch failed"));
 vi.mock("@/lib/manage/user-actions", () => ({
   sendLink: vi.fn(failure),
@@ -73,7 +81,15 @@ vi.mock("@/lib/manage/document-actions", () => ({
   discardDocument: vi.fn(),
   deleteDocument: vi.fn(),
 }));
-vi.mock("@/lib/manage/upload", () => ({ uploadDocumentFile: writes.upload }));
+vi.mock("@/lib/manage/upload", () => ({
+  uploadDocumentFile: writes.upload,
+  uploadImageFile: writes.upload,
+}));
+vi.mock("@/lib/manage/org-actions", () => ({
+  createOrg: vi.fn(),
+  saveOrg: vi.fn(),
+  deleteOrg: vi.fn(async () => ({ ok: true })),
+}));
 vi.mock("@/lib/notification-actions", () => ({
   markNotificationsRead: writes.markRead,
   markAllNotificationsRead: vi.fn(),
@@ -84,6 +100,7 @@ const { UserDataProtection } = await import("./user-data-protection");
 const { RenewButton } = await import("@/components/marketplace/renew-button");
 const { DocumentEditor } = await import("./document-editor");
 const { NotificationBell } = await import("@/components/notifications/notification-bell");
+const { OrgEditor } = await import("./org-editor");
 
 type Props = Record<string, unknown> & { children?: ReactNode };
 
@@ -111,6 +128,7 @@ function shallow<P>(component: (props: P) => ReactNode, props: P, seed: unknown[
 
 beforeEach(() => {
   shim.updates = [];
+  shim.sets = [];
   shim.transitions = [];
   guard.leave = true;
   vi.clearAllMocks();
@@ -195,7 +213,10 @@ describe("an action whose call rejects", () => {
 
 describe("the anonymisation's result", () => {
   /** The status line after an anonymisation whose rewrite left `remaining` notifications. */
-  const status = (remaining: number, avatar: { id: number; removed: boolean } | null = null) => {
+  const status = (
+    remaining: number | null,
+    avatar: { id: number; removed: boolean } | null = null,
+  ) => {
     const done = {
       id: 7,
       anonymisedAt: "2026-10-26T10:00:00.000Z",
@@ -214,6 +235,9 @@ describe("the anonymisation's result", () => {
   it("names the notifications still pending, chosen by the count alone", () => {
     expect(status(0)).not.toContain("anonymise.remaining");
     expect(status(2)).toContain("anonymise.remaining#2");
+    // The final count failed: some may be pending, without a number.
+    expect(status(null)).toContain("anonymise.remainingUnknown");
+    expect(status(null)).not.toContain("anonymise.remaining#");
   });
 
   it("keeps the done sentence when the profile picture stays, and says so after it", () => {
@@ -294,5 +318,37 @@ describe("the bell with an editor's unsaved changes", () => {
   it("follows the link on OK", () => {
     select();
     expect(router.push).toHaveBeenCalledWith("/announcements/a1");
+  });
+});
+
+describe("deleting a department with an image picked", () => {
+  it("drops the pick, so the form is clean while the list is on its way", async () => {
+    // The run records the control that started it (an HTMLElement check).
+    vi.stubGlobal("HTMLElement", class {});
+    const editable = {
+      documentId: "deptdesign00000000000000",
+      version: "3",
+      status: "published",
+      publishedAt: null,
+      updatedAt: null,
+      roleClass: "moderator",
+      name: "Design",
+      description: null,
+      color: null,
+      headerImage: null,
+      head: null,
+    } as unknown as Parameters<typeof OrgEditor>[0]["editable"];
+    const banner = new File(["png"], "banner.png", { type: "image/png" });
+    // States: values, initial, picked (index 2).
+    const tree = shallow(OrgEditor, { type: "department", editable }, [
+      undefined,
+      undefined,
+      banner,
+    ]);
+    (find(tree, (p) => p.confirmLabel === "confirm.deleteConfirm").onConfirm as () => void)();
+    await Promise.allSettled(shim.transitions);
+    expect(router.push).toHaveBeenCalledWith("/departments");
+    expect(shim.sets).toContainEqual([2, null]);
+    vi.unstubAllGlobals();
   });
 });

@@ -153,7 +153,10 @@ export function OrgEditor({
     setConfirmDelete(false);
     editor.run("delete", (version) => deleteOrg(type, editable.documentId, version), {
       onSuccess: () => {
+        // Clean also while the list is on its way: a picked image goes too.
         setInitial(values);
+        setPicked(null);
+        setPickError(null);
         showFlash(tc("success.deleted"));
         releaseUnsaved();
         router.push(LIST_PATH[type]);
