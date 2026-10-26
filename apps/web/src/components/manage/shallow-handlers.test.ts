@@ -1,15 +1,22 @@
 import { isValidElement, type ReactElement, type ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { UserAdminDetail } from "@sinnlos/domain";
+import type { AreaAccess } from "@/lib/manage/access";
+import type { Notification } from "@/lib/types";
 
 /**
- * v0.30: the five buttons whose Server Action call can reject (a deploy
- * restart, a lost connection) show their inline failure, and the rejection
- * never escapes the transition (it would replace the page with the error
- * page). The components run under a shallow hook shim: each one is called
+ * v0.30 handlers driven under a shallow hook shim: each component is called
  * as a function, its handlers are taken from the elements it returns (the
- * dialogs are not rendered), and every state update is recorded. The
- * same shim shows the anonymisation's result text.
+ * dialogs and menus are not rendered), and every state update and
+ * transition is recorded.
+ *
+ *  - The five buttons whose Server Action call can reject (a deploy
+ *    restart, a lost connection) show their inline failure, and the
+ *    rejection never escapes the transition (it would replace the page with
+ *    the error page).
+ *  - The anonymisation's result text.
+ *  - Enter in the document form of a create whose options failed.
+ *  - The bell asks before it leaves an editor with unsaved changes.
  */
 const shim = vi.hoisted(() => ({
   index: 0,
@@ -26,12 +33,30 @@ vi.mock("react", async (importOriginal) => ({
     return [value, (next: unknown) => shim.updates.push(next)];
   },
   useTransition: () => [false, (run: () => unknown) => shim.transitions.push(run())],
+  useCallback: (fn: unknown) => fn,
+  useMemo: (make: () => unknown) => make(),
+  useRef: (current: unknown) => ({ current }),
+  useEffect: () => {},
+  useId: () => "id",
 }));
 vi.mock("next-intl", () => ({
   useTranslations: () => (key: string, values?: { count?: number }) =>
     values?.count === undefined ? key : `${key}#${values.count}`,
   useFormatter: () => ({ dateTime: () => "" }),
+  useLocale: () => "en",
+  useTimeZone: () => "Europe/Berlin",
 }));
+const router = vi.hoisted(() => ({ push: vi.fn(), replace: vi.fn(), refresh: vi.fn() }));
+vi.mock("next/navigation", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("next/navigation")>()),
+  useRouter: () => router,
+}));
+const guard = vi.hoisted(() => ({ leave: true }));
+vi.mock("./unsaved-guard", () => ({
+  confirmLeave: () => guard.leave,
+  useUnsavedGuard: () => () => {},
+}));
+vi.mock("./flash", () => ({ useManageFlash: () => () => {} }));
 const failure = () => Promise.reject(new TypeError("fetch failed"));
 vi.mock("@/lib/manage/user-actions", () => ({
   sendLink: vi.fn(failure),
@@ -40,10 +65,25 @@ vi.mock("@/lib/manage/user-actions", () => ({
   anonymiseUser: vi.fn(failure),
 }));
 vi.mock("@/lib/classified-actions", () => ({ renewClassified: vi.fn(failure) }));
+const writes = vi.hoisted(() => ({ save: vi.fn(), upload: vi.fn(), markRead: vi.fn() }));
+vi.mock("@/lib/manage/document-actions", () => ({
+  saveDocument: writes.save,
+  publishDocument: vi.fn(),
+  unpublishDocument: vi.fn(),
+  discardDocument: vi.fn(),
+  deleteDocument: vi.fn(),
+}));
+vi.mock("@/lib/manage/upload", () => ({ uploadDocumentFile: writes.upload }));
+vi.mock("@/lib/notification-actions", () => ({
+  markNotificationsRead: writes.markRead,
+  markAllNotificationsRead: vi.fn(),
+}));
 
 const { UserAccountActions } = await import("./user-account-actions");
 const { UserDataProtection } = await import("./user-data-protection");
 const { RenewButton } = await import("@/components/marketplace/renew-button");
+const { DocumentEditor } = await import("./document-editor");
+const { NotificationBell } = await import("@/components/notifications/notification-bell");
 
 type Props = Record<string, unknown> & { children?: ReactNode };
 
@@ -68,6 +108,13 @@ function shallow<P>(component: (props: P) => ReactNode, props: P, seed: unknown[
   shim.seed = new Map(seed.flatMap((value, i) => (value === undefined ? [] : [[i, value]])));
   return component(props);
 }
+
+beforeEach(() => {
+  shim.updates = [];
+  shim.transitions = [];
+  guard.leave = true;
+  vi.clearAllMocks();
+});
 
 const person = (patch: Partial<UserAdminDetail>) =>
   ({
@@ -138,11 +185,6 @@ const cases: { name: string; press: () => void; shows: unknown }[] = [
 ];
 
 describe("an action whose call rejects", () => {
-  beforeEach(() => {
-    shim.updates = [];
-    shim.transitions = [];
-  });
-
   it.each(cases)("$name shows its inline failure", async ({ press, shows }) => {
     press();
     const settled = await Promise.allSettled(shim.transitions);
@@ -153,11 +195,11 @@ describe("an action whose call rejects", () => {
 
 describe("the anonymisation's result", () => {
   /** The status line after an anonymisation whose rewrite left `remaining` notifications. */
-  const status = (remaining: number) => {
+  const status = (remaining: number, avatar: { id: number; removed: boolean } | null = null) => {
     const done = {
       id: 7,
       anonymisedAt: "2026-10-26T10:00:00.000Z",
-      avatar: null,
+      avatar,
       notifications: { rewritten: 3, remaining },
     };
     const tree = shallow(
@@ -172,5 +214,85 @@ describe("the anonymisation's result", () => {
   it("names the notifications still pending, chosen by the count alone", () => {
     expect(status(0)).not.toContain("anonymise.remaining");
     expect(status(2)).toContain("anonymise.remaining#2");
+  });
+
+  it("keeps the done sentence when the profile picture stays, and says so after it", () => {
+    for (const remaining of [0, 2]) {
+      const kept = status(remaining, { id: 5, removed: false });
+      expect(kept).toContain("anonymise.done");
+      expect(kept).toContain("anonymise.avatarKept");
+      expect(kept.includes("anonymise.remaining")).toBe(remaining > 0);
+    }
+    expect(status(0, { id: 5, removed: true })).not.toContain("anonymise.avatarKept");
+  });
+});
+
+describe("Enter in the document form of a create whose options failed", () => {
+  const access = (roleClass: AreaAccess["roleClass"]): AreaAccess => ({
+    area: "documents",
+    verbs: ["create", "edit", "publish", "unpublish", "discard"],
+    scope: roleClass === "moderator" ? "any" : "ownDepartment",
+    roleClass,
+  });
+  /** Submits the form with a PDF picked (the editor's first state). */
+  const submit = (roleClass: AreaAccess["roleClass"]) => {
+    const tree = shallow(
+      DocumentEditor,
+      {
+        editable: null,
+        access: access(roleClass),
+        timeZone: "Europe/Berlin",
+        departments: [],
+        optionsFailed: true,
+        optionsTruncated: false,
+        ownDepartment:
+          roleClass === "departmentAuthor"
+            ? { documentId: "deptengineering000000000", name: "Engineering" }
+            : null,
+      },
+      [new File(["%PDF-1.7"], "policy.pdf", { type: "application/pdf" })],
+    );
+    const preventDefault = vi.fn();
+    (find(tree, (p) => "onSubmit" in p).onSubmit as (event: object) => void)({ preventDefault });
+    expect(preventDefault).toHaveBeenCalledOnce();
+  };
+
+  it("uploads and saves nothing for a moderator, whose targeting failed", () => {
+    submit("moderator");
+    expect(writes.upload).not.toHaveBeenCalled();
+    expect(writes.save).not.toHaveBeenCalled();
+  });
+
+  it("still saves for a department author, whose department is pinned", () => {
+    submit("departmentAuthor");
+    expect(writes.upload).toHaveBeenCalledOnce();
+  });
+});
+
+describe("the bell with an editor's unsaved changes", () => {
+  const notification: Notification = {
+    id: 4,
+    type: "announcement",
+    title: "News",
+    link: "/announcements/a1",
+    readAt: null,
+    createdAt: "2026-10-26T09:00:00.000Z",
+  };
+  const select = () => {
+    const tree = shallow(NotificationBell, { notifications: [notification], unreadTotal: 1 });
+    const item = (p: Props) => "onSelect" in p && JSON.stringify(p.children).includes("News");
+    (find(tree, item).onSelect as () => void)();
+  };
+
+  it("stays on Cancel: no navigation, no mark-read", () => {
+    guard.leave = false;
+    select();
+    expect(router.push).not.toHaveBeenCalled();
+    expect(writes.markRead).not.toHaveBeenCalled();
+  });
+
+  it("follows the link on OK", () => {
+    select();
+    expect(router.push).toHaveBeenCalledWith("/announcements/a1");
   });
 });

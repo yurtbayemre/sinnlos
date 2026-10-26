@@ -180,10 +180,11 @@ export function UserDataProtection({
 
       {done && (
         <p role="status" className="text-sm text-muted-foreground">
-          {done.avatar && !done.avatar.removed
-            ? t("anonymise.doneAvatarKept", { id: done.avatar.id })
-            : t("anonymise.done")}
+          {t("anonymise.done")}
           {remaining > 0 && <> {t("anonymise.remaining", { count: remaining })}</>}
+          {done.avatar && !done.avatar.removed && (
+            <> {t("anonymise.avatarKept", { id: done.avatar.id })}</>
+          )}
         </p>
       )}
     </section>

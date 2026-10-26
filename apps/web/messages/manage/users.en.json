@@ -162,7 +162,7 @@
       "confirm": "Anonymise for good",
       "blockFirst": "To anonymise this person, block them first (in the form above).",
       "done": "The person is anonymised.",
-      "doneAvatarKept": "The person is anonymised. The profile picture (file {id}) is still used elsewhere or could not be removed: please check the Media Library.",
+      "avatarKept": "The profile picture (file {id}) is still used elsewhere or could not be removed: please check the Media Library.",
       "remaining": "{count, plural, one {One notification is} other {# notifications are}} still pending; the nightly clean-up repeats it."
     },
     "error": {
