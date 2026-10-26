@@ -91,7 +91,10 @@ beforeEach(() => {
 describe("course report: who reads what", () => {
   it("gives admin_role every course with every learner it is for", async () => {
     const { actions, ctx } = await setup("admin_role");
+    const before = vi.mocked(roster.loadLearners).mock.calls.length;
     const body = (await actions.report(ctx)) as TrainingReportSummaryResponse;
+    // One read of the learners for the whole page, not one per course (v0.32, #179).
+    expect(vi.mocked(roster.loadLearners).mock.calls.length - before).toBe(1);
     expect(ctx.set).toHaveBeenCalledWith("Cache-Control", "private, no-store");
     expect(body.data.scope).toBe("all");
     expect(body.data.courses.map((c) => [c.title, c.counts.total])).toEqual([
@@ -104,7 +107,9 @@ describe("course report: who reads what", () => {
   it("gives a head or lead their department's learners and the courses meant for it", async () => {
     for (const role of ["department_head", "team_lead"]) {
       const office = await setup(role, { id: BUERO, name: "Büro" });
+      const before = vi.mocked(roster.loadLearners).mock.calls.length;
       const body = (await office.actions.report(office.ctx)) as TrainingReportSummaryResponse;
+      expect(vi.mocked(roster.loadLearners).mock.calls.length - before).toBe(1);
       expect(body.data).toMatchObject({ scope: "department", department: "Büro" });
       expect(body.data.courses.map((c) => [c.title, c.counts.total])).toEqual([["Brandschutz", 1]]);
       expect(roster.loadLearners).toHaveBeenLastCalledWith(expect.anything(), BUERO);
