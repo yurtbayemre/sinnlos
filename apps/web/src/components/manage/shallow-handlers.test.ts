@@ -190,7 +190,8 @@ const cases: { name: string; press: () => void; shows: unknown }[] = [
       );
       (find(tree, (p) => p.children === "anonymise.confirm").onClick as () => void)();
     },
-    shows: "error.failed",
+    // It may have committed before the answer was lost (v0.30).
+    shows: "error.uncertain",
   },
   {
     name: "renewing an ad",
@@ -208,6 +209,33 @@ describe("an action whose call rejects", () => {
     const settled = await Promise.allSettled(shim.transitions);
     expect(settled.map((result) => result.status)).toEqual(["fulfilled"]);
     expect(shim.updates).toContainEqual(shows);
+  });
+});
+
+describe("an anonymisation without an answer", () => {
+  it("reads the account again, and only then; a refusal keeps its own text", async () => {
+    const actions = await import("@/lib/manage/user-actions");
+    const run = vi.mocked(actions.anonymiseUser);
+    for (const [answer, shows, refreshed] of [
+      [{ ok: false, code: "unavailable" }, "error.uncertain", true],
+      [{ ok: false, code: "anonymised" }, "error.anonymised", true],
+      [{ ok: false, code: "confirm" }, "error.confirm", false],
+      [{ ok: false, code: "notBlocked" }, "error.notBlocked", false],
+    ] as const) {
+      shim.updates = [];
+      shim.transitions = [];
+      router.refresh.mockClear();
+      run.mockResolvedValueOnce(answer as never);
+      const tree = shallow(
+        UserDataProtection,
+        { user: person({ blocked: true }), trainingEvidence: false },
+        [true, preview, "former"],
+      );
+      (find(tree, (p) => p.children === "anonymise.confirm").onClick as () => void)();
+      await Promise.all(shim.transitions);
+      expect(shim.updates).toContainEqual(shows);
+      expect(router.refresh).toHaveBeenCalledTimes(refreshed ? 1 : 0);
+    }
   });
 });
 

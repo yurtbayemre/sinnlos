@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { useFormatter, useTranslations } from "next-intl";
 import { Download } from "lucide-react";
 import {
@@ -46,6 +47,7 @@ export function UserDataProtection({
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<AnonymiseOutcome | null>(null);
   const [pending, startTransition] = useTransition();
+  const router = useRouter();
   const base = `/manage/users/${user.id}`;
 
   const errorText = (code: string) =>
@@ -81,7 +83,17 @@ export function UserDataProtection({
         setDone(data);
         setOpen(false);
       },
-      onFailure: (code) => setError(errorText(code)),
+      onFailure: (code) => {
+        if (code === "notBlocked" || code === "confirm") {
+          setError(errorText(code));
+          return;
+        }
+        // No answer (or an already anonymised person): the run may have
+        // committed before the answer was lost, so read the account again;
+        // an anonymised one replaces this dialog with its date.
+        router.refresh();
+        setError(code === "anonymised" ? errorText(code) : t("error.uncertain"));
+      },
     });
   };
 

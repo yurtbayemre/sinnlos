@@ -22,7 +22,9 @@ Everyday operation of an installed instance: monitoring, restore, backups, harde
 
 ### Time limits web → cms
 
-Since v0.30 every request of the web to the cms stops after 15 seconds unless it sets its own limit: the export 120 s, the anonymisation 300 s, invitations and password links 30 s (the cms waits up to 15 s for the mail server), uploads 120 s, the calendar download 15 s. A slower cms shows the fetch-error banner instead of a page that hangs. The edge must let a request run for the anonymisation's 300 s (the bundled Caddy has no limit; a host Traefik with `readTimeout: 0` neither).
+Since v0.30 every call through the web's cms client stops after 15 seconds unless it sets its own limit: the export 120 s, the anonymisation 300 s, invitations and password links 30 s (the cms waits up to 15 s for the mail server), sending an upload 120 s, the calendar download 15 s. A slower cms shows the fetch-error banner instead of a page that hangs. Some calls keep limits of their own: local sign-in 5 s, the SSO exchange 10 s, the readiness probe 3 s, the public password pages 10 s, the language switch 3 s; a file download waits up to 30 s for the cms to start answering and then streams without a limit.
+
+The edge must let a response take the anonymisation's 300 s. The bundled Caddy sets no limit. On a host Traefik the entry point's `respondingTimeouts.writeTimeout` must be 0 (its default) or above 300 s.
 
 ### `infra/ops-check.sh`
 

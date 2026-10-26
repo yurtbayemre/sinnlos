@@ -164,8 +164,8 @@ Newest first. Older releases: [archive/deployment-history.md](archive/deployment
 
 - **Deploys:** the smoke check asks `/healthz`. `--require-green-ci` needs the successful CI run for the push to `main` at the exact commit, and every push to `main` now runs the whole CI. Before `up`, deploy.sh checks `APP_TIME_ZONE` and `MFA_REQUIRED_ROLES` in the new cms image ([INSTALL.md](INSTALL.md)).
 - **Second factor:** new recovery codes have 80 bits (`xxxx-xxxx-xxxx-xxxx`). Codes issued before keep working; admins and editors get new ones by re-enrolling (an admin MFA reset, or disable and enable).
-- **Sessions:** a block in the Strapi admin panel now ends the person's sessions and links too, as one in `/manage/users` did.
-- **Uploads:** only images (not SVG), PDF, video and audio open in the browser; other files download in a sandbox. The cms refuses XML uploads; XML files uploaded before stay and download.
+- **Sessions:** a block ends the person's sessions and links wherever it is set, the Strapi admin panel included.
+- **Uploads:** PNG, JPEG, GIF, WebP and AVIF images, PDF, video and audio open in the browser; other files download. The cms refuses XML uploads; XML files uploaded before stay and download.
 - **Anonymisation** cleans other people's notifications after it committed, page by page, and reports what is still pending; the nightly sweep finishes the rest ([data-protection.md](data-protection.md)).
 - **Time limits** web → cms ([OPERATIONS.md](OPERATIONS.md#time-limits-web--cms)): the edge must allow 300 s for the anonymisation.
 - **Editors** ask before leaving with unsaved changes (links, search, the bell, sign-out; Back and Forward in browsers with the Navigation API).

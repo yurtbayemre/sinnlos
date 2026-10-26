@@ -170,7 +170,8 @@
       "notBlocked": "Die Person ist nicht gesperrt. Bitte zuerst sperren.",
       "anonymised": "Die Person ist bereits anonymisiert.",
       "confirm": "Der Benutzername stimmt nicht.",
-      "failed": "Das hat nicht geklappt. Bitte erneut versuchen."
+      "failed": "Das hat nicht geklappt. Bitte erneut versuchen.",
+      "uncertain": "Es kam keine Antwort. Die Seite zeigt jetzt den aktuellen Stand: Steht die Person als anonymisiert da, hat es geklappt; sonst bitte erneut versuchen."
     },
     "classes": {
       "reactions": "Reaktionen",

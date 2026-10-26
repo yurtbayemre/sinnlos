@@ -170,7 +170,8 @@
       "notBlocked": "The person is not blocked. Block them first.",
       "anonymised": "The person is already anonymised.",
       "confirm": "The username does not match.",
-      "failed": "That did not work. Please try again."
+      "failed": "That did not work. Please try again.",
+      "uncertain": "No answer arrived. The page now shows the current state: if the person shows as anonymised, it went through; otherwise try again."
     },
     "classes": {
       "reactions": "Reactions",

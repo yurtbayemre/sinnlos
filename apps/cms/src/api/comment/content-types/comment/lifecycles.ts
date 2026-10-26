@@ -6,6 +6,7 @@ import { NOTIFICATION_UID, buildNotification } from "../../../../utils/notify";
 import {
   ANNOUNCEMENT_FIND,
   announcementRecipients,
+  holdsGrant,
   loadRoleGrants,
   loadUserScope,
   withFreshAnnouncementFlags,
@@ -84,23 +85,27 @@ async function notifyAnnouncementAuthor(commentId: number | string): Promise<voi
  * Whether the announcement's author can still read it (v0.30). The
  * notification names the current title, and a moderator may have
  * retargeted the announcement away from its author since it was written.
- * The read policy's rule (policies/announcement-visibility.ts): admin_role
- * and editor read every announcement; anyone else needs a published row
- * that has not ended, targets them, and the announcement.find grant,
- * checked with the fan-out's own predicate for this one user
+ * Every role needs the announcement.find grant (the route checks it before
+ * the read policy). Then the read policy's rule
+ * (policies/announcement-visibility.ts): admin_role and editor read every
+ * announcement; anyone else needs a published row that has not ended and
+ * targets them, checked with the fan-out's own predicate for this one user
  * (utils/visible-ids.ts).
  */
 async function authorCanRead(announcement: any): Promise<boolean> {
   const author = announcement.author;
-  const roleType: string | null = author.role?.type ?? null;
-  if (hasRole(author, MODERATORS)) return true;
-  if (!announcement.publishedAt || isAnnouncementExpired(announcement, new Date())) return false;
-  const [scope, grants, checked] = await Promise.all([
+  const [scope, grants] = await Promise.all([
     loadUserScope(strapi, author.id),
     loadRoleGrants(strapi, [ANNOUNCEMENT_FIND]),
-    // The flags again after the relations (utils/targeting-flags.ts).
-    withFreshAnnouncementFlags(strapi, [announcement], { id: announcement.id }),
   ]);
-  const reader = { ...scope, userId: author.id, roleType };
-  return announcementRecipients(checked[0], [reader], grants.holders(ANNOUNCEMENT_FIND)).length > 0;
+  const readers = grants.holders(ANNOUNCEMENT_FIND);
+  if (!holdsGrant(scope, readers)) return false;
+  if (hasRole(author, MODERATORS)) return true;
+  if (!announcement.publishedAt || isAnnouncementExpired(announcement, new Date())) return false;
+  // The flags again after the relations (utils/targeting-flags.ts).
+  const [checked] = await withFreshAnnouncementFlags(strapi, [announcement], {
+    id: announcement.id,
+  });
+  const reader = { ...scope, userId: author.id, roleType: author.role?.type ?? null };
+  return announcementRecipients(checked, [reader], readers).length > 0;
 }

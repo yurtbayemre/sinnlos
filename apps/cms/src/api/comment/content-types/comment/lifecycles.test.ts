@@ -125,6 +125,22 @@ describe("comment afterCreate", () => {
     ]);
   });
 
+  it("an author whose role lost announcement.find is not told, a moderator included", async () => {
+    const strapi = createOrgStub({ grants: false });
+    vi.stubGlobal("strapi", strapi);
+    // carol (editor) passes the moderator bypass, dave (team lead) the targeting.
+    for (const author of [USER.carol, USER.dave]) {
+      const { documentId } = strapi.seedDocument(
+        ANNOUNCEMENT_UID,
+        { title: "Town hall", author: { id: author } },
+        { status: "published" },
+      );
+      const row = await comment(strapi, { author: USER.anna, targetDocumentId: documentId });
+      await lifecycles.afterCreate({ result: row });
+    }
+    expect(notificationRows(strapi)).toEqual([]);
+  });
+
   it("an author below the moderators is not told about an announcement that has ended", async () => {
     const strapi = createOrgStub();
     vi.stubGlobal("strapi", strapi);

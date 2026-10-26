@@ -168,9 +168,9 @@ Single sign-on users get their second factor from their identity provider.
   Activation needs a valid code **and the current password**, also in a
   restricted session; it stores the secret encrypted with Strapi's
   `admin::encryption` (`ENCRYPTION_KEY`), returns ten recovery codes once
-  (stored as hashes) and a JWT with `mfa: 1`. A recovery code has 80 bits
-  (`xxxx-xxxx-xxxx-xxxx`, v0.30); codes issued before v0.30 have 50 bits
-  (`xxxxx-xxxxx`) and keep working until the next enrolment. New codes come
+  (stored as hashes) and a JWT with `mfa: 1`. A recovery code has 16
+  characters (`xxxx-xxxx-xxxx-xxxx`, v0.30); codes issued before v0.30
+  (`xxxxx-xxxxx`) keep working until the next enrolment. New codes come
   only with an enrolment: after an admin reset, or a disable and enable.
 - **Resets.** An admin resets a user's second factor at `/manage/users`;
   a locked-out sole admin runs `infra/mfa-reset.sh <email>` on the host.
@@ -383,10 +383,10 @@ the same way.
 
 ### Token versions
 
-> **Since v0.30 a block raises the version too:** `/manage/users` did
-> already, and a block through the Content Manager or the Document Service
-> (`blocked` set to any value Strapi stores as true) now does as well, on
-> the active → blocked transition and inside the write's transaction. So a
+> **A block raises the version too,** wherever it is set (v0.30):
+> `/manage/users`, the Content Manager or the Document Service (`blocked`
+> set to any value Strapi stores as true), on the active → blocked
+> transition and inside the write's transaction. So a
 > block ends every session, password link and enrolment of that user, and
 > an unblock does not bring them back.
 
@@ -1317,9 +1317,8 @@ Since v0.28 ([data-protection.md](data-protection.md) describes the result in Ge
   `lead`/`members`) populate active people only, in every populate form
   and depth, counts included (the relation guard's query wrapper).
   `/api/me` drops a blocked manager. `/manage/users` still lists them.
-  A root sort through a directory relation (`manager`, `directReports`,
-  `head`, `members`, `lead`) answers 400 for every caller (v0.30), so the
-  order of a list cannot tell a hidden person from an empty slot.
+  A root sort through one of these relations answers 400 for every
+  caller (v0.30).
 - **Attribution.** Every other populated user (authors, organisers,
   `uploadedBy`, kudos `from`/`to`, notification actors) that is blocked
   is cut to `{ id, documentId, displayName, username, blocked }` for every
@@ -1463,11 +1462,10 @@ routes: its uploads are bound only by `deniedTypes` (below).
   content (PDF JavaScript, embedded OLE objects, ActiveX, external
   relationships, DDE fields). An image that is also a zip is stored as the
   image. Every file behind the session gate is served with
-  `X-Content-Type-Options: nosniff`. Since v0.30 only PNG, JPEG, GIF,
-  WebP, AVIF, PDF, video and audio are shown inline; every other type (SVG,
-  HTML, XML, Office files, anything unknown) goes out as `Content-Disposition:
-attachment` with `Content-Security-Policy: sandbox`, so a file uploaded
-  through the admin panel cannot run script on the intranet's origin.
+  `X-Content-Type-Options: nosniff`. Since v0.30 PNG, JPEG, GIF,
+  WebP, AVIF, PDF, video and audio are shown inline; every other type goes
+  out as a download (`Content-Disposition: attachment`,
+  `Content-Security-Policy: sandbox`).
 - **Canonical name and mime:** the stored name becomes `<stem><extension of
 the sniffed format>` and the mime the table's (core stores and serves by
   extension, so a JPEG named `x.pdf` was served as `application/pdf`). A
