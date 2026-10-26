@@ -4,24 +4,29 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createTestStrapi, testEngines, type Row, type TestStrapi } from "./harness.test.helper";
 
 /**
- * Read policies bind their visible-id lists into one SQL statement; a
- * statement with more bound values than the database's limit (Postgres
- * 65535, SQLite 32766) fails and Strapi answers 500. The guard (PL04,
- * utils/policy-query.ts fitsBindLimit) admits a list of at most the engine
- * limit minus 1000 values of headroom for the rest of the statement and
- * answers a longer one with nothing and an error log. Visible wiki pages
- * are inserted in bulk past the Document Service, in two steps:
+ * Read policies past the bind-parameter limit (#175, v0.33). A statement
+ * may bind at most 65535 parameters on Postgres and 32766 on SQLite. Up to
+ * v0.32 a visible-id list was bound one parameter per id, and a list past
+ * the limit answered nothing (fail closed). Now:
  *
- *   - one page more than the guard admits (31,767 on SQLite, 64,536 on
- *     Postgres). Still bindable: 5f2eac0 served these rows, the guard fails
- *     closed here (the accepted headroom window).
- *   - one page more than the engine can bind at all (32,767 / 65,536),
- *     where 5f2eac0 failed with a 500.
+ *   - the list reaches the reads as ONE parameter (utils/policy-query.ts
+ *     oneParamIn, through the Document Service middleware), and
+ *   - the loaders that populate read in id pages (utils/paged-read.ts), so
+ *     a populate never binds a whole type either.
+ *
+ * Seeded in bulk past the Document Service: 70,000 published wiki pages in
+ * one public space (no populate in their loader, one list), and 70,000
+ * company-wide documents, each with its draft twin (140,000 rows whose
+ * departments populate used to bind every row id), next to the fixture's
+ * own rows. Every request's statements are captured: none binds more than
+ * a handful of parameters.
  */
 
 interface Knex {
   (table: string): { insert(rows: object[]): Promise<unknown> };
   raw(sql: string, bindings?: unknown[]): Promise<unknown>;
+  on(event: "query", listener: (query: { sql: string; bindings?: unknown[] }) => void): void;
+  off(event: "query", listener: (query: { sql: string; bindings?: unknown[] }) => void): void;
 }
 
 interface JoinTable {
@@ -34,73 +39,60 @@ interface Metadata {
   get(uid: string): { tableName: string; attributes: Record<string, { joinTable?: JoinTable }> };
 }
 
-interface Logger {
-  error(...args: unknown[]): unknown;
-}
-
-/** Where the bulk pages go: the page table and its space join table. */
-interface PageSeed {
-  connection: Knex;
-  tableName: string;
-  join: JoinTable;
-  spaceId: number;
-  postgres: boolean;
-}
-
 const PAGE = "api::wiki-page.wiki-page";
+const DOCUMENT = "api::document.document";
+const COUNT = 70_000;
 const BATCH = 500;
 const FIRST_ID = 1_000_000;
-/** Restated from utils/policy-query.ts (BIND_LIMITS, BIND_HEADROOM): a change there shows here. */
-const ENGINE_LIMIT = { postgres: 65535, sqlite: 32766 } as const;
-const HEADROOM = 1000;
 
-/** Inserts published pages number `from` to `to - 1` into the seed's space. */
-async function insertPages(seed: PageSeed, from: number, to: number): Promise<void> {
-  const now = new Date().toISOString();
-  for (let offset = from; offset < to; offset += BATCH) {
-    const pages: object[] = [];
-    const links: object[] = [];
-    for (let index = offset; index < Math.min(to, offset + BATCH); index += 1) {
-      const id = FIRST_ID + index;
-      pages.push({
-        id,
-        document_id: `b${randomBytes(12).toString("hex").slice(0, 23)}`,
-        title: `BL page ${index}`,
-        slug: `bl-page-${index}`,
-        published_at: now,
-        created_at: now,
-        updated_at: now,
-      });
-      links.push({
-        [seed.join.joinColumn.name]: id,
-        [seed.join.inverseJoinColumn.name]: seed.spaceId,
-      });
-    }
-    await seed.connection(seed.tableName).insert(pages);
-    await seed.connection(seed.join.name).insert(links);
+const documentId = () => `b${randomBytes(12).toString("hex").slice(0, 23)}`;
+
+/** Inserts `rows` in batches, then moves the table's Postgres serial past them. */
+async function insertRows(
+  connection: Knex,
+  table: string,
+  rows: object[],
+  postgres: boolean,
+): Promise<void> {
+  for (let offset = 0; offset < rows.length; offset += BATCH) {
+    await connection(table).insert(rows.slice(offset, offset + BATCH));
   }
-  if (seed.postgres) {
+  if (postgres && rows.length > 0 && "id" in (rows[0] as object)) {
     // Explicit ids leave the serial behind; later inserts must not collide.
-    await seed.connection.raw(
-      `SELECT setval(pg_get_serial_sequence('${seed.tableName}', 'id'), (SELECT max(id) FROM ${seed.tableName}))`,
+    await connection.raw(
+      `SELECT setval(pg_get_serial_sequence('${table}', 'id'), (SELECT max(id) FROM ${table}))`,
     );
   }
 }
 
-describe.each(testEngines())("policy bind limit on %s", (engine) => {
-  const engineLimit = ENGINE_LIMIT[engine];
+describe.each(testEngines())("read policies past the bind limit on %s", (engine) => {
   let t: TestStrapi;
-  let seed: PageSeed;
+  let connection: Knex;
   let announcement: Row;
-  let pageCount = 0;
-  const logged: string[] = [];
+  let memberDocumentsBefore = 0;
 
   const threadPath = () =>
     "/api/comments?filters[targetType][$eq]=announcement" +
     `&filters[targetDocumentId][$eq]=${announcement.documentId}`;
 
+  /** The request's answer and the most parameters one of its statements bound. */
+  async function measured<T>(caller: Parameters<TestStrapi["api"]>[0], path: string) {
+    let most = 0;
+    const listener = (query: { bindings?: unknown[] }) => {
+      most = Math.max(most, query.bindings?.length ?? 0);
+    };
+    connection.on("query", listener);
+    try {
+      const res = await t.api<T>(caller, path);
+      return { res, most };
+    } finally {
+      connection.off("query", listener);
+    }
+  }
+
   beforeAll(async () => {
     t = await createTestStrapi({ engine });
+    const postgres = engine === "postgres";
     const docs = (uid: string) => t.strapi.documents(uid);
     announcement = await docs("api::announcement.announcement").create({
       data: { title: "BL announcement", audience: "all" },
@@ -118,56 +110,101 @@ describe.each(testEngines())("policy bind limit on %s", (engine) => {
       data: { name: "BL space", slug: "bl-space", visibility: "public" },
       status: "published",
     });
+    const before = await t.api<{ meta: { pagination: { total: number } } }>(
+      "member",
+      "/api/documents?pagination[pageSize]=1",
+    );
+    memberDocumentsBefore = before.body.meta.pagination.total;
 
     const db = t.strapi.db as unknown as { connection: Knex; metadata: Metadata };
-    const { tableName, attributes } = db.metadata.get(PAGE);
-    const join = attributes.space.joinTable;
-    if (!join) throw new Error("wiki-page.space has no join table");
+    connection = db.connection;
+    const now = new Date().toISOString();
+
+    // 70,000 published wiki pages in the public space.
+    const pageMeta = db.metadata.get(PAGE);
+    const spaceJoin = pageMeta.attributes.space.joinTable;
+    if (!spaceJoin) throw new Error("wiki-page.space has no join table");
     const spaceRows = await t.strapi.db.query("api::wiki-space.wiki-space").findMany({
       where: { documentId: space.documentId, publishedAt: { $notNull: true } },
       select: ["id"],
     });
     const spaceId = spaceRows[0]?.id;
     if (typeof spaceId !== "number") throw new Error("published space row missing");
-    seed = { connection: db.connection, tableName, join, spaceId, postgres: engine === "postgres" };
+    const pages = Array.from({ length: COUNT }, (_, index) => ({
+      id: FIRST_ID + index,
+      document_id: documentId(),
+      title: `BL page ${index}`,
+      slug: `bl-page-${index}`,
+      published_at: now,
+      created_at: now,
+      updated_at: now,
+    }));
+    await insertRows(connection, pageMeta.tableName, pages, postgres);
+    await insertRows(
+      connection,
+      spaceJoin.name,
+      pages.map((page) => ({
+        [spaceJoin.joinColumn.name]: page.id,
+        [spaceJoin.inverseJoinColumn.name]: spaceId,
+      })),
+      postgres,
+    );
 
-    // One page more than the guard admits: the engine limit minus the 1000
-    // values of headroom (utils/policy-query.ts). A statement could still
-    // bind this list; the guard fails closed from here on by design.
-    pageCount = engineLimit - HEADROOM + 1;
-    await insertPages(seed, 0, pageCount);
-
-    const log = t.strapi.log as unknown as Logger;
-    const original = log.error.bind(log);
-    log.error = (...args: unknown[]) => {
-      logged.push(String(args[0]));
-      return original(...args);
-    };
-  }, 300_000);
+    // 70,000 company-wide documents, each a draft and a published row.
+    const documentMeta = db.metadata.get(DOCUMENT);
+    const documents = Array.from({ length: COUNT }, (_, index) => {
+      const shared = {
+        document_id: documentId(),
+        title: `BL document ${index}`,
+        audience: "all",
+        created_at: now,
+        updated_at: now,
+      };
+      return [
+        { id: FIRST_ID + 2 * index, ...shared, published_at: null },
+        { id: FIRST_ID + 2 * index + 1, ...shared, published_at: now },
+      ];
+    }).flat();
+    await insertRows(connection, documentMeta.tableName, documents, postgres);
+  }, 600_000);
 
   afterAll(async () => {
     await t?.stop();
   });
 
-  it("answers the page list with nothing and a log once the guard's limit is passed", async () => {
-    const before = logged.length;
-    const res = await t.api<{ data: Row[] }>("member", "/api/wiki-pages?pagination[pageSize]=5");
+  it("answers a member's wiki-page list with rows, one parameter for the list", async () => {
+    const { res, most } = await measured<{ data: Row[]; meta: { pagination: { total: number } } }>(
+      "member",
+      "/api/wiki-pages?pagination[pageSize]=5",
+    );
     expect(res.status).toBe(200);
-    expect(res.body.data).toEqual([]);
-    const lines = logged.slice(before);
-    expect(lines.some((line) => line.includes(`${pageCount} values exceed`))).toBe(true);
-    // The log names the policy and the count, never the ids.
-    expect(lines.join("\n")).not.toContain(String(FIRST_ID));
-  });
+    expect(res.body.data).toHaveLength(5);
+    expect(res.body.meta.pagination.total).toBeGreaterThanOrEqual(COUNT);
+    expect(most).toBeLessThan(100);
+  }, 120_000);
 
-  it("answers the full comment path with nothing, the single-anchor path as before", async () => {
-    const full = await t.api<{ data: Row[] }>("member", "/api/comments");
-    expect(full.status).toBe(200);
-    expect(full.body.data).toEqual([]);
+  it("answers a member's documents, the populated loader read in pages", async () => {
+    const { res, most } = await measured<{ data: Row[]; meta: { pagination: { total: number } } }>(
+      "member",
+      "/api/documents?pagination[pageSize]=5",
+    );
+    expect(res.status).toBe(200);
+    expect(res.body.data).toHaveLength(5);
+    // Each document once: its published row.
+    expect(res.body.meta.pagination.total).toBe(memberDocumentsBefore + COUNT);
+    // A page of 5,000 parent ids per populate, never all 140,000 rows.
+    expect(most).toBeLessThanOrEqual(5_000);
+  }, 120_000);
+
+  it("answers the full comment path and the single-anchor path with the thread", async () => {
+    const full = await measured<{ data: Row[] }>("member", "/api/comments");
+    expect(full.res.status).toBe(200);
+    expect(full.res.body.data.map((row) => row.body)).toContain("BL comment");
+    expect(full.most).toBeLessThan(100);
     const thread = await t.api<{ data: Row[] }>("member", threadPath());
     expect(thread.status).toBe(200);
     expect(thread.body.data.map((row) => row.body)).toEqual(["BL comment"]);
-  });
+  }, 120_000);
 
   it("leaves the admin/editor bypass alone", async () => {
     const res = await t.api<{ data: Row[]; meta: { pagination: { total: number } } }>(
@@ -175,27 +212,6 @@ describe.each(testEngines())("policy bind limit on %s", (engine) => {
       "/api/wiki-pages?pagination[pageSize]=1",
     );
     expect(res.status).toBe(200);
-    expect(res.body.meta.pagination.total).toBe(pageCount);
-  });
-
-  it("answers with nothing and a log past the engine limit, where 5f2eac0 failed with a 500", async () => {
-    // Last case: it grows the table for good.
-    await insertPages(seed, pageCount, engineLimit + 1);
-    pageCount = engineLimit + 1;
-
-    const before = logged.length;
-    const pages = await t.api<{ data: Row[] }>("member", "/api/wiki-pages?pagination[pageSize]=5");
-    expect(pages.status).toBe(200);
-    expect(pages.body.data).toEqual([]);
-    expect(logged.slice(before).some((line) => line.includes(`${pageCount} values exceed`))).toBe(
-      true,
-    );
-
-    const full = await t.api<{ data: Row[] }>("member", "/api/comments");
-    expect(full.status).toBe(200);
-    expect(full.body.data).toEqual([]);
-    const thread = await t.api<{ data: Row[] }>("member", threadPath());
-    expect(thread.status).toBe(200);
-    expect(thread.body.data.map((row) => row.body)).toEqual(["BL comment"]);
+    expect(res.body.meta.pagination.total).toBeGreaterThanOrEqual(COUNT);
   });
 });

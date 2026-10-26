@@ -1,14 +1,13 @@
 import { errors } from "@strapi/utils";
 import { describe, expect, it, vi } from "vitest";
 import {
-  BIND_HEADROOM,
-  BIND_LIMITS,
-  boundedIdFilter,
-  fitsBindLimit,
+  canNarrow,
+  createVisibilityNarrowing,
   forcePublishedStatus,
   getMutableQuery,
-  maxBoundValues,
   narrowFilters,
+  narrowReads,
+  oneParamIn,
   restrictiveIdFilter,
 } from "./policy-query";
 
@@ -208,58 +207,135 @@ describe("narrowFilters", () => {
 });
 
 /**
- * The bind-limit guard (PL04): an injected list beyond what one statement
- * may bind fails closed with an error log instead of an SQL error.
+ * The one-parameter list (#175): a whole list as ONE bound parameter, so a
+ * read policy has no bind limit to fail at.
  */
-describe("bind-limit guard", () => {
-  const host = (client?: string) => ({
-    db: client === undefined ? {} : { dialect: { client } },
-    log: { error: vi.fn<(message: string) => void>() },
-  });
-  const ids = (count: number) => Array.from({ length: count }, (_, index) => index + 1);
+describe("oneParamIn", () => {
+  const host = (client?: string) => {
+    const raw = vi.fn((sql: string, bindings: unknown[]) => ({ sql, bindings }));
+    return {
+      raw,
+      strapi: { db: { dialect: client ? { client } : undefined, connection: { raw } } },
+    };
+  };
 
-  it("uses the dialect's limit minus the headroom, SQLite's when unknown", () => {
-    expect(BIND_LIMITS).toEqual({ postgres: 65535, sqlite: 32766 });
-    expect(maxBoundValues(host("postgres"))).toBe(65535 - BIND_HEADROOM);
-    expect(maxBoundValues(host("sqlite"))).toBe(32766 - BIND_HEADROOM);
-    for (const client of [undefined, "mysql", "better-sqlite3"]) {
-      expect(maxBoundValues(host(client)), String(client)).toBe(32766 - BIND_HEADROOM);
+  it("binds a Postgres array: unnest(?::int[]) or ?::text[], one binding", () => {
+    const { raw, strapi } = host("postgres");
+    oneParamIn(strapi, [3, 1, 2], "int");
+    oneParamIn(strapi, ["a", "b"], "text");
+    expect(raw.mock.calls).toEqual([
+      ["select unnest(?::int[])", [[3, 1, 2]]],
+      ["select unnest(?::text[])", [["a", "b"]]],
+    ]);
+  });
+
+  it("binds one JSON text elsewhere: json_each(?), the SQLite way", () => {
+    for (const client of ["sqlite", undefined]) {
+      const { raw, strapi } = host(client);
+      oneParamIn(strapi, [1, 2], "int");
+      oneParamIn(strapi, [], "text");
+      expect(raw.mock.calls).toEqual([
+        ["select value from json_each(?)", ["[1,2]"]],
+        ["select value from json_each(?)", ["[]"]],
+      ]);
     }
-    expect(maxBoundValues({})).toBe(32766 - BIND_HEADROOM);
   });
 
-  it("passes a list up to the limit without a log", () => {
-    const strapi = host("sqlite");
-    const max = maxBoundValues(strapi);
-    expect(fitsBindLimit(strapi, max, "test")).toBe(true);
-    expect(boundedIdFilter(strapi, ids(3), "test")).toEqual({ id: { $in: [1, 2, 3] } });
-    expect(boundedIdFilter(strapi, [], "test")).toEqual({ id: { $eq: -1 } });
-    expect(strapi.log.error).not.toHaveBeenCalled();
+  it("keeps 70,000 values in one binding", () => {
+    const { raw, strapi } = host("postgres");
+    const ids = Array.from({ length: 70_000 }, (_, index) => index + 1);
+    oneParamIn(strapi, ids, "int");
+    const bindings = raw.mock.calls[0][1];
+    expect(bindings).toHaveLength(1);
+    expect(bindings[0]).toEqual(ids);
+  });
+});
+
+/**
+ * The request-stored clause (#175): a read policy leaves it on ctx.state,
+ * and the Document Service middleware ANDs it into the reads of its uid.
+ */
+describe("visibility narrowing", () => {
+  const UID = "api::document.document";
+  const request = () => ({ state: {} as Record<PropertyKey, unknown> });
+  const host = (ctx: unknown) => ({ requestContext: { get: () => ctx } });
+  const run = async (
+    strapi: ReturnType<typeof host>,
+    context: { uid?: string; action?: string; params?: unknown },
+  ) => {
+    const next = vi.fn(async () => "result");
+    await expect(createVisibilityNarrowing(strapi)(context, next)).resolves.toBe("result");
+    expect(next).toHaveBeenCalledTimes(1);
+    return context.params;
+  };
+
+  it("needs the request context the policy runs in", () => {
+    const ctx = request();
+    expect(canNarrow(host(ctx), ctx.state)).toBe(true);
+    expect(canNarrow(host(undefined), ctx.state)).toBe(false);
+    expect(canNarrow({}, ctx.state)).toBe(false);
+    expect(canNarrow(host({ state: {} }), ctx.state)).toBe(false);
+    expect(canNarrow(host({}), undefined)).toBe(false);
+    expect(narrowReads(host(undefined), ctx.state, UID, { id: 1 })).toBe(false);
   });
 
-  it("fails closed beyond the limit, logging the count but no values", () => {
-    const strapi = host("sqlite");
-    const over = maxBoundValues(strapi) + 1;
-    expect(fitsBindLimit(strapi, over, "document read policy")).toBe(false);
-    expect(boundedIdFilter(strapi, ids(over), "document read policy")).toEqual({
-      id: { $eq: -1 },
+  it("ANDs the stored clauses into the reads of their uid, list and count alike", async () => {
+    const ctx = request();
+    const strapi = host(ctx);
+    expect(narrowReads(strapi, ctx.state, UID, { id: { $in: "A" } })).toBe(true);
+    expect(narrowReads(strapi, ctx.state, UID, { id: { $in: "B" } })).toBe(true);
+    for (const action of ["findMany", "findOne", "findFirst", "count"]) {
+      await expect(run(strapi, { uid: UID, action, params: {} })).resolves.toEqual({
+        filters: { $and: [{ id: { $in: "A" } }, { id: { $in: "B" } }] },
+      });
+    }
+  });
+
+  it("keeps the client's filters and the other params, the clause after them", async () => {
+    const ctx = request();
+    const strapi = host(ctx);
+    narrowReads(strapi, ctx.state, UID, { id: { $in: "A" } });
+    const params = { documentId: "doc", filters: { title: "x" }, status: "published" };
+    await expect(run(strapi, { uid: UID, action: "findOne", params })).resolves.toEqual({
+      documentId: "doc",
+      filters: { $and: [{ title: "x" }, { id: { $in: "A" } }] },
+      status: "published",
     });
-    expect(strapi.log.error).toHaveBeenCalledTimes(2);
-    const message = strapi.log.error.mock.calls[0][0];
-    expect(message).toContain("[policy] document read policy");
-    expect(message).toContain(String(over));
-    expect(message).not.toContain("1, 2, 3");
+    await expect(run(strapi, { uid: UID, action: "findMany" })).resolves.toEqual({
+      filters: { id: { $in: "A" } },
+    });
   });
 
-  it("allows Postgres more than SQLite", () => {
-    const list = ids(40_000);
-    const pg = host("postgres");
-    expect(boundedIdFilter(pg, list, "t")).toEqual({ id: { $in: list } });
-    const sqlite = host("sqlite");
-    expect(boundedIdFilter(sqlite, list, "t")).toEqual({ id: { $eq: -1 } });
+  it("refuses a scalar client filter it would have to wrap (400, fail closed)", async () => {
+    const ctx = request();
+    const strapi = host(ctx);
+    narrowReads(strapi, ctx.state, UID, { id: { $in: "A" } });
+    const next = vi.fn(async () => "result");
+    await expect(
+      createVisibilityNarrowing(strapi)(
+        { uid: UID, action: "findMany", params: { filters: "title" } },
+        next,
+      ),
+    ).rejects.toBeInstanceOf(errors.ValidationError);
+    expect(next).not.toHaveBeenCalled();
   });
 
-  it("works without a log (fails closed all the same)", () => {
-    expect(fitsBindLimit({ db: { dialect: { client: "sqlite" } } }, 1_000_000, "t")).toBe(false);
+  it("leaves writes, other uids and requests without a clause alone", async () => {
+    const ctx = request();
+    const strapi = host(ctx);
+    narrowReads(strapi, ctx.state, UID, { id: { $in: "A" } });
+    const params = { filters: { title: "x" } };
+    for (const action of ["create", "update", "delete", "publish"]) {
+      await expect(run(strapi, { uid: UID, action, params })).resolves.toBe(params);
+    }
+    await expect(run(strapi, { uid: "api::poll.poll", action: "findMany", params })).resolves.toBe(
+      params,
+    );
+    await expect(run(host(request()), { uid: UID, action: "findMany", params })).resolves.toBe(
+      params,
+    );
+    await expect(run(host(undefined), { uid: UID, action: "findMany", params })).resolves.toBe(
+      params,
+    );
   });
 });

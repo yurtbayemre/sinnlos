@@ -1,11 +1,17 @@
 import { errors } from "@strapi/utils";
 import { hasRole, isRoleType, type RoleType } from "../bootstrap/roles";
 import { isRowId, parseEntryRef } from "./entry-id";
+import { findAllPaged } from "./paged-read";
 import {
-  boundedIdFilter,
+  assertFiltersShape,
+  canNarrow,
   forcePublishedStatus,
   getMutableQuery,
   narrowFilters,
+  narrowReads,
+  oneParamIn,
+  type OneParamHost,
+  type RequestContextHost,
 } from "./policy-query";
 
 /**
@@ -24,12 +30,13 @@ import {
  *      particular: false for ownership, the anonymous scope for a
  *      visibility filter (an undefined id in a where clause would match
  *      an arbitrary row);
- *   4. the clause goes onto the REAL request query (getMutableQuery),
- *      $and-composed with the client filter (narrowFilters), an empty id
- *      list as restrictiveIdFilter's `{ id: { $eq: -1 } }` (an empty `$in`
- *      is stripped by sanitizeQuery and fails open), and a list beyond the
- *      database's bind-parameter limit the same way, with an error log
- *      (boundedIdFilter: fail closed instead of an SQL error);
+ *   4. an ownership clause goes onto the REAL request query
+ *      (getMutableQuery), $and-composed with the client filter
+ *      (narrowFilters); a visible-id list goes to the Document Service as
+ *      ONE bound parameter (oneParamIn, narrowReads; #175, v0.33), so it
+ *      neither meets the content API's sanitizer (which strips an empty
+ *      `$in` and fails open) nor the database's bind-parameter limit, and a
+ *      request without a request context to carry it is refused;
  *   5. draft & publish types get status=published AFTER the bypass
  *      (forcePublishedStatus);
  *   6. every branch returns a strict boolean: Strapi counts `undefined` as
@@ -46,7 +53,7 @@ import {
  * is-classified-author takes its bypass from the route config.
  */
 
-/** The slice of `strapi` a lookup reads (a db.query; the dialect for the bind limit). */
+/** The slice of `strapi` a lookup reads: a db.query. */
 export interface PolicyDb {
   db: {
     query(uid: string): {
@@ -57,8 +64,12 @@ export interface PolicyDb {
   };
 }
 
-/** What the factories read from `strapi`: the db, and the log when there is one. */
-export interface PolicyStrapi extends PolicyDb {
+/**
+ * What the policies read from `strapi`: the db with its dialect and knex
+ * (oneParamIn), the request context (narrowReads), the log.
+ */
+export interface PolicyStrapi extends PolicyDb, RequestContextHost {
+  db: PolicyDb["db"] & { connection: OneParamHost["db"]["connection"] };
   log?: { error(message: string): void };
 }
 
@@ -250,9 +261,12 @@ export interface VisibleIdsOptions<Config> {
  * A read policy for a type whose visibility needs relations the caller may
  * not filter by (validateQuery 400s a relation filter for every role without
  * that relation's `.find`, e.g. guest on department): the loader decides in
- * JS which row ids are visible, and the policy injects the non-relational
- * `{ id: { $in } }` (§5.14-§5.16, §5.24). findOne honours it too (the
- * document service merges the filters with the documentId).
+ * JS which row ids are visible (§5.14-§5.16, §5.24), and the Document
+ * Service ANDs `{ id: { $in: <the list as one parameter> } }` into the
+ * route's reads (narrowReads, #175, v0.33): the list, its pagination count
+ * and findOne (the document service merges the filters with the
+ * documentId). A request whose context cannot carry the clause (canNarrow)
+ * is refused before anything is read.
  */
 export function visibleIdsPolicy<Config = unknown>(
   options: VisibleIdsOptions<Config>,
@@ -264,13 +278,16 @@ export function visibleIdsPolicy<Config = unknown>(
 
     const caller = identifiedCaller(user);
     if (!caller && options.anonymous === "deny") return false;
+    if (!canNarrow(strapi, policyContext.state)) return false;
+    // The client filter is ANDed with the clause at the Document Service.
+    assertFiltersShape(getMutableQuery(policyContext).filters);
 
     const uid = typeof options.uid === "function" ? options.uid(config) : options.uid;
     const ids = await options.loadVisibleIds({ strapi, user: caller, config, uid });
 
-    const query = getMutableQuery(policyContext);
-    narrowFilters(query, boundedIdFilter(strapi, ids, `${uid} read policy`));
-    if (options.pinPublished) forcePublishedStatus(query);
+    const clause = { id: { $in: oneParamIn(strapi, ids, "int") } };
+    if (!narrowReads(strapi, policyContext.state, uid, clause)) return false;
+    if (options.pinPublished) forcePublishedStatus(getMutableQuery(policyContext));
     return true;
   };
 }
@@ -322,12 +339,14 @@ export async function departmentScopedIds({
 }: VisibleIdsInput<unknown>): Promise<number[]> {
   const departmentId = await callerDepartmentId(strapi, user);
 
-  const rows = await strapi.db.query(uid).findMany({
+  // Paged (utils/paged-read.ts): the departments populate binds one page
+  // of row ids, not the whole type (#175).
+  const rows = await findAllPaged<{ id: number } & Record<string, unknown>>(strapi.db.query(uid), {
     select: ["id", "audience"],
     populate: { departments: { select: ["id"] } },
   });
   const visible: number[] = [];
-  for (const row of Array.isArray(rows) ? rows : []) {
+  for (const row of rows) {
     if (!isRecord(row) || typeof row.id !== "number") continue;
     const departments: unknown[] = Array.isArray(row.departments) ? row.departments : [];
     const companyWide = departments.length === 0 && row.audience !== DEPARTMENTS_AUDIENCE;

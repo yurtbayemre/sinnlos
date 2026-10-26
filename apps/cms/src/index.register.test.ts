@@ -714,7 +714,7 @@ describe("Document Service middlewares in register() (decision 06 §K)", () => {
     const polls = bySlot.get("poll-audience-guard")!;
     const departmentScoped = bySlot.get("department-audience-guard")!;
     const users = bySlot.get("user-write-guard")!;
-    expect(slots[slots.length - 1]).toBe("user-write-guard");
+    expect(slots[slots.length - 1]).toBe("visibility-narrowing");
     // The user guard: tokenVersion never reaches a user write; other types
     // pass untouched.
     const reached: unknown[] = [];

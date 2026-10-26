@@ -1,5 +1,11 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import wikiVisibility from "./wiki-visibility";
+import {
+  narrowedFilters,
+  oneParamList,
+  storedUid,
+  withNarrowing,
+} from "../test/narrowing.test.helper";
 
 /**
  * Wiring test for the wiki read policy. It resolves the set of visible
@@ -112,11 +118,11 @@ function stubStrapi(overrides: StubOverrides = {}) {
             case "api::team.team":
               return teams;
             case "api::wiki-page.wiki-page": {
-              const ids: number[] = params?.where?.space?.id?.$in ?? [];
+              const ids = (oneParamList(params?.where?.space?.id?.$in) ?? []) as number[];
               return pages.filter((p) => ids.includes(p.spaceId)).map((p) => ({ id: p.id }));
             }
             case "api::wiki-revision.wiki-revision": {
-              const ids: number[] = params?.where?.page?.space?.id?.$in ?? [];
+              const ids = (oneParamList(params?.where?.page?.space?.id?.$in) ?? []) as number[];
               return revisions.filter((r) => ids.includes(r.spaceId)).map((r) => ({ id: r.id }));
             }
             default:
@@ -136,45 +142,51 @@ function context(user: StubUser | null, query: Record<string, unknown> = {}) {
 }
 
 const run = (ctx: any, level?: "space" | "page" | "revision", overrides: StubOverrides = {}) =>
-  wikiVisibility(ctx, level ? { level } : undefined, { strapi: stubStrapi(overrides) } as any);
+  wikiVisibility(ctx, level ? { level } : undefined, {
+    strapi: withNarrowing(stubStrapi(overrides), ctx),
+  } as any);
+
+/** The filters a read gets once the Document Service applied what the policy stored (#175). */
+const filtersOf = (ctx: { state?: object; request: { query: Record<string, unknown> } }) =>
+  narrowedFilters(ctx, storedUid(ctx) ?? "none", ctx.request.query.filters);
 
 describe("wiki-visibility policy", () => {
   describe("space level", () => {
     it("defaults to the space level when no config is given", async () => {
       const ctx = context(roleUser);
       await run(ctx); // config undefined → level "space"
-      expect(ctx.request.query.filters).toEqual({ id: { $in: [100, 101] } });
+      expect(await filtersOf(ctx)).toEqual({ id: { $in: [100, 101] } });
     });
 
     it("shows an anonymous caller only public spaces", async () => {
       const ctx = context(null);
       await run(ctx, "space");
-      expect(ctx.request.query.filters).toEqual({ id: { $in: [100] } });
+      expect(await filtersOf(ctx)).toEqual({ id: { $in: [100] } });
     });
 
     it("adds a role space when the caller's role is allowed", async () => {
       const ctx = context(roleUser);
       await run(ctx, "space");
-      expect(ctx.request.query.filters).toEqual({ id: { $in: [100, 101] } });
+      expect(await filtersOf(ctx)).toEqual({ id: { $in: [100, 101] } });
     });
 
     it("adds a department space when the caller's department matches", async () => {
       const ctx = context(deptUser);
       await run(ctx, "space");
-      expect(ctx.request.query.filters).toEqual({ id: { $in: [100, 102] } });
+      expect(await filtersOf(ctx)).toEqual({ id: { $in: [100, 102] } });
     });
 
     it("adds a team space when one of the caller's teams matches", async () => {
       const ctx = context(teamUser);
       await run(ctx, "space");
-      expect(ctx.request.query.filters).toEqual({ id: { $in: [100, 103] } });
+      expect(await filtersOf(ctx)).toEqual({ id: { $in: [100, 103] } });
     });
 
     it("lets admin_role through without touching the query (trap d bypass)", async () => {
       const admin = { id: 1, role: { id: 1, type: "admin_role" } };
       const ctx = context(admin, { status: "draft" });
       await expect(run(ctx, "space")).resolves.toBe(true);
-      expect(ctx.request.query.filters).toBeUndefined();
+      expect(await filtersOf(ctx)).toBeUndefined();
       expect(ctx.request.query.status).toBe("draft");
     });
 
@@ -182,7 +194,7 @@ describe("wiki-visibility policy", () => {
       const ed = { id: 1, role: { id: 3, type: "editor" } };
       const ctx = context(ed, { status: "draft" });
       await expect(run(ctx, "space")).resolves.toBe(true);
-      expect(ctx.request.query.filters).toBeUndefined();
+      expect(await filtersOf(ctx)).toBeUndefined();
       expect(ctx.request.query.status).toBe("draft");
     });
 
@@ -191,13 +203,13 @@ describe("wiki-visibility policy", () => {
       const noPublic = SPACES.filter((s) => s.visibility !== "public");
       const ctx = context(null);
       await run(ctx, "space", { spaces: noPublic });
-      expect(ctx.request.query.filters).toEqual({ id: { $eq: -1 } });
+      expect(await filtersOf(ctx)).toEqual({ id: { $in: [] } });
     });
 
     it("keeps a caller-supplied filter and only narrows it", async () => {
       const ctx = context(roleUser, { filters: { slug: { $eq: "handbook" } } });
       await run(ctx, "space");
-      expect(ctx.request.query.filters).toEqual({
+      expect(await filtersOf(ctx)).toEqual({
         $and: [{ slug: { $eq: "handbook" } }, { id: { $in: [100, 101] } }],
       });
     });
@@ -206,7 +218,7 @@ describe("wiki-visibility policy", () => {
       const ctx = context(roleUser);
       ctx.query = {};
       await run(ctx, "space");
-      expect(ctx.request.query.filters).toEqual({ id: { $in: [100, 101] } });
+      expect(await filtersOf(ctx)).toEqual({ id: { $in: [100, 101] } });
       expect(ctx.query.filters).toBeUndefined();
     });
   });
@@ -216,20 +228,20 @@ describe("wiki-visibility policy", () => {
       const ctx = context(roleUser);
       await run(ctx, "page");
       // spaces [100, 101] → pages [200, 201].
-      expect(ctx.request.query.filters).toEqual({ id: { $in: [200, 201] } });
+      expect(await filtersOf(ctx)).toEqual({ id: { $in: [200, 201] } });
     });
 
     it("gives an anonymous caller only public-space pages", async () => {
       const ctx = context(null);
       await run(ctx, "page");
-      expect(ctx.request.query.filters).toEqual({ id: { $in: [200] } });
+      expect(await filtersOf(ctx)).toEqual({ id: { $in: [200] } });
     });
 
     it("stays restrictive when no space is visible (trap b, join skipped)", async () => {
       const noPublic = SPACES.filter((s) => s.visibility !== "public");
       const ctx = context(null);
       await run(ctx, "page", { spaces: noPublic });
-      expect(ctx.request.query.filters).toEqual({ id: { $eq: -1 } });
+      expect(await filtersOf(ctx)).toEqual({ id: { $in: [] } });
     });
   });
 
@@ -238,20 +250,20 @@ describe("wiki-visibility policy", () => {
       const ctx = context(roleUser);
       await run(ctx, "revision");
       // spaces [100, 101] → revisions [300, 301].
-      expect(ctx.request.query.filters).toEqual({ id: { $in: [300, 301] } });
+      expect(await filtersOf(ctx)).toEqual({ id: { $in: [300, 301] } });
     });
 
     it("gives an anonymous caller only public-space revisions", async () => {
       const ctx = context(null);
       await run(ctx, "revision");
-      expect(ctx.request.query.filters).toEqual({ id: { $in: [300] } });
+      expect(await filtersOf(ctx)).toEqual({ id: { $in: [300] } });
     });
 
     it("stays restrictive when no space is visible (trap b, join skipped)", async () => {
       const noPublic = SPACES.filter((s) => s.visibility !== "public");
       const ctx = context(null);
       await run(ctx, "revision", { spaces: noPublic });
-      expect(ctx.request.query.filters).toEqual({ id: { $eq: -1 } });
+      expect(await filtersOf(ctx)).toEqual({ id: { $in: [] } });
     });
   });
 
@@ -278,55 +290,76 @@ describe("wiki-visibility policy", () => {
     it("pins the status without disturbing the injected id filter", async () => {
       const ctx = context(roleUser, { status: "draft" });
       await run(ctx, "page");
-      expect(ctx.request.query.filters).toEqual({ id: { $in: [200, 201] } });
+      expect(await filtersOf(ctx)).toEqual({ id: { $in: [200, 201] } });
     });
   });
 });
 
-describe("wiki-visibility: bind limit (PL04)", () => {
+describe("wiki-visibility: past the old bind limit (#175)", () => {
+  interface BigParams {
+    where?: {
+      $and?: { id?: { $gt?: number } }[];
+      id?: { $gt?: number };
+      space?: { id?: { $in?: unknown } };
+      page?: { space?: { id?: { $in?: unknown } } };
+    };
+    limit?: number;
+  }
+  const UIDS = {
+    space: "api::wiki-space.wiki-space",
+    page: "api::wiki-page.wiki-page",
+    revision: "api::wiki-revision.wiki-revision",
+  } as const;
   const SPACE_COUNT = 40_000;
+  const ALL = Array.from({ length: SPACE_COUNT }, (_, index) => index + 1);
 
   function bigStub() {
-    const lookups: string[] = [];
-    const error = vi.fn<(message: string) => void>();
+    const lookups: { uid: string; spaces?: unknown }[] = [];
     const strapi = {
       db: {
         query: (uid: string) => ({
           findOne: async () => null,
-          findMany: async () => {
-            lookups.push(uid);
-            if (uid !== "api::wiki-space.wiki-space") return [];
-            return Array.from({ length: SPACE_COUNT }, (_, index) => ({
-              id: index + 1,
-              visibility: "public",
-            }));
+          findMany: async (params: BigParams = {}) => {
+            if (uid === "api::wiki-space.wiki-space") {
+              // Paged (utils/paged-read.ts): the cursor and the limit apply.
+              const after = params.where?.$and?.[1]?.id?.$gt ?? params.where?.id?.$gt ?? 0;
+              lookups.push({ uid });
+              return ALL.filter((id) => id > after)
+                .slice(0, params.limit ?? SPACE_COUNT)
+                .map((id) => ({ id, visibility: "public" }));
+            }
+            const spaces = params.where?.space?.id?.$in ?? params.where?.page?.space?.id?.$in;
+            lookups.push({ uid, spaces: oneParamList(spaces) });
+            return [];
           },
         }),
       },
-      log: { error },
     };
-    return { strapi, lookups, error };
+    return { strapi, lookups };
   }
 
-  it("never binds more space ids than one statement may carry", async () => {
+  it("looks pages and revisions up with every space id as one list", async () => {
     for (const level of ["page", "revision"] as const) {
-      const { strapi, lookups, error } = bigStub();
+      const { strapi, lookups } = bigStub();
       const ctx = { state: {}, request: { query: {} as Record<string, unknown> } };
-      await expect(wikiVisibility(ctx, { level }, { strapi })).resolves.toBe(true);
-      expect(ctx.request.query.filters, level).toEqual({ id: { $eq: -1 } });
-      // The page/revision lookup with the oversized list never ran.
-      expect(lookups, level).toEqual(["api::wiki-space.wiki-space"]);
-      expect(String(error.mock.calls[0]?.[0]), level).toContain(
-        `wiki-visibility ${level} spaces: ${SPACE_COUNT} values`,
-      );
+      await expect(
+        wikiVisibility(ctx, { level }, { strapi: withNarrowing(strapi, ctx) }),
+      ).resolves.toBe(true);
+      const lookup = lookups.find((entry) => entry.uid !== "api::wiki-space.wiki-space");
+      expect(lookup?.spaces, level).toEqual(ALL);
+      // No page or revision in the stub: the read matches nothing.
+      await expect(narrowedFilters(ctx, UIDS[level])).resolves.toEqual({ id: { $in: [] } });
     }
   });
 
-  it("fails the space level itself closed too (the injected list)", async () => {
-    const { strapi, error } = bigStub();
+  it("carries every visible space id at the space level, read in pages", async () => {
+    const { strapi, lookups } = bigStub();
     const ctx = { state: {}, request: { query: {} as Record<string, unknown> } };
-    await expect(wikiVisibility(ctx, { level: "space" }, { strapi })).resolves.toBe(true);
-    expect(ctx.request.query.filters).toEqual({ id: { $eq: -1 } });
-    expect(error).toHaveBeenCalledTimes(1);
+    await expect(
+      wikiVisibility(ctx, { level: "space" }, { strapi: withNarrowing(strapi, ctx) }),
+    ).resolves.toBe(true);
+    await expect(narrowedFilters(ctx, UIDS.space)).resolves.toEqual({ id: { $in: ALL } });
+    // 40,000 spaces in pages of 5,000, and one more read that comes back short.
+    expect(lookups.filter((entry) => entry.uid === "api::wiki-space.wiki-space")).toHaveLength(9);
   });
 });

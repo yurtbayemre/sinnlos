@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import trainingVisibility from "./training-visibility";
+import { narrowedFilters, storedUid, withNarrowing } from "../test/narrowing.test.helper";
 
 /**
  * Wiring test for the training read policy (issue #29; course audience
@@ -37,7 +38,10 @@ function stubStrapi(lessonRows: unknown[] = LESSONS, departmentId: number | null
         findOne: async () => ({ id: 10, department: departmentId ? { id: departmentId } : null }),
         findMany: async ({ where }: any) => {
           if (uid === "api::lesson.lesson") {
-            expect(where).toEqual({ course: { publishedAt: { $notNull: true } } });
+            // Read in id pages (#175): the loader's where and the cursor.
+            expect(where).toEqual({
+              $and: [{ course: { publishedAt: { $notNull: true } } }, { id: { $gt: 0 } }],
+            });
             return lessonRows;
           }
           if (uid === "api::course.course") return COURSES;
@@ -54,36 +58,50 @@ function context(user: any, query: Record<string, unknown> = {}) {
 
 const member = { id: 10, role: { type: "member" } };
 
+/** The filters a read gets once the Document Service applied what the policy stored (#175). */
+const filtersOf = (ctx: { state?: object; request: { query: Record<string, unknown> } }) =>
+  narrowedFilters(ctx, storedUid(ctx) ?? "none", ctx.request.query.filters);
+
 describe("training-visibility", () => {
   it("bypasses admin_role/editor without touching the query", async () => {
     for (const type of ["admin_role", "editor"]) {
       for (const level of ["course", "lesson"] as const) {
         const ctx = context({ id: 1, role: { type } }, { status: "draft" });
-        await expect(trainingVisibility(ctx, { level }, { strapi: stubStrapi() })).resolves.toBe(
-          true,
-        );
+        await expect(
+          trainingVisibility(ctx, { level }, { strapi: withNarrowing(stubStrapi(), ctx) }),
+        ).resolves.toBe(true);
         expect(ctx.request.query.status).toBe("draft");
-        expect(ctx.request.query.filters).toBeUndefined();
+        expect(await filtersOf(ctx)).toBeUndefined();
       }
     }
   });
 
   it("course level: company-wide courses and the caller's department, status pinned", async () => {
     const ctx = context(member, { status: "draft" });
-    await trainingVisibility(ctx, { level: "course" }, { strapi: stubStrapi() });
+    await trainingVisibility(
+      ctx,
+      { level: "course" },
+      { strapi: withNarrowing(stubStrapi(), ctx) },
+    );
     expect(ctx.request.query.status).toBe("published");
-    expect(ctx.request.query.filters).toEqual({ id: { $in: [1] } });
+    expect(await filtersOf(ctx)).toEqual({ id: { $in: [1] } });
 
     const warehouse = context(member);
-    await trainingVisibility(warehouse, undefined, { strapi: stubStrapi(LESSONS, WAREHOUSE) });
-    expect(warehouse.request.query.filters).toEqual({ id: { $in: [1, 2] } });
+    await trainingVisibility(warehouse, undefined, {
+      strapi: withNarrowing(stubStrapi(LESSONS, WAREHOUSE), warehouse),
+    });
+    expect(await filtersOf(warehouse)).toEqual({ id: { $in: [1, 2] } });
   });
 
   it("lesson level: lessons of the courses meant for the caller, narrowing client filters", async () => {
     const clientFilter = { title: { $containsi: "x" } };
     const ctx = context(member, { filters: clientFilter });
-    await trainingVisibility(ctx, { level: "lesson" }, { strapi: stubStrapi() });
-    expect(ctx.request.query.filters).toEqual({ $and: [clientFilter, { id: { $in: [11] } }] });
+    await trainingVisibility(
+      ctx,
+      { level: "lesson" },
+      { strapi: withNarrowing(stubStrapi(), ctx) },
+    );
+    expect(await filtersOf(ctx)).toEqual({ $and: [clientFilter, { id: { $in: [11] } }] });
     expect(ctx.request.query.status).toBe("published");
 
     const warehouse = context(member);
@@ -91,15 +109,19 @@ describe("training-visibility", () => {
       warehouse,
       { level: "lesson" },
       {
-        strapi: stubStrapi(LESSONS, WAREHOUSE),
+        strapi: withNarrowing(stubStrapi(LESSONS, WAREHOUSE), warehouse),
       },
     );
-    expect(warehouse.request.query.filters).toEqual({ id: { $in: [11, 12] } });
+    expect(await filtersOf(warehouse)).toEqual({ id: { $in: [11, 12] } });
   });
 
   it("lesson level: stays restrictive when no course is published (never empty $in)", async () => {
     const ctx = context(member);
-    await trainingVisibility(ctx, { level: "lesson" }, { strapi: stubStrapi([]) });
-    expect(ctx.request.query.filters).toEqual({ id: { $eq: -1 } });
+    await trainingVisibility(
+      ctx,
+      { level: "lesson" },
+      { strapi: withNarrowing(stubStrapi([]), ctx) },
+    );
+    expect(await filtersOf(ctx)).toEqual({ id: { $in: [] } });
   });
 });

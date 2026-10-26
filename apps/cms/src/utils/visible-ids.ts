@@ -17,9 +17,9 @@
  *   the users-permissions gating AND `throwRestrictedRelations`. So we
  *   resolve the set of visible primary-key `id`s HERE, in the policy, by
  *   loading the (small) space set with its visibility relations populated
- *   and deciding membership in plain JS. The policy then injects only a
- *   non-relational `{ id: { $in: [...] } }` filter into the REST query —
- *   which validates for every role and traverses nothing.
+ *   and deciding membership in plain JS. The Document Service then ANDs
+ *   only a non-relational `{ id: { $in } }` clause into the reads (the
+ *   list as one parameter, visibleIdsPolicy, #175), which traverses nothing.
  *
  * Draft & publish note (wiki spaces): `strapi.db.query` returns ALL rows
  * (draft AND published) regardless of publication state. That is
@@ -49,6 +49,7 @@ import {
   type AudienceScope,
 } from "./announcement-audience";
 import { notExpiredWhere } from "./announcement-expiry";
+import { findAllPaged } from "./paged-read";
 import type { VisibleIdsInput } from "./policy-factories";
 
 const USER_UID = "plugin::users-permissions.user";
@@ -445,8 +446,10 @@ export async function visibleAnnouncementIds({
   // Team targeting covers members AND the team lead — a lead is not
   // automatically listed in `team.members` (toAudienceScope).
   const scope = user ? toAudienceScope(await loadUserScope(strapi, user.id)) : null;
+  // One expiry cutoff for the whole scan.
   const where = notExpiredWhere(new Date());
-  const rows = (await strapi.db.query(ANNOUNCEMENT_UID).findMany({
+  // Paged (utils/paged-read.ts, #175): the populates bind one page of ids.
+  const rows = await findAllPaged<AnnouncementRow>(strapi.db.query(ANNOUNCEMENT_UID), {
     where,
     // The predicate reads the flag and the marker (D-PT01, retargetRequired).
     select: ["id", "audience", "retargetRequired"],
@@ -455,9 +458,10 @@ export async function visibleAnnouncementIds({
       team: { select: ["id"] },
       audienceRoles: { select: ["id"] },
     },
-  })) as AnnouncementRow[];
-  // Flags read again after the relations: a delete between the statements
-  // must not pair an old marker with the new links (utils/targeting-flags.ts).
+  });
+  // Flags read again after ALL pages' relations: a delete between the
+  // statements, on any page, must not pair an old marker with the new links
+  // (utils/targeting-flags.ts). Scalars only, so one statement.
   const checked = await withFreshAnnouncementFlags(strapi, rows, where);
   return checked.filter((row) => isAnnouncementVisible(row, scope)).map((row) => row.id);
 }
@@ -489,7 +493,8 @@ function isSpaceVisible(space: SpaceRow, scope: UserScope | null): boolean {
  *   - team       → authenticated users one of whose teams is `space.team`
  */
 export async function visibleWikiSpaceIds(strapi: any, scope: UserScope | null): Promise<number[]> {
-  const spaces: SpaceRow[] = await strapi.db.query("api::wiki-space.wiki-space").findMany({
+  // Paged (utils/paged-read.ts, #175): the populates bind one page of ids.
+  const spaces = await findAllPaged<SpaceRow>(strapi.db.query("api::wiki-space.wiki-space"), {
     select: ["id", "visibility"],
     populate: {
       allowedRoles: { select: ["id"] },

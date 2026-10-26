@@ -7,6 +7,7 @@ import { createDepartmentAudienceGuard } from "../utils/department-audience-guar
 import { createDocumentLock, type DocumentLockMiddlewareHost } from "../utils/document-lock";
 import { createMediaClaims } from "../utils/media-claims";
 import { createOffsetlessDatetimeGuard } from "../utils/offsetless-datetime-guard";
+import { createVisibilityNarrowing, type RequestContextHost } from "../utils/policy-query";
 import {
   createPollAudienceGuard,
   type DocumentMiddleware,
@@ -48,7 +49,11 @@ import { createWikiChecks, type WikiChecksHost } from "../utils/wiki-checks";
  *   8. audit recorder (§H): last of the content middlewares, inside the
  *      transaction;
  *   9. the FX40 user write guard: users are neither locked nor audited, so
- *      its position carries no load; last.
+ *      its position carries no load;
+ *  10. visibility narrowing (#175, v0.33; utils/policy-query.ts
+ *      createVisibilityNarrowing): a read of a type whose read policy left
+ *      a clause in this request gets it ANDed into `params.filters`. It
+ *      only touches reads, so it sits innermost, after every guard: last.
  *
  * The guards open their own `strapi.db.transaction`, which joins the lock's
  * (C5/C8). The factory names and signatures of 3a and 3b are frozen (K6):
@@ -73,6 +78,7 @@ export const DOCUMENT_MIDDLEWARE_SLOTS = [
   "media-claims",
   "audit-recorder",
   "user-write-guard",
+  "visibility-narrowing",
 ] as const;
 
 export type DocumentMiddlewareSlot = (typeof DOCUMENT_MIDDLEWARE_SLOTS)[number];
@@ -83,7 +89,8 @@ export type DocumentMiddlewaresHost = PollAudienceGuardHost &
   DocumentLockMiddlewareHost &
   ScheduleClearHost &
   PublishReadinessHost &
-  AuditHost;
+  AuditHost &
+  RequestContextHost;
 
 /** register() also needs `strapi.documents.use`. */
 export type DocumentMiddlewaresRegistrationHost = DocumentMiddlewaresHost & {
@@ -112,6 +119,7 @@ export function documentMiddlewares(strapi: DocumentMiddlewaresHost): SlottedMid
     { slot: "media-claims", middleware: createMediaClaims(strapi) },
     { slot: "audit-recorder", middleware: createAuditRecorder(strapi) },
     { slot: "user-write-guard", middleware: createUserWriteGuard(strapi) },
+    { slot: "visibility-narrowing", middleware: createVisibilityNarrowing(strapi) },
   ];
   return slotted.sort(
     (a, b) => DOCUMENT_MIDDLEWARE_SLOTS.indexOf(a.slot) - DOCUMENT_MIDDLEWARE_SLOTS.indexOf(b.slot),
@@ -128,7 +136,7 @@ export function registerDocumentMiddlewares(strapi: DocumentMiddlewaresRegistrat
     throw new Error(
       `${DOCUMENT_MIDDLEWARES_LOG} strapi.documents.use not found — refusing to boot without the ` +
         "Document Service middlewares (datetime guard, document lock, audience guards, wiki " +
-        "checks, schedule, readiness, media claims, audit, user write guard)",
+        "checks, schedule, readiness, media claims, audit, user write guard, visibility)",
     );
   }
   for (const { middleware } of documentMiddlewares(strapi)) documents.use(middleware);

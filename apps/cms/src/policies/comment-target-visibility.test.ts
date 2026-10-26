@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 
 import {
   createStrapiStub,
@@ -8,19 +8,29 @@ import {
   type StrapiStub,
   type StubUser,
 } from "../test/strapi-stub.test.helper";
+import { narrowedFilters, oneParamList, withNarrowing } from "../test/narrowing.test.helper";
 import commentTargetVisibility from "./comment-target-visibility";
 
 /**
  * Wiring test for the #28 read policy — decision logic itself is covered
  * by utils/target-visibility.test.ts. Pinned here (same trap set as the
  * sibling visibility policy tests):
- *   1. the filter lands on `policyContext.request.query`, not on the
- *      throw-away `policyContext.query` copy (Koa prototype-getter trap),
+ *   1. the full path's anchors reach the comment reads through the
+ *      Document Service (#175; filtersOf runs the real narrowing over what
+ *      the policy stored), one parameter per list,
  *   2. no visible target stays restrictive (`{ id: { $eq: -1 } }`) —
  *      never an empty `$in` (sanitizeQuery strips those, fail-open),
  *   3. a client filter is only narrowed (`$and`), never replaced,
- *   4. empty per-type lists emit NO branch for that type.
+ *   4. empty per-type lists emit NO branch for that type,
+ *   5. the guarded type comes from the route (comment or reaction); any
+ *      other route, or no request context, is refused.
  */
+
+const COMMENT_UID = "api::comment.comment";
+
+/** The filters a comment read gets once the Document Service applied what the policy stored. */
+const filtersOf = (ctx: { state?: object; request: { query: Record<string, unknown> } }) =>
+  narrowedFilters(ctx, COMMENT_UID, ctx.request.query.filters);
 
 const ENG = 1;
 
@@ -43,7 +53,7 @@ function stubStrapi({
           if (uid === "api::announcement.announcement") return announcements;
           if (uid === "api::wiki-space.wiki-space") return spaces;
           if (uid === "api::wiki-page.wiki-page") {
-            const ids: number[] = where?.space?.id?.$in ?? [];
+            const ids = (oneParamList(where?.space?.id?.$in) ?? []) as number[];
             return pages.filter((p: any) => p.space && ids.includes(p.space.id));
           }
           return [];
@@ -55,7 +65,7 @@ function stubStrapi({
 
 function context(user: any, query: Record<string, unknown> = {}) {
   return {
-    state: user ? { user } : {},
+    state: { ...(user ? { user } : {}), route: { handler: `${COMMENT_UID}.find` } },
     request: { query: { ...query } },
   } as any;
 }
@@ -65,9 +75,36 @@ const member = { id: 10, role: { id: 5, type: "member" } };
 describe("comment-target-visibility policy", () => {
   it("lets admin_role through without touching the query", async () => {
     const ctx = context({ id: 1, role: { type: "admin_role" } });
-    await expect(commentTargetVisibility(ctx, undefined, { strapi: stubStrapi() })).resolves.toBe(
-      true,
-    );
+    await expect(
+      commentTargetVisibility(ctx, undefined, { strapi: withNarrowing(stubStrapi(), ctx) }),
+    ).resolves.toBe(true);
+    expect(ctx.request.query.filters).toBeUndefined();
+  });
+
+  it("guards the reaction reads the same way, by the route", async () => {
+    const strapi = stubStrapi({
+      announcements: [{ id: 1, documentId: "docA", publishedAt: "2026-01-01", audience: "all" }],
+    });
+    const ctx = context(member);
+    ctx.state.route = { handler: "api::reaction.reaction.find" };
+    await commentTargetVisibility(ctx, undefined, { strapi: withNarrowing(strapi, ctx) });
+    const branch = { targetType: "announcement", targetDocumentId: { $in: ["docA"] } };
+    await expect(narrowedFilters(ctx, "api::reaction.reaction")).resolves.toEqual(branch);
+    await expect(narrowedFilters(ctx, COMMENT_UID)).resolves.toBeUndefined();
+  });
+
+  it("refuses another route, a missing route and a request without a context", async () => {
+    for (const route of [{ handler: "api::announcement.announcement.find" }, undefined]) {
+      const ctx = context(member);
+      ctx.state.route = route;
+      await expect(
+        commentTargetVisibility(ctx, undefined, { strapi: withNarrowing(stubStrapi(), ctx) }),
+      ).resolves.toBe(false);
+    }
+    const ctx = context(member);
+    const strapi = withNarrowing(stubStrapi(), ctx);
+    strapi.requestContext = { get: () => undefined };
+    await expect(commentTargetVisibility(ctx, undefined, { strapi })).resolves.toBe(false);
     expect(ctx.request.query.filters).toBeUndefined();
   });
 
@@ -78,8 +115,8 @@ describe("comment-target-visibility policy", () => {
       pages: [{ id: 100, documentId: "pageP", space: { id: 1 } }],
     });
     const ctx = context(member);
-    await commentTargetVisibility(ctx, undefined, { strapi });
-    expect(ctx.request.query.filters).toEqual({
+    await commentTargetVisibility(ctx, undefined, { strapi: withNarrowing(strapi, ctx) });
+    expect(await filtersOf(ctx)).toEqual({
       $or: [
         { targetType: "announcement", targetDocumentId: { $in: ["docA"] } },
         { targetType: "wiki-page", targetDocumentId: { $in: ["pageP"] } },
@@ -92,8 +129,8 @@ describe("comment-target-visibility policy", () => {
       announcements: [{ id: 1, documentId: "docA", publishedAt: "2026-01-01", audience: "all" }],
     });
     const ctx = context(member);
-    await commentTargetVisibility(ctx, undefined, { strapi });
-    expect(ctx.request.query.filters).toEqual({
+    await commentTargetVisibility(ctx, undefined, { strapi: withNarrowing(strapi, ctx) });
+    expect(await filtersOf(ctx)).toEqual({
       targetType: "announcement",
       targetDocumentId: { $in: ["docA"] },
     });
@@ -101,8 +138,8 @@ describe("comment-target-visibility policy", () => {
 
   it("stays restrictive when nothing at all is visible", async () => {
     const ctx = context(member);
-    await commentTargetVisibility(ctx, undefined, { strapi: stubStrapi() });
-    expect(ctx.request.query.filters).toEqual({ id: { $eq: -1 } });
+    await commentTargetVisibility(ctx, undefined, { strapi: withNarrowing(stubStrapi(), ctx) });
+    expect(await filtersOf(ctx)).toEqual({ id: { $eq: -1 } });
   });
 
   it("narrows a client filter with $and instead of replacing it", async () => {
@@ -111,8 +148,8 @@ describe("comment-target-visibility policy", () => {
     });
     const clientFilter = { targetType: { $eq: "announcement" } };
     const ctx = context(member, { filters: clientFilter });
-    await commentTargetVisibility(ctx, undefined, { strapi });
-    expect(ctx.request.query.filters).toEqual({
+    await commentTargetVisibility(ctx, undefined, { strapi: withNarrowing(strapi, ctx) });
+    expect(await filtersOf(ctx)).toEqual({
       $and: [clientFilter, { targetType: "announcement", targetDocumentId: { $in: ["docA"] } }],
     });
   });
@@ -125,8 +162,8 @@ describe("comment-target-visibility policy", () => {
       ],
     });
     const ctx = context(null);
-    await commentTargetVisibility(ctx, undefined, { strapi });
-    expect(ctx.request.query.filters).toEqual({
+    await commentTargetVisibility(ctx, undefined, { strapi: withNarrowing(strapi, ctx) });
+    expect(await filtersOf(ctx)).toEqual({
       targetType: "announcement",
       targetDocumentId: { $in: ["docA"] },
     });
@@ -240,8 +277,14 @@ describe("comment-target-visibility: single-anchor fast path (PL04)", () => {
   async function read(user: StubUser | null, filters?: unknown) {
     const strapi = stub();
     const ctx = policyContext(user, filters === undefined ? {} : { query: { filters } });
-    const result = await commentTargetVisibility(ctx, undefined, { strapi });
-    const final = ctx.request.query.filters as Record<string, unknown>;
+    ctx.state = { ...ctx.state, route: { handler: `${COMMENT}.find` } } as typeof ctx.state;
+    const result = await commentTargetVisibility(ctx, undefined, {
+      strapi: withNarrowing(strapi, ctx),
+    });
+    const final = (await narrowedFilters(ctx, COMMENT, ctx.request.query.filters)) as Record<
+      string,
+      unknown
+    >;
     const ids = strapi.tables[COMMENT].filter((row) => matchWhere(COMMENT, row, final)).map(
       (row) => row.id,
     );
@@ -325,39 +368,45 @@ describe("comment-target-visibility: single-anchor fast path (PL04)", () => {
     expect(full.calls.some((call) => call.uid === "api::wiki-space.wiki-space")).toBe(true);
   });
 
-  it("fails closed with a log when the anchors exceed the bind limit (PL04)", async () => {
+  it("carries 40,000 visible anchors as one list, past the old bind limit (#175)", async () => {
     const count = 40_000;
-    const error = vi.fn<(message: string) => void>();
+    const anchors = Array.from(
+      { length: count },
+      (_, index) => `a${String(index).padStart(23, "0")}`,
+    );
+    const rows = anchors.map((documentId, index) => ({
+      id: index + 1,
+      documentId,
+      publishedAt: PUBLISHED,
+    }));
     const strapi = {
       db: {
         query: (uid: string) => ({
           findOne: async () => null,
-          findMany: async () =>
-            uid === "api::announcement.announcement"
-              ? Array.from({ length: count }, (_, index) => ({
-                  id: index + 1,
-                  documentId: `a${String(index).padStart(23, "0")}`,
-                  publishedAt: PUBLISHED,
-                }))
-              : [],
+          findMany: async (
+            params: { where?: { $and?: { id?: { $gt?: number } }[] }; limit?: number } = {},
+          ) => {
+            if (uid !== "api::announcement.announcement") return [];
+            // Paged (utils/paged-read.ts): the cursor and the limit apply.
+            const after = params.where?.$and?.[1]?.id?.$gt ?? 0;
+            return rows.filter((row) => row.id > after).slice(0, params.limit ?? count);
+          },
         }),
       },
-      log: { error },
     };
     const ctx = policyContext(null, { query: { filters: { body: { $contains: "x" } } } });
-    await expect(commentTargetVisibility(ctx, undefined, { strapi })).resolves.toBe(true);
-    expect(ctx.request.query.filters).toEqual({
-      $and: [{ body: { $contains: "x" } }, { id: { $eq: -1 } }],
+    ctx.state = { ...ctx.state, route: { handler: `${COMMENT}.find` } } as typeof ctx.state;
+    await expect(
+      commentTargetVisibility(ctx, undefined, { strapi: withNarrowing(strapi, ctx) }),
+    ).resolves.toBe(true);
+    // The client filter stays as sent; the anchors join it at the Document Service.
+    expect(ctx.request.query.filters).toEqual({ body: { $contains: "x" } });
+    await expect(narrowedFilters(ctx, COMMENT, ctx.request.query.filters)).resolves.toEqual({
+      $and: [
+        { body: { $contains: "x" } },
+        { targetType: "announcement", targetDocumentId: { $in: anchors } },
+      ],
     });
-    expect(String(error.mock.calls[0]?.[0])).toContain(
-      `comment-target-visibility anchors: ${count} values`,
-    );
-    // A single pinned anchor binds one value: the fast path is unaffected.
-    const pinned = policyContext(null, {
-      query: { filters: pin("announcement", "a" + "0".repeat(23)) },
-    });
-    await expect(commentTargetVisibility(pinned, undefined, { strapi })).resolves.toBe(true);
-    expect(error).toHaveBeenCalledTimes(1);
   });
 
   it("lets admin_role and editor through untouched on the fast path too", async () => {

@@ -1,24 +1,26 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createStrapiStub, policyContext } from "../test/strapi-stub.test.helper";
 import announcementVisibility from "./announcement-visibility";
+import { narrowedFilters, withNarrowing } from "../test/narrowing.test.helper";
 
 /**
  * Wiring test for the read policy: it must resolve the caller's scope,
- * decide visibility in JS and inject a NON-relational id filter into the
- * REAL request query.
+ * decide visibility in JS and leave a NON-relational id clause for the
+ * Document Service reads of the request (#175; filtersOf runs the real
+ * narrowing middleware over what the policy stored).
  *
- * The four traps this pins down (all of them shipped bugs once, see
+ * The traps this pins down (all of them shipped bugs once, see
  * utils/policy-query.ts):
- *   1. the filter must land on `policyContext.request.query`, not on the
- *      throw-away `policyContext.query` copy,
- *   2. an empty visible-id list must stay restrictive (`$eq: -1`),
+ *   1. the status pin must land on `policyContext.request.query`, not on
+ *      the throw-away `policyContext.query` copy,
+ *   2. an empty visible-id list must stay restrictive (it matches nothing),
  *   3. a client-supplied filter may only be narrowed, never replaced, and
  *   4. the id list spans drafts AND published rows, so the publication
  *      state must be pinned server-side — otherwise `?status=draft` reads
  *      unpublished announcements.
  *
- * The policy only touches `strapi.db.query`, so a small stub is enough —
- * no Strapi runtime, no database.
+ * The policy only touches `strapi.db.query` and the request context, so a
+ * small stub is enough — no Strapi runtime, no database.
  */
 
 const ENGINEERING = 1;
@@ -73,14 +75,18 @@ function context(user: StubUser | null, query: Record<string, unknown> = {}) {
 }
 
 const run = (ctx: any, users: StubUser[]) =>
-  announcementVisibility(ctx, undefined, { strapi: stubStrapi(users) } as any);
+  announcementVisibility(ctx, undefined, { strapi: withNarrowing(stubStrapi(users), ctx) } as any);
+
+/** The filters a read gets once the Document Service applied what the policy stored (#175). */
+const filtersOf = (ctx: { state?: object; request: { query: Record<string, unknown> } }) =>
+  narrowedFilters(ctx, "api::announcement.announcement", ctx.request.query.filters);
 
 describe("announcement-visibility policy", () => {
   it("lets admin_role through without touching the query", async () => {
     const admin = { id: 1, role: { id: 1, type: "admin_role" } };
     const ctx = context(admin, { status: "draft" });
     await expect(run(ctx, [admin])).resolves.toBe(true);
-    expect(ctx.request.query.filters).toBeUndefined();
+    expect(await filtersOf(ctx)).toBeUndefined();
     // admin_role / editor bypass BEFORE the status is pinned — they author
     // the drafts and must keep reading them.
     expect(ctx.request.query.status).toBe("draft");
@@ -95,7 +101,7 @@ describe("announcement-visibility policy", () => {
     const ctx = context(designer);
     await run(ctx, [designer]);
     // #2 is Engineering-only, #3 is team-scoped, #4 is role-scoped.
-    expect(ctx.request.query.filters).toEqual({ id: { $in: [1] } });
+    expect(await filtersOf(ctx)).toEqual({ id: { $in: [1] } });
   });
 
   it("includes the department announcement for that department's members", async () => {
@@ -106,7 +112,7 @@ describe("announcement-visibility policy", () => {
     };
     const ctx = context(engineer);
     await run(ctx, [engineer]);
-    expect(ctx.request.query.filters).toEqual({ id: { $in: [1, 2] } });
+    expect(await filtersOf(ctx)).toEqual({ id: { $in: [1, 2] } });
   });
 
   it("counts the team LEAD as a team member (no inverse field on the user)", async () => {
@@ -119,7 +125,7 @@ describe("announcement-visibility policy", () => {
     const ctx = context(lead);
     await run(ctx, [lead]);
     // #3 via the led team, #4 via the team_lead role.
-    expect(ctx.request.query.filters).toEqual({ id: { $in: [1, 3, 4] } });
+    expect(await filtersOf(ctx)).toEqual({ id: { $in: [1, 3, 4] } });
   });
 
   it("keeps a caller-supplied filter and only narrows it", async () => {
@@ -130,7 +136,7 @@ describe("announcement-visibility policy", () => {
     };
     const ctx = context(engineer, { filters: { requiresAck: { $eq: true } } });
     await run(ctx, [engineer]);
-    expect(ctx.request.query.filters).toEqual({
+    expect(await filtersOf(ctx)).toEqual({
       $and: [{ requiresAck: { $eq: true } }, { id: { $in: [1, 2] } }],
     });
   });
@@ -138,7 +144,7 @@ describe("announcement-visibility policy", () => {
   it("gives an anonymous caller only the untargeted announcements", async () => {
     const ctx = context(null);
     await run(ctx, []);
-    expect(ctx.request.query.filters).toEqual({ id: { $in: [1] } });
+    expect(await filtersOf(ctx)).toEqual({ id: { $in: [1] } });
   });
 
   it("stays restrictive when nothing is visible (no fail-open empty $in)", async () => {
@@ -159,8 +165,8 @@ describe("announcement-visibility policy", () => {
         }),
       },
     };
-    await announcementVisibility(ctx, undefined, { strapi } as any);
-    expect(ctx.request.query.filters).toEqual({ id: { $eq: -1 } });
+    await announcementVisibility(ctx, undefined, { strapi: withNarrowing(strapi, ctx) } as any);
+    expect(await filtersOf(ctx)).toEqual({ id: { $in: [] } });
   });
 
   describe("publication state", () => {
@@ -197,7 +203,7 @@ describe("announcement-visibility policy", () => {
     it("pins the status without disturbing the injected id filter", async () => {
       const ctx = context(engineer, { status: "draft" });
       await run(ctx, [engineer]);
-      expect(ctx.request.query.filters).toEqual({ id: { $in: [1, 2] } });
+      expect(await filtersOf(ctx)).toEqual({ id: { $in: [1, 2] } });
     });
   });
 });
@@ -233,8 +239,10 @@ describe("announcement expiry (DA02, owner answer 2026-09-29 (b))", () => {
     vi.setSystemTime(NOW);
     const strapi = expiryStub();
     const ctx = policyContext(user);
-    await expect(announcementVisibility(ctx, undefined, { strapi })).resolves.toBe(true);
-    return ctx.request.query.filters;
+    await expect(
+      announcementVisibility(ctx, undefined, { strapi: withNarrowing(strapi, ctx) }),
+    ).resolves.toBe(true);
+    return filtersOf(ctx);
   };
 
   it("drops announcements whose expiresAt instant has passed, for members and anonymous alike", async () => {
@@ -297,9 +305,9 @@ describe("fail-closed targeting (D-PT01 and the re-target marker, batch 15)", ()
   const filtersFor = async (user: { id: number; role: { type: string } } | null) => {
     const ctx = policyContext(user);
     await expect(
-      announcementVisibility(ctx, undefined, { strapi: failClosedStub() }),
+      announcementVisibility(ctx, undefined, { strapi: withNarrowing(failClosedStub(), ctx) }),
     ).resolves.toBe(true);
-    return ctx.request.query.filters;
+    return filtersOf(ctx);
   };
 
   it("hides restricted announcements from their remaining audience and from anonymous callers", async () => {
@@ -351,7 +359,9 @@ describe("a department delete between the policy's reads (batch 15)", () => {
       };
     };
     const ctx = policyContext({ id: 2, role: { type: "member" } });
-    await expect(announcementVisibility(ctx, undefined, { strapi })).resolves.toBe(true);
-    expect(ctx.request.query.filters).toEqual({ id: { $eq: -1 } });
+    await expect(
+      announcementVisibility(ctx, undefined, { strapi: withNarrowing(strapi, ctx) }),
+    ).resolves.toBe(true);
+    expect(await filtersOf(ctx)).toEqual({ id: { $in: [] } });
   });
 });
