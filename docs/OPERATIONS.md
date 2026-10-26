@@ -1295,9 +1295,15 @@ through Strapi with the user's own JWT, so every read rule (department
 audiences, announcement targeting and expiry, wiki spaces, guests, drafts)
 still decides what anyone sees; nothing from the index reaches the browser.
 While Meilisearch is off, unreachable, slow or empty, the web answers with
-its built-in search. The cms keeps the index `sinnlos_search` current: about
-once a minute it checks for changes and rebuilds into `sinnlos_search_build`,
-then swaps it in. The index holds published content only and is rebuilt from
+its built-in search. The cms keeps the index `sinnlos_search` current: every
+minute it reads a small probe (per kind the count and the newest id,
+`updatedAt` and `publishedAt` of the published rows). Only when the probe
+moved, the live index is missing, the cms just started, or an hour has passed
+since the last full check does it load the published content, compare it with
+the last build and, if it changed, rebuild into `sinnlos_search_build` and
+swap it in (v0.31). So publishing, unpublishing, deleting and scheduled runs
+show within a minute; a raw database write that changes text in place shows
+within the hour. A failed check is retried the next minute. The index holds published content only and is rebuilt from
 the database at any time, so it needs no backup.
 
 | Variable                  | Where                | Purpose                                                                                              |
@@ -1333,8 +1339,8 @@ infra/docker-compose.traefik.yml --profile search rm -sf meili`. The volume
 `infra_meili_data` only holds the rebuildable index; delete it when the
 module is not coming back.
 
-**After a database restore** nothing is needed: the next minute's check sees
-the changed content and rebuilds the index. Until then a stale hit is
+**After a database restore** nothing is needed: `infra/restore-db.sh` starts
+the cms again, and its first minute rebuilds the index. Until then a stale hit is
 harmless, because Strapi drops anything gone or hidden.
 
 **Resources:** `mem_limit: 512m`, one CPU, one indexing thread with

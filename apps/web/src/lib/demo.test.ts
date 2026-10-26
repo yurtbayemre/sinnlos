@@ -85,7 +85,6 @@ const API_READS: Record<string, () => Promise<unknown>> = {
   "polls.results": () => api.polls.results("demopoll0000000000000001"),
   "polls.resultsMany": () => api.polls.resultsMany([1, "demopoll0000000000000002"]),
   "documents.list": () => api.documents.list(),
-  "documents.requiringAck": () => api.documents.requiringAck(),
   "kudos.list": () => api.kudos.list(),
   "classifieds.list": () => api.classifieds.list(zonedDateKey(NOW, ZONE)),
   "classifieds.mine": () => api.classifieds.mine(1),
@@ -117,6 +116,7 @@ const DIRECT_READS: Record<string, () => Promise<unknown>> = {
   "analytics recentComments": () => analytics.recentComments(),
   "analytics searchSummary": () => analytics.searchSummary(),
   "me (/api/me)": () => strapi("/api/me"),
+  "open-acks (/api/me/open-acks)": () => strapi("/api/me/open-acks"),
   "person (/api/users/:id)": () => strapi("/api/users/2?populate[department]=true"),
 };
 
@@ -156,6 +156,25 @@ describe("DEMO_MODE: every read has a fixture route", () => {
       expect(state.tokenReads).toBe(0);
     },
   );
+
+  it("refuses a report index request the cms refuses (v0.31)", () => {
+    const post = (body: unknown) =>
+      demo("/api/acknowledgements/report-index", { method: "POST", body: JSON.stringify(body) });
+    for (const body of [
+      { targetType: "poll", documentIds: [] },
+      { targetType: "announcement" },
+      { targetType: "announcement", documentIds: [5] },
+      { targetType: "announcement", documentIds: [""] },
+      { targetType: "announcement", documentIds: ["x".repeat(65)] },
+      { targetType: "document", documentIds: Array.from({ length: 21 }, (_, i) => `d${i}`) },
+    ]) {
+      expect(() => post(body), JSON.stringify(body).slice(0, 60)).toThrow(StrapiError);
+    }
+    expect(post({ targetType: "document", documentIds: ["d1"] })).toEqual({
+      data: { acks: { d1: [] } },
+      meta: { truncated: false },
+    });
+  });
 
   it("warns (outside production) and answers an empty list for an unknown path", () => {
     expect(listOf(demo("/api/nothing-here?x=1")).data).toEqual([]);

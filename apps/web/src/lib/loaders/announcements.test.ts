@@ -6,26 +6,24 @@ import type { Acknowledgement } from "@/lib/types";
 
 /**
  * WD03: the /announcements view-model and the dashboard's open-ack count
- * from mocked reads (the api facade and the receipts walk); computeOpenAcks
- * is the real rule. Snapshots pin the view-model per scenario: success,
+ * from mocked reads (the api facade and the receipts walk; the banner's one
+ * cms read, v0.31); computeOpenAcks is the real rule. Snapshots pin the view-model per scenario: success,
  * partial failure, truncation, CMS down.
  */
 const feedMock = vi.fn<() => Promise<unknown>>();
 const mandatoryMock = vi.fn<() => Promise<unknown>>();
 const receiptsMock = vi.fn<() => Promise<unknown>>();
-const documentsMock = vi.fn<() => Promise<unknown>>();
-const documentReceiptsMock = vi.fn<() => Promise<unknown>>();
+const openAcksMock = vi.fn<(path: string) => Promise<unknown>>();
 
 vi.mock("@/lib/strapi", () => ({
   api: {
     announcements: { list: () => feedMock(), requiringAck: () => mandatoryMock() },
-    documents: { requiringAck: () => documentsMock() },
   },
 }));
+vi.mock("@/lib/strapi/client", () => ({ strapi: (path: string) => openAcksMock(path) }));
 vi.mock("@/lib/acknowledgements", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/acknowledgements")>()),
   fetchMyAnnouncementAcks: () => receiptsMock(),
-  fetchMyDocumentAcks: () => documentReceiptsMock(),
 }));
 
 const { loadAnnouncements, loadOpenAckCount, pickLatestNews } = await import("./announcements");
@@ -80,8 +78,7 @@ beforeEach(() => {
   feedMock.mockReset().mockResolvedValue(FEED);
   mandatoryMock.mockReset().mockResolvedValue(MANDATORY);
   receiptsMock.mockReset().mockResolvedValue(RECEIPTS);
-  documentsMock.mockReset().mockResolvedValue({ data: [], truncated: false });
-  documentReceiptsMock.mockReset().mockResolvedValue({ acks: [], truncated: false });
+  openAcksMock.mockReset().mockResolvedValue({ data: { announcements: 2, documents: 0 } });
   vi.spyOn(console, "error").mockImplementation(() => {});
 });
 
@@ -162,59 +159,23 @@ describe("loadAnnouncements", () => {
 });
 
 describe("loadOpenAckCount (the dashboard banner)", () => {
-  it("counts the mandatory posts the caller has not confirmed", async () => {
-    await expect(loadOpenAckCount()).resolves.toEqual({
-      count: 2,
-      documents: 0,
-      truncated: false,
-    });
+  it("reads the cms's open counts in one request (v0.31)", async () => {
+    await expect(loadOpenAckCount()).resolves.toEqual({ count: 2, documents: 0 });
+    expect(openAcksMock.mock.calls).toEqual([["/api/me/open-acks"]]);
+    expect(mandatoryMock).not.toHaveBeenCalled();
+    expect(receiptsMock).not.toHaveBeenCalled();
   });
 
-  it("counts the documents requiring acknowledgement the caller has not confirmed (v0.20)", async () => {
-    documentsMock.mockResolvedValue({
-      data: [
-        { id: 1, documentId: "doc-1", requiresAck: true },
-        { id: 2, documentId: "doc-2", requiresAck: true },
-        // DEMO_MODE answers unfiltered: requiresAck is checked again.
-        { id: 3, documentId: "doc-3", requiresAck: false },
-      ],
-      truncated: false,
-    });
-    documentReceiptsMock.mockResolvedValue({
-      acks: [{ ...receipt("doc-2", null), targetType: "document" }],
-      truncated: false,
-    });
-    await expect(loadOpenAckCount()).resolves.toEqual({
-      count: 2,
-      documents: 1,
-      truncated: false,
-    });
+  it("keeps a kind the role may not read unknown (null), never 0", async () => {
+    openAcksMock.mockResolvedValue({ data: { announcements: null, documents: 3 } });
+    await expect(loadOpenAckCount()).resolves.toEqual({ count: null, documents: 3 });
   });
 
-  it("is unknown (null) per kind when its read fails, never 0 or every post", async () => {
-    receiptsMock.mockRejectedValue(outage());
-    await expect(loadOpenAckCount()).resolves.toEqual({
-      count: null,
-      documents: 0,
-      truncated: false,
-    });
-    receiptsMock.mockResolvedValue(RECEIPTS);
-    mandatoryMock.mockRejectedValue(outage());
-    documentReceiptsMock.mockRejectedValue(outage());
-    await expect(loadOpenAckCount()).resolves.toEqual({
-      count: null,
-      documents: null,
-      truncated: false,
-    });
-  });
-
-  it("flags a walk cut at its cap", async () => {
-    receiptsMock.mockResolvedValue({ ...RECEIPTS, truncated: true });
-    await expect(loadOpenAckCount()).resolves.toEqual({
-      count: 2,
-      documents: 0,
-      truncated: true,
-    });
+  it("is unknown (null) when the read fails or answers nonsense, never 0", async () => {
+    openAcksMock.mockRejectedValue(outage());
+    await expect(loadOpenAckCount()).resolves.toEqual({ count: null, documents: null });
+    openAcksMock.mockResolvedValue({ data: { announcements: -1, documents: "2" } });
+    await expect(loadOpenAckCount()).resolves.toEqual({ count: null, documents: null });
   });
 });
 
@@ -240,6 +201,7 @@ describe("control flow", () => {
     })();
     receiptsMock.mockRejectedValue(expired);
     await expect(loadAnnouncements("member")).rejects.toBe(expired);
+    openAcksMock.mockRejectedValue(expired);
     await expect(loadOpenAckCount()).rejects.toBe(expired);
   });
 });

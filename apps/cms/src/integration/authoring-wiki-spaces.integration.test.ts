@@ -271,7 +271,7 @@ describe.each(testEngines())("authoring wiki spaces on %s", (engine) => {
       "[bootstrap] granted 52 permission(s) across intranet roles",
       // v0.28: +4 user administration actions (export, anonymisation, evidence)
       // and the admin unread count.
-      "[bootstrap] permission drift: none (report-only check of 218 managed actions)",
+      "[bootstrap] permission drift: none (report-only check of 220 managed actions)",
     ]);
 
     if (engine !== "postgres") return;

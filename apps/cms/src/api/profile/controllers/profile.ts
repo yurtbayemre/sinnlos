@@ -40,6 +40,7 @@ import { ENTRA_MANAGED_PROFILE_FIELDS } from "../../../entra/profile";
 import type { RequestAssurance } from "../../../extensions/users-permissions/strapi-server";
 import { idpOf } from "../../../idp/exchange-core";
 import { mfaActivate, mfaDisable, mfaSetup } from "../../../utils/mfa";
+import { openAckCounts } from "../../../utils/open-acks";
 import { answerRefusals } from "../../../utils/refusal";
 import { isEnrolled, requiredMfa } from "../../../utils/mfa-core";
 import { OIDC_MANAGED_PROFILE_FIELDS } from "../../../oidc/provision";
@@ -319,6 +320,13 @@ export default {
     const profile = await loadProfile(user.id, user.role?.type, ctx.state.assurance);
     if (!profile) return ctx.notFound();
     return ctx.send({ data: profile });
+  },
+
+  // v0.31: the dashboard banner's open confirmations (utils/open-acks.ts).
+  async openAcks(ctx: ProfileContext) {
+    const user = ctx.state.user;
+    if (!user) return ctx.unauthorized();
+    return ctx.send({ data: await openAckCounts(strapi as never, user) });
   },
 
   // v0.27: the caller's own second factor (utils/mfa.ts). The answers carry

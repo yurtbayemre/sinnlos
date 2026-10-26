@@ -8,11 +8,12 @@ import {
   type ReportUser,
 } from "@/lib/ack-report";
 import { fetchAnnouncementAckIndex, fetchDocumentAckIndex } from "@/lib/acknowledgements";
-import { listAckReportAnnouncements } from "@/lib/api/announcements";
-import { listDocumentsRequiringAck } from "@/lib/api/documents";
+import { ackReportAnnouncementsPage } from "@/lib/api/announcements";
+import { ackReportDocumentsPage } from "@/lib/api/documents";
 import { ACKNOWLEDGER_ROLES, ANNOUNCEMENT_READER_ROLES } from "@/lib/roles";
 import { tryFetch } from "@/lib/safe-fetch";
 import { fetchAllTeams } from "@/lib/teams";
+import type { StrapiListResponse } from "@/lib/strapi/client";
 import { fetchAllUsers } from "@/lib/users";
 import { displayNameOf } from "@/lib/utils";
 
@@ -22,6 +23,11 @@ import { displayNameOf } from "@/lib/utils";
  * announcement-visibility policy, so the reads return EVERY mandatory
  * announcement and every user's acks of them; the target audience is
  * recomputed here instead of being handed over by the API.
+ *
+ * v0.31 (#173, owner decision Q1): the announcements and the documents
+ * page separately, ACK_REPORT_PAGE_SIZE items each (lib/ack-report.ts),
+ * and the receipts are read for the shown items only, from the cms report
+ * index. Users and teams are read once per render, as before.
  */
 
 /**
@@ -56,20 +62,38 @@ export interface AckReportRowView {
   openUsers: { id: number; name: string }[];
 }
 
+/** Where one section of the report is. */
+export interface AckReportPage {
+  page: number;
+  pageCount: number;
+  total: number;
+}
+
+/** The page of each section to show (the URL's `page` and `documentsPage`). */
+export interface AckReportPages {
+  page: number;
+  documentsPage: number;
+}
+
 export interface AckReportView {
   rows: AckReportRowView[];
+  /** The announcement section's page; null when its read failed. */
+  announcementsPage: AckReportPage | null;
   /**
    * The documents that require acknowledgement (v0.20), in the same shape:
    * `audience.department` lists the linked departments' names.
    */
   documentRows: AckReportRowView[];
+  /** The document section's page; null when its read failed. */
+  documentsPage: AckReportPage | null;
   /** Both reads answered with none: the empty state (not on an outage). */
   empty: boolean;
   /** A read failed: the CMS-down banner (and the affected rows unknown). */
   failed: boolean;
   /**
-   * An input walk stopped at its cap: the numbers may be too low, so the
-   * report warns and never reads as complete (#14).
+   * An input walk or the receipt index stopped at its cap: the numbers of
+   * the shown items may be too low, so the report warns and never reads as
+   * complete (#14).
    */
   truncated: boolean;
 }
@@ -82,28 +106,55 @@ function audienceOf(a: ReportAnnouncement): AckReportAudience {
   };
 }
 
-/** Everything the report renders; the reads are the ones of before WD03. */
-export async function loadAckReport(): Promise<AckReportView> {
+/**
+ * One page of a section; a page past the last one (an item deleted since
+ * the link was made) shows the last page instead.
+ */
+async function sectionPage<T>(
+  read: (page: number) => Promise<StrapiListResponse<T>>,
+  page: number,
+): Promise<StrapiListResponse<T>> {
+  const answer = await read(page);
+  const pageCount = answer.meta?.pagination?.pageCount ?? 0;
+  return (answer.data ?? []).length === 0 && pageCount >= 1 && page > pageCount
+    ? read(pageCount)
+    : answer;
+}
+
+const pageOf = (answer: StrapiListResponse<unknown> | null): AckReportPage | null => {
+  if (!answer) return null;
+  const {
+    page = 1,
+    pageCount = 1,
+    total = (answer.data ?? []).length,
+  } = answer.meta?.pagination ?? {};
+  return { page, pageCount: Math.max(1, pageCount), total };
+};
+
+/** Everything the report renders, for the given page of each section. */
+export async function loadAckReport(
+  pages: AckReportPages = { page: 1, documentsPage: 1 },
+): Promise<AckReportView> {
   const [announcementsResult, usersResult, teamsResult, documentsResult] = await Promise.all([
-    // Every mandatory announcement with its targeting fields, a full walk
+    // One page of the mandatory announcements with their targeting fields
     // (the audienceRoles populate needs the role.find grant admin_role
     // holds for exactly this page).
-    tryFetch(() => listAckReportAnnouncements(), "ack-report"),
+    tryFetch(() => sectionPage(ackReportAnnouncementsPage, pages.page), "ack-report"),
     tryFetch(() => fetchAllUsers<ReportUser>(ACK_REPORT_USER_QUERY), "ack-report"),
     // Team membership for team-scoped announcements: `team.lead` has no
     // inverse field on the user, so the mapping is built from the team
     // side (field-limited to ids, with its own truncated signal).
     tryFetch(() => fetchAllTeams(), "ack-report"),
-    // Every document that requires acknowledgement (admin_role bypasses
-    // document-visibility) with its departments and flag.
-    tryFetch(() => listDocumentsRequiringAck(), "ack-report"),
+    // One page of the documents that require acknowledgement (admin_role
+    // bypasses document-visibility) with their departments and flag.
+    tryFetch(() => sectionPage(ackReportDocumentsPage, pages.documentsPage), "ack-report"),
   ]);
 
   // Re-check requiresAck: DEMO_MODE's fixture answers announcement paths
   // unfiltered, and it keeps the report honest if the query ever changes.
   const announcements = (announcementsResult.data?.data ?? []).filter((a) => a.requiresAck);
-  // The acks of exactly the listed announcements, per chunk of documentIds
-  // with a cap per chunk (FX32). They need the announcements first.
+  // The acks of exactly the shown items, from the cms report index (FX32,
+  // v0.31). They need the items first.
   const documents = (documentsResult.data?.data ?? []).filter((d) => d.requiresAck);
   const idsOf = (rows: { documentId?: string }[]) =>
     rows.map((row) => row.documentId).filter((id): id is string => !!id);
@@ -124,8 +175,8 @@ export async function loadAckReport(): Promise<AckReportView> {
     acksFailed: acksResult.failed || documentAcksResult.failed,
     acksTruncated: !!acksResult.data?.truncated || !!documentAcksResult.data?.truncated,
     announcementsFailed: announcementsResult.failed || documentsResult.failed,
-    announcementsTruncated:
-      !!announcementsResult.data?.truncated || !!documentsResult.data?.truncated,
+    // One page each, no walk: nothing of the items is cut short.
+    announcementsTruncated: false,
   });
 
   const rows = buildAckReportRows({
@@ -180,6 +231,8 @@ export async function loadAckReport(): Promise<AckReportView> {
         openUsers: openNames(openUsers),
       }),
     ),
+    announcementsPage: pageOf(announcementsResult.data),
+    documentsPage: pageOf(documentsResult.data),
     empty:
       !announcementsResult.failed &&
       !documentsResult.failed &&

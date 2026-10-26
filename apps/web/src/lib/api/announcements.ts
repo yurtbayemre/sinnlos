@@ -10,7 +10,7 @@
  * (acknowledgement-visibility scopes them to the caller's own rows,
  * admin_role bypasses).
  */
-import type { ReportAck, ReportAnnouncement } from "@/lib/ack-report";
+import { ACK_REPORT_PAGE_SIZE, type ReportAnnouncement } from "@/lib/ack-report";
 import { walkAllPages, type WalkResult } from "@/lib/paginate";
 import { strapi, type StrapiListResponse } from "@/lib/strapi/client";
 import { strapiQuery, withQuery, type StrapiQuery } from "@/lib/strapi/query";
@@ -26,9 +26,6 @@ export type AnnouncementAuthor = Pick<
 export type AnnouncementListItem = Omit<Announcement, "author"> & {
   author?: AnnouncementAuthor | null;
 };
-
-/** An acknowledgement as the report index reads it: target and user id only. */
-export type AckIndexRow = ReportAck & { id: number };
 
 const withAuthor = (query: StrapiQuery) =>
   query.populateFields("author", ["username", "email", "displayName", "jobTitle"]);
@@ -79,32 +76,29 @@ export function listRequiringAck(): Promise<WalkResult<AnnouncementListItem>> {
 }
 
 /**
- * Every mandatory announcement with the fields its targeting depends on,
- * for the admin ack report (/manage/acknowledgements). admin_role bypasses
- * the visibility policy, so this is the whole set. The audienceRoles
- * populate needs `plugin::users-permissions.role.find`, which the CMS
- * bootstrap grants to admin_role for exactly this page. Full page walk,
- * not a single pageSize=100 request: a mandatory announcement dropped past
- * the first page would silently vanish from the report and never be chased
- * for confirmation (#14). Secondary sort on id keeps the walk stable when
- * rows share a createdAt.
+ * One page of the mandatory announcements with the fields their targeting
+ * depends on, for the admin ack report (/manage/acknowledgements; v0.31:
+ * the report pages, ACK_REPORT_PAGE_SIZE items, so every item stays
+ * reachable and the page stays small). admin_role bypasses the visibility
+ * policy, so the pages hold the whole set. The audienceRoles populate needs
+ * `plugin::users-permissions.role.find`, which the CMS bootstrap grants to
+ * admin_role for exactly this page. Secondary sort on id keeps the pages
+ * stable when rows share a createdAt.
  */
-export function listAckReportAnnouncements(): Promise<WalkResult<ReportAnnouncement>> {
-  return walkAllPages<ReportAnnouncement>(
-    (page) =>
-      strapi<StrapiListResponse<ReportAnnouncement>>(
-        withQuery(
-          "/api/announcements",
-          strapiQuery()
-            .filter("requiresAck", "$eq", true)
-            .populateFields("department", ["name"])
-            .populateFields("team", ["name"])
-            .populateFields("audienceRoles", ["type", "name"])
-            .sort(["createdAt:desc", "id:desc"])
-            .page(page, 100),
-        ),
-      ),
-    { maxPages: 50, label: "ack-report announcements" },
+export function ackReportAnnouncementsPage(
+  page: number,
+): Promise<StrapiListResponse<ReportAnnouncement>> {
+  return strapi<StrapiListResponse<ReportAnnouncement>>(
+    withQuery(
+      "/api/announcements",
+      strapiQuery()
+        .filter("requiresAck", "$eq", true)
+        .populateFields("department", ["name"])
+        .populateFields("team", ["name"])
+        .populateFields("audienceRoles", ["type", "name"])
+        .sort(["createdAt:desc", "id:desc"])
+        .page(page, ACK_REPORT_PAGE_SIZE),
+    ),
   );
 }
 
@@ -132,27 +126,24 @@ export function myAcksPage(
   );
 }
 
+/** The cms's answer of POST /api/acknowledgements/report-index. */
+export interface AckReportIndexResponse {
+  data?: { acks?: Record<string, unknown> };
+  meta?: { truncated?: boolean };
+}
+
 /**
- * One page of the acknowledgements of the given announcements or documents
- * across all users (admin_role, the ack report, FX32): only the target and
- * the user's id, sorted by id so the pages of a walk stay stable.
+ * Who confirmed which of up to 20 announcements or documents, across all
+ * users (admin_role, the ack report; v0.31, #173): the cms reads the
+ * receipts itself and answers documentId → user ids, `truncated` past its
+ * budget of 2,000 receipts per item.
  */
-export function acksPage(
+export function ackReportIndex(
   targetType: Acknowledgement["targetType"],
   documentIds: readonly string[],
-  page: number,
-  pageSize: number,
-): Promise<StrapiListResponse<AckIndexRow>> {
-  return strapi<StrapiListResponse<AckIndexRow>>(
-    withQuery(
-      "/api/acknowledgements",
-      strapiQuery()
-        .filter("targetType", "$eq", targetType)
-        .filterIn("targetDocumentId", documentIds)
-        .fields(["targetDocumentId"])
-        .populateFields("user", ["id"])
-        .sort(["id:asc"])
-        .page(page, pageSize),
-    ),
-  );
+): Promise<AckReportIndexResponse> {
+  return strapi<AckReportIndexResponse>("/api/acknowledgements/report-index", {
+    method: "POST",
+    body: JSON.stringify({ targetType, documentIds }),
+  });
 }

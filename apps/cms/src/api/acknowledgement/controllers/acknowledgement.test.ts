@@ -567,3 +567,58 @@ describe("acknowledgement create: documents (v0.20)", () => {
     expect(ctx.badRequest).toHaveBeenCalledWith("Already acknowledged");
   });
 });
+
+describe("acknowledgement reportIndex (v0.31, #173)", () => {
+  async function reportIndex(body: unknown, user: Caller | null = ADMIN) {
+    const s = setup(body);
+    const ctx = {
+      ...s.ctx,
+      forbidden: vi.fn(() => ({ status: 403 })),
+      set: vi.fn(),
+    };
+    ctx.state.user = user ?? undefined;
+    const controller = s.controller as unknown as { reportIndex(ctx: unknown): Promise<unknown> };
+    await controller.reportIndex(ctx);
+    return { ...s, ctx };
+  }
+
+  it("is admin_role's only, whatever the grants say", async () => {
+    for (const user of [EDITOR, MEMBER]) {
+      const { ctx, calls } = await reportIndex(
+        { targetType: "announcement", documentIds: [ANN_DOC] },
+        user,
+      );
+      expect(ctx.forbidden, user.role.type).toHaveBeenCalled();
+      expect(calls).toEqual([]);
+    }
+    expect((await reportIndex({}, null)).ctx.unauthorized).toHaveBeenCalled();
+  });
+
+  it("refuses a bad type and more than 20 or malformed documentIds, before any query", async () => {
+    const ids = (n: number) => Array.from({ length: n }, (_, i) => `doc${i}`);
+    for (const body of [
+      { targetType: "poll", documentIds: [ANN_DOC] },
+      { targetType: "constructor", documentIds: [] },
+      { targetType: "announcement" },
+      { targetType: "announcement", documentIds: ANN_DOC },
+      { targetType: "announcement", documentIds: [""] },
+      { targetType: "announcement", documentIds: [5] },
+      { targetType: "announcement", documentIds: ["x".repeat(65)] },
+      { targetType: "document", documentIds: ids(21) },
+    ]) {
+      const { ctx, calls } = await reportIndex(body);
+      expect(ctx.badRequest, JSON.stringify(body).slice(0, 60)).toHaveBeenCalled();
+      expect(calls).toEqual([]);
+    }
+  });
+
+  it("answers the index and the truncation flag, uncached", async () => {
+    const { ctx } = await reportIndex({ targetType: "document", documentIds: ["d1", "d1", "d2"] });
+    expect(ctx.badRequest).not.toHaveBeenCalled();
+    expect(ctx.set).toHaveBeenCalledWith("Cache-Control", "private, no-store");
+    expect(ctx.send).toHaveBeenCalledWith({
+      data: { acks: { d1: [], d2: [] } },
+      meta: { truncated: false },
+    });
+  });
+});

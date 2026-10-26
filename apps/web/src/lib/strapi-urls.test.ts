@@ -209,6 +209,7 @@ const { getViewer } = await import("./viewer");
 const { getNotifications } = await import("./notification-actions");
 const { PRELOAD_KINDS, loadPreload, searchLive } = await import("./search-action");
 const { getCommentSection, getCommentSections } = await import("./comment-actions");
+const { loadOpenAckCount } = await import("./loaders/announcements");
 const { default: AckReportPage } = await import("@/app/(app)/manage/acknowledgements/page");
 const { default: AnalyticsPage } = await import("@/app/(app)/manage/analytics/page");
 const { default: TrainingReportPage } = await import("@/app/(app)/manage/training/report/page");
@@ -250,7 +251,6 @@ const API_READS: Record<string, () => Promise<unknown>> = {
       7,
     ]),
   "documents.list": () => api.documents.list(),
-  "documents.requiringAck": () => api.documents.requiringAck(),
   "kudos.list": () => api.kudos.list(),
   "classifieds.list": async () => {
     await api.classifieds.list("2026-09-28");
@@ -273,10 +273,9 @@ const DIRECT_READS: Record<string, () => Promise<unknown>> = {
   "acknowledgements.fetchMyAnnouncementAcks": () => fetchMyAnnouncementAcks(),
   "acknowledgements.fetchMyDocumentAcks": () => fetchMyDocumentAcks(),
   "acknowledgements.fetchAnnouncementAckIndex": () =>
-    fetchAnnouncementAckIndex(
-      Array.from({ length: 21 }, (_, i) => `ann doc ${i}`).concat(["ann doc 0", ""]),
-    ),
+    fetchAnnouncementAckIndex(["ann doc 0", "ann doc 1", "ann doc 0", ""]),
   "acknowledgements.fetchDocumentAckIndex": () => fetchDocumentAckIndex(["doc doc 0"]),
+  "announcements.loadOpenAckCount": () => loadOpenAckCount(),
   "training.fetchCourses": () => training.fetchCourses(),
   "training.fetchCourseBySlug": () => training.fetchCourseBySlug("security & safety"),
   "training.fetchLessonByDocumentId": () => training.fetchLessonByDocumentId("lesson/doc 1"),
@@ -308,6 +307,8 @@ const DIRECT_READS: Record<string, () => Promise<unknown>> = {
   "comments.getCommentSection(reaction overflow)": () =>
     getCommentSection({ type: "announcement", documentId: OVERFLOW_DOC }),
   "page.manage/acknowledgements": () => AckReportPage(),
+  "page.manage/acknowledgements?page=3&documentsPage=2": () =>
+    AckReportPage({ searchParams: Promise.resolve({ page: "3", documentsPage: "2" }) }),
   "page.manage/analytics": () => AnalyticsPage(),
   "page.manage/training/report": () => TrainingReportPage(),
   "page.manage/training/report/[course]": () =>
