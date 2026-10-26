@@ -197,13 +197,14 @@ describe("compose images (v0.32, #196)", () => {
   const compose = read("./docker-compose.yml");
   const images = [...compose.matchAll(/^ {4}image: (\S+)$/gm)].map((match) => match[1]);
 
-  it("pins every image of the compose file by digest, postgres to production's 16.15", () => {
+  it("pins every image of the compose file by digest, postgres on its 16 line", () => {
     expect(images.length).toBeGreaterThanOrEqual(3);
     for (const image of images) expect(image).toMatch(/^[\w./-]+:[\w.-]+@sha256:[0-9a-f]{64}$/);
-    expect(images).toContain(
-      "postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea",
+    // A digest bump of the same tag (Dependabot) passes; another tag does not.
+    expect(images.some((image) => /^postgres:16-alpine@sha256:[0-9a-f]{64}$/.test(image))).toBe(
+      true,
     );
-    expect(images.some((image) => image.startsWith("caddy:2-alpine@sha256:"))).toBe(true);
+    expect(images.some((image) => /^caddy:2-alpine@sha256:[0-9a-f]{64}$/.test(image))).toBe(true);
   });
 
   it("lets CI's edge check run the caddy the compose file pins, never a floating tag", () => {
@@ -223,5 +224,7 @@ describe("compose images (v0.32, #196)", () => {
         `- dependency-name: ${name}\n        update-types: ["version-update:semver-major"]`,
       );
     }
+    // Meilisearch not at all: a new version may not open the old index files.
+    expect(block).toMatch(/- dependency-name: getmeili\/meilisearch\n?$/);
   });
 });

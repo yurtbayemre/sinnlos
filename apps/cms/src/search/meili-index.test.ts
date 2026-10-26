@@ -295,6 +295,17 @@ describe("rebuildSearchIndex", () => {
     expect(meili.calls.indexOf("POST /swap-indexes")).toBeGreaterThan(
       meili.calls.lastIndexOf("POST /indexes/sinnlos_search_build/documents"),
     );
+    // One byte less and no two documents fit: counting characters, or
+    // leaving out the brackets or the comma, would still pair them.
+    const tight = fakeMeili({ refuseOver: limit - 1 });
+    await rebuildSearchIndex(
+      documents,
+      parseMeiliConfig(ON)!,
+      tight.fetchImpl,
+      async () => {},
+      limit - 1,
+    );
+    expect(tight.uploads.map((batch) => batch.length)).toEqual([1, 1, 1, 1, 1, 1, 1]);
   });
 
   it("refuses a single document over the limit before it touches Meilisearch", async () => {
