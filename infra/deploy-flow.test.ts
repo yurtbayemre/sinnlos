@@ -1637,6 +1637,13 @@ describe.skipIf(!RUN_SEQUENCES)(
       expect(run.calls).toContain(
         `docker tag ghcr.io/yurtbayemre/sinnlos-web:${sha} infra-web:latest`,
       );
+      // Both label checks finish before the first local tag moves.
+      const labelChecks = run.calls.flatMap((c, i) =>
+        /^docker image inspect .*image\.revision.* ghcr\.io\//.test(c) ? [i] : [],
+      );
+      const firstTag = run.calls.findIndex((c) => /^docker tag ghcr\.io\//.test(c));
+      expect(labelChecks).toHaveLength(2);
+      expect(Math.max(...labelChecks)).toBeLessThan(firstTag);
       expect(retag).toBeGreaterThan(-1);
       expect(check).toBeGreaterThan(retag);
       expect(up).toBeGreaterThan(check);

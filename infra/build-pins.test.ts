@@ -181,6 +181,10 @@ describe("CI's arm64 images for the registry deploy (v0.33)", () => {
     // Only the exact answer "private" lets the push happen.
     expect(job.match(/if \[\[ "\$\{visibility\}" != private \]\]; then/g)).toHaveLength(2);
     expect(job.match(/curl -fsS /g)).toHaveLength(2);
+    // With pipefail (shell: bash): a curl error cannot hide behind the parsed answer.
+    for (const step of ["private (before the push)", "still private (after the push)"]) {
+      expect(job).toContain(`- name: The package is ${step}\n        shell: bash\n`);
+    }
   });
 
   it("leaves the public release images off (the lawyer gate, owner decision 2026-10-22)", () => {

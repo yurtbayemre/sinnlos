@@ -530,7 +530,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      # shell: bash runs with pipefail, so a curl error fails the step even when
+      # the part of the answer it printed would read private.
       - name: The package is private (before the push)
+        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -591,6 +594,7 @@ jobs:
         run: docker push "${IMAGE}"
 
       - name: The package is still private (after the push)
+        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
