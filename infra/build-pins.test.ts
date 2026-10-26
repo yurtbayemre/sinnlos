@@ -160,7 +160,23 @@ describe("CI's arm64 images for the registry deploy (v0.33)", () => {
       /workflow_dispatch:\n {4}inputs:\n {6}publish:\n[^]*?type: boolean\n {8}default: false\n/,
     );
     expect(job).toContain("    runs-on: ubuntu-24.04-arm\n");
-    expect(job).toContain("    permissions:\n      contents: read\n      packages: write\n");
+    // No package permission for GITHUB_TOKEN: a fork's pull request could
+    // otherwise read the private images with it (v0.33 review).
+    expect(job).toContain("    permissions:\n      contents: read\n    strategy:");
+    expect(job).not.toMatch(/^\s+packages: (read|write)$/m);
+    expect(job).not.toContain("github.token");
+  });
+
+  it("uses the owner's token from a repository secret, only in the steps that need it", () => {
+    expect(job.match(/GHCR_TOKEN: \$\{\{ secrets\.GHCR_PUBLISH_TOKEN \}\}/g)).toHaveLength(2);
+    expect(job).toContain(
+      "          username: yurtbayemre\n          password: ${{ secrets.GHCR_PUBLISH_TOKEN }}\n",
+    );
+    // A missing secret stops before anything is built or pushed.
+    expect(job.match(/if \[\[ -z "\$\{GHCR_TOKEN\}" \]\]; then/g)).toHaveLength(2);
+    // A package that turned public cannot be made private again: the message says so.
+    expect(job).toContain("cannot be made private again");
+    expect(job).not.toContain("make it private now");
   });
 
   it("pushes only the image it checked, tagged with the commit, between two private checks", () => {

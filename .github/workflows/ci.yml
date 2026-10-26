@@ -516,9 +516,12 @@ jobs:
     name: publish · ${{ matrix.app }} (arm64, private)
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 45
+    # No package permission for GITHUB_TOKEN, and the repository has no
+    # Actions access to the packages: a fork's pull request could otherwise
+    # change a workflow to read the private images with GITHUB_TOKEN. The
+    # owner's token lives in a repository secret, which fork runs never get.
     permissions:
       contents: read
-      packages: write
     strategy:
       fail-fast: false
       matrix:
@@ -535,9 +538,13 @@ jobs:
       - name: The package is private (before the push)
         shell: bash
         env:
-          GH_TOKEN: ${{ github.token }}
+          GHCR_TOKEN: ${{ secrets.GHCR_PUBLISH_TOKEN }}
         run: |
-          visibility="$(curl -fsS -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" \
+          if [[ -z "${GHCR_TOKEN}" ]]; then
+            echo "::error::the repository secret GHCR_PUBLISH_TOKEN (a classic token with write:packages) is missing: nothing is pushed"
+            exit 1
+          fi
+          visibility="$(curl -fsS -H "Authorization: Bearer ${GHCR_TOKEN}" -H "Accept: application/vnd.github+json" \
             "https://api.github.com/users/yurtbayemre/packages/container/sinnlos-${APP}" |
             python3 -c 'import json, sys; print(json.load(sys.stdin).get("visibility", ""))')"
           if [[ "${visibility}" != private ]]; then
@@ -586,8 +593,8 @@ jobs:
         uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ github.token }}
+          username: yurtbayemre
+          password: ${{ secrets.GHCR_PUBLISH_TOKEN }}
 
       # The image just checked, by its local id: nothing is rebuilt.
       - name: Push ${{ env.IMAGE }}
@@ -596,12 +603,16 @@ jobs:
       - name: The package is still private (after the push)
         shell: bash
         env:
-          GH_TOKEN: ${{ github.token }}
+          GHCR_TOKEN: ${{ secrets.GHCR_PUBLISH_TOKEN }}
         run: |
-          visibility="$(curl -fsS -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" \
+          if [[ -z "${GHCR_TOKEN}" ]]; then
+            echo "::error::the repository secret GHCR_PUBLISH_TOKEN (a classic token with write:packages) is missing: nothing is pushed"
+            exit 1
+          fi
+          visibility="$(curl -fsS -H "Authorization: Bearer ${GHCR_TOKEN}" -H "Accept: application/vnd.github+json" \
             "https://api.github.com/users/yurtbayemre/packages/container/sinnlos-${APP}" |
             python3 -c 'import json, sys; print(json.load(sys.stdin).get("visibility", ""))')"
           if [[ "${visibility}" != private ]]; then
-            echo "::error::ghcr.io/yurtbayemre/sinnlos-${APP} is '${visibility:-unknown}' after the push: make it private now (Package settings)"
+            echo "::error::ghcr.io/yurtbayemre/sinnlos-${APP} is '${visibility:-unknown}' after the push. A public package cannot be made private again: stop this job (no further pushes) and have the owner withdraw or replace the package"
             exit 1
           fi
