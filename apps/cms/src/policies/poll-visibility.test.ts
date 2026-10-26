@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import pollVisibility, { type PollVisibilityHost } from "./poll-visibility";
+import { narrowedFilters, withNarrowing } from "../test/narrowing.test.helper";
 
 /**
  * Wiring test for the poll read policy (decision 02), in the strapi-stub
@@ -9,7 +10,7 @@ import pollVisibility, { type PollVisibilityHost } from "./poll-visibility";
  *   - the visible ids come from PUBLISHED rows only (the findMany `where`),
  *   - departments match by documentId (a user linked to row 1 and a poll
  *     linked to row 2 of the same department document still match),
- *   - an empty list stays restrictive ({ id: { $eq: -1 } }, never $in: []),
+ *   - an empty list stays restrictive ({ id: { $in: [] } }, never $in: []),
  *   - a client filter is $and-wrapped, the status pinned to published, the
  *     legacy publicationState removed, and the result is a strict true,
  *   - guests (owner decision 2026-09-27) get only the polls that are
@@ -77,9 +78,11 @@ function stub(users: StubUser[], polls: PollRow[] = POLLS) {
         findMany: async (params: Record<string, unknown>) => {
           findManyCalls.push(params);
           if (uid !== "api::poll.poll") return [];
-          const wantsPublished =
-            (params.where as { publishedAt?: { $notNull?: boolean } } | undefined)?.publishedAt
-              ?.$notNull === true;
+          // The loader reads in id pages (#175): its where is `{ $and: [where, cursor] }`.
+          const where = params.where as { $and?: Record<string, unknown>[] } | undefined;
+          const own = (where?.$and?.[0] ?? where) as
+            { publishedAt?: { $notNull?: boolean } } | undefined;
+          const wantsPublished = own?.publishedAt?.$notNull === true;
           return polls.filter((p) => !wantsPublished || p.publishedAt !== null);
         },
       }),
@@ -100,8 +103,10 @@ function context(user: StubUser | null, query: Query = {}) {
 async function run(user: StubUser | null, query: Query = {}, polls?: PollRow[]) {
   const ctx = context(user, query);
   const { strapi, findManyCalls } = stub(user ? [user] : [], polls);
-  const result = await pollVisibility(ctx, undefined, { strapi });
-  return { result, query: ctx.request.query, findManyCalls };
+  const result = await pollVisibility(ctx, undefined, { strapi: withNarrowing(strapi, ctx) });
+  // `filters`: what a Document Service read gets once the stored clause applied (#175).
+  const filters = await narrowedFilters(ctx, "api::poll.poll", ctx.request.query.filters);
+  return { result, query: { ...ctx.request.query, filters } as Query, findManyCalls };
 }
 
 const as = (type: string, department: StubUser["department"] = null): StubUser => ({
@@ -137,7 +142,7 @@ describe("poll-visibility policy", () => {
   it("hides every poll from a guest while no poll is visible to guests (the default)", async () => {
     const { result, query } = await run(as("guest", { id: 3, documentId: "d-design" }));
     expect(result).toBe(true);
-    expect(query.filters).toEqual({ id: { $eq: -1 } });
+    expect(query.filters).toEqual({ id: { $in: [] } });
   });
 
   it("shows a user without a department the company-wide polls only", async () => {
@@ -155,16 +160,18 @@ describe("poll-visibility policy", () => {
     // Not even when it is visible to guests: no department left, no audience.
     const orphanedForGuests = POLLS.map((p) => (p.id === 5 ? { ...p, visibleToGuests: true } : p));
     const { query } = await run(as("guest", ENG_ROW_1), {}, orphanedForGuests);
-    expect(query.filters).toEqual({ id: { $eq: -1 } });
+    expect(query.filters).toEqual({ id: { $in: [] } });
   });
 
   it("evaluates published rows only", async () => {
     const { query, findManyCalls } = await run(as("member", null));
     expect(findManyCalls).toEqual([
       {
-        where: { publishedAt: { $notNull: true } },
+        where: { $and: [{ publishedAt: { $notNull: true } }, { id: { $gt: 0 } }] },
         select: ["id", "audience", "visibleToGuests"],
         populate: { departments: { select: ["documentId"] } },
+        orderBy: [{ id: "asc" }],
+        limit: 5000,
       },
     ]);
     expect((query.filters as { id: { $in: number[] } }).id.$in).not.toContain(7);
@@ -173,7 +180,7 @@ describe("poll-visibility policy", () => {
   it("stays restrictive when nothing is visible (no fail-open empty $in)", async () => {
     const targetedOnly = POLLS.filter((p) => p.id === 2 || p.id === 3);
     const { query } = await run(as("member", null), {}, targetedOnly);
-    expect(query.filters).toEqual({ id: { $eq: -1 } });
+    expect(query.filters).toEqual({ id: { $in: [] } });
   });
 
   it("keeps a client filter and only narrows it", async () => {
@@ -198,12 +205,13 @@ describe("poll-visibility policy", () => {
     expect("hasPublishedVersion" in query).toBe(false);
   });
 
-  it("writes onto request.query, never the throw-away ctx.query copy", async () => {
+  it("pins the status on request.query, never the throw-away ctx.query copy", async () => {
     const ctx = { ...context(as("member", null)), query: {} as Query };
     const { strapi } = stub([as("member", null)]);
-    await pollVisibility(ctx, undefined, { strapi });
-    expect(ctx.request.query.filters).toEqual({ id: { $in: [1] } });
-    expect(ctx.query.filters).toBeUndefined();
+    await pollVisibility(ctx, undefined, { strapi: withNarrowing(strapi, ctx) });
+    expect(ctx.request.query.status).toBe("published");
+    expect(ctx.query.status).toBeUndefined();
+    await expect(narrowedFilters(ctx, "api::poll.poll")).resolves.toEqual({ id: { $in: [1] } });
   });
 
   it("returns a strict true for a reader", async () => {
@@ -323,7 +331,7 @@ describe("poll-visibility policy: guest access (owner decision 2026-09-27)", () 
   it("stays restrictive for a guest when no poll is visible to guests", async () => {
     const hiddenOnly = GUEST_POLLS.filter((p) => p.visibleToGuests !== true);
     const { query } = await run(as("guest", ENG), {}, hiddenOnly);
-    expect(query.filters).toEqual({ id: { $eq: -1 } });
+    expect(query.filters).toEqual({ id: { $in: [] } });
   });
 
   it("leaves every other role unchanged by the guest flags", async () => {

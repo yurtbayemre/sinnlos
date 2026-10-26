@@ -66,6 +66,8 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { vi, type Mock } from "vitest";
 
+import { oneParamConnection, oneParamList } from "./narrowing.test.helper";
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -218,6 +220,7 @@ export interface StrapiStub {
     query(uid: string): StubQuery;
     transaction<T>(callback: (scope: TransactionScope) => Promise<T> | T): Promise<T>;
     inTransaction(): boolean;
+    connection: typeof oneParamConnection;
   };
   documents(uid: string): StubDocuments;
   plugin(name: string): { service(name: string): object };
@@ -379,9 +382,17 @@ function matchOperator(value: unknown, op: string, operand: unknown): boolean {
     case "$ne":
       return operand === null ? !isNull(value) : !isNull(value) && !sqlEquals(value, operand);
     case "$in":
-      return castArray(operand).some((candidate) => sqlEquals(value, candidate));
+      // A oneParamIn operand (#175) carries its list as a marker here.
+      return castArray(oneParamList(operand) ?? operand).some((candidate) =>
+        sqlEquals(value, candidate),
+      );
     case "$notIn":
-      return !isNull(value) && !castArray(operand).some((candidate) => sqlEquals(value, candidate));
+      return (
+        !isNull(value) &&
+        !castArray(oneParamList(operand) ?? operand).some((candidate) =>
+          sqlEquals(value, candidate),
+        )
+      );
     case "$null":
       return operand ? isNull(value) : !isNull(value);
     case "$notNull":
@@ -1173,7 +1184,7 @@ export function createStrapiStub(options: StrapiStubOptions = {}): StrapiStub {
   };
 
   return {
-    db: { query, transaction, inTransaction: () => depth > 0 },
+    db: { query, transaction, inTransaction: () => depth > 0, connection: oneParamConnection },
     documents,
     plugin,
     service,

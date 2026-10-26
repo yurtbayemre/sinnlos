@@ -30,10 +30,10 @@ import { departmentScopedIds, visibleIdsPolicy } from "../utils/policy-factories
  *
  *   Instead the visible primary-key ids are resolved SERVER-SIDE via
  *   `strapi.db.query` (which bypasses both permission gating AND
- *   `throwRestrictedRelations`) and injected as a single non-relational
- *   `{ id: { $in: [...] } }` clause, $and-composed with the client filter;
- *   an empty list becomes `{ id: { $eq: -1 } }` (an empty `$in` would be
- *   stripped by sanitizeQuery, fail-open).
+ *   `throwRestrictedRelations`); the Document Service ANDs them into the
+ *   reads as one non-relational `{ id: { $in } }` clause, the list bound
+ *   as one parameter (visibleIdsPolicy, #175), past the client filter's
+ *   validation; an empty list matches nothing.
  *
  * Draft & publish note: the id list spans draft AND published rows, so the
  * status is pinned to "published" — otherwise `?status=draft` would hand

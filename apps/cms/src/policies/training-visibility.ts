@@ -1,6 +1,7 @@
 import { isInScopedAudience } from "@sinnlos/domain";
 
 import { MODERATORS } from "../bootstrap/roles";
+import { findAllPaged } from "../utils/paged-read";
 import {
   callerDepartmentId,
   departmentScopedIds,
@@ -29,10 +30,9 @@ import {
  *     published row whose audience includes the caller (visibleIdsPolicy,
  *     utils/policy-factories.ts). Resolved server-side via `strapi.db.query`
  *     (no relation traversal in the REST filter → validates for every role,
- *     no validateQuery 400) and injected as a non-relational id clause.
- *     Lessons without a course fail closed. Empty list stays restrictive via
- *     `restrictiveIdFilter` (an empty `$in` would be stripped by
- *     sanitizeQuery — fail-open, §5.15).
+ *     no validateQuery 400); the Document Service ANDs the ids as a
+ *     non-relational clause, the list bound as one parameter (#175).
+ *     Lessons without a course fail closed; an empty list matches nothing.
  * The player, quiz check and completion endpoints apply the same audience
  * through utils/training-access.ts loadPublishedLesson.
  */
@@ -47,7 +47,12 @@ async function lessonsOfPublishedCourses({
   user,
 }: VisibleIdsInput<TrainingConfig>): Promise<number[]> {
   const departmentId = await callerDepartmentId(strapi, user);
-  const lessons = await strapi.db.query(LESSON_UID).findMany({
+  // Paged (utils/paged-read.ts, #175): the course populate binds one page
+  // of lesson ids, its departments populate one page of course ids.
+  const lessons = await findAllPaged<{
+    id: number;
+    course?: Parameters<typeof isInScopedAudience>[0] | null;
+  }>(strapi.db.query(LESSON_UID), {
     where: { course: { publishedAt: { $notNull: true } } },
     select: ["id"],
     populate: {
@@ -55,9 +60,7 @@ async function lessonsOfPublishedCourses({
     },
   });
   return rowIds(
-    (Array.isArray(lessons) ? lessons : []).filter(
-      (lesson) => lesson?.course && isInScopedAudience(lesson.course, departmentId),
-    ),
+    lessons.filter((lesson) => lesson?.course && isInScopedAudience(lesson.course, departmentId)),
   );
 }
 

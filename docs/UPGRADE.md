@@ -160,6 +160,14 @@ format`: a scanner posted to a page with a made-up Server Action id,
 
 Newest first. Older releases: [archive/deployment-history.md](archive/deployment-history.md).
 
+**Upgrading to v0.33.** No required env, no edge change, no schema change.
+
+- **Visibility at any size (#175):** the read rules (announcements, documents, quick links, polls, wiki, courses and lessons, comments and reactions) no longer stop at about 64,500 visible rows of one type (Postgres; about 31,700 on SQLite). The visible list now reaches the database as one parameter, and the rule loaders read in pages of 5,000. Who sees what is unchanged.
+  - A filter that is not an object (`?filters=text`) now answers 400 on every policy-gated route.
+- **Images from CI:** CI builds arm64 images on every push to `main` into the owner's **private** GHCR packages. `DEPLOY_IMAGE_SOURCE=registry` pulls them by commit SHA and needs a `read:packages` token on the host ([INSTALL.md](INSTALL.md#images-from-ci-registry-mode)). It no longer needs a release tag on the checkout. Other installations keep building (`build`, the default). A host that switches to registry mode does so after a deploy of this release in build mode.
+- **iPhone:** text fields show 16px on touch screens, so iOS Safari no longer zooms in on focus and the page after sign-in no longer opens zoomed in. On a desktop the fields keep their size.
+- **Rollback** to v0.32.0 is a plain retag.
+
 **Upgrading to v0.32 (tidy).** No required env, no edge change, no schema change.
 
 - **Pinned images:** `infra/docker-compose.yml` pins `postgres:16-alpine` and `caddy:2-alpine` by digest (Postgres 16.15, Caddy 2.11.7; Dependabot proposes new digests of the same tags). The changed image reference can make the first deploy recreate the db container even when the image is the one already running: a short database restart during that deploy. The `pgdata` volume and its data stay. A host whose Postgres differs from the pinned digest gets the pinned 16.x on that deploy.

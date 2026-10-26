@@ -355,9 +355,13 @@ async function seed(t: TestStrapi): Promise<Seeded> {
       documentId: row.documentId,
     })),
   ];
-  for (const target of targets) {
+  for (const [index, target] of targets.entries()) {
+    // Fixed documentIds (db.query assigns none): the detail routes are probed too.
+    const comment = `snapcomment${String(index).padStart(13, "0")}`;
+    const reaction = `snapreaction${String(index).padStart(12, "0")}`;
     await t.strapi.db.query("api::comment.comment").create({
       data: {
+        documentId: comment,
         body: `S:c:${target.label}`,
         targetType: target.targetType,
         targetDocumentId: target.documentId,
@@ -366,12 +370,15 @@ async function seed(t: TestStrapi): Promise<Seeded> {
     });
     await t.strapi.db.query("api::reaction.reaction").create({
       data: {
+        documentId: reaction,
         emoji: "heart",
         targetType: target.targetType,
         targetDocumentId: target.documentId,
         author: users.member.id,
       },
     });
+    (details.comments ??= {})[`S:c:${target.label}`] = comment;
+    (details.reactions ??= {})[`reaction@${target.label}`] = reaction;
   }
 
   // Personal rows: each owner anchors on a different target.
@@ -462,15 +469,20 @@ describe.each(testEngines())("role read snapshot on %s", (engine) => {
 
   const list = async (caller: Caller, endpoint: Endpoint, query = ""): Promise<Answer> => {
     const separator = query === "" ? "" : "&";
-    const res = await t.api<{ data?: Params[] }>(
+    const res = await t.api<{ data?: Params[]; meta?: { pagination?: { total?: number } } }>(
       caller,
       `${endpoint.path}?pagination[pageSize]=100${separator}${query}`,
     );
     if (res.status !== 200) return res.status;
-    return (res.body.data ?? [])
-      .map((row) => endpoint.label(row, labelOf))
-      .filter((label): label is string => label !== null)
-      .sort();
+    // The labelled rows, then the pagination total of every row the caller
+    // may read (fixture rows included): the count query is narrowed too.
+    return [
+      ...(res.body.data ?? [])
+        .map((row) => endpoint.label(row, labelOf))
+        .filter((label): label is string => label !== null)
+        .sort(),
+      `total=${String(res.body.meta?.pagination?.total)}`,
+    ];
   };
 
   it("matches the recorded per-role snapshot", async () => {
@@ -637,7 +649,10 @@ describe.each(testEngines())("role read snapshot on %s", (engine) => {
         .map((row) => LISTS.reactions.label(row, labelOf))
         .filter((label): label is string => label !== null)
         .sort();
-      const single = threads.flatMap((answer) => (typeof answer === "number" ? [] : answer)).sort();
+      const single = threads
+        .flatMap((answer) => (typeof answer === "number" ? [] : answer))
+        .filter((label) => !label.startsWith("total="))
+        .sort();
       expect(batched, name).toEqual(single);
       seen.set(name, batched.length);
     }

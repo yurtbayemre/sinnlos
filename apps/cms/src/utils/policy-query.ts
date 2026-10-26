@@ -86,72 +86,155 @@ export function narrowFilters(
   query: Record<string, unknown>,
   clause: Record<string, unknown>,
 ): void {
-  // A scalar wrapped in $and bypasses Strapi's root shape check and fails as a database 500.
-  if (query.filters && typeof query.filters !== "object") {
-    throw new errors.ValidationError("The filters parameter must be an object or an array");
-  }
+  assertFiltersShape(query.filters);
   query.filters = query.filters ? { $and: [query.filters, clause] } : clause;
 }
 
 /**
- * Bind-parameter ceilings of ONE SQL statement (PL04): Postgres 65535 (the
- * wire protocol counts parameters in an int16), SQLite 32766
- * (SQLITE_MAX_VARIABLE_NUMBER since SQLite 3.32; better-sqlite3 bundles a
- * newer one). Every value of an `$in` list is one parameter.
+ * Refuses client filters that are neither an object nor an array with a
+ * 400: a scalar wrapped in `$and` (narrowFilters, or the Document Service
+ * narrowing below) bypasses Strapi's root shape check and fails as a
+ * database 500 ("Where must be an array or an object").
  */
-export const BIND_LIMITS = { postgres: 65535, sqlite: 32766 } as const;
-
-/**
- * Parameters a statement keeps for everything besides an injected list:
- * the client's own filters, pagination, status, locale.
- */
-export const BIND_HEADROOM = 1000;
-
-/** What the bind-limit guard reads from `strapi`: the dialect and the log. */
-export interface BindLimitHost {
-  db?: { dialect?: { client?: unknown } };
-  log?: { error(message: string): void };
+export function assertFiltersShape(filters: unknown): void {
+  if (filters && typeof filters !== "object") {
+    throw new errors.ValidationError("The filters parameter must be an object or an array");
+  }
 }
 
 /**
- * The most values one injected list may carry on this database: the
- * dialect's limit minus BIND_HEADROOM, the lower (SQLite) limit when the
- * dialect is unknown.
+ * The database a one-parameter list is written for: the dialect and the
+ * knex instance the query engine runs on (`strapi.db.connection`).
  */
-export function maxBoundValues(strapi: BindLimitHost): number {
-  const client = strapi.db?.dialect?.client;
-  return (client === "postgres" ? BIND_LIMITS.postgres : BIND_LIMITS.sqlite) - BIND_HEADROOM;
+export interface OneParamHost {
+  db: {
+    dialect?: { client?: unknown };
+    connection: { raw(sql: string, bindings: unknown[]): unknown };
+  };
 }
 
 /**
- * Whether a list of `count` values fits one statement (PL04). Beyond the
- * limit Postgres and SQLite fail the query ("too many SQL variables", a
- * bind message error), which Strapi answers with a 500; a policy asks
- * first and fails CLOSED instead: an error log naming `what` and the count
- * (never the values), and the caller answers with nothing. Far beyond this
- * intranet's size (tens of thousands of visible rows of one type); the log
- * is the signal to switch that policy to a join before it matters.
+ * An `$in` operand that carries a whole list as ONE bound parameter (#175,
+ * v0.33): `{ id: { $in: oneParamIn(strapi, ids, "int") } }`. A plain array
+ * binds one parameter per value, and a statement may bind at most 65535
+ * (Postgres, an int16 in the wire protocol) or 32766 (SQLite); a read
+ * policy whose list grew past that used to answer nothing. This one does
+ * not grow with the list:
+ *
+ *   - Postgres: `select unnest(?::int[])` / `?::text[]`, the list bound as
+ *     one array (pg serialises a JS array as an array literal);
+ *   - SQLite (and any other dialect): `select value from json_each(?)`,
+ *     the list bound as one JSON text.
+ *
+ * The query engine keeps a knex raw as the operand (@strapi/database 5.59
+ * `query/helpers/where.js` `$in`: `isKnexQuery(value) ? value : [...]`), so
+ * this works in a `db.query` where clause and in a Document Service
+ * `params.filters` (createVisibilityNarrowing below), never in a REST
+ * query: the content API's filter walkers would recurse into the knex
+ * object. An empty list matches nothing, no special case.
  */
-export function fitsBindLimit(strapi: BindLimitHost, count: number, what: string): boolean {
-  const max = maxBoundValues(strapi);
-  if (count <= max) return true;
-  strapi.log?.error(
-    `[policy] ${what}: ${count} values exceed the ${max} one statement may carry; ` +
-      "answering with nothing (fail closed)",
-  );
-  return false;
+export function oneParamIn(
+  strapi: OneParamHost,
+  values: readonly (number | string)[],
+  kind: "int" | "text",
+): unknown {
+  if (strapi.db.dialect?.client === "postgres") {
+    return strapi.db.connection.raw(`select unnest(?::${kind}[])`, [[...values]]);
+  }
+  return strapi.db.connection.raw("select value from json_each(?)", [JSON.stringify(values)]);
+}
+
+/** Where a read policy leaves its clause for the Document Service: on ctx.state. */
+const VISIBILITY = Symbol.for("sinnlos.visibility");
+
+/** The request context as `strapi.requestContext.get()` returns it: the Koa context. */
+interface RequestState {
+  state?: Record<PropertyKey, unknown>;
+}
+
+/** The slice of `strapi` that hands out the current request. */
+export interface RequestContextHost {
+  requestContext?: { get(): unknown } | null;
+}
+
+function currentState(strapi: RequestContextHost): Record<PropertyKey, unknown> | null {
+  const request =
+    typeof strapi.requestContext?.get === "function" ? strapi.requestContext.get() : undefined;
+  const state = (request as RequestState | undefined)?.state;
+  return typeof state === "object" && state !== null ? state : null;
 }
 
 /**
- * restrictiveIdFilter for a resolved id list, fail-closed beyond the bind
- * limit (fitsBindLimit): an oversized list becomes `{ id: { $eq: -1 } }`.
+ * Whether a read policy can hand a clause to the Document Service in this
+ * request: `strapi.requestContext` (Strapi's AsyncLocalStorage, one store
+ * per request) holds the very context the policy runs in. Without it the
+ * clause would never reach the read, so the policy refuses (false) instead
+ * of answering unfiltered.
  */
-export function boundedIdFilter(
-  strapi: BindLimitHost,
-  idList: readonly number[],
-  what: string,
-): Record<string, unknown> {
-  return restrictiveIdFilter(fitsBindLimit(strapi, idList.length, what) ? [...idList] : []);
+export function canNarrow(strapi: RequestContextHost, policyState: unknown): boolean {
+  const state = currentState(strapi);
+  return state !== null && state === policyState;
+}
+
+/**
+ * Leaves `clause` for every Document Service read of `uid` in this request
+ * (findMany, findOne, findFirst, count: the list AND its pagination count),
+ * ANDed into its `params.filters` by createVisibilityNarrowing. For clauses
+ * whose operand cannot go through the REST query (a oneParamIn list).
+ * Returns false when there is no request context (canNarrow); the caller
+ * then refuses.
+ */
+export function narrowReads(
+  strapi: RequestContextHost,
+  policyState: unknown,
+  uid: string,
+  clause: Record<string, unknown>,
+): boolean {
+  if (!canNarrow(strapi, policyState)) return false;
+  const state = currentState(strapi) as Record<PropertyKey, unknown>;
+  const byUid = (state[VISIBILITY] ??= new Map()) as Map<string, Record<string, unknown>[]>;
+  byUid.set(uid, [...(byUid.get(uid) ?? []), clause]);
+  return true;
+}
+
+/** The Document Service reads a stored clause narrows. */
+const NARROWED_READS = new Set(["findMany", "findOne", "findFirst", "count"]);
+
+/** A Document Service middleware as @strapi/core runs them (context, next). */
+export type NarrowingMiddleware = (
+  context: { uid?: string; action?: string; params?: unknown },
+  next: () => Promise<unknown>,
+) => Promise<unknown>;
+
+/**
+ * The Document Service middleware that applies what narrowReads stored
+ * (#175, v0.33): for a read of a uid with stored clauses, the clauses are
+ * ANDed into `params.filters`, after the content API validated and
+ * sanitized the client's part, so a client filter still only narrows.
+ * `params.filters`, never `params.where`: the Document Service drops an
+ * unknown `where` key (document-service/params.js), which would leave the
+ * clause unapplied.
+ *
+ * A read outside a request, or of a uid nobody stored a clause for, is
+ * untouched: cron jobs, lifecycles, the policies' own loaders (they run
+ * before the clause is stored, through db.query anyway). Populate and
+ * relation joins do not go through the Document Service and keep the
+ * relation guards they have (utils/restricted-relations.ts).
+ */
+export function createVisibilityNarrowing(strapi: RequestContextHost): NarrowingMiddleware {
+  return async (context, next) => {
+    if (!context.uid || !NARROWED_READS.has(String(context.action))) return next();
+    const stored = (currentState(strapi)?.[VISIBILITY] as Map<string, unknown[]> | undefined)?.get(
+      context.uid,
+    );
+    if (!stored?.length) return next();
+    const params = (context.params ?? {}) as Record<string, unknown>;
+    // Never narrow by skipping a filter we cannot wrap: refuse it (fail closed).
+    assertFiltersShape(params.filters);
+    const clauses = params.filters ? [params.filters, ...stored] : stored;
+    context.params = { ...params, filters: clauses.length === 1 ? clauses[0] : { $and: clauses } };
+    return next();
+  };
 }
 
 /**
