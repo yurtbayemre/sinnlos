@@ -1,7 +1,7 @@
 {
   "name": "sinnlos-intranet",
   "private": true,
-  "version": "0.29.3",
+  "version": "0.30.0",
   "license": "AGPL-3.0-only",
   "description": "Self-hosted intranet platform: Strapi v5 + Next.js 16, local sign-in with optional Microsoft Entra ID",
   "packageManager": "pnpm@10.34.6",
