@@ -1518,6 +1518,19 @@ describe("the Document Service guard of the user type (admin-panel passwords, to
     expect(g.users.get(2)?.tokenVersion).toBe(4);
   });
 
+  it("raises on every spelling the validator stores as a block, and on none other", async () => {
+    for (const blocked of [1, "1", "true", "TRUE"]) {
+      const h = guardHarness();
+      await h.documents.update({ documentId: "doc-2", data: { blocked } });
+      expect(h.writes(), String(blocked)).toContain("bump 2");
+    }
+    for (const blocked of [false, 0, "0", "false", null, undefined]) {
+      const h = guardHarness();
+      await h.documents.update({ documentId: "doc-2", data: { blocked } });
+      expect(h.writes(), String(blocked)).not.toContain("bump 2");
+    }
+  });
+
   it("a failed block write rolls the bump back", async () => {
     const h = guardHarness();
     const before = (await h.jwt.issue({ id: 2 })) as string;

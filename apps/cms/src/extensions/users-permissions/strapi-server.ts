@@ -846,7 +846,8 @@ export function createUserWriteGuard(strapi: TokenVersionStrapi): DocumentMiddle
     // Before the update-only return below: creates must meet the baseline too.
     assertPasswordAllowed(data?.password);
     const password = setsPassword(data);
-    const blocks = data?.blocked === true;
+    // Every spelling the validator stores as true (yup.boolean(): `true`, 1, "1", "TRUE").
+    const blocks = data != null && /^(true|1)$/i.test(String(data.blocked));
     if (context.action !== "update" || (!password && !blocks) || refreshMode(strapi)) return next();
     const documentId = params.documentId;
     const row =

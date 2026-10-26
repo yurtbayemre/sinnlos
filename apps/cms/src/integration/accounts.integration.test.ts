@@ -458,6 +458,43 @@ describe.each(testEngines())("accounts (v0.27) on %s", (engine) => {
     expect((await signIn("moved@integration.test", "Strong-Password-27")).status).toBe(200);
   });
 
+  it("a block in the Content Manager voids a reset link and an enrollment, also after an unblock (v0.30)", async () => {
+    const user = t.fixtures.users.team_lead;
+    const jwt = await admin();
+    mails.length = 0;
+    const sent = await t.api(bearer(jwt), `/api/user-management/${user.id}/send-link`, {
+      method: "POST",
+    });
+    expect(sent.status, sent.text).toBe(200);
+    const link = /set-password#(\S+)/.exec(mails[mails.length - 1]?.text ?? "")?.[1] ?? "";
+    const session = (await signIn(user.username, user.password)).body.jwt!;
+    const setup = (await t.api(bearer(session), "/api/me/mfa/setup", {
+      method: "POST",
+    })) as Answer<{ secret: string; enrollment: string }>;
+    expect(setup.status, setup.text).toBe(200);
+    const { secret, enrollment } = setup.body.data!;
+    // The Content Manager's path; "1" is a spelling the validator stores as true.
+    const documentId = (await row(user.id)).documentId as string;
+    await t.strapi
+      .documents(USER)
+      .update({ documentId, data: { blocked: "1" as unknown as boolean } });
+    expect((await row(user.id)).blocked).toBe(true);
+    await t.strapi.documents(USER).update({ documentId, data: { blocked: false } });
+    const set = await t.api(null, "/api/auth/password/set", {
+      json: { token: link, password: "Strong-Password-30" },
+      headers: { "x-internal-token": TOKEN },
+    });
+    expect(errorCode(set as Answer)).toBe("token_invalid");
+    expect((await me(session)).status).toBe(401);
+    // A fresh session cannot finish the enrollment started before the block.
+    const fresh = (await signIn(user.username, user.password)).body.jwt!;
+    const act = (await t.api(bearer(fresh), "/api/me/mfa/activate", {
+      json: { enrollment, code: code(secret), password: user.password },
+    })) as Answer;
+    expect(errorCode(act)).toBe("enrollment_invalid");
+    expect((await row(user.id)).totpEnabledAt ?? null).toBeNull();
+  });
+
   it("no link for an account bound to an identity provider", async () => {
     const user = t.fixtures.users.department_head;
     await t.strapi.db.query(USER).update({
