@@ -64,7 +64,7 @@ vi.mock("./unsaved-guard", () => ({
   confirmLeave: () => guard.leave,
   useUnsavedGuard: () => () => {},
 }));
-vi.mock("./flash", () => ({ useManageFlash: () => () => {}, showFlash: () => {} }));
+vi.mock("./flash", () => ({ showFlash: () => {} }));
 const failure = () => Promise.reject(new TypeError("fetch failed"));
 vi.mock("@/lib/manage/user-actions", () => ({
   sendLink: vi.fn(failure),

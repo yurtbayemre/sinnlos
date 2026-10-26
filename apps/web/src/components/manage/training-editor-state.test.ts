@@ -64,7 +64,7 @@ vi.mock("next/navigation", async (original) => ({
   ...(await original<typeof import("next/navigation")>()),
   useRouter: () => router,
 }));
-vi.mock("./flash", () => ({ useManageFlash: () => vi.fn() }));
+vi.mock("./flash", () => ({ showFlash: vi.fn() }));
 const save = vi.fn();
 const upload = vi.fn();
 vi.mock("@/lib/manage/training-actions", () => ({

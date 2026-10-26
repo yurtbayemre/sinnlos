@@ -24,7 +24,7 @@ import { ActionBar, ConflictDialog, FormAlert, useFieldError } from "./editor-ch
 import { BackToList, OptionsNotice, RetargetNotice, Section } from "./editor-parts";
 import { Badge } from "./status-badges";
 import { useItemEditor, type ItemActions } from "./use-item-editor";
-import { useManageFlash } from "./flash";
+import { showFlash } from "./flash";
 
 const FORM_ID = "poll";
 
@@ -77,7 +77,6 @@ export function PollEditor({
   const t = useTranslations("manage.polls");
   const tc = useTranslations("manage.common");
   const format = useFormatter();
-  const flash = useManageFlash();
   const hasVotes = editable?.hasVotes ?? false;
   // v0.28: the voter links are gone (30 days after the close), so the end
   // can no longer move: the cms refuses it (votersRemoved).
@@ -140,7 +139,7 @@ export function PollEditor({
       onSuccess: () => {
         // The cms closed it now: today is its closing day.
         item.rebase({ closesDay: today });
-        flash(tc("success.closed"));
+        showFlash(tc("success.closed"));
       },
     });
   };

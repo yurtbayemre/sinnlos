@@ -5,7 +5,7 @@ import { RotateCcw } from "lucide-react";
 import { useTranslations } from "next-intl";
 import type { AuthoringDocumentStatus } from "@sinnlos/domain";
 import { ConflictDialog, FormAlert } from "@/components/manage/editor-chrome";
-import { useManageFlash } from "@/components/manage/flash";
+import { showFlash } from "@/components/manage/flash";
 import { metaOf, useAuthoringEditor } from "@/components/manage/use-authoring-editor";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
@@ -43,7 +43,6 @@ export function RestoreRevision({
 }) {
   const t = useTranslations("manage.wiki.history");
   const tc = useTranslations("manage.common");
-  const flash = useManageFlash();
   const [confirm, setConfirm] = useState(false);
   const editor = useAuthoringEditor({
     formId: "wiki-history",
@@ -58,7 +57,7 @@ export function RestoreRevision({
     editor.run(
       "publish",
       (version) => restoreWikiRevision(page.documentId, version ?? "", revisionId),
-      { onSuccess: () => flash(t("restored")) },
+      { onSuccess: () => showFlash(t("restored")) },
     );
   };
 
