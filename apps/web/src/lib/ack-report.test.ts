@@ -3,14 +3,23 @@ import {
   buildAckReportRows,
   buildDocumentAckRows,
   eligibleReportUsers,
-  indexAcks,
   reportCompleteness,
-  type ReportAck,
+  type AckIndex,
   type ReportAnnouncement,
   type ReportDocument,
   type ReportInputs,
   type ReportUser,
 } from "./ack-report";
+
+/** documentId → user ids, as lib/acknowledgements.ts builds it from the cms index. */
+type Receipt = [documentId: string, userId: number];
+const indexOf = (receipts: Receipt[]): AckIndex => {
+  const index: AckIndex = new Map();
+  for (const [documentId, userId] of receipts) {
+    index.set(documentId, (index.get(documentId) ?? new Set<number>()).add(userId));
+  }
+  return index;
+};
 
 /**
  * The acknowledgement report recomputes compliance from four capped list
@@ -102,19 +111,16 @@ describe("buildAckReportRows", () => {
     requiresAck: true,
     ...extra,
   });
-  const ack = (a: ReportAnnouncement, userId: number | null): ReportAck => ({
-    targetDocumentId: a.documentId!,
-    user: userId === null ? null : { id: userId },
-  });
+  const ack = (a: ReportAnnouncement, userId: number): Receipt => [a.documentId!, userId];
   const rows = (
     announcements: ReportAnnouncement[],
-    acks: ReportAck[],
+    acks: Receipt[],
     users: ReportUser[],
     flags: { usersUnknown?: boolean; teamsUnknown?: boolean; teams?: Map<number, number[]> } = {},
   ) =>
     buildAckReportRows({
       announcements,
-      acks: indexAcks(acks),
+      acks: indexOf(acks),
       eligibleUsers: eligibleReportUsers(users, READERS),
       userTeamIds: flags.teams ?? new Map(),
       usersUnknown: flags.usersUnknown ?? false,
@@ -151,11 +157,7 @@ describe("buildAckReportRows", () => {
   it("counts a user's duplicate acks once and ignores acks of other announcements and users", () => {
     const a = announcement(1);
     const other = announcement(2);
-    const [row] = rows(
-      [a],
-      [ack(a, 1), ack(a, 1), ack(other, 2), ack(a, 42), ack(a, null)],
-      [user(1), user(2)],
-    );
+    const [row] = rows([a], [ack(a, 1), ack(a, 1), ack(other, 2), ack(a, 42)], [user(1), user(2)]);
     expect(row).toMatchObject({ ackedCount: 1, pct: 50 });
     expect(row!.openUsers.map((u) => u.id)).toEqual([2]);
   });
@@ -269,7 +271,7 @@ describe("buildDocumentAckRows (v0.20)", () => {
   const rows = (documents: ReportDocument[], usersUnknown = false) =>
     buildDocumentAckRows({
       documents,
-      acks: indexAcks([{ targetDocumentId: "doc1", user: { id: 1 } }]),
+      acks: indexOf([["doc1", 1]]),
       eligibleUsers: eligibleReportUsers(users, ACKNOWLEDGERS),
       usersUnknown,
     });
@@ -293,34 +295,5 @@ describe("buildDocumentAckRows (v0.20)", () => {
 
   it("marks every row unknown when the directory is unknown", () => {
     expect(rows([doc(1)], true)[0]!.targetUnknown).toBe(true);
-  });
-});
-
-describe("indexAcks (FX32)", () => {
-  it("maps each announcement documentId to the set of users who confirmed it", () => {
-    const index = indexAcks([
-      { targetDocumentId: "a", user: { id: 1 } },
-      { targetDocumentId: "a", user: { id: 2 } },
-      { targetDocumentId: "a", user: { id: 1 } }, // duplicate row
-      { targetDocumentId: "b", user: { id: 2 } },
-      { targetDocumentId: "b", user: null }, // deleted account
-      { targetDocumentId: "c" }, // user not populated
-    ]);
-    expect([...index].map(([doc, users]) => [doc, [...users]])).toEqual([
-      ["a", [1, 2]],
-      ["b", [2]],
-    ]);
-  });
-
-  it("adds into a given index, keeping its empty entries", () => {
-    const index = new Map([
-      ["a", new Set([1])],
-      ["z", new Set<number>()],
-    ]);
-    expect(indexAcks([{ targetDocumentId: "a", user: { id: 3 } }], index)).toBe(index);
-    expect([...index].map(([doc, users]) => [doc, [...users]])).toEqual([
-      ["a", [1, 3]],
-      ["z", []],
-    ]);
   });
 });

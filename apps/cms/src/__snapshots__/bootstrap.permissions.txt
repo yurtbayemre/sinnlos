@@ -1,6 +1,7 @@
 admin_role|api::acknowledgement.acknowledgement.create
 admin_role|api::acknowledgement.acknowledgement.find
 admin_role|api::acknowledgement.acknowledgement.findOne
+admin_role|api::acknowledgement.acknowledgement.reportIndex
 admin_role|api::announcement.announcement.authoringList
 admin_role|api::announcement.announcement.create
 admin_role|api::announcement.announcement.delete
@@ -125,6 +126,7 @@ admin_role|api::profile.profile.me
 admin_role|api::profile.profile.mfaActivate
 admin_role|api::profile.profile.mfaDisable
 admin_role|api::profile.profile.mfaSetup
+admin_role|api::profile.profile.openAcks
 admin_role|api::profile.profile.updateMe
 admin_role|api::quick-link.quick-link.authoringList
 admin_role|api::quick-link.quick-link.create
@@ -239,6 +241,7 @@ authenticated|api::profile.profile.me
 authenticated|api::profile.profile.mfaActivate
 authenticated|api::profile.profile.mfaDisable
 authenticated|api::profile.profile.mfaSetup
+authenticated|api::profile.profile.openAcks
 authenticated|api::profile.profile.updateMe
 authenticated|api::quick-link.quick-link.find
 authenticated|api::quick-link.quick-link.findOne
@@ -353,6 +356,7 @@ department_head|api::profile.profile.me
 department_head|api::profile.profile.mfaActivate
 department_head|api::profile.profile.mfaDisable
 department_head|api::profile.profile.mfaSetup
+department_head|api::profile.profile.openAcks
 department_head|api::profile.profile.updateMe
 department_head|api::quick-link.quick-link.find
 department_head|api::quick-link.quick-link.findOne
@@ -503,6 +507,7 @@ editor|api::profile.profile.me
 editor|api::profile.profile.mfaActivate
 editor|api::profile.profile.mfaDisable
 editor|api::profile.profile.mfaSetup
+editor|api::profile.profile.openAcks
 editor|api::profile.profile.updateMe
 editor|api::quick-link.quick-link.authoringList
 editor|api::quick-link.quick-link.create
@@ -569,6 +574,7 @@ guest|api::profile.profile.me
 guest|api::profile.profile.mfaActivate
 guest|api::profile.profile.mfaDisable
 guest|api::profile.profile.mfaSetup
+guest|api::profile.profile.openAcks
 guest|api::profile.profile.updateMe
 guest|api::quick-link.quick-link.find
 guest|api::quick-link.quick-link.findOne
@@ -641,6 +647,7 @@ member|api::profile.profile.me
 member|api::profile.profile.mfaActivate
 member|api::profile.profile.mfaDisable
 member|api::profile.profile.mfaSetup
+member|api::profile.profile.openAcks
 member|api::profile.profile.updateMe
 member|api::quick-link.quick-link.find
 member|api::quick-link.quick-link.findOne
@@ -736,6 +743,7 @@ team_lead|api::profile.profile.me
 team_lead|api::profile.profile.mfaActivate
 team_lead|api::profile.profile.mfaDisable
 team_lead|api::profile.profile.mfaSetup
+team_lead|api::profile.profile.openAcks
 team_lead|api::profile.profile.updateMe
 team_lead|api::quick-link.quick-link.find
 team_lead|api::quick-link.quick-link.findOne

@@ -51,6 +51,9 @@ export const HANDLER_MODULE: Readonly<Record<string, ModuleName>> = {
 /** Single routes of a feature, by handler. */
 export const HANDLER_FEATURE: Readonly<Record<string, FeatureName>> = {
   "api::acknowledgement.acknowledgement.create": "read-confirmations",
+  // v0.31: the banner's open count and the admin report's index.
+  "api::acknowledgement.acknowledgement.reportIndex": "read-confirmations",
+  "api::profile.profile.openAcks": "read-confirmations",
   "api::course.course.report": "training-reports",
   "api::course.course.reportCourse": "training-reports",
   "api::search-log.search-log.summary": "search-logging",

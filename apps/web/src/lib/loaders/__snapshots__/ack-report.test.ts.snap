@@ -2,7 +2,9 @@
 
 exports[`loadAckReport > CMS down: the banner, no rows and no empty state 1`] = `
 {
+  "announcementsPage": null,
   "documentRows": [],
+  "documentsPage": null,
   "empty": false,
   "failed": true,
   "rows": [],
@@ -12,7 +14,17 @@ exports[`loadAckReport > CMS down: the banner, no rows and no empty state 1`] = 
 
 exports[`loadAckReport > partial failure: no team roster leaves only the team-scoped row unknown 1`] = `
 {
+  "announcementsPage": {
+    "page": 1,
+    "pageCount": 1,
+    "total": 4,
+  },
   "documentRows": [],
+  "documentsPage": {
+    "page": 1,
+    "pageCount": 1,
+    "total": 0,
+  },
   "empty": false,
   "failed": true,
   "rows": [
@@ -81,7 +93,17 @@ exports[`loadAckReport > partial failure: no team roster leaves only the team-sc
 
 exports[`loadAckReport > success: one row per mandatory announcement, rates over the eligible audience 1`] = `
 {
+  "announcementsPage": {
+    "page": 1,
+    "pageCount": 1,
+    "total": 4,
+  },
   "documentRows": [],
+  "documentsPage": {
+    "page": 1,
+    "pageCount": 1,
+    "total": 0,
+  },
   "empty": false,
   "failed": false,
   "rows": [
@@ -159,7 +181,17 @@ exports[`loadAckReport > success: one row per mandatory announcement, rates over
 
 exports[`loadAckReport > truncated: any input walk cut at its cap marks the report incomplete 1`] = `
 {
+  "announcementsPage": {
+    "page": 1,
+    "pageCount": 1,
+    "total": 4,
+  },
   "documentRows": [],
+  "documentsPage": {
+    "page": 1,
+    "pageCount": 1,
+    "total": 0,
+  },
   "empty": false,
   "failed": false,
   "rows": [

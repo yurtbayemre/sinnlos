@@ -17,6 +17,13 @@
 import { isInScopedAudience } from "@sinnlos/domain";
 import { isAnnouncementVisibleTo, type AnnouncementAudience } from "@/lib/audience";
 
+/**
+ * Items per report page and section (v0.31, owner decision Q1): the
+ * announcements and the documents page separately, and the receipts are
+ * read for the shown items only (the cms report index takes up to 20).
+ */
+export const ACK_REPORT_PAGE_SIZE = 20;
+
 export interface ReportInputs {
   usersFailed: boolean;
   /** Directory walk stopped at its cap (see users.ts MAX_USERS). */
@@ -111,31 +118,12 @@ export interface ReportDocument {
   departments?: { id: number; name?: string }[] | null;
 }
 
-/** One acknowledgement as the report needs it: whose, and for which document. */
-export interface ReportAck {
-  targetDocumentId: string;
-  user?: { id: number } | null;
-}
-
-/** Announcement documentId → ids of the users who acknowledged it. */
-export type AckIndex = Map<string, Set<number>>;
-
 /**
- * Index ack rows by their announcement's documentId (FX32), into `index`
- * when given. A Set dedupes duplicate ack rows (the accepted
- * check-then-insert race in the CMS); a row without a user (deleted
- * account) or without a target confirms nothing.
+ * Announcement or document documentId → ids of the users who acknowledged
+ * it, as the cms report index answers it (v0.31; duplicates collapsed,
+ * receipts without a user left out).
  */
-export function indexAcks(rows: ReportAck[], index: AckIndex = new Map()): AckIndex {
-  for (const row of rows) {
-    const userId = row.user?.id;
-    if (typeof row.targetDocumentId !== "string" || typeof userId !== "number") continue;
-    const users = index.get(row.targetDocumentId);
-    if (users) users.add(userId);
-    else index.set(row.targetDocumentId, new Set([userId]));
-  }
-  return index;
-}
+export type AckIndex = Map<string, Set<number>>;
 
 export interface AckReportRow<U extends ReportUser, A extends ReportAnnouncement> {
   announcement: A;
@@ -173,7 +161,7 @@ export function eligibleReportUsers<U extends ReportUser>(
  * audience is exactly the targeting the CMS policy enforces on reads
  * (lib/audience.ts): the report runs as admin_role, which bypasses that
  * policy, so it recomputes it. Acks come indexed by the announcement's
- * stable documentId (numeric ids change on every re-publish, see indexAcks).
+ * stable documentId (numeric ids change on every re-publish).
  */
 export function buildAckReportRows<U extends ReportUser, A extends ReportAnnouncement>(input: {
   announcements: A[];

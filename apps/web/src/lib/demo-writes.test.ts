@@ -36,7 +36,8 @@ const { addComment, deleteComment, getCommentSection, toggleReaction } =
   await import("./comment-actions");
 const { votePoll } = await import("./poll-actions");
 const { acknowledgeAnnouncement, acknowledgeDocument } = await import("./acknowledgement-actions");
-const { fetchMyAnnouncementAcks, fetchMyDocumentAcks } = await import("./acknowledgements");
+const { fetchAnnouncementAckIndex, fetchMyAnnouncementAcks, fetchMyDocumentAcks } =
+  await import("./acknowledgements");
 const { getNotifications, markAllNotificationsRead, markNotificationsRead } =
   await import("./notification-actions");
 const { updateProfile } = await import("./profile-actions");
@@ -143,6 +144,22 @@ describe("DEMO_MODE writes change what the reads show", () => {
       ok: false,
       code: "pollOptionsChanged",
     });
+  });
+
+  it("the banner's count and the report's index follow a confirmation (v0.31)", async () => {
+    const open = async () =>
+      (await strapi<{ data: { announcements: number; documents: number } }>("/api/me/open-acks"))
+        .data;
+    const index = async () => [
+      ...((await fetchAnnouncementAckIndex(["demoann00000000000000001"])).index.get(
+        "demoann00000000000000001",
+      ) ?? []),
+    ];
+    expect(await open()).toEqual({ announcements: 1, documents: 1 });
+    expect(await index()).toEqual([]);
+    expect(await acknowledgeAnnouncement("demoann00000000000000001")).toEqual({ ok: true });
+    expect(await open()).toEqual({ announcements: 0, documents: 1 });
+    expect(await index()).toEqual([1]);
   });
 
   it("acknowledgement: recorded once, read back as the demo user's own", async () => {

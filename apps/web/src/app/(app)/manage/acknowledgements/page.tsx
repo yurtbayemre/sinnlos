@@ -1,3 +1,4 @@
+import type { Route } from "next";
 import { redirect } from "next/navigation";
 import { AlertTriangle, CheckCircle2, ClipboardCheck, Clock, UserX } from "lucide-react";
 import { getLocale, getTranslations } from "next-intl/server";
@@ -5,12 +6,16 @@ import { formatDateOnly, LONG_DAY } from "@/lib/date-format";
 import {
   loadAckReport,
   type AckReportAudience,
+  type AckReportPage,
+  type AckReportPages,
   type AckReportRowView,
 } from "@/lib/loaders/ack-report";
+import { pageParam, type ListSearchParams } from "@/lib/loaders/manage/list";
 import { capabilitiesFor } from "@/lib/roles";
 import { getViewer } from "@/lib/viewer";
 import { AdminPageHeader } from "@/components/admin-page-header";
 import { EmptyState } from "@/components/empty-state";
+import { PageNav } from "@/components/manage/list";
 import { FetchErrorBanner } from "@/components/fetch-error";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
@@ -24,17 +29,41 @@ export async function generateMetadata() {
  * denominator counts the role types holding `announcement.find`, lib/roles.ts
  * ANNOUNCEMENT_READER_ROLES; an indeterminable audience is "–", never a
  * green 0 of 0) are lib/loaders/ack-report.ts (WD03); the page renders.
+ * v0.31: each section pages on its own (`page`, `documentsPage`); a
+ * section's links keep the other section's page.
  */
-export default async function AcknowledgementReportPage() {
+export default async function AcknowledgementReportPage({
+  searchParams,
+}: { searchParams?: Promise<ListSearchParams> } = {}) {
   if (!capabilitiesFor((await getViewer()).role).reports.acknowledgements) {
     redirect("/");
   }
 
+  const params = (await searchParams) ?? {};
+  const pages: AckReportPages = {
+    page: pageParam(params),
+    documentsPage: pageParam({ page: params.documentsPage }),
+  };
   const [t, locale, view] = await Promise.all([
     getTranslations("ackReport"),
     getLocale(),
-    loadAckReport(),
+    loadAckReport(pages),
   ]);
+
+  // The pages shown (an out-of-range one fell back to the last page).
+  const shown: AckReportPages = {
+    page: view.announcementsPage?.page ?? pages.page,
+    documentsPage: view.documentsPage?.page ?? pages.documentsPage,
+  };
+  /** The report's URL with both sections' pages; page 1 is left out. */
+  const hrefOf = (next: Partial<AckReportPages>): Route => {
+    const query = new URLSearchParams();
+    const { page, documentsPage } = { ...shown, ...next };
+    if (page > 1) query.set("page", String(page));
+    if (documentsPage > 1) query.set("documentsPage", String(documentsPage));
+    const qs = query.toString();
+    return (qs ? `/manage/acknowledgements?${qs}` : "/manage/acknowledgements") as Route;
+  };
 
   // ackDeadline is a calendar date: shown as that day, never moved by a zone.
   const deadlineLabel = (date: string | null) => formatDateOnly(locale, date, LONG_DAY);
@@ -136,11 +165,17 @@ export default async function AcknowledgementReportPage() {
       </Card>
     );
   };
-  const section = (heading: string, rows: AckReportRowView[]) =>
+  const section = (
+    heading: string,
+    rows: AckReportRowView[],
+    pagination: AckReportPage | null,
+    hrefFor: (page: number) => Route,
+  ) =>
     rows.length > 0 && (
       <section className="space-y-4">
         <h2 className="text-sm font-medium text-muted-foreground">{heading}</h2>
         {rows.map(renderRow)}
+        {pagination && <PageNav pagination={pagination} hrefOf={hrefFor} />}
       </section>
     );
 
@@ -169,8 +204,12 @@ export default async function AcknowledgementReportPage() {
         <EmptyState icon={ClipboardCheck} title={t("emptyTitle")} hint={t("emptyHint")} />
       ) : (
         <div className="space-y-8">
-          {section(t("sectionAnnouncements"), view.rows)}
-          {section(t("sectionDocuments"), view.documentRows)}
+          {section(t("sectionAnnouncements"), view.rows, view.announcementsPage, (page) =>
+            hrefOf({ page }),
+          )}
+          {section(t("sectionDocuments"), view.documentRows, view.documentsPage, (documentsPage) =>
+            hrefOf({ documentsPage }),
+          )}
         </div>
       )}
     </div>

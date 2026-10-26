@@ -12,6 +12,13 @@ export default {
       handler: "api::profile.profile.updateMe",
       config: { policies: [] },
     },
+    // v0.31: the dashboard banner's open confirmations (utils/open-acks.ts).
+    {
+      method: "GET",
+      path: "/me/open-acks",
+      handler: "api::profile.profile.openAcks",
+      config: { policies: [] },
+    },
     // v0.27: the second factor of the caller's own local account (utils/mfa.ts).
     {
       method: "POST",

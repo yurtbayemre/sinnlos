@@ -325,6 +325,8 @@ const GOLDEN: Record<string, PolicySpec[]> = {
   "api::acknowledgement.acknowledgement.find": ["global::acknowledgement-visibility"],
   "api::acknowledgement.acknowledgement.findOne": ["global::acknowledgement-visibility"],
   "api::acknowledgement.acknowledgement.create": [],
+  // v0.31: the admin report's index; the controller checks admin_role again.
+  "api::acknowledgement.acknowledgement.reportIndex": [],
 
   "api::announcement.announcement.find": ["global::announcement-visibility"],
   "api::announcement.announcement.findOne": ["global::announcement-visibility"],
@@ -478,6 +480,8 @@ const GOLDEN: Record<string, PolicySpec[]> = {
   "api::profile.profile.mfaSetup": [],
   "api::profile.profile.mfaActivate": [],
   "api::profile.profile.mfaDisable": [],
+  // v0.31: the banner's open count; the controller checks the read grants.
+  "api::profile.profile.openAcks": [],
 
   "api::quick-link.quick-link.find": ["global::quick-link-visibility"],
   "api::quick-link.quick-link.findOne": ["global::quick-link-visibility"],
