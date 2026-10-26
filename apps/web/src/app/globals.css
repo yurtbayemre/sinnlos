@@ -351,6 +351,22 @@
   }
 }
 
+/*
+ * iOS Safari zooms into a focused field whose text is smaller than 16px and
+ * keeps the zoom after the submit, so the next page opens zoomed in (the
+ * second factor's code field after sign-in). On touch screens every text
+ * field shows 16px; elsewhere the utilities (text-sm) stay. Not
+ * `maximum-scale=1`: Android would then refuse pinch-zoom. Unlayered on
+ * purpose: unlayered CSS wins over Tailwind's utilities layer.
+ */
+@media (pointer: coarse) {
+  input:not([type="checkbox"], [type="radio"], [type="range"], [type="color"], [type="file"]),
+  textarea,
+  select {
+    font-size: 16px;
+  }
+}
+
 /* Respect users who prefer less motion. */
 @media (prefers-reduced-motion: reduce) {
   *,
