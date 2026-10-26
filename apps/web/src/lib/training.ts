@@ -50,9 +50,11 @@ export async function fetchLessonByDocumentId(documentId: string): Promise<Lesso
  * completedAt map of the NEWEST receipt per lesson: a renewed lesson
  * (v0.20) has several receipts, and accidental duplicates (accepted
  * check-then-insert race) collapse too. The walk is sorted by id, which
- * keeps the pages stable on Postgres.
+ * keeps the pages stable on Postgres. With `lessonDocumentId`, only that
+ * lesson's receipts (#181: the lesson page; the whole walk stops at 2,000
+ * receipts, and a lesson completed past them showed as open).
  */
-export async function fetchMyProgress(): Promise<{
+export async function fetchMyProgress(lessonDocumentId?: string): Promise<{
   completed: Map<string, string | null>;
   truncated: boolean;
 }> {
@@ -60,7 +62,7 @@ export async function fetchMyProgress(): Promise<{
   // Without an identity nothing is known: fail closed (the callers' tryFetch).
   if (id === null) throw new Error("lesson-progress: no viewer id");
   const result: WalkResult<MyProgressRow> = await walkAllPages<MyProgressRow>(
-    (page) => myProgressPage(id, page),
+    (page) => myProgressPage(id, page, lessonDocumentId),
     { maxPages: 20, label: "lesson-progress" },
   );
   return { completed: newestReceipts(result.data), truncated: result.truncated };

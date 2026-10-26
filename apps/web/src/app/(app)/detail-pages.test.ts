@@ -2,6 +2,8 @@ import { isValidElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { DeleteClassified } from "@/components/marketplace/delete-classified";
+import { FetchErrorBanner } from "@/components/fetch-error";
+import { LessonCompletion } from "@/components/training/lesson-completion";
 import { SectionUnavailablePage } from "@/components/section-unavailable";
 import { StrapiError } from "@/lib/strapi-error";
 
@@ -24,7 +26,7 @@ const classifiedMock = vi.fn<(id: string) => Promise<unknown>>();
 const departmentMock = vi.fn<(slug: string) => Promise<unknown>>();
 const teamMock = vi.fn<(slug: string) => Promise<unknown>>();
 const courseMock = vi.fn<(slug: string) => Promise<unknown>>();
-const progressMock = vi.fn<() => Promise<unknown>>();
+const progressMock = vi.fn<(lessonDocumentId?: string) => Promise<unknown>>();
 const lessonMock = vi.fn<(documentId: string) => Promise<unknown>>();
 
 vi.mock("@/lib/strapi", () => ({
@@ -37,7 +39,7 @@ vi.mock("@/lib/strapi", () => ({
 }));
 vi.mock("@/lib/training", () => ({
   fetchCourseBySlug: (slug: string) => courseMock(slug),
-  fetchMyProgress: () => progressMock(),
+  fetchMyProgress: (lessonDocumentId?: string) => progressMock(lessonDocumentId),
   fetchLessonByDocumentId: (documentId: string) => lessonMock(documentId),
 }));
 vi.mock("@/lib/session", () => ({
@@ -330,5 +332,50 @@ describe("a role without the section's read (guest)", () => {
     departmentMock.mockResolvedValue({ data: [] });
     await expect(department.default(slugParams("engineering"))).rejects.toMatchObject(NOT_FOUND);
     expect(departmentMock).toHaveBeenCalledWith("engineering");
+  });
+});
+
+describe("/training/[slug]/[lessonId] (#181)", () => {
+  const lessonParams = { params: Promise.resolve({ slug: "security", lessonId: "l1" }) };
+  const security = {
+    documentId: "c1",
+    title: "Security basics",
+    slug: "security",
+    validityMonths: null,
+    lessons: [{ documentId: "l1" }],
+  };
+  const l1 = {
+    documentId: "l1",
+    title: "Phishing",
+    body: null,
+    videoUrl: null,
+    quiz: null,
+    version: "1",
+    course: { documentId: "c1", completionMode: "confirm" },
+  };
+
+  beforeEach(() => {
+    who.role = "member";
+    who.userId = 3;
+    courseMock.mockResolvedValue(security);
+    lessonMock.mockResolvedValue(l1);
+  });
+
+  it("reads only this lesson's receipts and shows it done from them", async () => {
+    progressMock.mockResolvedValue({
+      completed: new Map([["l1", "2026-10-01T08:00:00.000Z"]]),
+      truncated: false,
+    });
+    const tree = elements(await lesson.default(lessonParams));
+    expect(progressMock).toHaveBeenCalledWith("l1");
+    const completion = tree.find((el) => el.type === LessonCompletion);
+    expect(completion?.props.completedAtLabel).not.toBeNull();
+  });
+
+  it("shows the error banner, not the completion, when that read is cut short", async () => {
+    progressMock.mockResolvedValue({ completed: new Map(), truncated: true });
+    const tree = elements(await lesson.default(lessonParams));
+    expect(tree.some((el) => el.type === FetchErrorBanner)).toBe(true);
+    expect(tree.some((el) => el.type === LessonCompletion)).toBe(false);
   });
 });

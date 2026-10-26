@@ -71,21 +71,21 @@ export function courseTrainingReport(
   );
 }
 
-/** One page of the caller's own completion receipts, sorted by id. */
+/** One page of the caller's own completion receipts (of one lesson, if given), sorted by id. */
 export function myProgressPage(
   userId: number,
   page: number,
+  lessonDocumentId?: string,
 ): Promise<StrapiListResponse<MyProgressRow>> {
+  const query = strapiQuery()
+    // lesson-progress-visibility lets admin_role read everyone's
+    // receipts: they must not count as the admin's own.
+    .filter(["user", "id"], "$eq", userId);
+  if (lessonDocumentId !== undefined) query.filter("targetDocumentId", "$eq", lessonDocumentId);
   return strapi<StrapiListResponse<MyProgressRow>>(
     withQuery(
       "/api/lesson-progresses",
-      strapiQuery()
-        // lesson-progress-visibility lets admin_role read everyone's
-        // receipts: they must not count as the admin's own.
-        .filter(["user", "id"], "$eq", userId)
-        .fields(["targetDocumentId", "completedAt"])
-        .sort(["id:asc"])
-        .page(page, 100),
+      query.fields(["targetDocumentId", "completedAt"]).sort(["id:asc"]).page(page, 100),
     ),
   );
 }
