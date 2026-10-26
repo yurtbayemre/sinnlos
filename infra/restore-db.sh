@@ -737,8 +737,11 @@ do_prepare() { # <source> [back-of attempt] [expected sha256]
     safety_sum="$(sha256_of "${safety}")"
   fi
 
+  # A copy, not a move (v0.32, #186): the attempt before stays the current
+  # state until save_attempt below replaces it in one rename, so an
+  # interruption in between still leaves back a way home.
   if [[ -n "${prev_attempt}" ]]; then
-    mv -f "${STATE_FILE}" "${STATE_DIR}/${PROJECT}.${prev_attempt}.state"
+    cp -p -- "${STATE_FILE}" "${STATE_DIR}/${PROJECT}.${prev_attempt}.state"
   fi
   clear_state S_ "${STATE_KEYS[@]}"
   S_ATTEMPT="${attempt}" S_PROJECT="${PROJECT}" S_CHECKOUT="${CHECKOUT}" S_COMPOSE_FILES="${COMPOSE_FILES}"
