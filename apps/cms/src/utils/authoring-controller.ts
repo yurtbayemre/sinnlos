@@ -917,15 +917,21 @@ export const chunks = <T>(items: readonly T[], size: number): T[][] => {
  * next write answers 412 and the client reloads), never with older content
  * under the newer version, which would authorise a change the caller never
  * saw. A document created in between has no version here: 0, which no
- * stored revision matches.
+ * stored revision matches. `documentIds` narrows the read to those
+ * documents (the list's page, v0.31); without it the read is type-wide.
  */
 export async function revisionsOf(
   strapi: AuthoringControllerHost,
   uid: string,
+  documentIds?: readonly string[],
 ): Promise<Map<string, number>> {
   const revisions = new Map<string, number>();
+  if (documentIds?.length === 0) return revisions;
   const rows = (await strapi.db.query(CONTENT_VERSION_UID).findMany({
-    where: { targetUid: uid },
+    where: {
+      targetUid: uid,
+      ...(documentIds ? { targetDocumentId: { $in: [...documentIds] } } : {}),
+    },
     select: ["targetDocumentId", "revision"],
   })) as Record<string, unknown>[];
   for (const row of rows) {
@@ -937,13 +943,8 @@ export async function revisionsOf(
   return revisions;
 }
 
-/** Every document of `uid` the list may show, as rows, newest draft first. */
-async function listDocuments(
-  strapi: AuthoringControllerHost,
-  spec: AuthoringSpec,
-  gate: AuthoringGate,
-  query: ListQuery,
-): Promise<AuthoringRows[]> {
+/** The drafts the list may show: a department author's own, then the owner, space and course filters. */
+function listWhere(gate: AuthoringGate, query: ListQuery): Record<string, unknown> {
   const where: Record<string, unknown> = { publishedAt: { $null: true } };
   if (gate.roleClass === DEPARTMENT_AUTHOR_CLASS && gate.callerDepartment) {
     where.ownerDepartment = { id: gate.callerDepartment.id };
@@ -954,29 +955,43 @@ async function listDocuments(
   }
   if (query.space !== undefined) where.space = { documentId: query.space };
   if (query.course !== undefined) where.course = { documentId: query.course };
-  const populate = AUTHORING_POPULATE[spec.uid] ?? {};
-  // The columns a list row needs (never a Markdown body): the label, the
-  // state and schedule, and the targeting flags.
-  const select = [
-    "id",
-    "documentId",
-    "publishedAt",
-    "updatedAt",
-    spec.labelField,
-    ...(spec.scheduled ? ["publishAt", "scheduleError"] : []),
-    ...(spec.unpublishScheduled ? ["unpublishAt"] : []),
-    ...spec.flagColumns,
-    ...(spec.listColumns ?? []),
-  ];
-  const drafts = (
-    (await strapi.db.query(spec.uid).findMany({ where, select, populate })) as unknown[]
-  )
-    .filter(isRecord)
-    .filter((row) => {
-      if (!query.q) return true;
-      const label = row[spec.labelField];
-      return typeof label === "string" && label.toLowerCase().includes(query.q.toLowerCase());
-    }) as AuthoringRow[];
+  return where;
+}
+
+/** `q`: the draft's label contains it, ignoring case (in JS, not in SQL: one rule on both engines). */
+function labelMatches(spec: AuthoringSpec, q: string | undefined) {
+  const needle = q?.toLowerCase();
+  return (row: Record<string, unknown>): boolean => {
+    if (!needle) return true;
+    const label = row[spec.labelField];
+    return typeof label === "string" && label.toLowerCase().includes(needle);
+  };
+}
+
+// The columns a list row needs (never a Markdown body): the label, the
+// state and schedule, and the targeting flags.
+const listSelect = (spec: AuthoringSpec): string[] => [
+  "id",
+  "documentId",
+  "publishedAt",
+  "updatedAt",
+  spec.labelField,
+  ...(spec.scheduled ? ["publishAt", "scheduleError"] : []),
+  ...(spec.unpublishScheduled ? ["unpublishAt"] : []),
+  ...spec.flagColumns,
+  ...(spec.listColumns ?? []),
+];
+
+/**
+ * The drafts with their published twins. A twin is read by documentId
+ * alone, never by the list's filters: a draft moved to another space keeps
+ * its published row in the old one, and that row still decides its status.
+ */
+async function withPublished(
+  strapi: AuthoringControllerHost,
+  spec: AuthoringSpec,
+  drafts: readonly AuthoringRow[],
+): Promise<AuthoringRows[]> {
   const published = new Map<string, AuthoringRow>();
   for (const chunk of chunks(
     drafts.map((row) => row.documentId),
@@ -984,19 +999,119 @@ async function listDocuments(
   )) {
     const rows = (await strapi.db.query(spec.uid).findMany({
       where: { documentId: { $in: chunk }, publishedAt: { $notNull: true } },
-      select,
-      populate,
+      select: listSelect(spec),
+      populate: AUTHORING_POPULATE[spec.uid] ?? {},
     })) as AuthoringRow[];
     for (const row of rows) published.set(row.documentId, row);
   }
-  const documents = drafts.map((draft) => ({
+  return drafts.map((draft) => ({
     documentId: draft.documentId,
     draft,
     published: published.get(draft.documentId) ?? null,
   }));
+}
+
+/** Every document of `uid` the list may show, as rows (unsorted). */
+async function listDocuments(
+  strapi: AuthoringControllerHost,
+  spec: AuthoringSpec,
+  gate: AuthoringGate,
+  query: ListQuery,
+): Promise<AuthoringRows[]> {
+  const drafts = (
+    (await strapi.db.query(spec.uid).findMany({
+      where: listWhere(gate, query),
+      select: listSelect(spec),
+      populate: AUTHORING_POPULATE[spec.uid] ?? {},
+    })) as unknown[]
+  )
+    .filter(isRecord)
+    .filter(labelMatches(spec, query.q)) as AuthoringRow[];
+  const documents = await withPublished(strapi, spec, drafts);
   return gate.roleClass === DEPARTMENT_AUTHOR_CLASS
     ? documents.filter((rows) => departmentAuthorOwns(spec.uid, rows, gate.callerDepartment))
     : documents;
+}
+
+/** The list's order: the newest draft first (no readable updatedAt: last), then documentId. */
+function newestDraftFirst(a: AuthoringRows, b: AuthoringRows): number {
+  const delta = (ms(b.draft?.updatedAt) ?? 0) - (ms(a.draft?.updatedAt) ?? 0);
+  return delta !== 0 ? delta : a.documentId.localeCompare(b.documentId);
+}
+
+const pageOf = <T>(items: readonly T[], page: number): T[] =>
+  items.slice((page - 1) * AUTHORING_LIST_PAGE_SIZE, page * AUTHORING_LIST_PAGE_SIZE);
+
+/** One page of the list, its total and the revisions of its documents. */
+interface ListPage {
+  total: number;
+  page: AuthoringRows[];
+  revisions: Map<string, number>;
+}
+
+/**
+ * The list without a light path (a `status` filter needs both rows of
+ * every document; a department author's rule reads the relations): every
+ * revision of the type, then every document, then the page.
+ */
+async function fullListPage(
+  strapi: AuthoringControllerHost,
+  spec: AuthoringSpec,
+  gate: AuthoringGate,
+  query: ListQuery,
+): Promise<ListPage> {
+  // Versions first, then the rows (see revisionsOf).
+  const revisions = await revisionsOf(strapi, spec.uid);
+  const documents = (await listDocuments(strapi, spec, gate, query))
+    .filter((rows) => listStatusMatches(rows, query.status))
+    .sort(newestDraftFirst);
+  return { total: documents.length, page: pageOf(documents, query.page), revisions };
+}
+
+/**
+ * The list's light path (#170, v0.31): only the page's documents are read
+ * in full. Three reads, in this order:
+ *  1. every matching draft's documentId, updatedAt and label (listWhere and
+ *     `q` as the full path), sorted by newestDraftFirst: the total and the
+ *     page's documentIds;
+ *  2. the revisions of exactly those documents;
+ *  3. their drafts and published twins with every list column, read AFTER
+ *     the revisions (the version rule of revisionsOf). A draft gone in
+ *     between leaves the page; the total stays the one of step 1.
+ */
+async function lightListPage(
+  strapi: AuthoringControllerHost,
+  spec: AuthoringSpec,
+  gate: AuthoringGate,
+  query: ListQuery,
+): Promise<ListPage> {
+  const light = (
+    (await strapi.db.query(spec.uid).findMany({
+      where: listWhere(gate, query),
+      select: ["documentId", "updatedAt", spec.labelField],
+    })) as unknown[]
+  )
+    .filter(isRecord)
+    .filter(labelMatches(spec, query.q)) as AuthoringRow[];
+  const ordered = light
+    .map((draft) => ({ documentId: draft.documentId, draft, published: null }))
+    .sort(newestDraftFirst);
+  const ids = pageOf(ordered, query.page).map((rows) => rows.documentId);
+  const revisions = await revisionsOf(strapi, spec.uid, ids);
+  const drafts =
+    ids.length === 0
+      ? []
+      : ((await strapi.db.query(spec.uid).findMany({
+          where: { documentId: { $in: ids }, publishedAt: { $null: true } },
+          select: listSelect(spec),
+          populate: AUTHORING_POPULATE[spec.uid] ?? {},
+        })) as AuthoringRow[]);
+  const byId = new Map(drafts.map((draft) => [draft.documentId, draft]));
+  const present = ids.flatMap((id) => {
+    const draft = byId.get(id);
+    return draft ? [draft] : [];
+  });
+  return { total: ordered.length, page: await withPublished(strapi, spec, present), revisions };
 }
 
 function listStatusMatches(rows: AuthoringRows, status: ListStatus | undefined): boolean {
@@ -1272,18 +1387,12 @@ export function authoringActionsFor(
         space: uid === WIKI_PAGE_UID,
         course: uid === LESSON_UID,
       });
-      // Versions first, then the rows (see revisionsOf).
-      const revisions = await revisionsOf(strapi, uid);
-      const documentsList = (await listDocuments(strapi, spec, gate, query)).filter((rows) =>
-        listStatusMatches(rows, query.status),
-      );
-      documentsList.sort((a, b) => {
-        const delta = (ms(b.draft?.updatedAt) ?? 0) - (ms(a.draft?.updatedAt) ?? 0);
-        return delta !== 0 ? delta : a.documentId.localeCompare(b.documentId);
-      });
-      const total = documentsList.length;
+      // The light path whenever the page follows from the drafts alone.
+      const { total, page, revisions } =
+        query.status === undefined && gate.roleClass !== DEPARTMENT_AUTHOR_CLASS
+          ? await lightListPage(strapi, spec, gate, query)
+          : await fullListPage(strapi, spec, gate, query);
       const pageSize = AUTHORING_LIST_PAGE_SIZE;
-      const page = documentsList.slice((query.page - 1) * pageSize, query.page * pageSize);
       const pageCounts =
         uid === WIKI_SPACE_UID
           ? await spacePageCounts(

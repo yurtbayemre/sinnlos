@@ -261,7 +261,9 @@ describe.each(testEngines())("authoring: HTTP concurrency on %s", (engine) => {
     it("the list's version is never newer than its rows: that token cannot publish or delete the unseen change", async () => {
       const item = await link("Listed race");
       const restore = commitAfterNextRead(
-        // The list's draft read (no documentId in its where).
+        // The full path's draft read (no documentId in its where); `status`
+        // keeps the list on that path (the light path's version rule:
+        // authoring-list-paging.integration.test.ts).
         (params) => params?.where !== undefined && !("documentId" in params.where),
         changeUnseen(item.documentId, "Listed race, changed unseen"),
       );
@@ -272,7 +274,7 @@ describe.each(testEngines())("authoring: HTTP concurrency on %s", (engine) => {
         list = await api.list<{ documentId: string; label: string; version: string }>(
           "editor",
           QP,
-          "q=listed%20race",
+          "status=draft&q=listed%20race",
         );
       } finally {
         restore();

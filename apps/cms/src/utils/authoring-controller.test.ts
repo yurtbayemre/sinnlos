@@ -526,21 +526,96 @@ describe("delete", () => {
 });
 
 describe("authoringList", () => {
-  it("reads the versions before the rows, so a version is never newer than its row", async () => {
+  const VERSION = "api::content-version.content-version";
+  const DOC = "doc0000000000000000000a1";
+  const listed = (query: Record<string, unknown> = {}) => {
     const { stub, host } = harness();
-    seedRows(stub, "doc0000000000000000000a1", true);
-    stub.tables["api::content-version.content-version"] = [
-      { id: 1, targetUid: A, targetDocumentId: "doc0000000000000000000a1", revision: 5 },
-    ];
-    const ctx = context(gateFor({ intent: "authoringList", documentId: undefined }));
-    await authoringActionsFor(host, A).authoringList(ctx);
+    seedRows(stub, DOC, true);
+    stub.tables[VERSION] = [{ id: 1, targetUid: A, targetDocumentId: DOC, revision: 5 }];
+    const ctx = context(gateFor({ intent: "authoringList", documentId: undefined }), { query });
+    const reads = () =>
+      stub.calls.filter((call) => call.api === "db" && call.method === "findMany");
+    return { ctx, reads, run: () => authoringActionsFor(host, A).authoringList(ctx) };
+  };
+
+  it("the full path (a status filter) reads the versions before the rows", async () => {
+    const { ctx, reads, run } = listed({ status: "published" });
+    await run();
     expect(ctx.status).toBe(200);
     expect((ctx.body as { data: { version: string }[] }).data).toMatchObject([{ version: "5" }]);
-    const reads = stub.calls
-      .filter((call) => call.api === "db" && call.method === "findMany")
-      .map((call) => call.uid);
-    expect(reads[0]).toBe("api::content-version.content-version");
-    expect(reads.slice(1)).toEqual([A, A]);
+    expect(reads().map((call) => call.uid)).toEqual([VERSION, A, A]);
+    expect(reads()[0].params).toEqual({
+      where: { targetUid: A },
+      select: ["targetDocumentId", "revision"],
+    });
+  });
+
+  it("the light path (#170): the page's ids, then their versions, then their rows in full", async () => {
+    const { ctx, reads, run } = listed();
+    await run();
+    expect(ctx.status).toBe(200);
+    expect(ctx.body).toMatchObject({
+      data: [{ documentId: DOC, version: "5", status: "published" }],
+      meta: { pagination: { total: 1 } },
+    });
+    expect(reads().map((call) => call.uid)).toEqual([A, VERSION, A, A]);
+    expect(reads()[0].params).toEqual({
+      where: { publishedAt: { $null: true } },
+      select: ["documentId", "updatedAt", "title"],
+    });
+    expect(reads()[1].params).toMatchObject({
+      where: { targetUid: A, targetDocumentId: { $in: [DOC] } },
+    });
+    expect(reads()[2].params).toMatchObject({
+      where: { documentId: { $in: [DOC] }, publishedAt: { $null: true } },
+    });
+  });
+
+  it("the light path reads versions, drafts and twins of the page's documents only", async () => {
+    const { stub, host } = harness();
+    const ids = Array.from({ length: 26 }, (_, i) => `doc${String(i).padStart(21, "0")}`);
+    // Older first: ids[0] is the oldest draft, so page 2 holds it alone.
+    stub.tables[A] = ids.flatMap((documentId, i) => [
+      {
+        id: 2 * i + 1,
+        documentId,
+        title: `T${i}`,
+        publishedAt: null,
+        updatedAt: new Date(Date.UTC(2026, 9, 1, 0, i)).toISOString(),
+      },
+      {
+        id: 2 * i + 2,
+        documentId,
+        title: `T${i}`,
+        publishedAt: "2026-09-01T00:00:00.000Z",
+        updatedAt: "2026-09-01T00:00:00.000Z",
+      },
+    ]);
+    stub.tables[VERSION] = [];
+    const ctx = context(gateFor({ intent: "authoringList", documentId: undefined }), {
+      query: { page: "2" },
+    });
+    await authoringActionsFor(host, A).authoringList(ctx);
+    expect(ctx.body).toMatchObject({
+      data: [{ documentId: ids[0], status: "modified" }],
+      meta: { pagination: { page: 2, pageCount: 2, total: 26 } },
+    });
+    const reads = stub.calls.filter((call) => call.api === "db" && call.method === "findMany");
+    expect(reads.map((call) => call.uid)).toEqual([A, VERSION, A, A]);
+    for (const call of reads.slice(1)) {
+      expect(call.params).toMatchObject({
+        where: expect.objectContaining({
+          [call.uid === VERSION ? "targetDocumentId" : "documentId"]: { $in: [ids[0]] },
+        }),
+      });
+    }
+  });
+
+  it("the light path reads no versions and no rows for a page past the end", async () => {
+    const { ctx, reads, run } = listed({ page: "2" });
+    await run();
+    expect(ctx.body).toMatchObject({ data: [], meta: { pagination: { page: 2, total: 1 } } });
+    expect(reads().map((call) => call.uid)).toEqual([A]);
   });
 });
 
