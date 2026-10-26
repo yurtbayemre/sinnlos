@@ -58,7 +58,8 @@ import { isAnnouncementVisible } from "./announcement-audience";
 import { isAnnouncementExpired } from "./announcement-expiry";
 import { targetAnchor, type CommentTargetType } from "./comment-target";
 import type { PolicyStrapi } from "./policy-factories";
-import { fitsBindLimit } from "./policy-query";
+import { findAllPaged } from "./paged-read";
+import { oneParamIn } from "./policy-query";
 import {
   loadUserScope,
   toAudienceScope,
@@ -114,19 +115,20 @@ const ANNOUNCEMENT_POPULATE = {
 const listOf = <T>(rows: unknown): T[] => (Array.isArray(rows) ? (rows as T[]) : []);
 
 /**
- * The announcement rows `where` matches, with their targeting relations;
- * the flags read again after the relations (utils/targeting-flags.ts).
+ * The announcement rows `where` matches, with their targeting relations,
+ * read in id pages (utils/paged-read.ts, #175: the populates bind one page
+ * of ids); the flags read again after ALL pages (utils/targeting-flags.ts),
+ * scalars only, one statement.
  */
 async function loadAnnouncementRows(
   strapi: PolicyStrapi,
   where: Record<string, unknown>,
 ): Promise<AnnouncementRow[]> {
-  const rows = await strapi.db.query(ANNOUNCEMENT_UID).findMany({
-    where,
-    select: ANNOUNCEMENT_SELECT,
-    populate: ANNOUNCEMENT_POPULATE,
-  });
-  return withFreshAnnouncementFlags(strapi, listOf<AnnouncementRow>(rows), where);
+  const rows = await findAllPaged<AnnouncementRow & { id: number }>(
+    strapi.db.query(ANNOUNCEMENT_UID),
+    { where, select: ANNOUNCEMENT_SELECT, populate: ANNOUNCEMENT_POPULATE },
+  );
+  return withFreshAnnouncementFlags(strapi, rows, where);
 }
 
 /**
@@ -160,16 +162,14 @@ export interface VisibleTargetAnchors {
  *      published row elsewhere (in a space the caller cannot see): one
  *      lookup for those documentIds.
  *
- * Neither query populates anything, so the only bind parameters are the
- * two id lists; either beyond the bind limit fails closed (PL04): no pages
- * for the first, none of the draft-only pages for the second.
+ * Neither query populates anything; each binds its list as ONE parameter
+ * (oneParamIn, #175), so neither has a bind limit to fail at.
  */
 async function visibleWikiPageAnchors(strapi: PolicyStrapi, spaceIds: number[]): Promise<string[]> {
   if (spaceIds.length === 0) return [];
-  if (!fitsBindLimit(strapi, spaceIds.length, "comment targets: wiki spaces")) return [];
   const rows = listOf<{ documentId?: string | null; publishedAt?: string | null }>(
     await strapi.db.query(WIKI_PAGE_UID).findMany({
-      where: { space: { id: { $in: spaceIds } } },
+      where: { space: { id: { $in: oneParamIn(strapi, spaceIds, "int") } } },
       select: ["documentId", "publishedAt"],
     }),
   );
@@ -183,13 +183,13 @@ async function visibleWikiPageAnchors(strapi: PolicyStrapi, spaceIds: number[]):
       draftOnly.add(row.documentId);
     }
   }
-  if (draftOnly.size > 0 && !fitsBindLimit(strapi, draftOnly.size, "comment targets: drafts")) {
-    draftOnly.clear();
-  }
   if (draftOnly.size > 0) {
     const elsewhere = listOf<{ documentId?: string | null }>(
       await strapi.db.query(WIKI_PAGE_UID).findMany({
-        where: { documentId: { $in: [...draftOnly] }, publishedAt: { $notNull: true } },
+        where: {
+          documentId: { $in: oneParamIn(strapi, [...draftOnly], "text") },
+          publishedAt: { $notNull: true },
+        },
         select: ["documentId"],
       }),
     );

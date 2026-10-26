@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createStrapiStub, policyContext } from "../test/strapi-stub.test.helper";
 import documentVisibility from "./document-visibility";
+import { narrowedFilters, withNarrowing } from "../test/narrowing.test.helper";
 
 /**
  * Wiring test for the document read policy: it resolves the caller's
@@ -65,7 +66,9 @@ function context(user: StubUser | null, query: Record<string, unknown> = {}) {
 }
 
 const run = (ctx: any, users: StubUser[], docs?: unknown[]) =>
-  documentVisibility(ctx, undefined, { strapi: stubStrapi(users, docs) } as any);
+  documentVisibility(ctx, undefined, {
+    strapi: withNarrowing(stubStrapi(users, docs), ctx),
+  } as any);
 
 const engineer: StubUser = {
   id: 2,
@@ -73,12 +76,16 @@ const engineer: StubUser = {
   department: { id: ENGINEERING },
 };
 
+/** The filters a read gets once the Document Service applied what the policy stored (#175). */
+const filtersOf = (ctx: { state?: object; request: { query: Record<string, unknown> } }) =>
+  narrowedFilters(ctx, "api::document.document", ctx.request.query.filters);
+
 describe("document-visibility policy", () => {
   it("lets admin_role through without touching the query (trap d bypass)", async () => {
     const admin = { id: 1, role: { id: 1, type: "admin_role" } };
     const ctx = context(admin, { status: "draft" });
     await expect(run(ctx, [admin])).resolves.toBe(true);
-    expect(ctx.request.query.filters).toBeUndefined();
+    expect(await filtersOf(ctx)).toBeUndefined();
     // Bypass happens BEFORE the status is pinned — admins author the drafts
     // and must keep reading them.
     expect(ctx.request.query.status).toBe("draft");
@@ -88,7 +95,7 @@ describe("document-visibility policy", () => {
     const ed = { id: 1, role: { id: 3, type: "editor" } };
     const ctx = context(ed, { status: "draft" });
     await expect(run(ctx, [ed])).resolves.toBe(true);
-    expect(ctx.request.query.filters).toBeUndefined();
+    expect(await filtersOf(ctx)).toBeUndefined();
     expect(ctx.request.query.status).toBe("draft");
   });
 
@@ -96,7 +103,7 @@ describe("document-visibility policy", () => {
     const ctx = context(engineer);
     await run(ctx, [engineer]);
     // #1 company-wide, #2 + #4 tagged Engineering; #3 is Design-only.
-    expect(ctx.request.query.filters).toEqual({ id: { $in: [1, 2, 4] } });
+    expect(await filtersOf(ctx)).toEqual({ id: { $in: [1, 2, 4] } });
   });
 
   it("scopes a different department to its own docs", async () => {
@@ -107,20 +114,20 @@ describe("document-visibility policy", () => {
     };
     const ctx = context(designer);
     await run(ctx, [designer]);
-    expect(ctx.request.query.filters).toEqual({ id: { $in: [1, 3, 4] } });
+    expect(await filtersOf(ctx)).toEqual({ id: { $in: [1, 3, 4] } });
   });
 
   it("gives an anonymous caller only the company-wide docs", async () => {
     const ctx = context(null);
     await run(ctx, []);
-    expect(ctx.request.query.filters).toEqual({ id: { $in: [1] } });
+    expect(await filtersOf(ctx)).toEqual({ id: { $in: [1] } });
   });
 
   it("gives a member without a department only the company-wide docs", async () => {
     const orphan: StubUser = { id: 9, role: { id: MEMBER_ROLE, type: "member" } };
     const ctx = context(orphan);
     await run(ctx, [orphan]);
-    expect(ctx.request.query.filters).toEqual({ id: { $in: [1] } });
+    expect(await filtersOf(ctx)).toEqual({ id: { $in: [1] } });
   });
 
   it("stays restrictive when nothing is visible (no fail-open empty $in — trap b)", async () => {
@@ -129,13 +136,13 @@ describe("document-visibility policy", () => {
     const onlyScoped = DOCS.filter((d) => d.id !== 1);
     const ctx = context(null);
     await run(ctx, [], onlyScoped);
-    expect(ctx.request.query.filters).toEqual({ id: { $eq: -1 } });
+    expect(await filtersOf(ctx)).toEqual({ id: { $in: [] } });
   });
 
   it("keeps a caller-supplied filter and only narrows it", async () => {
     const ctx = context(engineer, { filters: { archived: { $eq: false } } });
     await run(ctx, [engineer]);
-    expect(ctx.request.query.filters).toEqual({
+    expect(await filtersOf(ctx)).toEqual({
       $and: [{ archived: { $eq: false } }, { id: { $in: [1, 2, 4] } }],
     });
   });
@@ -146,7 +153,7 @@ describe("document-visibility policy", () => {
     // the controller never reads. The policy must ignore it.
     ctx.query = {};
     await run(ctx, [engineer]);
-    expect(ctx.request.query.filters).toEqual({ id: { $in: [1, 2, 4] } });
+    expect(await filtersOf(ctx)).toEqual({ id: { $in: [1, 2, 4] } });
     expect(ctx.query.filters).toBeUndefined();
   });
 
@@ -173,7 +180,7 @@ describe("document-visibility policy", () => {
     it("pins the status without disturbing the injected id filter", async () => {
       const ctx = context(engineer, { status: "draft" });
       await run(ctx, [engineer]);
-      expect(ctx.request.query.filters).toEqual({ id: { $in: [1, 2, 4] } });
+      expect(await filtersOf(ctx)).toEqual({ id: { $in: [1, 2, 4] } });
     });
   });
 });
@@ -217,8 +224,10 @@ describe("document of a deleted department (FX29 residual, owner answer 2026-09-
   const visibleIds = async (user: { id: number; role: { type: string } } | null) => {
     const strapi = flaggedStub();
     const ctx = policyContext(user);
-    await expect(documentVisibility(ctx, undefined, { strapi })).resolves.toBe(true);
-    return ctx.request.query.filters;
+    await expect(
+      documentVisibility(ctx, undefined, { strapi: withNarrowing(strapi, ctx) }),
+    ).resolves.toBe(true);
+    return filtersOf(ctx);
   };
 
   it("hides a flagged row without departments from everyone but the bypass roles", async () => {
@@ -245,7 +254,7 @@ describe("document of a deleted department (FX29 residual, owner answer 2026-09-
       },
     });
     const ctx = policyContext({ id: 2, role: { type: "member" } });
-    await documentVisibility(ctx, undefined, { strapi });
-    expect(ctx.request.query.filters).toEqual({ id: { $eq: -1 } });
+    await documentVisibility(ctx, undefined, { strapi: withNarrowing(strapi, ctx) });
+    expect(await filtersOf(ctx)).toEqual({ id: { $in: [] } });
   });
 });

@@ -238,6 +238,13 @@ interface Params {
 function matches(row: Row, where: Record<string, unknown> | undefined): boolean {
   if (!where) return true;
   return Object.entries(where).every(([key, condition]) => {
+    // The paged space read (utils/paged-read.ts, #175): `$and` and the id cursor.
+    if (key === "$and") {
+      return (condition as Record<string, unknown>[]).every((part) => matches(row, part));
+    }
+    if (condition !== null && typeof condition === "object" && "$gt" in condition) {
+      return (row[key] as number) > (condition as { $gt: number }).$gt;
+    }
     if (condition !== null && typeof condition === "object" && "$in" in condition) {
       return (condition as { $in: unknown[] }).$in.includes(row[key]);
     }

@@ -1,6 +1,6 @@
 import { MODERATORS } from "../bootstrap/roles";
 import { rowIds, visibleIdsPolicy, type VisibleIdsInput } from "../utils/policy-factories";
-import { fitsBindLimit } from "../utils/policy-query";
+import { oneParamIn } from "../utils/policy-query";
 import { loadUserScope, visibleWikiSpaceIds } from "../utils/visible-ids";
 
 /**
@@ -30,9 +30,9 @@ import { loadUserScope, visibleWikiSpaceIds } from "../utils/visible-ids";
  *   schemas have no `visibility` / `allowedRoles` attributes to filter on.
  *
  *   Instead the visible primary-key ids are resolved SERVER-SIDE via
- *   `strapi.db.query` and injected as a single non-relational
- *   `{ id: { $in: [...] } }` clause, $and-composed with the client filter;
- *   an empty list becomes `{ id: { $eq: -1 } }` (fail-closed).
+ *   `strapi.db.query` and the Document Service ANDs one non-relational
+ *   `{ id: { $in: <the list as one parameter> } }` clause into the reads
+ *   (visibleIdsPolicy, #175); an empty list matches nothing.
  *
  * The applicable content-type level is passed per route via the policy
  * config: `{ name: "global::wiki-visibility", config: { level: "space" } }`.
@@ -70,13 +70,13 @@ async function visibleWikiIds({
   if (level === "space") return spaceIds;
   // No visible space → no visible page/revision either. Skip the join.
   if (spaceIds.length === 0) return [];
-  // The space ids are bound into the lookup below (PL04): fail closed.
-  if (!fitsBindLimit(strapi, spaceIds.length, `wiki-visibility ${level} spaces`)) return [];
+  // The space ids as ONE bound parameter (#175): no bind limit to fail at.
+  const spaces = { id: { $in: oneParamIn(strapi, spaceIds, "int") } };
   const where =
     level === "page"
-      ? { space: { id: { $in: spaceIds } } }
+      ? { space: spaces }
       : // revision → visible when its page's space is visible.
-        { page: { space: { id: { $in: spaceIds } } } };
+        { page: { space: spaces } };
   return rowIds(await strapi.db.query(uid).findMany({ where, select: ["id"] }));
 }
 

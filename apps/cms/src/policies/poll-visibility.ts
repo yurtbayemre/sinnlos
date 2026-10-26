@@ -1,6 +1,7 @@
 import { MODERATORS } from "../bootstrap/roles";
 import { loadPollViewer, POLL_UID } from "../utils/poll-access";
 import { canSeePoll, type PollTargeting } from "../utils/poll-audience";
+import { findAllPaged } from "../utils/paged-read";
 import { visibleIdsPolicy, type VisibleIdsInput } from "../utils/policy-factories";
 
 /**
@@ -60,12 +61,13 @@ async function visiblePollIds({ strapi, user }: VisibleIdsInput<unknown>): Promi
     id: user.id,
     role: { type: typeof roleType === "string" ? roleType : null },
   });
-  const rows = await strapi.db.query(POLL_UID).findMany({
+  // Paged (utils/paged-read.ts, #175): the populate binds one page of ids.
+  const rows = await findAllPaged<PollRow>(strapi.db.query(POLL_UID), {
     where: { publishedAt: { $notNull: true } },
     select: ["id", "audience", "visibleToGuests"],
     populate: { departments: { select: ["documentId"] } },
   });
-  return (Array.isArray(rows) ? rows : [])
+  return rows
     .filter(isPollRow)
     .filter((row) => canSeePoll(row, viewer))
     .map((row) => row.id);

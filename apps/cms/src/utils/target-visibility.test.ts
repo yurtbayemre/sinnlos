@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createStrapiStub, type StrapiStub } from "../test/strapi-stub.test.helper";
+import { decodeOneParam, oneParamConnection, oneParamList } from "../test/narrowing.test.helper";
 import {
   isTargetVisible,
   pinnedTargetAnchor,
@@ -59,6 +60,7 @@ const PAGES = [
 function stubStrapi() {
   return {
     db: {
+      connection: oneParamConnection,
       query: (uid: string) => ({
         findOne: async ({ where }: any) => {
           if (uid === "plugin::users-permissions.user")
@@ -81,7 +83,7 @@ function stubStrapi() {
           }
           if (uid === "api::wiki-space.wiki-space") return SPACES;
           if (uid === "api::wiki-page.wiki-page") {
-            const ids: number[] = where?.space?.id?.$in ?? [];
+            const ids = (oneParamList(where?.space?.id?.$in) ?? []) as number[];
             return PAGES.filter((p) => p.space && ids.includes(p.space.id));
           }
           return [];
@@ -317,7 +319,8 @@ describe("wiki pages: the list and the single check agree (published row first)"
     const strapi = stub();
     await visibleTargetAnchors(strapi, { id: 1, role: { type: "member" } });
     const pageCalls = strapi.calls.filter((call) => call.uid === "api::wiki-page.wiki-page");
-    expect(pageCalls.map((call) => call.params)).toEqual([
+    // Each list goes as one parameter (oneParamIn, #175); decoded for the comparison.
+    expect(pageCalls.map((call) => decodeOneParam(call.params))).toEqual([
       { where: { space: { id: { $in: [1, 2, 3, 4, 6] } } }, select: ["documentId", "publishedAt"] },
       {
         where: {
@@ -331,34 +334,39 @@ describe("wiki pages: the list and the single check agree (published row first)"
   });
 });
 
-describe("wiki page anchors: bind limit (PL04)", () => {
-  it("drops the draft-only pages when their lookup would exceed the bind limit", async () => {
+describe("wiki page anchors: past the old bind limit (#175)", () => {
+  it("looks 40,000 draft-only pages up with one list and keeps them all", async () => {
     const count = 40_000;
-    const error = vi.fn<(message: string) => void>();
+    const documentIds = Array.from(
+      { length: count },
+      (_, index) => `p${String(index).padStart(23, "0")}`,
+    );
     const pageQueries: unknown[] = [];
     const strapi = {
       db: {
+        connection: oneParamConnection,
         query: (uid: string) => ({
           findOne: async () => null,
-          findMany: async (params: unknown) => {
+          findMany: async (params: { where?: { documentId?: unknown } }) => {
             if (uid === "api::wiki-space.wiki-space") return [{ id: 1, visibility: "public" }];
             if (uid !== "api::wiki-page.wiki-page") return [];
-            pageQueries.push(params);
-            // Every page has only a draft in the visible space.
-            return Array.from({ length: count }, (_, index) => ({
-              documentId: `p${String(index).padStart(23, "0")}`,
-              publishedAt: null,
-            }));
+            pageQueries.push(decodeOneParam(params));
+            // Every page has only a draft in the visible space, and none is
+            // published elsewhere.
+            return params.where?.documentId
+              ? []
+              : documentIds.map((documentId) => ({ documentId, publishedAt: null }));
           },
         }),
       },
-      log: { error },
     };
-    const anchors = await visibleTargetAnchors(strapi, null);
-    expect(anchors["wiki-page"]).toEqual([]);
-    // The second lookup (published rows elsewhere) with 40000 ids never ran.
-    expect(pageQueries).toHaveLength(1);
-    expect(String(error.mock.calls[0]?.[0])).toContain(`comment targets: drafts: ${count} values`);
+    const anchors = await visibleTargetAnchors(strapi as never, null);
+    expect(anchors["wiki-page"]).toHaveLength(count);
+    expect(pageQueries).toHaveLength(2);
+    expect(pageQueries[1]).toEqual({
+      where: { documentId: { $in: documentIds }, publishedAt: { $notNull: true } },
+      select: ["documentId"],
+    });
   });
 });
 

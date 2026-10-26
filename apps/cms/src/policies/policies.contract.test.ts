@@ -9,6 +9,7 @@ import {
   type StubPolicyContext,
   type StubUser,
 } from "../test/strapi-stub.test.helper";
+import { narrowedFilters, storedUid, withNarrowing } from "../test/narrowing.test.helper";
 
 /**
  * Contract for EVERY policy module in src/policies (roadmap S03), on the
@@ -673,8 +674,12 @@ async function run(
   ctx: StubPolicyContext,
   strapi: StrapiStub = fixture().strapi,
 ): Promise<Outcome> {
+  // As in a real request (#175): Koa's ctx.state always exists, Strapi's
+  // requestContext holds the context, and the route names the handler.
+  ctx.state ??= {};
+  (ctx.state as { route?: unknown }).route ??= { handler: "api::comment.comment.find" };
   try {
-    return { result: await policyOf(name)(ctx, config, { strapi }) };
+    return { result: await policyOf(name)(ctx, config, { strapi: withNarrowing(strapi, ctx) }) };
   } catch (error) {
     return { error };
   }
@@ -942,7 +947,12 @@ describe.each(Object.keys(CONTRACTS).sort())("policy contract: %s", (name) => {
 
           const query = ctx.request.query;
           if (contractCase.injectsFilter) {
-            const filters = query.filters as { $and?: unknown[] };
+            // A visible-id list joins the reads at the Document Service
+            // (#175); an ownership clause lands on the request query.
+            const uid = storedUid(ctx);
+            const filters = (
+              uid ? await narrowedFilters(ctx, uid, query.filters) : query.filters
+            ) as { $and?: unknown[] };
             expect(filters.$and?.[0], caller.label).toEqual(CLIENT_QUERY.filters);
             expect(filters.$and, caller.label).toHaveLength(2);
           } else {
@@ -962,8 +972,12 @@ describe.each(Object.keys(CONTRACTS).sort())("policy contract: %s", (name) => {
             expect(await run(name, contractCase.config, bare), caller.label).toEqual({
               result: true,
             });
-            expect(bare.request.query.filters, caller.label).toBeDefined();
-            expect(bare.request.query.filters, caller.label).not.toHaveProperty("$and");
+            const bareUid = storedUid(bare);
+            const clause = bareUid
+              ? await narrowedFilters(bare, bareUid, bare.request.query.filters)
+              : bare.request.query.filters;
+            expect(clause, caller.label).toBeDefined();
+            expect(clause, caller.label).not.toHaveProperty("$and");
           }
         }
       },

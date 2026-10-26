@@ -2,9 +2,11 @@ import { MODERATORS, hasRole } from "../bootstrap/roles";
 import { isCommentTargetType } from "../utils/comment-target";
 import { identifiedCaller, type PolicyContext, type PolicyStrapi } from "../utils/policy-factories";
 import {
-  fitsBindLimit,
+  canNarrow,
   getMutableQuery,
   narrowFilters,
+  narrowReads,
+  oneParamIn,
   restrictiveIdFilter,
 } from "../utils/policy-query";
 import {
@@ -42,9 +44,12 @@ import {
  * client filter already restricts the rows to that anchor, both paths
  * return the same rows; any other filter shape takes the full path.
  *
- * Bind limit (PL04): more anchors than one statement may bind (Postgres
- * 65535, SQLite 32766 parameters, utils/policy-query.ts) answer with
- * nothing and an error log instead of an SQL error.
+ * The full path (#175, v0.33): each anchor list goes to the Document
+ * Service as ONE bound parameter (`text[]` on Postgres, a JSON array on
+ * SQLite: oneParamIn), ANDed into the comment or reaction reads of this
+ * request (narrowReads), list and count alike; no bind limit to fail at.
+ * The root type comes from the route's handler; any other route, or a
+ * request without a request context to carry the clause, is refused.
  *
  * Empty-list trap: `$in: []` operands are stripped by sanitizeQuery
  * (fail-open!), so a branch is only emitted when its list is non-empty;
@@ -70,6 +75,8 @@ export default async (
 ): Promise<boolean> => {
   const user = policyContext.state?.user;
   if (hasRole(user, MODERATORS)) return true;
+  const root = rootUid(policyContext);
+  if (!root || !canNarrow(strapi, policyContext.state)) return false;
   const caller = identifiedCaller(user);
   const query = getMutableQuery(policyContext);
 
@@ -88,34 +95,33 @@ export default async (
   }
 
   const anchors = await visibleTargetAnchors(strapi, caller);
-  // Both anchor lists are bound into the one statement (PL04): fail closed.
-  const bound = anchors.announcement.length + anchors["wiki-page"].length;
-  if (!fitsBindLimit(strapi, bound, "comment-target-visibility anchors")) {
+  const branches: Record<string, unknown>[] = [];
+  for (const targetType of ["announcement", "wiki-page"] as const) {
+    if (anchors[targetType].length === 0) continue;
+    branches.push({
+      targetType,
+      targetDocumentId: { $in: oneParamIn(strapi, anchors[targetType], "text") },
+    });
+  }
+  if (branches.length === 0) {
     narrowFilters(query, restrictiveIdFilter([]));
     return true;
   }
-
-  const branches: Record<string, unknown>[] = [];
-  if (anchors.announcement.length > 0) {
-    branches.push({
-      targetType: "announcement",
-      targetDocumentId: { $in: anchors.announcement },
-    });
-  }
-  if (anchors["wiki-page"].length > 0) {
-    branches.push({
-      targetType: "wiki-page",
-      targetDocumentId: { $in: anchors["wiki-page"] },
-    });
-  }
-
-  const visibilityFilter =
-    branches.length === 0
-      ? restrictiveIdFilter([])
-      : branches.length === 1
-        ? branches[0]
-        : { $or: branches };
-
-  narrowFilters(query, visibilityFilter);
-  return true;
+  return narrowReads(
+    strapi,
+    policyContext.state,
+    root,
+    branches.length === 1 ? branches[0] : { $or: branches },
+  );
 };
+
+/** The types this policy guards, by the route's handler (`api::comment.comment.find`). */
+const ROOT_UIDS = new Set(["api::comment.comment", "api::reaction.reaction"]);
+
+function rootUid(policyContext: PolicyContext): string | null {
+  const handler = (policyContext.state as { route?: { handler?: unknown } } | undefined)?.route
+    ?.handler;
+  if (typeof handler !== "string") return null;
+  const uid = handler.slice(0, handler.lastIndexOf("."));
+  return ROOT_UIDS.has(uid) ? uid : null;
+}

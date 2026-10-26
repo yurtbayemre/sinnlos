@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { openAckCounts } from "./open-acks";
+import { oneParamConnection, oneParamList } from "../test/narrowing.test.helper";
 
 /**
  * GET /api/me/open-acks (v0.31, #172), the composition: the read grants
@@ -69,7 +70,9 @@ function matches(row: Row, where: Row): boolean {
     if (key === "user") return row.userId === (cond as { id: number }).id;
     if (cond && typeof cond === "object" && "$notNull" in cond) return row[key] != null;
     if (cond && typeof cond === "object" && "$in" in cond) {
-      return (cond as { $in: unknown[] }).$in.includes(row[key]);
+      // The visible ids come as one parameter (oneParamIn, #175).
+      const list = oneParamList((cond as Row).$in) ?? (cond as { $in: unknown[] }).$in;
+      return list.includes(row[key]);
     }
     if (cond && typeof cond === "object" && "$eq" in cond) return row[key] === (cond as Row).$eq;
     return row[key] === cond;
@@ -85,6 +88,7 @@ const strapi = {
     }),
     config: { connection: { client: "sqlite" } },
     dialect: { client: "sqlite" },
+    connection: oneParamConnection,
   },
 };
 
@@ -134,17 +138,14 @@ describe("openAckCounts", () => {
     });
   });
 
-  it("a visible set past the bind limit fails closed like the policy (counts nothing)", async () => {
-    // SQLite: 32,766 parameters minus the 1,000 of headroom (utils/policy-query.ts).
-    const oversized = Array.from({ length: 31_767 }, (_, i) => i + 1);
-    visible.announcement = oversized;
-    visible.document = Array.from({ length: 31_767 }, (_, i) => i + 11);
+  it("counts a visible set past the old bind limit like any other (#175)", async () => {
+    // More ids than SQLite could bind one by one (32,766): one parameter now.
+    visible.announcement = Array.from({ length: 40_000 }, (_, i) => i + 1);
+    visible.document = Array.from({ length: 40_000 }, (_, i) => i + 11);
     expect(await openAckCounts(strapi as never, MEMBER)).toEqual({
-      announcements: 0,
-      documents: 0,
+      announcements: 2,
+      documents: 1,
     });
-    visible.announcement = oversized.slice(0, 31_766);
-    expect((await openAckCounts(strapi as never, MEMBER)).announcements).toBe(2);
   });
 
   it("a kind whose read grant the role lacks is null, never 0", async () => {

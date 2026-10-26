@@ -12,8 +12,8 @@
  *     otherwise it is null, "not available", never 0 (guest has neither);
  *   - admin_role and editor read every row (the policies' bypass, expired
  *     announcements included); everyone else the row ids of
- *     visibleAnnouncementIds or departmentScopedIds, through the same
- *     fail-closed bounded id filter;
+ *     visibleAnnouncementIds or departmentScopedIds, bound as one
+ *     parameter like the policies' (oneParamIn, #175);
  *   - only published rows with `requiresAck`, as the policies' status pin;
  *   - minus the caller's own receipts of that type, by documentId.
  * The route is gated by `read-confirmations` (utils/module-switches.ts).
@@ -27,7 +27,7 @@ import {
   type PolicyStrapi,
   type VisibleIdsInput,
 } from "./policy-factories";
-import { boundedIdFilter } from "./policy-query";
+import { oneParamIn } from "./policy-query";
 import {
   ANNOUNCEMENT_FIND,
   holdsGrant,
@@ -72,7 +72,8 @@ async function openOf(strapi: PolicyStrapi, kind: Kind, user: IdentifiedCaller):
   ];
   if (!hasRole(user, MODERATORS)) {
     const input: VisibleIdsInput<unknown> = { strapi, user, config: undefined, uid };
-    where.push(boundedIdFilter(strapi, await loadVisibleIds(input), `${uid} open-acks`));
+    // The visible ids as ONE bound parameter (#175): no bind limit.
+    where.push({ id: { $in: oneParamIn(strapi, await loadVisibleIds(input), "int") } });
   }
   const [rows, receipts] = await Promise.all([
     strapi.db.query(uid).findMany({ where: { $and: where }, select: ["documentId"] }),

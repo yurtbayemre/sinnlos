@@ -8,6 +8,7 @@ import {
   type StrapiStub,
   type StubUser,
 } from "../test/strapi-stub.test.helper";
+import { narrowedFilters, withNarrowing } from "../test/narrowing.test.helper";
 import { MALFORMED_ENTRY_IDS } from "./entry-id.test.helper";
 import {
   configuredBypass,
@@ -214,28 +215,43 @@ describe("visibleIdsPolicy (PL02)", () => {
     return { policy, loads, strapi };
   }
 
+  /** A request in scope: Strapi's requestContext holds the Koa context (#175). */
+  const inRequest = (strapi: ReturnType<typeof createStrapiStub>, ctx: { state?: object }) => {
+    ctx.state ??= {};
+    return withNarrowing(strapi, ctx);
+  };
+
   it("bypasses exactly its roles, untouched and without loading", async () => {
     const passed: string[] = [];
     for (const type of ["admin_role", "editor", "department_head", "member", ...LOOKALIKES]) {
       const { policy, loads, strapi } = setup();
       const ctx = policyContext(as(type), { query: CLIENT });
-      expect(await policy(ctx, undefined, { strapi })).toBe(true);
-      if (loads.length === 0 && JSON.stringify(ctx.request.query) === JSON.stringify(CLIENT)) {
+      expect(await policy(ctx, undefined, { strapi: inRequest(strapi, ctx) })).toBe(true);
+      if (
+        loads.length === 0 &&
+        JSON.stringify(ctx.request.query) === JSON.stringify(CLIENT) &&
+        (await narrowedFilters(ctx, "api::thing.default")) === undefined
+      ) {
         passed.push(type);
       }
     }
     expect(passed.sort()).toEqual(["admin_role", "editor"]);
   });
 
-  it("injects the loaded ids, $and-narrowed, and pins published after the bypass", async () => {
+  it("leaves the loaded ids for the Document Service reads and pins published after the bypass", async () => {
     const { policy, loads, strapi } = setup();
     const ctx = policyContext(as("member", 9), { query: CLIENT, decoy: { filters: "DECOY" } });
-    await expect(policy(ctx, { level: "page" }, { strapi })).resolves.toBe(true);
+    await expect(policy(ctx, { level: "page" }, { strapi: inRequest(strapi, ctx) })).resolves.toBe(
+      true,
+    );
     expect(ctx.query).toEqual({ filters: "DECOY" });
-    expect(ctx.request.query).toEqual({
-      filters: { $and: [CLIENT.filters, { id: { $in: [3, 4] } }] },
-      status: "published",
+    // The client's filters stay as sent (validated by the content API); the
+    // ids join them at the Document Service, one parameter for the list.
+    expect(ctx.request.query).toEqual({ filters: CLIENT.filters, status: "published" });
+    await expect(narrowedFilters(ctx, "api::thing.page", CLIENT.filters)).resolves.toEqual({
+      $and: [CLIENT.filters, { id: { $in: [3, 4] } }],
     });
+    await expect(narrowedFilters(ctx, "api::thing.default")).resolves.toBeUndefined();
     expect(loads).toHaveLength(1);
     expect(loads[0].uid).toBe("api::thing.page");
     expect(loads[0].config).toEqual({ level: "page" });
@@ -243,17 +259,19 @@ describe("visibleIdsPolicy (PL02)", () => {
     expect(loads[0].strapi).toBe(strapi);
   });
 
-  it("keeps an empty set restrictive, never an empty $in", async () => {
+  it("keeps an empty set restrictive: an empty list matches nothing", async () => {
     const { policy, strapi } = setup({ ids: [] });
     const ctx = policyContext(as("member"));
-    await expect(policy(ctx, undefined, { strapi })).resolves.toBe(true);
-    expect(ctx.request.query.filters).toEqual({ id: { $eq: -1 } });
+    await expect(policy(ctx, undefined, { strapi: inRequest(strapi, ctx) })).resolves.toBe(true);
+    await expect(narrowedFilters(ctx, "api::thing.default")).resolves.toEqual({
+      id: { $in: [] },
+    });
   });
 
   it("leaves the status alone without pinPublished", async () => {
     const { policy, strapi } = setup({ pinPublished: false });
     const ctx = policyContext(as("member"), { query: CLIENT });
-    await expect(policy(ctx, undefined, { strapi })).resolves.toBe(true);
+    await expect(policy(ctx, undefined, { strapi: inRequest(strapi, ctx) })).resolves.toBe(true);
     expect(ctx.request.query.status).toBe("draft");
     expect(ctx.request.query.publicationFilter).toBe("x");
   });
@@ -262,14 +280,19 @@ describe("visibleIdsPolicy (PL02)", () => {
     for (const user of [undefined, null, { role: { type: "member" } }]) {
       const { policy, loads, strapi } = setup();
       const ctx = policyContext(user);
-      await expect(policy(ctx, undefined, { strapi }), JSON.stringify(user)).resolves.toBe(true);
+      await expect(
+        policy(ctx, undefined, { strapi: inRequest(strapi, ctx) }),
+        JSON.stringify(user),
+      ).resolves.toBe(true);
       expect(loads.map((load) => load.user)).toEqual([null]);
-      expect(ctx.request.query.filters).toEqual({ id: { $in: [3, 4] } });
+      await expect(narrowedFilters(ctx, "api::thing.default")).resolves.toEqual({
+        id: { $in: [3, 4] },
+      });
     }
   });
 
-  it("fails closed beyond the bind limit, with an error log (PL04)", async () => {
-    const many = Array.from({ length: 40_000 }, (_, index) => index + 1);
+  it("carries 70,000 ids as one list, past the old bind limit (#175)", async () => {
+    const many = Array.from({ length: 70_000 }, (_, index) => index + 1);
     const policy = visibleIdsPolicy({
       uid: "api::document.document",
       bypass: MODERATORS,
@@ -277,31 +300,36 @@ describe("visibleIdsPolicy (PL02)", () => {
       pinPublished: true,
       loadVisibleIds: async () => many,
     });
-
-    // SQLite (the stub names no dialect: the lower limit applies).
-    const sqlite = createStrapiStub();
+    const strapi = createStrapiStub();
     const ctx = policyContext(as("member"));
-    await expect(policy(ctx, undefined, { strapi: sqlite })).resolves.toBe(true);
-    expect(ctx.request.query).toEqual({ filters: { id: { $eq: -1 } }, status: "published" });
-    expect(sqlite.log.error).toHaveBeenCalledTimes(1);
-    expect(String(sqlite.log.error.mock.calls[0][0])).toContain(
-      "api::document.document read policy: 40000 values",
-    );
+    await expect(policy(ctx, undefined, { strapi: inRequest(strapi, ctx) })).resolves.toBe(true);
+    await expect(narrowedFilters(ctx, "api::document.document")).resolves.toEqual({
+      id: { $in: many },
+    });
+    expect(strapi.log.error).not.toHaveBeenCalled();
+  });
 
-    // Postgres binds 40000 ids in one statement.
-    const pg = createStrapiStub();
-    const pgStrapi = { ...pg, db: { ...pg.db, dialect: { client: "postgres" } } };
-    const pgCtx = policyContext(as("member"));
-    await expect(policy(pgCtx, undefined, { strapi: pgStrapi })).resolves.toBe(true);
-    expect(pgCtx.request.query.filters).toEqual({ id: { $in: many } });
-    expect(pg.log.error).not.toHaveBeenCalled();
+  it("refuses a request whose context cannot carry the clause, before loading", async () => {
+    const { policy, loads, strapi } = setup();
+    // No request in scope, or another request's context than the policy's.
+    for (const current of [undefined, { state: {} }]) {
+      const ctx = policyContext(as("member"), { query: CLIENT });
+      ctx.state ??= {};
+      strapi.requestContext = { get: () => current };
+      await expect(policy(ctx, undefined, { strapi })).resolves.toBe(false);
+      expect(ctx.request.query).toEqual(CLIENT);
+    }
+    expect(loads).toEqual([]);
   });
 
   it("refuses anonymous callers and callers without an id ('deny')", async () => {
     for (const user of [undefined, null, { role: { type: "member" } }]) {
       const { policy, loads, strapi } = setup({ anonymous: "deny" });
       const ctx = policyContext(user, { query: CLIENT });
-      await expect(policy(ctx, undefined, { strapi }), JSON.stringify(user)).resolves.toBe(false);
+      await expect(
+        policy(ctx, undefined, { strapi: inRequest(strapi, ctx) }),
+        JSON.stringify(user),
+      ).resolves.toBe(false);
       expect(loads).toEqual([]);
       expect(ctx.request.query).toEqual(CLIENT);
     }

@@ -53,10 +53,11 @@ describe("Document Service middleware slots (K6)", () => {
       "media-claims",
       "audit-recorder",
       "user-write-guard",
+      "visibility-narrowing",
     ]);
   });
 
-  it("registers the wired middlewares in slot order; the user write guard last", () => {
+  it("registers the wired middlewares in slot order; the visibility narrowing last", () => {
     const slots = documentMiddlewares(host(null)).map((entry) => entry.slot);
     expect(slots).toEqual(
       [...slots].sort(
@@ -74,8 +75,9 @@ describe("Document Service middleware slots (K6)", () => {
       "media-claims",
       "audit-recorder",
       "user-write-guard",
+      "visibility-narrowing",
     ]);
-    expect(slots[slots.length - 1]).toBe("user-write-guard");
+    expect(slots[slots.length - 1]).toBe("visibility-narrowing");
   });
 
   it("hangs each one onto strapi.documents.use, in that order", () => {
