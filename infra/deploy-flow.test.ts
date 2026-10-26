@@ -1647,6 +1647,15 @@ describe.skipIf(!RUN_SEQUENCES)(
       expect(retag).toBeGreaterThan(-1);
       expect(check).toBeGreaterThan(retag);
       expect(up).toBeGreaterThan(check);
+      // Each registry tag goes once the local tag holds the image, so the
+      // prune of the local tags removes it later (#210).
+      for (const app of ["web", "cms"]) {
+        const ref = `ghcr.io/yurtbayemre/sinnlos-${app}:${sha}`;
+        expect(run.calls.indexOf(`docker image rm ${ref}`)).toBeGreaterThan(
+          run.calls.indexOf(`docker tag ${ref} infra-${app}:latest`),
+        );
+      }
+      expect(run.images.filter((i) => i.startsWith("ghcr.io"))).toEqual([]);
       expect(run.state.WEB_IMAGE).toBe(`sha256:pulled-sinnlos-web:${sha}`);
       expect(run.state.PULLED).toMatch(
         /^ghcr\.io\/yurtbayemre\/sinnlos-web@sha256:\S+ ghcr\.io\/yurtbayemre\/sinnlos-cms@sha256:\S+$/,

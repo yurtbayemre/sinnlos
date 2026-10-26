@@ -20,7 +20,7 @@ Every command below runs on the host as the **deploy user**, the user that owns 
 ## 2. The code
 
 ```sh
-git clone --branch v0.33.0 https://github.com/yurtbayemre/sinnlos.git
+git clone --branch v0.33.1 https://github.com/yurtbayemre/sinnlos.git
 cd sinnlos
 ```
 
@@ -181,6 +181,8 @@ With `DEPLOY_IMAGE_SOURCE=registry` in `infra/deploy.env`, `deploy.sh` pulls the
 
 - The host needs a `docker login ghcr.io` as the deploy user, with a classic personal access token that has only `read:packages`. The token is stored in that user's `~/.docker/config.json`. Note its expiry date: an expired token makes the next deploy stop at the pull.
 - It pulls both images and checks both labels (revision = the commit, version = `package.json`) before any tag moves. It does not fall back to a build: a failed pull stops with the hint `DEPLOY_IMAGE_SOURCE=build`.
+- It then tags them as the local images and drops the `ghcr.io/…` tag, so the prune of old SHA tags (`DEPLOY_KEEP_TAGS`) removes old pulled images like built ones (since v0.33.1).
+- Run `docker login ghcr.io` as the deploy user itself, not with `sudo` (that logs in root).
 - A deploy from the registry takes minutes instead of the host build's half hour.
 
 Once the project publishes release images (`release-images.yml`, after the review), verify a published image with:

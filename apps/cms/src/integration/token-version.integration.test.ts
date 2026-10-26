@@ -13,6 +13,7 @@ import {
   type TestStrapi,
   type TestUser,
 } from "./harness.test.helper";
+import { lockWaits } from "./pg-lock.test.helper";
 
 /**
  * A password change revokes the user's older JWTs (FX40) on the real cms:
@@ -328,7 +329,8 @@ describe.each(testEngines())("password change revokes older JWTs (FX40) on %s", 
     /**
      * Resolves "done" once `work` settled, or "waits" once a statement waits
      * for the change's transaction: SQLite's only connection is taken
-     * (knex pool), or a Postgres lock is not granted. Condition-driven.
+     * (knex pool), or a statement on this boot's Postgres schema waits for
+     * a lock (lockWaits; not other suites' waits, #209). Condition-driven.
      */
     const doneOrWaiting = async (work: Promise<unknown>) => {
       let settled = false;
@@ -342,13 +344,7 @@ describe.each(testEngines())("password change revokes older JWTs (FX40) on %s", 
         }
       ).connection.client.pool;
       const waiting = async () =>
-        engine === "sqlite"
-          ? pool.numPendingAcquires() > 0
-          : ((
-              await t.database.sql<{ n: number }>(
-                "SELECT count(*)::int AS n FROM pg_locks WHERE NOT granted",
-              )
-            )[0]?.n ?? 0) > 0;
+        engine === "sqlite" ? pool.numPendingAcquires() > 0 : (await lockWaits(t)) > 0;
       for (let turn = 0; turn < 100_000; turn += 1) {
         if (settled) return "done";
         if (await waiting()) return "waits";

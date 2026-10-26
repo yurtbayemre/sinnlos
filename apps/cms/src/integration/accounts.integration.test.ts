@@ -188,7 +188,8 @@ describe.each(testEngines())("accounts (v0.27) on %s", (engine) => {
         await activate({ enrollment: "junk", code: code(secret), password: user.password }),
       ),
     ).toBe("enrollment_invalid");
-    const done = await activate({ enrollment, code: code(secret), password: user.password });
+    const activationCode = code(secret);
+    const done = await activate({ enrollment, code: activationCode, password: user.password });
     expect(done.status, done.text).toBe(200);
     expect(done.body.data!.recoveryCodes).toHaveLength(10);
     const full = done.body.data!.jwt;
@@ -202,8 +203,11 @@ describe.each(testEngines())("accounts (v0.27) on %s", (engine) => {
     const missing = await signIn(user.username, user.password);
     expect(missing.status).toBe(401);
     expect(errorCode(missing)).toBe("mfa_required");
-    // The activation consumed this step: the same code again is a replay.
-    expect(errorCode(await signIn(user.username, user.password, code(secret)))).toBe("mfa_invalid");
+    // The activation consumed its step: the same code again is a replay, also
+    // when the clock has crossed into the next step meanwhile (#212).
+    expect(errorCode(await signIn(user.username, user.password, activationCode))).toBe(
+      "mfa_invalid",
+    );
     later(1);
     const ok = await signIn(user.username, user.password, code(secret));
     expect(ok.status, ok.text).toBe(200);

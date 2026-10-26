@@ -48,24 +48,24 @@ export async function holdTransaction(t: TestStrapi): Promise<HeldTransaction> {
 }
 
 /**
- * Resolves once some statement on this boot's schema waits for a lock
+ * How many statements on this boot's schema wait for a lock right now
  * (pg_stat_activity; the schema name is in every statement Strapi sends).
+ * Not pg_locks: that is cluster-wide, and the other suites run in parallel
+ * on the same server (#209).
  */
+export async function lockWaits(t: TestStrapi): Promise<number> {
+  const [row] = await t.database.sql<{ n: number | string }>(
+    "SELECT count(*) AS n FROM pg_stat_activity " +
+      "WHERE wait_event_type = 'Lock' AND position(? in query) > 0",
+    [testSchema(t)],
+  );
+  return Number(row?.n ?? 0);
+}
+
+/** Resolves once some statement on this boot's schema waits for a lock. */
 export async function waitForLockWait(t: TestStrapi, timeout = 10_000): Promise<void> {
-  const schema = testSchema(t);
-  await expect
-    .poll(
-      async () => {
-        const [row] = await t.database.sql<{ n: number | string }>(
-          "SELECT count(*) AS n FROM pg_stat_activity " +
-            "WHERE wait_event_type = 'Lock' AND position(? in query) > 0",
-          [schema],
-        );
-        return Number(row?.n ?? 0);
-      },
-      { timeout, interval: 50 },
-    )
-    .toBeGreaterThan(0);
+  testSchema(t);
+  await expect.poll(() => lockWaits(t), { timeout, interval: 50 }).toBeGreaterThan(0);
 }
 
 /** How a promise ended. */

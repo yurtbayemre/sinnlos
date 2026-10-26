@@ -992,8 +992,9 @@ record_last_known_good() {
 # tags them with the full SHA), both before any local tag moves, refuses them
 # unless their labels name this commit and version (a foreign or mistagged
 # image), then tags them as the images compose runs (<project>-web,
-# <project>-cms). No fallback to a build. PULLED_DIGESTS: what was pulled,
-# for the state.
+# <project>-cms) and drops the registry tag, so the prune of the local tags
+# removes the image later (#210). No fallback to a build. PULLED_DIGESTS:
+# what was pulled, for the state.
 pull_release_images() {
   local app ref labels
   PULLED_DIGESTS=""
@@ -1017,7 +1018,12 @@ pull_release_images() {
     PULLED_DIGESTS+="${PULLED_DIGESTS:+ }$(docker image inspect --format '{{index .RepoDigests 0}}' "${ref}")"
   done
   for app in web cms; do
-    docker tag "${IMAGE_REPO}-${app}:${HEAD_SHA}" "${PROJECT}-${app}:latest"
+    ref="${IMAGE_REPO}-${app}:${HEAD_SHA}"
+    docker tag "${ref}" "${PROJECT}-${app}:latest"
+    # Only an untag: the local tag holds the image (Docker drops the
+    # repository's digest references with its last tag).
+    docker image rm "${ref}" >/dev/null ||
+      echo "WARNING: could not untag ${ref}; remove it by hand later, or the image is never pruned." >&2
   done
   echo "  pulled: ${PULLED_DIGESTS}"
 }
