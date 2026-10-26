@@ -162,7 +162,7 @@ Newest first. Older releases: [archive/deployment-history.md](archive/deployment
 
 **Upgrading to v0.31 (scale).** No required env, no edge change, no schema change.
 
-- **Indexes:** the first boot creates three plain indexes, `notifications (source_type, source_document_id)`, `comments (target_type, target_document_id)` and `reactions (target_type, target_document_id)`, and logs `[document-indexes] created 3 index(es): …` once. While one builds, writes to its table wait; on a large notifications table that can take minutes, so upgrade a big installation outside working hours. Later boots create and log nothing.
+- **Indexes:** the first boot creates four plain indexes, `notifications (source_type, source_document_id)` and `(target_type, target_document_id)` on `comments`, `reactions` and `acknowledgements`, and logs `[document-indexes] created 4 index(es): …` once. While one builds, writes to its table wait; on a large notifications table that can take minutes, so upgrade a big installation outside working hours. Later boots create and log nothing.
 - **Permissions:** two new actions, `api::profile.profile.openAcks` (every role) and `api::acknowledgement.acknowledgement.reportIndex` (`admin_role`). The first boot logs `granted 8`; the drift check then counts 220 managed actions.
 - **Dashboard banner:** one cms read (`GET /api/me/open-acks`) instead of a page walk over every mandatory announcement and document. Same rules as before.
 - **Acknowledgement report** (`/manage/acknowledgements`): 20 items per section and page (`?page=`, `?documentsPage=`), in the same order as before; receipts are read for the shown items only, and the "incomplete" warning refers to them.

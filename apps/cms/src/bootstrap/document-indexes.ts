@@ -20,10 +20,11 @@ import { WIKI_REVISION_UID } from "../utils/wiki-revisions";
  *     every history read and the boot backfill's baseline check go by
  *     (batch 16, DA03; utils/wiki-revisions.ts). Plain, not unique;
  *   - <table>_<type>_<document id>_idx on notifications (source_type,
- *     source_document_id), comments and reactions (target_type,
- *     target_document_id): the anchors the fan-out dedup, the digest and
- *     the janitors (utils/notification-source.ts), and every thread and
- *     reaction read go by (v0.31, #171). Plain.
+ *     source_document_id), comments, reactions and acknowledgements
+ *     (target_type, target_document_id): the anchors the fan-out dedup, the
+ *     digest and the janitors (utils/notification-source.ts), every thread
+ *     and reaction read, and the acknowledgement report index go by (v0.31,
+ *     #171). Plain.
  *
  * `CREATE … INDEX IF NOT EXISTS`, on Postgres and SQLite. Strapi's schema
  * sync never drops an index it did not create (@strapi/database
@@ -144,6 +145,7 @@ export function documentIndexSpecs(strapi: DocumentIndexHost): IndexSpec[] {
   pair("api::notification.notification", "source");
   pair("api::comment.comment", "target");
   pair("api::reaction.reaction", "target");
+  pair("api::acknowledgement.acknowledgement", "target");
   return specs;
 }
 

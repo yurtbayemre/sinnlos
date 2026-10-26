@@ -487,8 +487,9 @@ listed in the [README tables](../README.md#roles-and-permissions). A grant
 only lets a request reach the route; what the matrix encodes beyond the
 letters:
 
-- **Acknowledgements are immutable read receipts:** only `admin_role` may
-  update or delete them.
+- **Acknowledgements are immutable read receipts:** no role may update or
+  delete them through the content API (the routes are gone since v0.28);
+  corrections go through the Strapi admin panel.
 - **Open-confirmation count and report index (v0.31):** `profile.openAcks`
   is granted to every role, and the controller answers `null` for a kind
   whose source or acknowledgement `find` the role lacks;

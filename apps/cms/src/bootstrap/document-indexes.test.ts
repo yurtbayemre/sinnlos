@@ -27,6 +27,7 @@ const TABLES: Record<string, string> = {
   "api::notification.notification": "notifications",
   "api::comment.comment": "comments",
   "api::reaction.reaction": "reactions",
+  "api::acknowledgement.acknowledgement": "acknowledgements",
 };
 
 /** The polymorphic anchor indexes (v0.31, #171). */
@@ -46,6 +47,12 @@ const ANCHORS = [
   {
     name: "reactions_target_type_target_document_id_idx",
     table: "reactions",
+    columns: ["target_type", "target_document_id"],
+    unique: false,
+  },
+  {
+    name: "acknowledgements_target_type_target_document_id_idx",
+    table: "acknowledgements",
     columns: ["target_type", "target_document_id"],
     unique: false,
   },
@@ -132,7 +139,7 @@ describe("ensureDocumentIndexes", () => {
     );
   });
 
-  it("creates the three anchor indexes on the first boot of v0.31 and logs them once", async () => {
+  it("creates the four anchor indexes on the first boot of v0.31 and logs them once", async () => {
     const all = documentIndexSpecs(host("postgres").strapi).map((spec) => spec.name);
     const names = ANCHORS.map((anchor) => anchor.name);
     const { strapi, raw, info } = host(
@@ -145,7 +152,7 @@ describe("ensureDocumentIndexes", () => {
     );
     expect(info).toHaveBeenCalledTimes(1);
     expect(info).toHaveBeenCalledWith(
-      `[document-indexes] created 3 index(es): ${names.join(", ")}`,
+      `[document-indexes] created 4 index(es): ${names.join(", ")}`,
     );
   });
 

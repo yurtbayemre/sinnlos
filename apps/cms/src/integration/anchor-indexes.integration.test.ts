@@ -9,8 +9,8 @@ import {
 } from "./harness.test.helper";
 
 /**
- * v0.31 (#171): the boot ensures the notification, comment and reaction
- * anchor indexes (bootstrap/document-indexes.ts) on both engines; a boot on
+ * v0.31 (#171): the boot ensures the notification, comment, reaction and
+ * acknowledgement anchor indexes (bootstrap/document-indexes.ts) on both engines; a boot on
  * a database that lacks one (the first boot of v0.31) creates it, and a
  * boot that finds them all creates none.
  */
@@ -19,6 +19,7 @@ const ANCHORS: Record<string, string[]> = {
   notifications_source_type_source_document_id_idx: ["source_type", "source_document_id"],
   comments_target_type_target_document_id_idx: ["target_type", "target_document_id"],
   reactions_target_type_target_document_id_idx: ["target_type", "target_document_id"],
+  acknowledgements_target_type_target_document_id_idx: ["target_type", "target_document_id"],
 };
 
 type Ensure = { ensureDocumentIndexes(strapi: unknown): Promise<string[]> };
