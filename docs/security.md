@@ -169,9 +169,10 @@ Single sign-on users get their second factor from their identity provider.
   restricted session; it stores the secret encrypted with Strapi's
   `admin::encryption` (`ENCRYPTION_KEY`), returns ten recovery codes once
   (stored as hashes) and a JWT with `mfa: 1`. A recovery code has 16
-  characters (`xxxx-xxxx-xxxx-xxxx`, v0.30); codes issued before v0.30
-  (`xxxxx-xxxxx`) keep working until the next enrolment. New codes come
-  only with an enrolment: after an admin reset, or a disable and enable.
+  characters (`xxxx-xxxx-xxxx-xxxx`, v0.30); since v0.30.1 the sign-in
+  refuses the 10-character codes issued before v0.30 (`xxxxx-xxxxx`). New
+  codes come only with an enrolment: after an admin reset, or a disable
+  and enable.
 - **Resets.** An admin resets a user's second factor at `/manage/users`;
   a locked-out sole admin runs `infra/mfa-reset.sh <email>` on the host.
   Both clear the factor and raise the token version, so every session of

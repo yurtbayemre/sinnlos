@@ -160,10 +160,15 @@ format`: a scanner posted to a page with a made-up Server Action id,
 
 Newest first. Older releases: [archive/deployment-history.md](archive/deployment-history.md).
 
+**Upgrading to v0.30.1.** No required env, no edge change, no schema change.
+
+- **Recovery codes:** the sign-in refuses the 10-character recovery codes issued before v0.30 ([GHSA-2jjv-m669-5cqh](https://github.com/yurtbayemre/sinnlos/security/advisories/GHSA-2jjv-m669-5cqh)). The authenticator app keeps working. Everyone who enrolled before v0.30 has no working recovery code until they enrol again. Reset their second factor at `/manage/users`; your own needs another admin, or `infra/mfa-reset.sh <email>` on the host. The reset ends their sessions. A role in `MFA_REQUIRED_ROLES` enrols again at the next sign-in, with new codes; others turn it on again in their profile. Reset admins one at a time: reset the next only after the previous one has enrolled again, so one admin can always use `/manage`.
+- **Rollback** to v0.30.0 is a plain retag. Old codes whose hashes are still stored work there again; resets and re-enrolments are not undone.
+
 **Upgrading to v0.30 (hardening).** No required env, no edge change, no schema change.
 
 - **Deploys:** the smoke check asks `/healthz`. `--require-green-ci` needs the successful CI run for the push to `main` at the exact commit, and every push to `main` now runs the whole CI. Before `up`, deploy.sh checks `APP_TIME_ZONE` and `MFA_REQUIRED_ROLES` in the new cms image ([INSTALL.md](INSTALL.md)).
-- **Second factor:** new recovery codes have 80 bits (`xxxx-xxxx-xxxx-xxxx`). Codes issued before keep working; admins and editors get new ones by re-enrolling (an admin MFA reset, or disable and enable).
+- **Second factor:** new recovery codes have 80 bits (`xxxx-xxxx-xxxx-xxxx`). On v0.30.0 the codes issued before keep working; v0.30.1 refuses them (see above). New codes come with a new enrolment: after an admin MFA reset, or, for a role outside `MFA_REQUIRED_ROLES`, a disable and enable.
 - **Sessions:** a block ends the person's sessions and links wherever it is set, the Strapi admin panel included.
 - **Uploads:** PNG, JPEG, GIF, WebP and AVIF images, PDF, video and audio open in the browser; other files download. The cms refuses XML uploads; XML files uploaded before stay and download.
 - **Anonymisation** cleans other people's notifications after it committed, page by page, and reports what is still pending; the nightly sweep repeats the rest while `CRON_ENABLED` is on ([data-protection.md](data-protection.md)).

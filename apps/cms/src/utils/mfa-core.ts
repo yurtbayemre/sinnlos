@@ -174,11 +174,7 @@ export function unseal(seal: SealService, value: unknown): string | null {
   }
 }
 
-/**
- * Ten new recovery codes, `xxxx-xxxx-xxxx-xxxx` in lowercase base32 (v0.30).
- * Codes issued before v0.30 (`xxxxx-xxxxx`) keep working until the next
- * enrolment.
- */
+/** Ten new recovery codes, `xxxx-xxxx-xxxx-xxxx` in lowercase base32 (v0.30). */
 export function newRecoveryCodes(): string[] {
   return Array.from({ length: RECOVERY_CODE_COUNT }, () => {
     const code = base32Encode(randomBytes(10)).slice(0, 16).toLowerCase();
@@ -193,15 +189,14 @@ export function hashRecoveryCode(code: string): string {
 }
 
 /**
- * A TOTP code (6 digits) or a recovery code: 10 (before v0.30) or 16 base32
- * characters, with or without the hyphens and blanks hashRecoveryCode drops.
- * Anything else is null.
+ * A TOTP code (6 digits) or a recovery code (16 base32 characters), with or
+ * without the hyphens and blanks hashRecoveryCode drops. Anything else is
+ * null, the 10-character codes issued before v0.30 included (v0.30.1).
  */
 export function secondFactorKind(input: string): "totp" | "recovery" | null {
   const value = input.trim();
   if (/^\d{6}$/.test(value)) return "totp";
-  const compact = value.replace(/[\s-]/g, "");
-  if (/^[a-z2-7]{10}$/i.test(compact) || /^[a-z2-7]{16}$/i.test(compact)) return "recovery";
+  if (/^[a-z2-7]{16}$/i.test(value.replace(/[\s-]/g, ""))) return "recovery";
   return null;
 }
 

@@ -198,8 +198,8 @@ export async function authorizeCredentials(
 ): Promise<User | null> {
   const identifier = typeof input.identifier === "string" ? input.identifier : "";
   const password = typeof input.password === "string" ? input.password : "";
-  // A code is at most a recovery code (xxxx-xxxx-xxxx-xxxx, or the older
-  // xxxxx-xxxxx); anything longer is not one.
+  // A code is at most a recovery code (xxxx-xxxx-xxxx-xxxx); anything
+  // longer is not one.
   const otp = typeof input.otp === "string" ? input.otp.trim().slice(0, 32) : "";
   if (!identifier || !password || credentialsTooLong(identifier, password)) return null;
   const { clientIp } = input;

@@ -231,18 +231,15 @@ describe.each(testEngines())("accounts (v0.27) on %s", (engine) => {
     expect([c.status, d.status].sort()).toEqual([200, 401]);
     expect(errorCode(await signIn(user.username, user.password, codes[0]))).toBe("mfa_invalid");
     expect(((await row(user.id)).totpRecoveryCodes as string[]).length).toBe(7);
-    // v0.30: 80-bit codes; a 10-character code issued before keeps working once.
+    // v0.30: 80-bit codes; v0.30.1: a 10-character code issued before is refused, even stored.
     for (const issued of codes) expect(issued).toMatch(/^[a-z2-7]{4}(-[a-z2-7]{4}){3}$/);
     const stored = (await row(user.id)).totpRecoveryCodes as string[];
     await t.strapi.db.query(USER).update({
       where: { id: user.id },
       data: { totpRecoveryCodes: [...stored, mfa.hashRecoveryCode("abcde-23456")] },
     });
-    const old = await signIn(user.username, user.password, "ABCDE23456");
-    expect(old.status, old.text).toBe(200);
-    expect(errorCode(await signIn(user.username, user.password, "abcde-23456"))).toBe(
-      "mfa_invalid",
-    );
+    expect(errorCode(await signIn(user.username, user.password, "ABCDE23456"))).toBe("mfa_invalid");
+    expect(((await row(user.id)).totpRecoveryCodes as string[]).length).toBe(8);
   });
 
   it("disable: password and code, only when no role requires it; ends the other sessions", async () => {
