@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { getNotifications, type NotificationFeed } from "@/lib/notification-actions";
-import { useLiveChannel } from "@/components/live/live-events-provider";
+import { useLiveChannel, useLiveRegistry } from "@/components/live/live-events-provider";
 import { NotificationBell, createFeedRefetch } from "./notification-bell";
 
 /**
@@ -42,18 +42,21 @@ export function LiveNotificationBell({ initial }: { initial: NotificationFeed })
   const [refetch] = useState(() => createFeedRefetch(loadFeed, setFeed));
 
   const healthy = useLiveChannel("notifications", refetch);
+  const { streaming } = useLiveRegistry();
 
   useEffect(() => {
     const tick = () => {
       if (document.visibilityState === "visible") void refetch();
     };
     const id = setInterval(tick, healthy ? POLL_MS_HEALTHY : POLL_MS_DEGRADED);
-    document.addEventListener("visibilitychange", tick);
+    // With a push stream, its hello already refetches the notifications
+    // when the tab comes back; a listener here would fetch twice (#193).
+    if (!streaming) document.addEventListener("visibilitychange", tick);
     return () => {
       clearInterval(id);
       document.removeEventListener("visibilitychange", tick);
     };
-  }, [refetch, healthy]);
+  }, [refetch, healthy, streaming]);
 
   return (
     <NotificationBell

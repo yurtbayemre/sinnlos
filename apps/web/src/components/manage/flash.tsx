@@ -107,8 +107,3 @@ export function ManageFlashProvider({ children }: { children: ReactNode }) {
     </>
   );
 }
-
-/** Shows a success message in the /manage live region. */
-export function useManageFlash(): (text: string) => void {
-  return showFlash;
-}

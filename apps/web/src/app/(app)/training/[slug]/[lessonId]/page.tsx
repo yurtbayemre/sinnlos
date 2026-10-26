@@ -61,12 +61,18 @@ export default async function LessonPage({
   const [lessonResult, courseResult, progressResult] = await Promise.all([
     tryFetch(() => fetchLessonByDocumentId(lessonId), "training"),
     tryFetch(() => fetchCourseBySlug(slug), "training"),
-    tryFetch(() => fetchMyProgress(), "training"),
+    tryFetch(() => fetchMyProgress(lessonId), "training"),
   ]);
   // progressResult.failed included since the quiz-gate: a silently
   // missing progress row would RE-LOCK an already-completed quizGate
-  // lesson behind the quiz (review find) — honest banner instead.
-  if (lessonResult.failed || courseResult.failed || progressResult.failed) {
+  // lesson behind the quiz (review find) — honest banner instead. The read
+  // is this lesson's receipts only (#181); a cut-short one is unknown too.
+  if (
+    lessonResult.failed ||
+    courseResult.failed ||
+    progressResult.failed ||
+    progressResult.data?.truncated
+  ) {
     return (
       <div className="space-y-6">
         <FetchErrorBanner />

@@ -125,6 +125,10 @@ GET http://cms.test/api/courses/course%20doc%2F1/report cache=no-store headers[a
 GET http://cms.test/api/lesson-progresses?filters[user][id][$eq]=1&fields[0]=targetDocumentId&fields[1]=completedAt&sort[0]=id:asc&pagination[page]=1&pagination[pageSize]=100 cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
 GET http://cms.test/api/me cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
 
+## training.fetchMyProgress(lesson)
+GET http://cms.test/api/lesson-progresses?filters[user][id][$eq]=1&filters[targetDocumentId][$eq]=lesson%2Fdoc%201&fields[0]=targetDocumentId&fields[1]=completedAt&sort[0]=id:asc&pagination[page]=1&pagination[pageSize]=100 cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
+GET http://cms.test/api/me cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
+
 ## viewer.getViewer
 GET http://cms.test/api/me cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
 

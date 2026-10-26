@@ -54,6 +54,7 @@ import {
   dutyShiftsCode,
   dutyTemplatesCode,
   eventSpanCode,
+  instantEpochMs,
   pruneDutyShifts,
   validateDutyShifts,
   validateDutyTemplates,
@@ -495,6 +496,8 @@ const DUTY_PLAN_RULES: readonly FieldRule<DutyPlanValues>[] = [
       // An overlong list is refused before the prune could shorten it unseen.
       if (v.shifts.length > MAX_DUTY_SHIFTS) return { code: "invalid" };
       const kept = pruneDutyShifts(v.shifts, new Date(ctx.now));
+      const clock = clockChangeCode(kept, ctx.timeZone);
+      if (clock) return { code: clock };
       const result = validateDutyShifts(kept);
       return "error" in result
         ? { code: dutyShiftsCode(kept) ?? "invalid" }
@@ -502,6 +505,31 @@ const DUTY_PLAN_RULES: readonly FieldRule<DutyPlanValues>[] = [
     },
   },
 ];
+
+/**
+ * A shift endpoint the editor kept as typed because the clock change skips
+ * or repeats its wall time (#183): named like in every /manage form,
+ * timeSkipped or timeRepeated, instead of the generic invalid.
+ */
+function clockChangeCode(
+  shifts: readonly DutyShift[],
+  timeZone: string,
+): "timeSkipped" | "timeRepeated" | null {
+  for (const shift of shifts) {
+    for (const endpoint of [shift.startsAt, shift.endsAt]) {
+      if (instantEpochMs(endpoint) !== null) continue;
+      const [day = "", time = ""] = endpoint.split("T");
+      const converted = wallTimeInstant(day, time, timeZone);
+      if (
+        "code" in converted &&
+        (converted.code === "timeSkipped" || converted.code === "timeRepeated")
+      ) {
+        return converted.code;
+      }
+    }
+  }
+  return null;
+}
 
 export function buildDutyPlanPayload(
   values: DutyPlanValues,

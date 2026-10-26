@@ -97,6 +97,7 @@
     "toList": "To the user list",
     "pending": "Ready",
     "lineInvalid": "Not a valid address (or listed twice)",
+    "tooMany": "{count} lines: at most {max} per send. Split the list and send the rest afterwards.",
     "outcome": {
       "sent": "Invitation sent",
       "mailFailed": "Account created, but the mail failed: send the link again from the user's page",

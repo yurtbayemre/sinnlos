@@ -9,7 +9,7 @@ import type { AuthoringActionResult } from "@/lib/manage/authoring-action";
 import { AREA_PATH, areaItemPath, hasDrafts, type ManageArea } from "@/lib/manage/areas";
 import type { SaveInput } from "@/lib/manage/save";
 import type { ScheduleValues } from "@/lib/manage/values";
-import { useManageFlash } from "./flash";
+import { showFlash } from "./flash";
 import { useUnsavedGuard } from "./unsaved-guard";
 import type { PublishBarHandlers } from "./publish-bar";
 import { metaOf, useAuthoringEditor } from "./use-authoring-editor";
@@ -125,7 +125,6 @@ export function useItemEditor<V extends object, E extends Omit<EditableBase, "ro
 }) {
   const t = useTranslations("manage.common.success");
   const router = useRouter();
-  const flash = useManageFlash();
   const [values, setValues] = useState<V>(() => (editable ? toValues(editable) : emptyValues));
   const [initial, setInitial] = useState<V>(values);
   const [retarget, setRetarget] = useState(false);
@@ -239,12 +238,12 @@ export function useItemEditor<V extends object, E extends Omit<EditableBase, "ro
             if (clearOnSave) rebase(clearOnSave);
             setRetarget(false);
             if (creating && data) {
-              flash(status === "published" ? t("createdPublished") : t("created"));
+              showFlash(status === "published" ? t("createdPublished") : t("created"));
               releaseUnsaved();
               router.replace(itemPath(data));
               return;
             }
-            flash(
+            showFlash(
               schedule
                 ? t("scheduled")
                 : !drafts
@@ -266,7 +265,6 @@ export function useItemEditor<V extends object, E extends Omit<EditableBase, "ro
       extraInput,
       run,
       actions,
-      flash,
       t,
       router,
       drafts,
@@ -288,7 +286,7 @@ export function useItemEditor<V extends object, E extends Omit<EditableBase, "ro
       run(intent, (version) => action(documentId, version ?? ""), {
         onSuccess: (data) => {
           if (intent === "delete" || (intent === "discard" && data === null)) {
-            flash(t("deleted"));
+            showFlash(t("deleted"));
             // Nothing is left to save: the form is clean, also while the
             // navigation to the list is on its way (an edit typed
             // meanwhile is unsaved again and asks).
@@ -300,15 +298,15 @@ export function useItemEditor<V extends object, E extends Omit<EditableBase, "ro
             return;
           }
           if (intent === "discard") {
-            flash(t("discarded"));
+            showFlash(t("discarded"));
             requestReset();
             return;
           }
-          flash(intent === "publish" ? t("published") : t("unpublished"));
+          showFlash(intent === "publish" ? t("published") : t("unpublished"));
         },
       });
     },
-    [meta, run, flash, t, goToList, requestReset, releaseUnsaved, values, onResetExtra],
+    [meta, run, t, goToList, requestReset, releaseUnsaved, values, onResetExtra],
   );
 
   const handlers: PublishBarHandlers = useMemo(

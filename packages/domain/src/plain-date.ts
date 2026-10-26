@@ -1,7 +1,8 @@
 /**
  * Calendar dates and zone lookups with Intl only (datetime contract,
- * deep-dive decision 04, C5). No imports and no process access, so the file
- * runs anywhere: cms, web server code and web client components.
+ * deep-dive decision 04, C5). No process access and no import beyond the
+ * pure authoring/validators.js, so the file runs anywhere: cms, web server
+ * code and web client components.
  *
  * One implementation for both apps (SH01): apps/cms/src/utils/plain-date.ts
  * and apps/web/src/lib/plain-date.ts re-export it. The cms's Temporal module
@@ -15,6 +16,8 @@
  * Every zone is explicit (an IANA name, normally APP_TIME_ZONE); the process
  * zone is never used.
  */
+
+import { startsWithRealDay } from "./authoring/validators.js";
 
 const PLAIN_DATE_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
 const WALL_TIME_RE = /^([01]\d|2[0-3]):([0-5]\d)(?::([0-5]\d))?$/;
@@ -167,7 +170,7 @@ export function instantEpochMs(instant: Date | string): number | null {
   }
   if (typeof instant !== "string") return null;
   const trimmed = instant.trim();
-  if (!INSTANT_RE.test(trimmed)) return null;
+  if (!INSTANT_RE.test(trimmed) || !startsWithRealDay(trimmed)) return null;
   const ms = Date.parse(trimmed);
   return Number.isNaN(ms) ? null : ms;
 }

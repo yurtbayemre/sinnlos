@@ -3,6 +3,7 @@
 import { useId, useMemo, useRef, useState, useTransition } from "react";
 import { useTranslations } from "next-intl";
 import { Award, Check, Send, X, Search } from "lucide-react";
+import { MAX_KUDOS_MESSAGE } from "@sinnlos/domain";
 import { ModalDialog } from "@/components/ui/confirm-dialog";
 import { cn } from "@/lib/utils";
 import { isSharedErrorCode, startCmsAction, type CommonCode } from "@/lib/action-result";
@@ -103,129 +104,134 @@ export function GiveKudos({ people }: { people: KudosRecipient[] }) {
     >
       <form onSubmit={handleSubmit}>
         <div className="mt-4 space-y-4">
-          {/* Recipient picker */}
-          <div>
-            <label htmlFor={searchId} className="mb-1 block text-sm font-medium">
-              {t("to")}
-            </label>
-            {selected ? (
-              <div className="flex items-center gap-2 rounded-xl border bg-muted/40 px-3 py-2">
-                <Avatar className="h-7 w-7">
-                  {selected.avatarUrl ? <AvatarImage src={selected.avatarUrl} alt="" /> : null}
-                  <AvatarFallback className="text-xs">
-                    {initials(selected.displayName)}
-                  </AvatarFallback>
-                </Avatar>
-                <span className="text-sm font-medium">{selected.displayName}</span>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSelected(null);
-                    setSearch("");
-                  }}
-                  aria-label={t("removeRecipient")}
-                  className="ml-auto rounded-lg p-1 text-muted-foreground outline-hidden transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-                >
-                  <X className="h-3.5 w-3.5" aria-hidden="true" />
-                </button>
-              </div>
-            ) : (
-              <div className="relative">
-                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                <input
-                  id={searchId}
-                  type="text"
-                  placeholder={t("searchColleague")}
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  // Initial focus when the dialog opens.
-                  autoFocus
-                  className="h-10 w-full rounded-xl border bg-muted/40 pl-9 pr-3 text-sm outline-hidden placeholder:text-muted-foreground focus:bg-background focus:ring-2 focus:ring-ring"
-                />
-                {filtered.length > 0 && (
-                  <div className="absolute inset-x-0 top-full z-10 mt-1 max-h-40 overflow-y-auto rounded-xl border bg-background shadow-lg">
-                    {filtered.map((p) => (
-                      <button
-                        key={p.id}
-                        type="button"
-                        onClick={() => {
-                          setSelected(p);
-                          setSearch("");
-                          messageRef.current?.focus();
-                        }}
-                        className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm outline-hidden transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
-                      >
-                        <Avatar className="h-7 w-7">
-                          {p.avatarUrl ? (
-                            <AvatarImage src={p.avatarUrl} alt="" loading="lazy" />
-                          ) : null}
-                          <AvatarFallback className="text-xs">
-                            {initials(p.displayName)}
-                          </AvatarFallback>
-                        </Avatar>
-                        <div>
-                          <div className="font-medium">{p.displayName}</div>
-                          {p.jobTitle && (
-                            <div className="text-xs text-muted-foreground">{p.jobTitle}</div>
-                          )}
-                        </div>
-                      </button>
-                    ))}
-                  </div>
-                )}
-                <p role="status" className="sr-only">
-                  {search ? t("searchResults", { count: filtered.length }) : ""}
-                </p>
-              </div>
-            )}
-          </div>
-
-          {/* Value selector */}
-          <fieldset>
-            <legend className="mb-1 block text-sm font-medium">{t("for")}</legend>
-            <div className="flex flex-wrap gap-2">
-              {VALUES.map((v) => (
-                <label
-                  key={v.value}
-                  className={cn(
-                    "inline-flex cursor-pointer items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring has-[:focus-visible]:ring-offset-2 has-[:focus-visible]:ring-offset-background",
-                    value === v.value
-                      ? "border-primary-text bg-primary/10 text-primary"
-                      : "hover:border-border hover:bg-muted",
-                  )}
-                >
+          {/* While sending, the draft is fixed (#182): a success clears it,
+              so an edit made meanwhile would be lost unsent. */}
+          <fieldset disabled={isPending} className="min-w-0 space-y-4">
+            {/* Recipient picker */}
+            <div>
+              <label htmlFor={searchId} className="mb-1 block text-sm font-medium">
+                {t("to")}
+              </label>
+              {selected ? (
+                <div className="flex items-center gap-2 rounded-xl border bg-muted/40 px-3 py-2">
+                  <Avatar className="h-7 w-7">
+                    {selected.avatarUrl ? <AvatarImage src={selected.avatarUrl} alt="" /> : null}
+                    <AvatarFallback className="text-xs">
+                      {initials(selected.displayName)}
+                    </AvatarFallback>
+                  </Avatar>
+                  <span className="text-sm font-medium">{selected.displayName}</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelected(null);
+                      setSearch("");
+                    }}
+                    aria-label={t("removeRecipient")}
+                    className="ml-auto rounded-lg p-1 text-muted-foreground outline-hidden transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                  >
+                    <X className="h-3.5 w-3.5" aria-hidden="true" />
+                  </button>
+                </div>
+              ) : (
+                <div className="relative">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                   <input
-                    type="radio"
-                    name="kudos-value"
-                    value={v.value}
-                    checked={value === v.value}
-                    onChange={() => setValue(v.value)}
-                    className="sr-only"
+                    id={searchId}
+                    type="text"
+                    placeholder={t("searchColleague")}
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    // Initial focus when the dialog opens.
+                    autoFocus
+                    className="h-10 w-full rounded-xl border bg-muted/40 pl-9 pr-3 text-sm outline-hidden placeholder:text-muted-foreground focus:bg-background focus:ring-2 focus:ring-ring"
                   />
-                  <span aria-hidden="true">{v.emoji}</span>
-                  {t(v.labelKey)}
-                  {/* The pick is shown by a mark, not by colour alone. */}
-                  {value === v.value && <Check className="h-3 w-3" aria-hidden="true" />}
-                </label>
-              ))}
+                  {filtered.length > 0 && (
+                    <div className="absolute inset-x-0 top-full z-10 mt-1 max-h-40 overflow-y-auto rounded-xl border bg-background shadow-lg">
+                      {filtered.map((p) => (
+                        <button
+                          key={p.id}
+                          type="button"
+                          onClick={() => {
+                            setSelected(p);
+                            setSearch("");
+                            messageRef.current?.focus();
+                          }}
+                          className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm outline-hidden transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+                        >
+                          <Avatar className="h-7 w-7">
+                            {p.avatarUrl ? (
+                              <AvatarImage src={p.avatarUrl} alt="" loading="lazy" />
+                            ) : null}
+                            <AvatarFallback className="text-xs">
+                              {initials(p.displayName)}
+                            </AvatarFallback>
+                          </Avatar>
+                          <div>
+                            <div className="font-medium">{p.displayName}</div>
+                            {p.jobTitle && (
+                              <div className="text-xs text-muted-foreground">{p.jobTitle}</div>
+                            )}
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  <p role="status" className="sr-only">
+                    {search ? t("searchResults", { count: filtered.length }) : ""}
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {/* Value selector */}
+            <fieldset>
+              <legend className="mb-1 block text-sm font-medium">{t("for")}</legend>
+              <div className="flex flex-wrap gap-2">
+                {VALUES.map((v) => (
+                  <label
+                    key={v.value}
+                    className={cn(
+                      "inline-flex cursor-pointer items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring has-[:focus-visible]:ring-offset-2 has-[:focus-visible]:ring-offset-background",
+                      value === v.value
+                        ? "border-primary-text bg-primary/10 text-primary"
+                        : "hover:border-border hover:bg-muted",
+                    )}
+                  >
+                    <input
+                      type="radio"
+                      name="kudos-value"
+                      value={v.value}
+                      checked={value === v.value}
+                      onChange={() => setValue(v.value)}
+                      className="sr-only"
+                    />
+                    <span aria-hidden="true">{v.emoji}</span>
+                    {t(v.labelKey)}
+                    {/* The pick is shown by a mark, not by colour alone. */}
+                    {value === v.value && <Check className="h-3 w-3" aria-hidden="true" />}
+                  </label>
+                ))}
+              </div>
+            </fieldset>
+
+            {/* Message */}
+            <div>
+              <label htmlFor={messageId} className="mb-1 block text-sm font-medium">
+                {t("message")}
+              </label>
+              <textarea
+                id={messageId}
+                ref={messageRef}
+                value={message}
+                onChange={(e) => setMessage(e.target.value)}
+                placeholder={t("messagePlaceholder")}
+                rows={3}
+                maxLength={MAX_KUDOS_MESSAGE}
+                className="w-full rounded-xl border bg-muted/40 px-4 py-2.5 text-sm outline-hidden placeholder:text-muted-foreground focus:bg-background focus:ring-2 focus:ring-ring"
+              />
             </div>
           </fieldset>
-
-          {/* Message */}
-          <div>
-            <label htmlFor={messageId} className="mb-1 block text-sm font-medium">
-              {t("message")}
-            </label>
-            <textarea
-              id={messageId}
-              ref={messageRef}
-              value={message}
-              onChange={(e) => setMessage(e.target.value)}
-              placeholder={t("messagePlaceholder")}
-              rows={3}
-              className="w-full rounded-xl border bg-muted/40 px-4 py-2.5 text-sm outline-hidden placeholder:text-muted-foreground focus:bg-background focus:ring-2 focus:ring-ring"
-            />
-          </div>
 
           {error && (
             <p role="alert" className="text-sm text-destructive">

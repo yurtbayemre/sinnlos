@@ -1026,7 +1026,20 @@ describe("palette: createSearchScheduler (fake timers)", () => {
     expect(logs).toEqual([]);
   });
 
-  it("dispose flushes the pending log, aborts the request in flight and ignores later terms", async () => {
+  it("dispose flushes the current term's pending log and ignores later terms", async () => {
+    const { scheduler, requests, logs } = setup();
+    scheduler.query("urlaub");
+    await vi.advanceTimersByTimeAsync(300);
+    requests[0].resolve(items(2));
+    await vi.advanceTimersByTimeAsync(0);
+    scheduler.dispose();
+    expect(logs).toEqual([["urlaub", 2]]);
+    scheduler.query("again");
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(requests).toHaveLength(1);
+  });
+
+  it("dispose aborts the request in flight; the term before it was a step, not a search", async () => {
     const { scheduler, requests, logs } = setup();
     scheduler.query("urlaub");
     await vi.advanceTimersByTimeAsync(300);
@@ -1035,11 +1048,46 @@ describe("palette: createSearchScheduler (fake timers)", () => {
     scheduler.query("kantine");
     await vi.advanceTimersByTimeAsync(300);
     scheduler.dispose();
-    expect(logs).toEqual([["urlaub", 2]]);
     expect(requests[1].signal.aborted).toBe(true);
-    scheduler.query("again");
-    await vi.advanceTimersByTimeAsync(1000);
-    expect(requests).toHaveLength(2);
+    expect(logs).toEqual([]);
+  });
+
+  // #185: the old term's settle timer used to keep running after the query
+  // changed, so a zero-result prefix was logged once the next answer took
+  // longer than the rest of the 2 s, or failed.
+  it("never logs a prefix when the next search is slow, fails, or the box gets shorter", async () => {
+    const prefixThen = async (next: (s: ReturnType<typeof setup>) => Promise<void>) => {
+      const run = setup();
+      run.scheduler.query("of");
+      await vi.advanceTimersByTimeAsync(300);
+      run.requests[0].resolve([]);
+      await vi.advanceTimersByTimeAsync(0);
+      await next(run);
+      await vi.advanceTimersByTimeAsync(5000);
+      return run.logs;
+    };
+    // slow: "office" answers only after the old 2 s would have run out
+    expect(
+      await prefixThen(async ({ scheduler, requests }) => {
+        scheduler.query("office");
+        await vi.advanceTimersByTimeAsync(300 + 2500);
+        requests[1].resolve(items(4));
+      }),
+    ).toEqual([["office", 4]]);
+    // failed: nothing is logged at all
+    expect(
+      await prefixThen(async ({ scheduler, requests }) => {
+        scheduler.query("office");
+        await vi.advanceTimersByTimeAsync(300);
+        requests[1].reject(new Error("500"));
+      }),
+    ).toEqual([]);
+    // shortened below 2 characters
+    expect(
+      await prefixThen(async ({ scheduler }) => {
+        scheduler.query("o");
+      }),
+    ).toEqual([]);
   });
 });
 
