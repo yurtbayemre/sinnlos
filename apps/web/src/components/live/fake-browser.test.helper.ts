@@ -111,7 +111,7 @@ export interface FetchCall {
  * plain host elements (a wrapper div); no layout, events or properties
  * beyond attributes.
  */
-class FakeNode extends FakeEventTarget {
+export class FakeNode extends FakeEventTarget {
   parentNode: FakeNode | null = null;
   readonly childNodes: FakeNode[] = [];
   readonly style: Record<string, string> = {};
@@ -200,6 +200,8 @@ class FakeDocument extends FakeEventTarget {
 
 export interface FakeBrowser {
   document: FakeDocument;
+  /** The element the root renders into. */
+  container: FakeNode;
   /** Every fetch call since the install (or the last `calls.length = 0`). */
   calls: FetchCall[];
   /** Renders `element` into the one root (mounting it first) inside act(). */
@@ -262,6 +264,7 @@ export function installFakeBrowser(
 
   return {
     document,
+    container,
     calls,
     act: inAct,
     async render(element) {

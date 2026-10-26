@@ -1,4 +1,7 @@
-import { FileText, Download, File, ClipboardCheck } from "lucide-react";
+import { ChevronLeft, ChevronRight, FileText, Download, File, ClipboardCheck } from "lucide-react";
+import type { Route } from "next";
+import Link from "next/link";
+import { redirect } from "next/navigation";
 import { getFormatter, getTranslations } from "next-intl/server";
 import { fetchMyDocumentAcks } from "@/lib/acknowledgements";
 import { formatInstant, LONG_DAY, SHORT_DAY } from "@/lib/date-format";
@@ -7,6 +10,7 @@ import { isOff } from "@/lib/switches";
 import { api } from "@/lib/strapi";
 import { SKIPPED_READ, tryFetch } from "@/lib/safe-fetch";
 import { getViewer } from "@/lib/viewer";
+import { pageParam, type ListSearchParams } from "@/lib/loaders/manage/list";
 import { mediaUrl } from "@/lib/config";
 import { formatKilobytes } from "@/lib/manage/upload-check";
 import type { Document } from "@/lib/types";
@@ -14,6 +18,7 @@ import { AckButton } from "@/components/announcements/ack-button";
 import { EmptyState } from "@/components/empty-state";
 import { FetchErrorBanner } from "@/components/fetch-error";
 import { PageHeader } from "@/components/page-header";
+import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 
 export async function generateMetadata() {
@@ -35,17 +40,31 @@ function isDocumentCategory(value: string): value is (typeof DOCUMENT_CATEGORIES
   return (DOCUMENT_CATEGORIES as readonly string[]).includes(value);
 }
 
-export default async function DocumentsPage() {
+/** The library's URL for `page`; page 1 has no parameter. */
+const documentsHref = (page: number) =>
+  (page > 1 ? `/documents?page=${page}` : "/documents") as Route;
+
+export default async function DocumentsPage({
+  searchParams,
+}: {
+  searchParams: Promise<ListSearchParams>;
+}) {
+  const page = pageParam(await searchParams);
   // `format` renders instants in APP_TIME_ZONE (i18n/request.ts).
-  const [t, tCommon, format, viewer] = await Promise.all([
+  const [t, tCommon, tList, format, viewer] = await Promise.all([
     getTranslations("documents"),
     getTranslations("common"),
+    getTranslations("manage.common.list"),
     getFormatter(),
     getViewer(),
   ]);
   const updatedLabel = (iso: string | undefined) => formatInstant(format, iso, SHORT_DAY);
-  const { data, failed: docsFailed } = await tryFetch(() => api.documents.list(), "documents");
+  const { data, failed: docsFailed } = await tryFetch(() => api.documents.list(page), "documents");
   const docs = (data?.data ?? []) as Document[];
+  // A page past the end (an old link after deletions) starts over.
+  if (!docsFailed && page > 1 && docs.length === 0) redirect(documentsHref(1));
+  const pageCount = data?.meta?.pagination?.pageCount ?? 1;
+  const pagerLink = buttonVariants({ variant: "outline", size: "sm" });
 
   // Read confirmation (v0.20): only a role holding the acknowledgement
   // grants confirms (guest reads documents, never acknowledges). Without
@@ -164,6 +183,27 @@ export default async function DocumentsPage() {
             </div>
           </section>
         ))
+      )}
+
+      {pageCount > 1 && (
+        <nav
+          aria-label={tList("pagination")}
+          className="flex flex-wrap items-center justify-end gap-2 text-sm text-muted-foreground"
+        >
+          {page > 1 && (
+            <Link href={documentsHref(page - 1)} className={pagerLink} rel="prev">
+              <ChevronLeft className="h-4 w-4" aria-hidden="true" />
+              <span className="sr-only sm:not-sr-only">{tList("previous")}</span>
+            </Link>
+          )}
+          <span aria-current="page">{tList("page", { page, pageCount })}</span>
+          {page < pageCount && (
+            <Link href={documentsHref(page + 1)} className={pagerLink} rel="next">
+              <span className="sr-only sm:not-sr-only">{tList("next")}</span>
+              <ChevronRight className="h-4 w-4" aria-hidden="true" />
+            </Link>
+          )}
+        </nav>
       )}
     </div>
   );

@@ -1,3 +1,4 @@
+import { unstable_rethrow } from "next/navigation";
 import { getSession } from "@/lib/session";
 import { getCommentSections } from "@/lib/comment-actions";
 import type { CommentTarget } from "@/lib/comment-target";
@@ -77,13 +78,19 @@ export async function CommentSection({
   sections?: CommentSectionsLoad;
 }) {
   // getViewer() is one /api/me read per render, shared by every section.
+  // A failed load renders the section with a notice instead of the page's
+  // error screen (v0.30); it fills on its next refetch. A redirect (expired
+  // session) still navigates.
   const [session, viewer, loaded] = await Promise.all([
     getSession(),
     getViewer(),
-    sections ?? loadCommentSections([target]),
+    (sections ?? loadCommentSections([target])).catch((e: unknown) => {
+      unstable_rethrow(e);
+      return null;
+    }),
   ]);
   const userId = session?.user?.id;
-  const initial = loaded.get(commentSectionKey(target)) ?? {
+  const initial = loaded?.get(commentSectionKey(target)) ?? {
     comments: [],
     reactions: summarize([], userId),
   };
@@ -93,6 +100,7 @@ export async function CommentSection({
       target={target}
       currentUserId={userId}
       initial={initial}
+      loadFailed={loaded === null}
       controls={commentControlsFor(viewer.role)}
     />
   );

@@ -29,6 +29,7 @@
 import { refresh } from "next/cache";
 import { redirect, unstable_rethrow } from "next/navigation";
 import { actionFailure, runCmsAction, type ActionResult } from "@/lib/action-result";
+import { UPLOAD_TIMEOUT_MS } from "@/lib/api/manage/upload";
 import { appTimeZone } from "@/lib/app-time-zone";
 import { DEMO_MODE, STRAPI_URL } from "@/lib/config";
 import { getStrapiToken } from "@/lib/session";
@@ -150,7 +151,11 @@ function isAdId(id: unknown): id is number {
   return typeof id === "number" && Number.isInteger(id) && id > 0;
 }
 
-/** Multipart upload to Strapi — strapi() always sends JSON, hence raw fetch. */
+/**
+ * Multipart upload to Strapi — strapi() always sends JSON, hence raw fetch,
+ * with sendUpload()'s rules (lib/api/manage/upload.ts): a bounded wait, and a
+ * 401 for the sent JWT goes to the sign-in page (the callers rethrow it).
+ */
 async function uploadAdImages(files: File[]): Promise<number[]> {
   if (files.length === 0 || DEMO_MODE) return [];
   const token = await getStrapiToken();
@@ -164,7 +169,9 @@ async function uploadAdImages(files: File[]): Promise<number[]> {
     headers: { Authorization: `Bearer ${token}` },
     body,
     cache: "no-store",
+    signal: AbortSignal.timeout(UPLOAD_TIMEOUT_MS),
   });
+  if (res.status === 401) redirect("/sign-in?expired=1");
   if (!res.ok) {
     throw new Error(`Strapi upload ${res.status}: ${await res.text()}`);
   }

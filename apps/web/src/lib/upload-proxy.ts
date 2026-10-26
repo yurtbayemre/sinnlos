@@ -83,6 +83,27 @@ export function upstreamRequestHeaders(
   return headers;
 }
 
+/**
+ * The types a browser may show in place (v0.30): raster images, PDF, video
+ * and audio. Everything else, SVG and unknown types included, is delivered
+ * as a download in a sandbox, so a file never runs as a page of the
+ * intranet's own origin.
+ */
+const INLINE_TYPES = new Set([
+  "image/png",
+  "image/jpeg",
+  "image/gif",
+  "image/webp",
+  "image/avif",
+  "application/pdf",
+]);
+
+/** Is this Content-Type one a browser may show in place? */
+export function isInlineType(contentType: string | null): boolean {
+  const type = (contentType ?? "").split(";")[0]!.trim().toLowerCase();
+  return INLINE_TYPES.has(type) || type.startsWith("video/") || type.startsWith("audio/");
+}
+
 /** Headers for the response to the browser: the allowlist plus private caching. */
 export function downstreamResponseHeaders(upstream: Headers): Headers {
   const headers = new Headers();
@@ -94,5 +115,12 @@ export function downstreamResponseHeaders(upstream: Headers): Headers {
   // `private` keeps shared caches (and the edge) from serving bytes to the
   // next, possibly session-less, client.
   headers.set("cache-control", "private, max-age=3600");
+  // The browser keeps the declared type; anything not shown in place is a
+  // sandboxed download.
+  headers.set("x-content-type-options", "nosniff");
+  if (!isInlineType(upstream.get("content-type"))) {
+    headers.set("content-disposition", "attachment");
+    headers.set("content-security-policy", "sandbox");
+  }
   return headers;
 }

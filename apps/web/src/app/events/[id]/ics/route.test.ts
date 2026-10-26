@@ -9,7 +9,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
  *   2. the id is forwarded URL-encoded, with the caller's Strapi JWT and
  *      cache: "no-store" (D-DC01),
  *   3. no JWT is a 401, a cms error keeps its status, and the file comes
- *      back with the cms's Content-Disposition (or a fallback name).
+ *      back with the cms's Content-Disposition (or a fallback name),
+ *   4. (v0.30) the request is bounded, a 401 for the sent JWT redirects to
+ *      the sign-in page like strapi(), and an unreachable cms is a 503.
  *
  * `@/lib/session` is mocked (the real module pulls in next-auth), as are
  * `@/lib/config` and global fetch.
@@ -56,6 +58,7 @@ describe("GET /events/[id]/ics", () => {
     expect(url).toBe(`http://cms.test/api/events/${DOC}/ics`);
     expect(init.headers).toEqual({ Authorization: "Bearer jwt-1" });
     expect(init.cache).toBe("no-store");
+    expect(init.signal).toBeInstanceOf(AbortSignal);
   });
 
   it("still forwards a numeric row id (links from before 2026-09-27)", async () => {
@@ -106,6 +109,24 @@ describe("GET /events/[id]/ics", () => {
     const res = await get(DOC);
     expect(res.status).toBe(404);
     expect(await res.text()).toBe("Event not found");
+  });
+
+  it("sends a revoked session to the sign-in page", async () => {
+    fetchMock.mockResolvedValue(new Response("Unauthorized", { status: 401 }));
+    const error = await get(DOC).catch((e: unknown) => e);
+    expect(String((error as { digest?: unknown }).digest)).toContain("/sign-in?expired=1");
+  });
+
+  it("answers 503 when the cms cannot be reached or does not answer in time", async () => {
+    for (const failure of [
+      new TypeError("fetch failed"),
+      new DOMException("timed out", "TimeoutError"),
+    ]) {
+      fetchMock.mockRejectedValueOnce(failure);
+      const res = await get(DOC);
+      expect(res.status).toBe(503);
+      expect(await res.text()).toBe("Service unavailable");
+    }
   });
 
   it("names the file after the id when the cms sends no Content-Disposition", async () => {
