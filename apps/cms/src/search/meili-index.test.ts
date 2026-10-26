@@ -1,11 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  FULL_CHECK_MS,
   SearchConfigError,
   parseMeiliConfig,
   loadSearchDocuments,
   rebuildSearchIndex,
   searchFingerprint,
+  searchProbe,
   searchStatusLine,
   syncSearchIndex,
   toSearchDocument,
@@ -92,26 +94,67 @@ describe("toSearchDocument", () => {
   });
 });
 
-/** A db stub: per uid published rows and the newest updatedAt. */
+/**
+ * A db stub: per uid published rows and the newest updatedAt. The probe's
+ * newest id and publishedAt are the rows' own (an id defaults to the row's
+ * position); `loads` counts the content reads (loadSearchDocuments).
+ */
 function db(
   rows: Record<string, Record<string, unknown>[]>,
   updatedAt = "2026-10-21T10:00:00.000Z",
 ) {
+  let loads = 0;
   const strapi = {
     log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
     db: {
       query: (uid: string) => ({
         findMany: vi.fn(async ({ where }: { where: unknown }) => {
           expect(where).toEqual({ publishedAt: { $notNull: true } });
+          loads += 1;
           return rows[uid] ?? [];
         }),
-        count: vi.fn(async () => (rows[uid] ?? []).length),
-        findOne: vi.fn(async () => ({ updatedAt: new Date(updatedAt) })),
+        count: vi.fn(async ({ where }: { where: unknown }) => {
+          expect(where).toEqual({ publishedAt: { $notNull: true } });
+          return (rows[uid] ?? []).length;
+        }),
+        findOne: vi.fn(
+          async ({
+            select: [field],
+            where,
+            orderBy,
+          }: {
+            select: string[];
+            where: unknown;
+            orderBy: unknown;
+          }) => {
+            // The newest published row with a value: a NULL never wins (Postgres
+            // sorts NULLS FIRST in a descending order).
+            expect(where).toEqual({ publishedAt: { $notNull: true }, [field]: { $notNull: true } });
+            expect(orderBy).toEqual({ [field]: "desc" });
+            const list = rows[uid] ?? [];
+            if (list.length === 0) return null;
+            if (field === "updatedAt") return { updatedAt: new Date(updatedAt) };
+            const values = list.map(
+              (row, i) => row[field] ?? (field === "id" ? i + 1 : "2026-10-21T09:00:00.000Z"),
+            ) as (number | string)[];
+            const sorted = values.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+            return { [field]: sorted[sorted.length - 1] };
+          },
+        ),
       }),
     },
   };
-  return { strapi: strapi as unknown as SearchStrapi & typeof strapi };
+  return {
+    strapi: strapi as unknown as SearchStrapi & typeof strapi,
+    loads: () => loads,
+  };
 }
+
+const fresh = () => ({
+  signature: null as string | null,
+  probe: null as string | null,
+  checkedAt: 0,
+});
 
 /** A fake Meilisearch: records calls, enqueues tasks that succeed (or fail when told). */
 function fakeMeili(options: { liveExists?: boolean; failTask?: string } = {}) {
@@ -224,12 +267,12 @@ describe("syncSearchIndex", () => {
   it("does nothing while off", async () => {
     const { strapi } = db(ROWS);
     const meili = fakeMeili();
-    await syncSearchIndex(strapi, {}, meili.fetchImpl, { signature: null });
+    await syncSearchIndex(strapi, {}, meili.fetchImpl, fresh());
     expect(meili.calls).toEqual([]);
   });
 
   it("rebuilds on the first run, skips an unchanged minute, rebuilds after a change", async () => {
-    const state = { signature: null as string | null };
+    const state = fresh();
     const first = db(ROWS);
     const meili = fakeMeili();
     await syncSearchIndex(first.strapi, ON, meili.fetchImpl, state);
@@ -246,12 +289,116 @@ describe("syncSearchIndex", () => {
   });
 
   it("rebuilds an unchanged database when the live index is gone (a new Meilisearch volume)", async () => {
-    const state = { signature: null as string | null };
+    const state = fresh();
     const { strapi } = db(ROWS);
     await syncSearchIndex(strapi, ON, fakeMeili().fetchImpl, state);
     const empty = fakeMeili({ liveExists: false });
     await syncSearchIndex(strapi, ON, empty.fetchImpl, state);
     expect(empty.calls).toContain("POST /swap-indexes");
+  });
+});
+
+describe("syncSearchIndex with the probe (v0.31, #169)", () => {
+  const T0 = Date.parse("2026-10-26T10:00:00.000Z");
+  const MINUTE = 60_000;
+
+  it("loads no content while the probe stands, and checks in full once FULL_CHECK_MS passed", async () => {
+    const state = fresh();
+    const store = db(ROWS);
+    const meili = fakeMeili();
+    await syncSearchIndex(store.strapi, ON, meili.fetchImpl, state, T0);
+    const loads = store.loads();
+    meili.calls.length = 0;
+    for (let minute = 1; minute < FULL_CHECK_MS / MINUTE; minute++) {
+      await syncSearchIndex(store.strapi, ON, meili.fetchImpl, state, T0 + minute * MINUTE);
+    }
+    expect(store.loads()).toBe(loads);
+    expect(new Set(meili.calls)).toEqual(new Set(["GET /indexes/sinnlos_search"]));
+    // Sixty minutes on: a full check, and no rebuild for the same content.
+    await syncSearchIndex(store.strapi, ON, meili.fetchImpl, state, T0 + FULL_CHECK_MS);
+    expect(store.loads()).toBeGreaterThan(loads);
+    expect(meili.calls).not.toContain("POST /swap-indexes");
+    expect(state.checkedAt).toBe(T0 + FULL_CHECK_MS);
+  });
+
+  it("picks up a text change the probe cannot see at the hourly full check", async () => {
+    const state = fresh();
+    const meili = fakeMeili();
+    await syncSearchIndex(db(ROWS).strapi, ON, meili.fetchImpl, state, T0);
+    // A raw write: new body, same rows, ids, count and timestamps.
+    const raw = db({
+      ...ROWS,
+      "api::announcement.announcement": [{ documentId: "a1", title: "Kantine", body: "Zu" }],
+    });
+    meili.calls.length = 0;
+    await syncSearchIndex(raw.strapi, ON, meili.fetchImpl, state, T0 + MINUTE);
+    expect(raw.loads()).toBe(0);
+    await syncSearchIndex(raw.strapi, ON, meili.fetchImpl, state, T0 + FULL_CHECK_MS);
+    expect(meili.calls).toContain("POST /swap-indexes");
+  });
+
+  it("checks in full when the probe moved, and rebuilds only when the content changed", async () => {
+    const state = fresh();
+    const meili = fakeMeili();
+    await syncSearchIndex(db(ROWS).strapi, ON, meili.fetchImpl, state, T0);
+    // A republish of the same text: a new published row (id) and publishedAt.
+    const republished = db({
+      ...ROWS,
+      "api::announcement.announcement": [
+        { id: 5, documentId: "a1", title: "Kantine", body: "Neu", publishedAt: "2026-10-26" },
+      ],
+    });
+    meili.calls.length = 0;
+    await syncSearchIndex(republished.strapi, ON, meili.fetchImpl, state, T0 + MINUTE);
+    expect(republished.loads()).toBeGreaterThan(0);
+    expect(meili.calls).not.toContain("POST /swap-indexes");
+    // A module switched off changes the kinds: a full check and a rebuild.
+    await syncSearchIndex(
+      republished.strapi,
+      { ...ON, FEATURES_OFF: "polls" },
+      meili.fetchImpl,
+      state,
+      T0 + 2 * MINUTE,
+    );
+    expect(meili.calls).toContain("POST /swap-indexes");
+  });
+
+  it("advances nothing on a failed rebuild, so the next minute retries", async () => {
+    const state = fresh();
+    const store = db(ROWS);
+    await expect(
+      syncSearchIndex(
+        store.strapi,
+        ON,
+        fakeMeili({ failTask: "POST /swap-indexes" }).fetchImpl,
+        state,
+        T0,
+      ),
+    ).rejects.toThrow(/task \d+ failed/);
+    expect(state).toEqual(fresh());
+    const meili = fakeMeili({ liveExists: true });
+    await syncSearchIndex(store.strapi, ON, meili.fetchImpl, state, T0 + MINUTE);
+    expect(meili.calls).toContain("POST /swap-indexes");
+    expect(state.checkedAt).toBe(T0 + MINUTE);
+  });
+});
+
+describe("searchProbe", () => {
+  it("names each enabled kind with its count and newest id, updatedAt and publishedAt", async () => {
+    const probe = JSON.parse(await searchProbe(db(ROWS).strapi, {}));
+    expect(probe).toEqual([
+      ["announcement", 1, 1, "2026-10-21T10:00:00.000Z", "2026-10-21T09:00:00.000Z"],
+      ["wiki-page", 0, null, null, null],
+      ["document", 0, null, null, null],
+      ["event", 0, null, null, null],
+      ["poll", 1, 1, "2026-10-21T10:00:00.000Z", "2026-10-21T09:00:00.000Z"],
+    ]);
+    const off = JSON.parse(await searchProbe(db(ROWS).strapi, { FEATURES_OFF: "polls,events" }));
+    expect(off.map((part: unknown[]) => part[0])).toEqual([
+      "announcement",
+      "wiki-page",
+      "document",
+    ]);
   });
 });
 

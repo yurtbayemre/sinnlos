@@ -24,7 +24,32 @@ const TABLES: Record<string, string> = {
   "api::lesson.lesson": "lessons",
   "api::wiki-page.wiki-page": "wiki_pages",
   "api::wiki-revision.wiki-revision": "wiki_revisions",
+  "api::notification.notification": "notifications",
+  "api::comment.comment": "comments",
+  "api::reaction.reaction": "reactions",
 };
+
+/** The polymorphic anchor indexes (v0.31, #171). */
+const ANCHORS = [
+  {
+    name: "notifications_source_type_source_document_id_idx",
+    table: "notifications",
+    columns: ["source_type", "source_document_id"],
+    unique: false,
+  },
+  {
+    name: "comments_target_type_target_document_id_idx",
+    table: "comments",
+    columns: ["target_type", "target_document_id"],
+    unique: false,
+  },
+  {
+    name: "reactions_target_type_target_document_id_idx",
+    table: "reactions",
+    columns: ["target_type", "target_document_id"],
+    unique: false,
+  },
+];
 
 /** The wiki revision anchor index (batch 16, DA03). */
 const ANCHOR = {
@@ -62,6 +87,13 @@ describe("documentIndexSpecs", () => {
     expect(specs.find((spec) => spec.name === ANCHOR.name)).toEqual(ANCHOR);
   });
 
+  it("names the notification, comment and reaction anchors (v0.31)", () => {
+    const specs = documentIndexSpecs(host("sqlite").strapi);
+    for (const anchor of ANCHORS) {
+      expect(specs.find((spec) => spec.name === anchor.name)).toEqual(anchor);
+    }
+  });
+
   it("refuses when the wiki revision model is not loaded", () => {
     const { strapi } = host("sqlite");
     const get = strapi.db.metadata.get;
@@ -97,6 +129,23 @@ describe("ensureDocumentIndexes", () => {
     );
     expect(info).toHaveBeenCalledWith(
       "[document-indexes] created 1 index(es): wiki_revisions_page_document_id_idx",
+    );
+  });
+
+  it("creates the three anchor indexes on the first boot of v0.31 and logs them once", async () => {
+    const all = documentIndexSpecs(host("postgres").strapi).map((spec) => spec.name);
+    const names = ANCHORS.map((anchor) => anchor.name);
+    const { strapi, raw, info } = host(
+      "postgres",
+      all.filter((name) => !names.includes(name)),
+    );
+    expect(await ensureDocumentIndexes(strapi)).toEqual(names);
+    expect(raw).toHaveBeenCalledWith(
+      'CREATE INDEX IF NOT EXISTS "notifications_source_type_source_document_id_idx" ON "public"."notifications" ("source_type", "source_document_id")',
+    );
+    expect(info).toHaveBeenCalledTimes(1);
+    expect(info).toHaveBeenCalledWith(
+      `[document-indexes] created 3 index(es): ${names.join(", ")}`,
     );
   });
 
