@@ -85,6 +85,11 @@ describe("DEMO_MODE writes change what the reads show", () => {
       to: { id: 2, displayName: "Grace Hopper" },
     });
     expect(await sendKudos(1, "Me!", "teamwork")).toMatchObject({ ok: false, code: "invalid" });
+    // v0.32 (#198): over the cms limit, refused like the cms does
+    expect(await sendKudos(2, "x".repeat(1001), "teamwork")).toMatchObject({
+      ok: false,
+      code: "invalid",
+    });
   });
 
   it("RSVP: the answer replaces the demo user's own; an event without RSVP refuses", async () => {

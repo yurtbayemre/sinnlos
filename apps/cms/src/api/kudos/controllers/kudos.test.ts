@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { MAX_KUDOS_MESSAGE } from "@sinnlos/domain";
+
 import kudosController from "./kudos";
 
 /**
@@ -70,6 +72,21 @@ describe("kudos create (FX27)", () => {
     await controller.create(ctx);
     expect(ctx.badRequest).not.toHaveBeenCalled();
     expect(ctx.request.body).toEqual({ data: { ...kudos, to: 9, from: CALLER.id } });
+    expect(mocks.superCreate).toHaveBeenCalledTimes(1);
+  });
+
+  it("takes a message of exactly MAX_KUDOS_MESSAGE characters, refuses one more whole (#198)", async () => {
+    const at = setup({ data: { ...kudos, message: "a".repeat(MAX_KUDOS_MESSAGE), to: 9 } });
+    await at.controller.create(at.ctx);
+    expect(at.ctx.badRequest).not.toHaveBeenCalled();
+    expect(mocks.superCreate).toHaveBeenCalledTimes(1);
+
+    const over = setup({ data: { ...kudos, message: "a".repeat(MAX_KUDOS_MESSAGE + 1), to: 9 } });
+    await over.controller.create(over.ctx);
+    expect(over.ctx.badRequest).toHaveBeenCalledWith(
+      `message is longer than ${MAX_KUDOS_MESSAGE} characters`,
+      { code: "message" },
+    );
     expect(mocks.superCreate).toHaveBeenCalledTimes(1);
   });
 

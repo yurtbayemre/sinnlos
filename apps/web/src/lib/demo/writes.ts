@@ -9,6 +9,7 @@ import {
   isPollClosed,
   isQuizSelectionList,
   lessonReceiptState,
+  MAX_KUDOS_MESSAGE,
   newestReceipts,
   quizAnswersPass,
   zonedDateKey,
@@ -58,7 +59,13 @@ export const sendKudos: DemoHandler = ({ data, body }) => {
   const { to, message, value } = payload(body);
   const recipient = data.directory.find((user) => user.id === to);
   const note = text(message);
-  if (!recipient || recipient.id === DEMO_USER_ID || !note || typeof value !== "string") {
+  if (
+    !recipient ||
+    recipient.id === DEMO_USER_ID ||
+    !note ||
+    note.length > MAX_KUDOS_MESSAGE ||
+    typeof value !== "string"
+  ) {
     throw cmsError(400, "Invalid kudos");
   }
   const row = {
