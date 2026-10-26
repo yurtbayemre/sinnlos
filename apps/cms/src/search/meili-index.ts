@@ -22,9 +22,19 @@ import {
  * Kept current by the `search-index` cron (every minute, only registered
  * with MEILISEARCH_ENABLED=1): a fingerprint of the published content
  * (searchFingerprint); when it changed, or the live index is missing, the
- * whole index is rebuilt into SEARCH_BUILD_INDEX_UID and swapped in. One
- * mechanism covers edits, publish/unpublish, deletes, the scheduler, raw
- * updateMany, cascades and database restores.
+ * whole index is rebuilt into SEARCH_BUILD_INDEX_UID and swapped in.
+ *
+ * v0.31 (#169): a minute first reads a cheap probe (searchProbe: per
+ * enabled kind the count and the newest id, updatedAt and publishedAt of
+ * the published rows) and loads and fingerprints the content only when the
+ * probe moved, the live index is missing, it is the process's first run, or
+ * the last successful full check is FULL_CHECK_MS old. Every Document
+ * Service publish (edits, the scheduler, a republish that keeps updatedAt)
+ * writes a new published row, so it moves max(id) and max(publishedAt);
+ * unpublish and delete move the count; FEATURES_OFF changes the kinds. So
+ * those show within a minute; a raw write that changes indexed text in
+ * place (updateMany, a restore that keeps the ids) shows at the next
+ * hourly full check.
  * shortcut: changes are findable within about a minute; add after-commit
  * upserts in the Document Service chain if that is ever too slow.
  * Plain fetch against Meilisearch's HTTP API, no SDK.
@@ -140,11 +150,47 @@ export async function loadSearchDocuments(
  * A fingerprint of exactly what the index holds: it changes with every
  * published change and with nothing else (a draft save, a republish that
  * keeps the draft's updatedAt, a raw write all count only by their effect).
- * shortcut: reads every published row each minute; at many thousand rows,
- * compare per-type counts and publishedAt first.
+ * It reads every published row, so a minute computes it only when
+ * searchProbe moved (see the module comment).
  */
 export function searchFingerprint(documents: readonly SearchIndexDocument[]): string {
   return createHash("sha256").update(JSON.stringify(documents)).digest("hex");
+}
+
+/** How old the last full check may get before a minute repeats it whatever the probe says. */
+export const FULL_CHECK_MS = 60 * 60_000;
+
+/**
+ * The cheap side of the change check (v0.31, #169): per enabled kind the
+ * count and the newest id, updatedAt and publishedAt of the published rows,
+ * four small reads per kind instead of every row's text.
+ */
+export async function searchProbe(
+  strapi: SearchStrapi,
+  env: Record<string, string | undefined> = process.env,
+): Promise<string> {
+  const off = featuresOff(env);
+  const parts: unknown[] = [];
+  for (const kind of INDEXED_SEARCH_KINDS) {
+    if (!searchKindEnabled(off, kind)) continue;
+    const query = strapi.db.query(SOURCES[kind].uid);
+    const newest = async (field: string) => {
+      const row = (await query.findOne({
+        where: { ...PUBLISHED, [field]: { $notNull: true } },
+        select: [field],
+        orderBy: { [field]: "desc" },
+      })) as Record<string, unknown> | null;
+      return row?.[field] ?? null;
+    };
+    parts.push([
+      kind,
+      await query.count({ where: PUBLISHED }),
+      await newest("id"),
+      await newest("updatedAt"),
+      await newest("publishedAt"),
+    ]);
+  }
+  return JSON.stringify(parts);
 }
 
 /** One Meilisearch call; null for a 404 when `allowMissing`, otherwise any non-2xx throws. */
@@ -229,27 +275,36 @@ export async function rebuildSearchIndex(
   return documents.length;
 }
 
-/** The fingerprint of the last successful rebuild in this process. */
+/** This process's last successful full check: what the index was built or found from, and when. */
 export interface SyncState {
+  /** The content fingerprint; null before the first full check. */
   signature: string | null;
+  /** The probe read before that check's content (v0.31). */
+  probe: string | null;
+  /** When that check succeeded (ms since the epoch). */
+  checkedAt: number;
 }
 
-const processState: SyncState = { signature: null };
+const processState: SyncState = { signature: null, probe: null, checkedAt: 0 };
 
 /**
- * The cron task: rebuild when the content changed since the last rebuild of
- * this process (the first run always rebuilds) or the live index is gone.
+ * The cron task: a full check (load, fingerprint, rebuild when the content
+ * changed since the last rebuild of this process) when the probe moved, the
+ * live index is gone, on the first run, or an hour after the last one (see
+ * the module comment). The state advances only after a full check
+ * succeeded, so a failed one is retried the next minute. The probe is read
+ * before the content: a change in between makes the next probe differ.
  */
 export async function syncSearchIndex(
   strapi: SearchStrapi,
   env: Record<string, string | undefined> = process.env,
   fetchImpl: Fetch = fetch,
   state: SyncState = processState,
+  now: number = Date.now(),
 ): Promise<void> {
   const config = parseMeiliConfig(env);
   if (!config) return;
-  const documents = await loadSearchDocuments(strapi, env);
-  const signature = searchFingerprint(documents);
+  const probe = await searchProbe(strapi, env);
   const live = await meili(
     config,
     fetchImpl,
@@ -258,8 +313,13 @@ export async function syncSearchIndex(
     undefined,
     true,
   );
-  if (live && signature === state.signature) return;
-  const count = await rebuildSearchIndex(documents, config, fetchImpl);
-  state.signature = signature;
-  strapi.log.info(`[search] index rebuilt: ${count} document(s)`);
+  const fresh = now - state.checkedAt < FULL_CHECK_MS;
+  if (live && state.signature !== null && probe === state.probe && fresh) return;
+  const documents = await loadSearchDocuments(strapi, env);
+  const signature = searchFingerprint(documents);
+  if (!live || signature !== state.signature) {
+    const count = await rebuildSearchIndex(documents, config, fetchImpl);
+    strapi.log.info(`[search] index rebuilt: ${count} document(s)`);
+  }
+  Object.assign(state, { signature, probe, checkedAt: now });
 }
