@@ -3,6 +3,7 @@ import { hasRole, isRoleType, type RoleType } from "../bootstrap/roles";
 import { isRowId, parseEntryRef } from "./entry-id";
 import { findAllPaged } from "./paged-read";
 import {
+  assertFiltersShape,
   canNarrow,
   forcePublishedStatus,
   getMutableQuery,
@@ -278,6 +279,8 @@ export function visibleIdsPolicy<Config = unknown>(
     const caller = identifiedCaller(user);
     if (!caller && options.anonymous === "deny") return false;
     if (!canNarrow(strapi, policyContext.state)) return false;
+    // The client filter is ANDed with the clause at the Document Service.
+    assertFiltersShape(getMutableQuery(policyContext).filters);
 
     const uid = typeof options.uid === "function" ? options.uid(config) : options.uid;
     const ids = await options.loadVisibleIds({ strapi, user: caller, config, uid });

@@ -309,6 +309,15 @@ describe("visibleIdsPolicy (PL02)", () => {
     expect(strapi.log.error).not.toHaveBeenCalled();
   });
 
+  it("refuses a scalar client filter with a 400 before loading (never a database 500)", async () => {
+    const { policy, loads, strapi } = setup();
+    const ctx = policyContext(as("member"), { query: { filters: "title" } });
+    await expect(policy(ctx, undefined, { strapi: inRequest(strapi, ctx) })).rejects.toBeInstanceOf(
+      errors.ValidationError,
+    );
+    expect(loads).toEqual([]);
+  });
+
   it("refuses a request whose context cannot carry the clause, before loading", async () => {
     const { policy, loads, strapi } = setup();
     // No request in scope, or another request's context than the policy's.

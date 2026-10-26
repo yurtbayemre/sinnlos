@@ -30,12 +30,12 @@ import { visibleIdsPolicy, type VisibleIdsInput } from "../utils/policy-factorie
  * HOW IT WORKS — visibleIdsPolicy (utils/policy-factories.ts), the same
  * id-injection pattern as quick-link-visibility and announcement-visibility:
  * no relation filter (a REST filter through `departments` would 400 for
- * guest, validateQuery → throwRestrictedRelations), the clause $and-composed
- * with any client filter, an empty list as `{ id: { $eq: -1 } }`, and
- * `forcePublishedStatus` so a client cannot switch to the draft rows (only
- * published rows are evaluated: the audience of a draft is not live).
- * findOne honours the injected filters too (document service findOne
- * merges them with the documentId).
+ * guest, validateQuery → throwRestrictedRelations), the id clause ANDed
+ * into the reads by the Document Service (the list as one parameter, #175;
+ * an empty list matches nothing), and `forcePublishedStatus` so a client
+ * cannot switch to the draft rows (only published rows are evaluated: the
+ * audience of a draft is not live). findOne honours the clause too (the
+ * document service merges the filters with the documentId).
  */
 
 /** Everything the policy reads from Strapi (a superset of PollAccessHost). */

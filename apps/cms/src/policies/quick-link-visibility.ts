@@ -19,10 +19,11 @@ import { departmentScopedIds, visibleIdsPolicy } from "../utils/policy-factories
  * (visibleIdsPolicy + departmentScopedIds, utils/policy-factories.ts): a
  * REST filter traversing the `departments` relation would 400 for any role
  * lacking `api::department.department.find` (`guest` in particular), so the
- * visible ids are resolved via `strapi.db.query` and injected as a
- * non-relational `{ id: { $in } }` clause, $and-composed with the client
- * filter, empty → `{ id: { $eq: -1 } }`. The ids span draft and published
- * rows, so the status is pinned to "published" (`?status=draft` trap).
+ * visible ids are resolved via `strapi.db.query` and the Document Service
+ * ANDs them into the reads as a non-relational `{ id: { $in } }` clause,
+ * the list bound as one parameter (#175); empty matches nothing. The ids
+ * span draft and published rows, so the status is pinned to "published"
+ * (`?status=draft` trap).
  */
 export default visibleIdsPolicy({
   uid: "api::quick-link.quick-link",

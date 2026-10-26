@@ -306,6 +306,20 @@ describe("visibility narrowing", () => {
     });
   });
 
+  it("refuses a scalar client filter it would have to wrap (400, fail closed)", async () => {
+    const ctx = request();
+    const strapi = host(ctx);
+    narrowReads(strapi, ctx.state, UID, { id: { $in: "A" } });
+    const next = vi.fn(async () => "result");
+    await expect(
+      createVisibilityNarrowing(strapi)(
+        { uid: UID, action: "findMany", params: { filters: "title" } },
+        next,
+      ),
+    ).rejects.toBeInstanceOf(errors.ValidationError);
+    expect(next).not.toHaveBeenCalled();
+  });
+
   it("leaves writes, other uids and requests without a clause alone", async () => {
     const ctx = request();
     const strapi = host(ctx);

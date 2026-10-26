@@ -2,6 +2,7 @@ import { MODERATORS, hasRole } from "../bootstrap/roles";
 import { isCommentTargetType } from "../utils/comment-target";
 import { identifiedCaller, type PolicyContext, type PolicyStrapi } from "../utils/policy-factories";
 import {
+  assertFiltersShape,
   canNarrow,
   getMutableQuery,
   narrowFilters,
@@ -94,6 +95,8 @@ export default async (
     return true;
   }
 
+  // The client filter is ANDed with the anchors at the Document Service.
+  assertFiltersShape(query.filters);
   const anchors = await visibleTargetAnchors(strapi, caller);
   const branches: Record<string, unknown>[] = [];
   for (const targetType of ["announcement", "wiki-page"] as const) {

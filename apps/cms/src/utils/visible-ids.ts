@@ -17,9 +17,9 @@
  *   the users-permissions gating AND `throwRestrictedRelations`. So we
  *   resolve the set of visible primary-key `id`s HERE, in the policy, by
  *   loading the (small) space set with its visibility relations populated
- *   and deciding membership in plain JS. The policy then injects only a
- *   non-relational `{ id: { $in: [...] } }` filter into the REST query —
- *   which validates for every role and traverses nothing.
+ *   and deciding membership in plain JS. The Document Service then ANDs
+ *   only a non-relational `{ id: { $in } }` clause into the reads (the
+ *   list as one parameter, visibleIdsPolicy, #175), which traverses nothing.
  *
  * Draft & publish note (wiki spaces): `strapi.db.query` returns ALL rows
  * (draft AND published) regardless of publication state. That is

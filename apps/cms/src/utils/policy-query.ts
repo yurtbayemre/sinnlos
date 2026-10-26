@@ -86,11 +86,20 @@ export function narrowFilters(
   query: Record<string, unknown>,
   clause: Record<string, unknown>,
 ): void {
-  // A scalar wrapped in $and bypasses Strapi's root shape check and fails as a database 500.
-  if (query.filters && typeof query.filters !== "object") {
+  assertFiltersShape(query.filters);
+  query.filters = query.filters ? { $and: [query.filters, clause] } : clause;
+}
+
+/**
+ * Refuses client filters that are neither an object nor an array with a
+ * 400: a scalar wrapped in `$and` (narrowFilters, or the Document Service
+ * narrowing below) bypasses Strapi's root shape check and fails as a
+ * database 500 ("Where must be an array or an object").
+ */
+export function assertFiltersShape(filters: unknown): void {
+  if (filters && typeof filters !== "object") {
     throw new errors.ValidationError("The filters parameter must be an object or an array");
   }
-  query.filters = query.filters ? { $and: [query.filters, clause] } : clause;
 }
 
 /**
@@ -220,6 +229,8 @@ export function createVisibilityNarrowing(strapi: RequestContextHost): Narrowing
     );
     if (!stored?.length) return next();
     const params = (context.params ?? {}) as Record<string, unknown>;
+    // Never narrow by skipping a filter we cannot wrap: refuse it (fail closed).
+    assertFiltersShape(params.filters);
     const clauses = params.filters ? [params.filters, ...stored] : stored;
     context.params = { ...params, filters: clauses.length === 1 ? clauses[0] : { $and: clauses } };
     return next();
