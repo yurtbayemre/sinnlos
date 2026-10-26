@@ -35,8 +35,9 @@ import { reportRunFailure } from "../cron/run-context";
  * the existing invariant: the caller is a freshly locked active admin, the
  * target is blocked.
  *
- * ONE TRANSACTION, lock order directory → caller → target (as every user
- * administration write, utils/user-admin.ts), re-checked under the locks:
+ * STEP 1, ONE TRANSACTION, lock order directory → caller → target (as every
+ * user administration write, utils/user-admin.ts), re-checked under the
+ * locks:
  *   1. the person's receipts without a snapshot get one now
  *      (fillMissingSnapshots), while their name is still there;
  *   2. deleted (deletePersonalRows): reactions, all their poll votes (no
@@ -45,14 +46,7 @@ import { reportRunFailure } from "../cron/run-context";
  *      recipients), their read confirmations (owner decision), their ads
  *      through the Document Service (its lifecycle records the delete and
  *      removes the images after the commit);
- *   3. other people's notifications naming them as actor lose the name
- *      (rewriteActorNotifications): the actor link and `titleParams.actor`
- *      go, the stored English title is rendered again, so the bell and the
- *      digest show the template's own neutral word ("Someone" / "Jemand")
- *      in each reader's language; subject, link, recipient, read state and
- *      anchors stay. Rows from before AC04 (no titleParams) lose only the
- *      link: their stored title stays (documented);
- *   4. the row: username `former-<documentId>`, e-mail
+ *   3. the row: username `former-<documentId>`, e-mail
  *      `former-<documentId>@anonymised.invalid` (documentIds are unique; a
  *      unique violation fails the whole run and overwrites nothing), the
  *      display name "Ehemalige Person" / "Former person"
@@ -63,26 +57,46 @@ import { reportRunFailure } from "../cron/run-context";
  *      provisioning a new account), the role, and the organisation links
  *      (department, teams, manager, head/lead): the directory hides blocked
  *      people, and no department or team write is needed;
- *   5. one `anonymise` audit row: the deleted counts and the avatar file id,
+ *   4. one `anonymise` audit row: the deleted counts and the avatar file id,
  *      no names.
+ *
+ * STEP 2, AFTER THE COMMIT, in the same request but outside the directory
+ * lock (v0.30, plan-v030-rev3.md R3 v3 with rev4/rev5), once the tombstone
+ * reads as committed: other people's notifications naming them as actor
+ * lose the name (rewriteActorNotifications): the actor link and
+ * `titleParams.actor` go, the stored English title is rendered again, so
+ * the bell and the digest show the template's own neutral word ("Someone" /
+ * "Jemand") in each reader's language; subject, link, recipient, read state
+ * and anchors stay. Rows from before AC04 (no titleParams) lose only the
+ * link: their stored title stays (documented). It runs in pages over the
+ * actor link table, each in its own short transaction that locks its
+ * notification rows and re-reads the links under the locks, so a second
+ * worker (the sweep) skips what another committed; only committed pages
+ * count. A failed page stops it: the answer's `notifications.remaining`
+ * (still linked at the final count) is what the nightly sweep repeats. A
+ * second `anonymise` audit row (detail `notifications …`) records it; its
+ * failure is only logged.
  * Business content (announcements, wiki, documents, events, polls,
  * comments, kudos they gave, duty plans, KPIs) stays with the neutral name;
  * training receipts stay under their retention (utils/training-evidence.ts).
  *
- * AFTER THE COMMIT the avatar file goes through one removal reservation
- * that refuses a file anything links (reserveRemoval + removeReserved; the
- * stamp rule of the app's removers is left out for this known file). A
+ * AFTER THE COMMIT, whatever step 2 did, the avatar file goes through one
+ * removal reservation that refuses a file anything links (reserveRemoval +
+ * removeReserved; the stamp rule of the app's removers is left out for this
+ * known file). A
  * linked file, or a failure, keeps it: the answer says so, the audit row
  * holds its id, and the admin deletes it in the Media Library.
  *
- * THE ERASURE SWEEP (sweepAnonymised, nightly) repeats steps 2 and 3 for
- * every anonymised person: a fan-out batch or a comment callback that read
- * the person before the commit and wrote after it is gone by the next night
- * (rev3 R3, rev3.1), and so is an ad whose create was authenticated before
- * the block and committed after the run (whole-release Codex review): the
- * ads go through the Document Service there too, so their images follow
- * after the commit. Each person runs in its own transaction; one that fails
- * is logged and the others still run, the next night retries it.
+ * THE ERASURE SWEEP (sweepAnonymised, nightly) repeats the deletions and
+ * step 2 for every anonymised person: a fan-out batch or a comment callback
+ * that read the person before the commit and wrote after it is gone by the
+ * next night (rev3 R3, rev3.1), and so is an ad whose create was
+ * authenticated before the block and committed after the run (whole-release
+ * Codex review): the ads go through the Document Service there too, so
+ * their images follow after the commit. No outer transaction (v0.30): the
+ * deletions run as short statements and the rewrite in the same locked
+ * pages, so it may run beside a request's step 2. A person that fails is
+ * logged and the others still run, the next night retries it.
  *
  * The anonymisation and the sweep run whatever FEATURES_OFF says.
  */
@@ -92,6 +106,14 @@ const CLASSIFIED_UID = "api::classified.classified";
 const ID_PAGE = 500;
 
 type Row = Record<string, unknown>;
+
+/** The query builder slice that locks notification rows (Postgres). */
+interface LockQuery {
+  select(columns: string[]): LockQuery;
+  where(where: Row): LockQuery;
+  forUpdate(): LockQuery;
+  execute(): Promise<unknown>;
+}
 
 /** The slice of the Strapi instance this module uses. */
 export interface AnonymiseHost extends Omit<UserAdminHost, "db"> {
@@ -104,6 +126,12 @@ export interface AnonymiseHost extends Omit<UserAdminHost, "db"> {
       create(params: { data: Row }): Promise<unknown>;
       deleteMany(params: Row): Promise<unknown>;
     };
+    /** Joins the ambient transaction on execute() (as utils/department-delete-restrict.ts). */
+    queryBuilder(uid: string): LockQuery;
+    /** 'postgres' or 'sqlite'. */
+    dialect: { client: string };
+    /** @strapi/database metadata; read defensively (actorLinks). */
+    metadata: { get(uid: string): unknown };
   };
   documents(uid: string): { delete(params: { documentId: string }): Promise<unknown> };
   log: { info(message: string): void; warn(message: string): void; error(message: string): void };
@@ -191,9 +219,9 @@ async function idsLinking(strapi: AnonymiseHost, uid: string, where: Row): Promi
 }
 
 /**
- * Step 2 (see the module comment). The link rows go with each row (ON
+ * Step 1.2 (see the module comment). The link rows go with each row (ON
  * DELETE CASCADE, as prune-notifications.ts relies on); the ads go through
- * the Document Service, which joins the ambient transaction and leaves their
+ * the Document Service, which joins an ambient transaction and leaves their
  * images to the classified lifecycle after the commit.
  */
 export async function deletePersonalRows(
@@ -225,40 +253,128 @@ export async function deletePersonalRows(
   return deleted;
 }
 
-/** Step 3 (see the module comment); returns the rows rewritten. */
+/** The actor link table of the notifications (`notifications_actor_lnk(notification_id, user_id)`). */
+function actorLinks(strapi: AnonymiseHost): { uid: string; notification: string; user: string } {
+  const field = (value: unknown, key: string): unknown =>
+    isRecord(value) ? value[key] : undefined;
+  const joinTable = field(
+    field(field(strapi.db.metadata.get(NOTIFICATION_UID), "attributes"), "actor"),
+    "joinTable",
+  );
+  const uid = text(field(joinTable, "name"));
+  const notification = text(field(field(joinTable, "joinColumn"), "name"));
+  const user = text(field(field(joinTable, "inverseJoinColumn"), "name"));
+  if (!uid || !notification || !user) {
+    throw new Error("[anonymise] the actor link table of the notifications is unknown");
+  }
+  return { uid, notification, user };
+}
+
+const numbersOf = (value: unknown, key: string): number[] =>
+  rows(value)
+    .map((row) => row[key])
+    .filter((n): n is number => typeof n === "number");
+
+/** A notification without the person's name (see the module comment). */
+function nameless(row: Row): Row {
+  const data: Row = { actor: null };
+  const type = text(row.type);
+  if (
+    isRecord(row.titleParams) &&
+    type &&
+    Object.prototype.hasOwnProperty.call(NOTIFICATION_TITLES.en, type)
+  ) {
+    const { actor: _actor, ...params } = row.titleParams;
+    const rebuilt = buildNotification({
+      type: type as NotificationType,
+      titleParams: params,
+      link: text(row.link) ?? "",
+      recipient: 0,
+    });
+    data.titleParams = rebuilt.titleParams;
+    data.title = rebuilt.title;
+  }
+  return data;
+}
+
+/**
+ * One page of step 2: the next ID_PAGE notifications after `afterId` that
+ * link the person as actor, in one short transaction that locks their rows
+ * (Postgres; SQLite has one writer), re-reads the links under the locks and
+ * rewrites only the rows still naming the person. A second worker on the
+ * same page waits for the locks and then finds nothing. Null at the end.
+ */
+async function rewriteActorPage(
+  strapi: AnonymiseHost,
+  id: number,
+  afterId: number,
+): Promise<{ rewritten: number; last: number } | null> {
+  const link = actorLinks(strapi);
+  const page = numbersOf(
+    await strapi.db.query(link.uid).findMany({
+      where: { [link.user]: id, [link.notification]: { $gt: afterId } },
+      select: [link.notification],
+      orderBy: { [link.notification]: "asc" },
+      limit: ID_PAGE,
+    }),
+    link.notification,
+  );
+  if (page.length === 0) return null;
+  const rewritten = await strapi.db.transaction(async () => {
+    if (strapi.db.dialect.client === "postgres") {
+      await strapi.db
+        .queryBuilder(NOTIFICATION_UID)
+        .select(["id"])
+        .where({ id: { $in: page } })
+        .forUpdate()
+        .execute();
+    }
+    const naming = numbersOf(
+      await strapi.db.query(link.uid).findMany({
+        where: { [link.user]: id, [link.notification]: { $in: page } },
+        select: [link.notification],
+      }),
+      link.notification,
+    );
+    if (naming.length === 0) return 0;
+    const found = rows(
+      await strapi.db.query(NOTIFICATION_UID).findMany({
+        where: { id: { $in: naming } },
+        select: ["id", "type", "titleParams", "link"],
+      }),
+    );
+    for (const row of found) {
+      await strapi.db
+        .query(NOTIFICATION_UID)
+        .update({ where: { id: row.id }, data: nameless(row) });
+    }
+    return found.length;
+  });
+  return { rewritten, last: page[page.length - 1] };
+}
+
+/**
+ * Step 2, page by page (see the module comment): the rows rewritten in
+ * committed pages, the pages, and the error that stopped it (null when done).
+ */
 export async function rewriteActorNotifications(
   strapi: AnonymiseHost,
   id: number,
-): Promise<number> {
-  const ids = await idsLinking(strapi, NOTIFICATION_UID, namingWhere(id));
+): Promise<{ rewritten: number; pages: number; error: unknown }> {
   let rewritten = 0;
-  for (const notificationId of ids) {
-    const row = await strapi.db.query(NOTIFICATION_UID).findOne({
-      where: { id: notificationId },
-      select: ["id", "type", "titleParams", "link"],
-    });
-    if (!isRecord(row)) continue;
-    const data: Row = { actor: null };
-    const type = text(row.type);
-    if (
-      isRecord(row.titleParams) &&
-      type &&
-      Object.prototype.hasOwnProperty.call(NOTIFICATION_TITLES.en, type)
-    ) {
-      const { actor: _actor, ...params } = row.titleParams;
-      const rebuilt = buildNotification({
-        type: type as NotificationType,
-        titleParams: params,
-        link: text(row.link) ?? "",
-        recipient: 0,
-      });
-      data.titleParams = rebuilt.titleParams;
-      data.title = rebuilt.title;
+  let pages = 0;
+  let afterId = 0;
+  try {
+    for (;;) {
+      const page = await rewriteActorPage(strapi, id, afterId);
+      if (!page) return { rewritten, pages, error: null };
+      rewritten += page.rewritten;
+      pages++;
+      afterId = page.last;
     }
-    await strapi.db.query(NOTIFICATION_UID).update({ where: { id: notificationId }, data });
-    rewritten++;
+  } catch (error) {
+    return { rewritten, pages, error };
   }
-  return rewritten;
 }
 
 /** GET /api/user-management/:id/anonymise: what a run would do now (advisory). */
@@ -310,16 +426,77 @@ function tombstoneData(documentId: string, at: Date, avatarUnlinked: boolean): R
   };
 }
 
-const auditDetail = (deleted: Record<string, number>, rewritten: number, avatarId: number | null) =>
+const auditDetail = (deleted: Record<string, number>, avatarId: number | null) =>
   [
     ...Object.entries(deleted)
       .filter(([, count]) => count > 0)
       .map(([key, count]) => `${key}:${count}`),
-    rewritten > 0 ? `rewrittenNotifications:${rewritten}` : null,
     avatarId !== null ? `avatarFile:${avatarId}` : null,
   ]
     .filter(Boolean)
     .join(" ") || "nothing to delete";
+
+const auditRow = (callerId: number, documentId: string, detail: string) => ({
+  action: "anonymise" as const,
+  targetUid: USER_UID,
+  targetDocumentId: documentId,
+  actorKind: "user" as const,
+  actorUserId: callerId,
+  actorClass: "moderator",
+  source: "content-api" as const,
+  detail,
+});
+
+/**
+ * Step 2 after the commit of step 1 (see the module comment); never throws.
+ */
+async function rewriteAfterCommit(
+  strapi: AnonymiseHost,
+  callerId: number,
+  id: number,
+  documentId: string,
+): Promise<AnonymiseResponse["data"]["notifications"]> {
+  let done: Awaited<ReturnType<typeof rewriteActorNotifications>>;
+  try {
+    const tomb = await strapi.db
+      .query(USER_UID)
+      .findOne({ where: { id }, select: ["id", "anonymisedAt"] });
+    done =
+      isRecord(tomb) && tomb.anonymisedAt != null
+        ? await rewriteActorNotifications(strapi, id)
+        : { rewritten: 0, pages: 0, error: new Error("the tombstone is not committed") };
+  } catch (error) {
+    done = { rewritten: 0, pages: 0, error };
+  }
+  let remaining: number | null = null;
+  try {
+    remaining = await strapi.db.query(NOTIFICATION_UID).count({ where: namingWhere(id) });
+  } catch (err) {
+    strapi.log.error(
+      `[anonymise] user=${documentId}: the notifications still naming them were not counted (${(err as Error).message})`,
+    );
+  }
+  if (done.error) {
+    strapi.log.warn(
+      `[anonymise] notification rewrite stopped after ${done.pages} page(s): ${(done.error as Error)?.message ?? String(done.error)}; ${remaining ?? "an unknown number"} left for the nightly sweep`,
+    );
+  }
+  try {
+    await recordAuditEvent(
+      strapi as unknown as AuditHost,
+      auditRow(
+        callerId,
+        documentId,
+        `notifications rewritten:${done.rewritten} remaining:${remaining ?? "unknown"}`,
+      ),
+    );
+  } catch (err) {
+    strapi.log.error(
+      `[anonymise] audit row for the notification rewrite failed: ${(err as Error).message}`,
+    );
+  }
+  return { rewritten: done.rewritten, remaining };
+}
 
 /** POST /api/user-management/:id/anonymise (see the module comment). */
 export async function anonymiseUser(
@@ -332,7 +509,7 @@ export async function anonymiseUser(
   let avatarId: number | null = null;
   let documentId = "";
   const at = new Date();
-  const counts = await strapi.db.transaction(async ({ trx }) => {
+  const step1 = await strapi.db.transaction(async ({ trx }) => {
     await lockDirectory(strapi);
     await assertActiveAdmin(strapi, trx, callerId, callerTv);
     await lockUserRow(strapi as unknown as MfaHost, trx, id);
@@ -353,28 +530,36 @@ export async function anonymiseUser(
     await fillMissingSnapshots(strapi as never, { userId: id });
     const before = await countAll(strapi, id);
     const deleted = await deletePersonalRows(strapi, id);
-    const rewritten = await rewriteActorNotifications(strapi, id);
     await strapi.db
       .query(USER_UID)
       .update({ where: { id }, data: tombstoneData(documentId, at, avatarId !== null) });
-    await recordAuditEvent(strapi as unknown as AuditHost, {
-      action: "anonymise",
-      targetUid: USER_UID,
-      targetDocumentId: documentId,
-      actorKind: "user",
-      actorUserId: callerId,
-      actorClass: "moderator",
-      source: "content-api",
-      detail: auditDetail(deleted, rewritten, avatarId),
-    });
-    return { deleted, rewritten: { notifications: rewritten }, kept: before.kept };
+    await recordAuditEvent(
+      strapi as unknown as AuditHost,
+      auditRow(callerId, documentId, auditDetail(deleted, avatarId)),
+    );
+    return { deleted, kept: before.kept };
   });
   strapi.log.info(`[anonymise] user=${documentId} anonymised by user=${callerId}`);
-  const avatar =
-    avatarId === null
-      ? null
-      : { id: avatarId, removed: await removeAvatar(strapi, avatarId, documentId) };
-  return { id, anonymisedAt: at.toISOString(), counts, avatar };
+  let notifications: AnonymiseResponse["data"]["notifications"] = { rewritten: 0, remaining: 0 };
+  let avatar: AnonymiseResponse["data"]["avatar"] = null;
+  try {
+    notifications = await rewriteAfterCommit(strapi, callerId, id, documentId);
+  } finally {
+    if (avatarId !== null) {
+      avatar = { id: avatarId, removed: await removeAvatar(strapi, avatarId, documentId) };
+    }
+  }
+  return {
+    id,
+    anonymisedAt: at.toISOString(),
+    counts: {
+      deleted: step1.deleted,
+      rewritten: { notifications: notifications.rewritten },
+      kept: step1.kept,
+    },
+    notifications,
+    avatar,
+  };
 }
 
 /** The avatar's removal after the commit (see the module comment); never throws. */
@@ -401,8 +586,8 @@ async function removeAvatar(
 
 /**
  * The nightly erasure sweep (see the module comment): every anonymised
- * person, each in its own transaction. Returns the rows it removed and
- * rewrote.
+ * person, without an outer transaction. Returns the rows it removed and
+ * rewrote (committed).
  */
 export async function sweepAnonymised(
   strapi: AnonymiseHost,
@@ -414,17 +599,13 @@ export async function sweepAnonymised(
     try {
       // The ads' delete audit rows carry the source `cron`, as the
       // classified-janitor's (cron/purge-expired-classifieds.ts).
-      const done = await runWithDeleteAudit({ source: "cron" }, () =>
-        strapi.db.transaction(async () => {
-          const removed = await deletePersonalRows(strapi, id);
-          return {
-            deleted: Object.values(removed).reduce((sum, count) => sum + count, 0),
-            rewritten: await rewriteActorNotifications(strapi, id),
-          };
-        }),
+      const removed = await runWithDeleteAudit({ source: "cron" }, () =>
+        deletePersonalRows(strapi, id),
       );
-      deleted += done.deleted;
+      deleted += Object.values(removed).reduce((sum, count) => sum + count, 0);
+      const done = await rewriteActorNotifications(strapi, id);
       rewritten += done.rewritten;
+      if (done.error) throw done.error;
     } catch (err) {
       reportRunFailure(err, `user=${id}: ${(err as Error).message}`);
       strapi.log.error(

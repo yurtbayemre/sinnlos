@@ -327,4 +327,28 @@ describe("hideBlockedUsers: probes through withheld fields (Codex review)", () =
     // The user root lists active users only: its own fields sort freely.
     expect(() => hide({ sort: "jobTitle:asc" }, USER_UID)).not.toThrow();
   });
+
+  it("refuses a root sort through a directory relation, whatever it names (v0.30)", () => {
+    for (const [sort, uid] of [
+      ["head.id:asc", DEPARTMENT],
+      ["head.blocked:desc", DEPARTMENT],
+      ["members.username:asc", DEPARTMENT],
+      ["lead.id", TEAM],
+      ["manager.id:asc", USER_UID],
+      ["directReports.id", USER_UID],
+      ["department.head.id:asc", ANNOUNCEMENT],
+    ] as const) {
+      expect(() => hide({ sort }, uid), sort).toThrow(/Invalid key/);
+    }
+    expect(() => hide({ sort: { head: { id: "asc" } } }, DEPARTMENT)).toThrow(
+      /Invalid key head at head/,
+    );
+    expect(() => hide({ sort: ["name:asc", { manager: { id: "desc" } }] }, USER_UID)).toThrow(
+      /Invalid key manager/,
+    );
+    // Scalar and attribution sorts stay.
+    expect(() => hide({ sort: "name:asc" }, DEPARTMENT)).not.toThrow();
+    expect(() => hide({ sort: "author.id:asc" }, ANNOUNCEMENT)).not.toThrow();
+    expect(() => hide({ sort: "department.name:asc" }, ANNOUNCEMENT)).not.toThrow();
+  });
 });

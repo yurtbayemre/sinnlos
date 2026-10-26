@@ -636,6 +636,26 @@ describe.each(testEngines())("password change revokes older JWTs (FX40) on %s", 
       expect((await me(signedIn)).status).toBe(200);
     });
 
+    it("a block in the Content Manager ends the user's sessions, also after an unblock (v0.30)", async () => {
+      const account = await newUser();
+      const signedIn = await t.login(account.username, account.password);
+      const block = await t.api({ jwt: await admin() }, adminPath(account.documentId), {
+        method: "PUT",
+        json: { blocked: true },
+      });
+      expect(block.status).toBe(200);
+      expect(await version(account.id)).toBe(1);
+      const unblock = await t.api({ jwt: await admin() }, adminPath(account.documentId), {
+        method: "PUT",
+        json: { blocked: false },
+      });
+      expect(unblock.status).toBe(200);
+      expect(await version(account.id)).toBe(1);
+      // The JWT from before the block stays revoked; a fresh sign-in works.
+      expect((await me(signedIn)).status).toBe(401);
+      expect((await me(await t.login(account.username, account.password))).status).toBe(200);
+    });
+
     it("the Content Manager cannot set the version back", async () => {
       const account = await newUser();
       await t.api({ jwt: await admin() }, adminPath(account.documentId), {

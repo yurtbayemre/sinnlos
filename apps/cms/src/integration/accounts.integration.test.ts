@@ -42,6 +42,7 @@ type Answer<T = Record<string, unknown>> = ApiResponse<
 describe.each(testEngines())("accounts (v0.27) on %s", (engine) => {
   let t: TestStrapi;
   let totp: Totp;
+  let mfa: { hashRecoveryCode(code: string): string };
   const mails: { to: string; subject: string; text: string }[] = [];
 
   beforeAll(async () => {
@@ -58,6 +59,7 @@ describe.each(testEngines())("accounts (v0.27) on %s", (engine) => {
       },
     });
     totp = t.requireBuilt<Totp>("src/utils/totp");
+    mfa = t.requireBuilt<{ hashRecoveryCode(code: string): string }>("src/utils/mfa-core");
     const email = t.strapi.plugin("email").service("email") as unknown as {
       send(mail: { to: string; subject: string; text: string }): Promise<void>;
     };
@@ -229,6 +231,18 @@ describe.each(testEngines())("accounts (v0.27) on %s", (engine) => {
     expect([c.status, d.status].sort()).toEqual([200, 401]);
     expect(errorCode(await signIn(user.username, user.password, codes[0]))).toBe("mfa_invalid");
     expect(((await row(user.id)).totpRecoveryCodes as string[]).length).toBe(7);
+    // v0.30: 80-bit codes; a 10-character code issued before keeps working once.
+    for (const issued of codes) expect(issued).toMatch(/^[a-z2-7]{4}(-[a-z2-7]{4}){3}$/);
+    const stored = (await row(user.id)).totpRecoveryCodes as string[];
+    await t.strapi.db.query(USER).update({
+      where: { id: user.id },
+      data: { totpRecoveryCodes: [...stored, mfa.hashRecoveryCode("abcde-23456")] },
+    });
+    const old = await signIn(user.username, user.password, "ABCDE23456");
+    expect(old.status, old.text).toBe(200);
+    expect(errorCode(await signIn(user.username, user.password, "abcde-23456"))).toBe(
+      "mfa_invalid",
+    );
   });
 
   it("disable: password and code, only when no role requires it; ends the other sessions", async () => {
@@ -442,6 +456,43 @@ describe.each(testEngines())("accounts (v0.27) on %s", (engine) => {
       .update({ where: { id }, data: { email: "moved@integration.test" } });
     expect(errorCode(await set(reset, "Another-Password-27"))).toBe("token_invalid");
     expect((await signIn("moved@integration.test", "Strong-Password-27")).status).toBe(200);
+  });
+
+  it("a block in the Content Manager voids a reset link and an enrollment, also after an unblock (v0.30)", async () => {
+    const user = t.fixtures.users.team_lead;
+    const jwt = await admin();
+    mails.length = 0;
+    const sent = await t.api(bearer(jwt), `/api/user-management/${user.id}/send-link`, {
+      method: "POST",
+    });
+    expect(sent.status, sent.text).toBe(200);
+    const link = /set-password#(\S+)/.exec(mails[mails.length - 1]?.text ?? "")?.[1] ?? "";
+    const session = (await signIn(user.username, user.password)).body.jwt!;
+    const setup = (await t.api(bearer(session), "/api/me/mfa/setup", {
+      method: "POST",
+    })) as Answer<{ secret: string; enrollment: string }>;
+    expect(setup.status, setup.text).toBe(200);
+    const { secret, enrollment } = setup.body.data!;
+    // The Content Manager's path; "1" is a spelling the validator stores as true.
+    const documentId = (await row(user.id)).documentId as string;
+    await t.strapi
+      .documents(USER)
+      .update({ documentId, data: { blocked: "1" as unknown as boolean } });
+    expect((await row(user.id)).blocked).toBe(true);
+    await t.strapi.documents(USER).update({ documentId, data: { blocked: false } });
+    const set = await t.api(null, "/api/auth/password/set", {
+      json: { token: link, password: "Strong-Password-30" },
+      headers: { "x-internal-token": TOKEN },
+    });
+    expect(errorCode(set as Answer)).toBe("token_invalid");
+    expect((await me(session)).status).toBe(401);
+    // A fresh session cannot finish the enrollment started before the block.
+    const fresh = (await signIn(user.username, user.password)).body.jwt!;
+    const act = (await t.api(bearer(fresh), "/api/me/mfa/activate", {
+      json: { enrollment, code: code(secret), password: user.password },
+    })) as Answer;
+    expect(errorCode(act)).toBe("enrollment_invalid");
+    expect((await row(user.id)).totpEnabledAt ?? null).toBeNull();
   });
 
   it("no link for an account bound to an identity provider", async () => {

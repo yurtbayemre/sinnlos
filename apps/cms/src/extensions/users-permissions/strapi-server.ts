@@ -810,6 +810,10 @@ export type DocumentMiddleware = (
  *    user service's edit() is saving that user's password inside its own
  *    (passwordSave): that is how a password the admin panel sets revokes
  *    the older JWTs;
+ *  - v0.30: an update that blocks a user who was not blocked raises the
+ *    version in the same transaction, as /manage/users does: a block in the
+ *    admin panel ends the sessions and open links for good, and a later
+ *    unblock does not bring them back;
  *  - v0.28: `anonymisedAt` is dropped like them, and an update, delete or
  *    clone of an ANONYMISED user is refused (400 `anonymised`): the Content
  *    Manager and PUT /api/users/:id cannot unblock, refill or remove the
@@ -841,20 +845,37 @@ export function createUserWriteGuard(strapi: TokenVersionStrapi): DocumentMiddle
     }
     // Before the update-only return below: creates must meet the baseline too.
     assertPasswordAllowed(data?.password);
-    if (context.action !== "update" || !setsPassword(data) || refreshMode(strapi)) return next();
+    const password = setsPassword(data);
+    // Every spelling the validator stores as true (yup.boolean(): `true`, 1, "1", "TRUE").
+    const blocks = data != null && /^(true|1)$/i.test(String(data.blocked));
+    if (context.action !== "update" || (!password && !blocks) || refreshMode(strapi)) return next();
     const documentId = params.documentId;
     const row =
       typeof documentId === "string" && documentId !== ""
-        ? await strapi.db.query(USER_UID).findOne({ where: { documentId }, select: ["id"] })
+        ? await strapi.db
+            .query(USER_UID)
+            .findOne({ where: { documentId }, select: ["id", "blocked"] })
         : null;
     const id = isRecord(row) ? userIdOf(row.id) : null;
+    if (!password) {
+      // v0.30: a block raises the version as /manage/users does
+      // (utils/user-admin.ts), so a later unblock does not bring the older
+      // JWTs and links back. Active → blocked only; one transaction, so a
+      // failed write rolls the bump back.
+      if (id === null || (isRecord(row) && row.blocked === true)) return next();
+      return strapi.db.transaction(async () => {
+        await bumpTokenVersion(strapi, id);
+        return next();
+      });
+    }
     if (id === null) {
       throw new Error(
         "[users-permissions-extension] a password update of a user that cannot be found is refused: " +
           "its older JWTs could not be revoked (FX40).",
       );
     }
-    // The user service's edit() bumped for this very save already.
+    // The user service's edit() bumped for this very save already; a
+    // password bump also covers a block in the same write.
     if (passwordSave.getStore()?.userId === id) return next();
     return saveAfterBump(strapi, id, next);
   };

@@ -34,15 +34,36 @@ describe("MFA_REQUIRED_ROLES", () => {
 });
 
 describe("recovery codes", () => {
-  it("are ten distinct xxxxx-xxxxx codes; spelling does not matter, the hash does", () => {
+  it("are ten distinct xxxx-xxxx-xxxx-xxxx codes of 80 bits (v0.30)", () => {
     const codes = newRecoveryCodes();
     expect(codes).toHaveLength(10);
     expect(new Set(codes).size).toBe(10);
-    for (const code of codes) expect(code).toMatch(/^[a-z2-7]{5}-[a-z2-7]{5}$/);
+    // 16 base32 characters = 80 bits.
+    for (const code of codes) expect(code).toMatch(/^[a-z2-7]{4}(-[a-z2-7]{4}){3}$/);
+    expect(hashRecoveryCode("abcd-efgh-ijkl-mnop")).toBe(hashRecoveryCode(" ABCDEFGHIJKLMNOP "));
+  });
+
+  it("recognises the new codes and the 10-character ones issued before v0.30, in any spelling", () => {
     expect(hashRecoveryCode("abcde-fghij")).toBe(hashRecoveryCode(" ABCDEFGHIJ "));
     expect(secondFactorKind("123456")).toBe("totp");
-    expect(secondFactorKind("ABCDE-23456")).toBe("recovery");
-    expect(secondFactorKind("1234567")).toBeNull();
+    for (const code of [
+      "ABCDE-23456",
+      "abcde23456",
+      "abcd-efgh-ijkl-mnop",
+      "ABCDEFGHIJKLMNOP",
+      "abcd efgh ijkl mnop",
+    ]) {
+      expect(secondFactorKind(code), code).toBe("recovery");
+    }
+    for (const code of [
+      "1234567",
+      "abcde-2345",
+      "abcd-efgh-ijkl-mno",
+      "abcd-efgh-ijkl-mnop-q",
+      "abcde-23456-1",
+    ]) {
+      expect(secondFactorKind(code), code).toBeNull();
+    }
   });
 });
 

@@ -141,7 +141,10 @@ export type AnonymiseKeptClass = (typeof ANONYMISE_KEPT)[number];
 
 export interface AnonymiseCounts {
   deleted: Record<AnonymiseDeletedClass, number>;
-  /** Other people's notifications that named the person: the name is replaced. */
+  /**
+   * Other people's notifications that named the person: the name is
+   * replaced. In a run's answer: the rewrites this request committed.
+   */
   rewritten: { notifications: number };
   kept: Record<AnonymiseKeptClass, number>;
 }
@@ -153,7 +156,7 @@ export interface AnonymisePreviewResponse {
     displayName: string;
     blocked: boolean;
     anonymisedAt: string | null;
-    /** Advisory: the run counts again under its locks. */
+    /** A snapshot (advisory): the run counts again under its locks. */
     counts: AnonymiseCounts;
   };
 }
@@ -169,6 +172,14 @@ export interface AnonymiseResponse {
     /** ISO 8601. */
     anonymisedAt: string;
     counts: AnonymiseCounts;
+    /**
+     * The rewrite of other people's notifications naming the person, after
+     * the commit (v0.30): `rewritten` = `counts.rewritten.notifications`,
+     * committed by this request; `remaining` = still linked at the final
+     * count (0: done; more: the nightly erasure sweep repeats them; null:
+     * that count failed, the sweep still repeats whatever is left).
+     */
+    notifications: { rewritten: number; remaining: number | null };
     /** The avatar after the commit: removed, or kept (linked elsewhere, or the removal failed: delete it in the Media Library). */
     avatar: { id: number; removed: boolean } | null;
   };
