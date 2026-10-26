@@ -10,6 +10,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   ANNOUNCEMENT_UID,
   COMMENT_UID,
+  DEPT,
   NOTIFICATION_UID,
   USER,
   USER_UID,
@@ -75,6 +76,64 @@ describe("comment afterCreate", () => {
     const carol = strapi.tables[USER_UID].find((user) => user.id === USER.carol)!;
     carol.blocked = true;
     const row = await comment(strapi, { author: USER.alice, targetDocumentId: announcement });
+    await lifecycles.afterCreate({ result: row });
+    expect(notificationRows(strapi)).toEqual([]);
+  });
+
+  it("an author the announcement no longer reaches is not told (v0.30)", async () => {
+    const strapi = createOrgStub();
+    vi.stubGlobal("strapi", strapi);
+    // dave (team lead, Sales) wrote it; a moderator then targeted it to
+    // Engineering and gave it a new title.
+    const { documentId } = strapi.seedDocument(
+      ANNOUNCEMENT_UID,
+      {
+        title: "Engineering only",
+        author: { id: USER.dave },
+        audience: "departments",
+        department: { id: DEPT.engineering },
+      },
+      { status: "published" },
+    );
+    const row = await comment(strapi, { author: USER.alice, targetDocumentId: documentId });
+    await lifecycles.afterCreate({ result: row });
+    expect(notificationRows(strapi)).toEqual([]);
+  });
+
+  it("an author the announcement still reaches is told; a moderator author always is", async () => {
+    const strapi = createOrgStub();
+    vi.stubGlobal("strapi", strapi);
+    const sales = { audience: "departments", department: { id: DEPT.sales } };
+    const { documentId: forDave } = strapi.seedDocument(
+      ANNOUNCEMENT_UID,
+      { title: "Sales update", author: { id: USER.dave }, ...sales },
+      { status: "published" },
+    );
+    // carol (editor, Engineering) reads every announcement (moderator bypass).
+    const { documentId: forCarol } = strapi.seedDocument(
+      ANNOUNCEMENT_UID,
+      { title: "Sales note", author: { id: USER.carol }, ...sales },
+      { status: "published" },
+    );
+    for (const target of [forDave, forCarol]) {
+      const row = await comment(strapi, { author: USER.anna, targetDocumentId: target });
+      await lifecycles.afterCreate({ result: row });
+    }
+    expect(notificationRows(strapi).map((n) => n.recipient)).toEqual([
+      { id: USER.dave },
+      { id: USER.carol },
+    ]);
+  });
+
+  it("an author below the moderators is not told about an announcement that has ended", async () => {
+    const strapi = createOrgStub();
+    vi.stubGlobal("strapi", strapi);
+    const { documentId } = strapi.seedDocument(
+      ANNOUNCEMENT_UID,
+      { title: "Old news", author: { id: USER.dave }, expiresAt: "2020-01-01T00:00:00.000Z" },
+      { status: "published" },
+    );
+    const row = await comment(strapi, { author: USER.alice, targetDocumentId: documentId });
     await lifecycles.afterCreate({ result: row });
     expect(notificationRows(strapi)).toEqual([]);
   });

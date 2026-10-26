@@ -22,6 +22,7 @@ import {
 import { stubDocumentId, type Row, type StrapiStub } from "../test/strapi-stub.test.helper";
 import {
   DIGEST_ANNOUNCEMENT_CAP,
+  NOTIFIED_PAGE,
   DIGEST_EXCLUDED_ROLE_TYPES,
   digestsEnabled,
   isDigestRecipient,
@@ -567,6 +568,66 @@ describe("sendDigests orchestrator", () => {
     expect(alice.match(/Canteen menu/g)).toHaveLength(1);
     // bob never got the first notification (joined later): it is news to him.
     expect(mailTo(mails(), "bob")?.text).toContain("Holiday rota (fixed)");
+  });
+
+  it("reads the earlier notifications in id pages and keeps the earliest across them (v0.30)", async () => {
+    // A bulk republish leaves more anchored rows than one read may bind
+    // (the populate binds every row id). alice's first notification sits on
+    // page 1 and a later one on page 2; only the earliest says she was told
+    // before her window, and only it makes the republish old news for
+    // carol, the author (decided by the earliest of any recipient). bob's
+    // later window makes the read reach past alice's window start.
+    const typoFix = news("Holiday rota (fixed)", minutesAfter(MONDAY_RUN, 30));
+    const fresh = news("Canteen menu", minutesAfter(MONDAY_RUN, 40));
+    const told = minutesAfter(WEEK_AGO, -24 * 60);
+    const later = minutesAfter(WEEK_AGO, 24 * 60);
+    const anchored = (id: number, recipient: number, createdAt: string): Row => ({
+      id,
+      type: "announcement",
+      sourceType: "announcement",
+      sourceDocumentId: typoFix.documentId,
+      recipient: { id: recipient },
+      createdAt,
+    });
+    const notifications: Row[] = [
+      anchored(20_000, USER.alice, told),
+      ...Array.from({ length: NOTIFIED_PAGE - 1 }, (_, i) => anchored(20_001 + i, USER.bob, later)),
+      anchored(20_000 + NOTIFIED_PAGE, USER.alice, later),
+    ];
+    const { strapi, mails } = digestStub({
+      users: {
+        [USER.alice]: optIn({ lastDigestAt: WEEK_AGO }),
+        [USER.carol]: optIn({ lastDigestAt: WEEK_AGO }),
+        [USER.bob]: optIn(),
+      },
+      announcements: [typoFix, fresh],
+      notifications,
+    });
+    const reads: Record<string, unknown>[] = [];
+    const query = strapi.db.query.bind(strapi.db);
+    vi.spyOn(strapi.db, "query").mockImplementation((uid: string) => {
+      const real = query(uid);
+      if (uid !== NOTIFICATION_UID) return real;
+      return {
+        ...real,
+        findMany: async (params: Record<string, unknown>) => {
+          if ((params.where as Record<string, unknown>).sourceType) reads.push(params);
+          return real.findMany(params as never);
+        },
+      };
+    });
+    await sendDigests(strapi, NOW);
+
+    expect(reads.map((params) => params.limit)).toEqual([NOTIFIED_PAGE, NOTIFIED_PAGE]);
+    expect(reads.map((params) => (params.where as { id: { $gt: number } }).id.$gt)).toEqual([
+      0,
+      20_000 + NOTIFIED_PAGE - 1,
+    ]);
+    for (const username of ["alice", "carol"]) {
+      const text = mailTo(mails(), username)?.text ?? "";
+      expect(text).toContain("Canteen menu");
+      expect(text).not.toContain("Holiday rota");
+    }
   });
 
   it("the author's own republish is not news to them; a user new to the audience gets it once", async () => {
