@@ -225,7 +225,8 @@ describe("invitations, links and the 2FA reset (v0.27)", () => {
       { email: "ADA@example.test", name: "", valid: false },
     ]);
     const many = Array.from({ length: 150 }, (_, i) => `u${i}@x.test`).join("\n");
-    expect(parseInviteLines(many)).toHaveLength(100);
+    // #184: nothing is cut; the form refuses more than 100 (shallow-handlers.test.ts).
+    expect(parseInviteLines(many)).toHaveLength(150);
   });
 });
 

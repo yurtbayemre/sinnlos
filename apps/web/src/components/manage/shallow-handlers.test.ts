@@ -17,6 +17,7 @@ import type { Notification } from "@/lib/types";
  *  - The anonymisation's result text.
  *  - Enter in the document form of a create whose options failed.
  *  - The bell asks before it leaves an editor with unsaved changes.
+ *  - v0.32 (#184): a bulk invitation over 100 lines is refused whole.
  */
 const shim = vi.hoisted(() => ({
   index: 0,
@@ -71,6 +72,7 @@ vi.mock("@/lib/manage/user-actions", () => ({
   resetUserMfa: vi.fn(failure),
   previewAnonymisation: vi.fn(failure),
   anonymiseUser: vi.fn(failure),
+  inviteUser: vi.fn(),
 }));
 vi.mock("@/lib/classified-actions", () => ({ renewClassified: vi.fn(failure) }));
 const writes = vi.hoisted(() => ({ save: vi.fn(), upload: vi.fn(), markRead: vi.fn() }));
@@ -101,6 +103,7 @@ const { RenewButton } = await import("@/components/marketplace/renew-button");
 const { DocumentEditor } = await import("./document-editor");
 const { NotificationBell } = await import("@/components/notifications/notification-bell");
 const { OrgEditor } = await import("./org-editor");
+const { UserInviteForm } = await import("./user-invite-form");
 
 type Props = Record<string, unknown> & { children?: ReactNode };
 
@@ -378,5 +381,29 @@ describe("deleting a department with an image picked", () => {
     expect(router.push).toHaveBeenCalledWith("/departments");
     expect(shim.sets).toContainEqual([2, null]);
     vi.unstubAllGlobals();
+  });
+});
+
+describe("a bulk invitation over the line limit (#184)", () => {
+  const options = { people: [], departments: [], failed: false };
+  const addresses = (n: number) => Array.from({ length: n }, (_, i) => `u${i}@x.test`);
+  /** Submits the form with `text` typed (its first state); the recorded state updates. */
+  const submit = (text: string) => {
+    const tree = shallow(UserInviteForm, { options }, [text]);
+    const preventDefault = vi.fn();
+    (find(tree, (p) => "onSubmit" in p).onSubmit as (event: object) => void)({ preventDefault });
+    expect(preventDefault).toHaveBeenCalledOnce();
+    return shim.sets;
+  };
+
+  it("refuses 101 addresses as a whole: no preview, the count shown, the text kept", () => {
+    // States: text 0, role 1, department 2, rows 3, sending 4, tooMany 5.
+    expect(submit(addresses(101).join("\n"))).toEqual([[5, 101]]);
+  });
+
+  it("accepts 100 addresses with blank lines between them", () => {
+    const sets = submit(addresses(100).join("\n\n"));
+    expect(sets.map(([index]) => index)).toEqual([5, 3]);
+    expect((sets[1][1] as unknown[]).length).toBe(100);
   });
 });

@@ -97,6 +97,7 @@
     "toList": "Zur Benutzerliste",
     "pending": "Bereit",
     "lineInvalid": "Keine gültige Adresse (oder doppelt)",
+    "tooMany": "{count} Zeilen: höchstens {max} pro Versand. Bitte die Liste aufteilen und den Rest danach senden.",
     "outcome": {
       "sent": "Einladung verschickt",
       "mailFailed": "Konto angelegt, aber die E-Mail ging nicht raus: Link auf der Seite der Person erneut senden",
