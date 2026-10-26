@@ -43,8 +43,8 @@
 #      stay resolvable through the build (keep_running_images).
 #   3. Build web and cms (without BuildKit's default attestations, so an
 #      unchanged rebuild keeps its image id; SINNLOS_REVISION = the commit),
-#      or with DEPLOY_IMAGE_SOURCE=registry pull the published images of the
-#      checkout's release tag (both, checked against the commit and the
+#      or with DEPLOY_IMAGE_SOURCE=registry pull the images CI built for the
+#      checkout's commit (both, checked against the commit and the
 #      version, before any local tag moves); check APP_TIME_ZONE and
 #      MFA_REQUIRED_ROLES with the cms's own validators in the new cms image
 #      (a refusal stops before the restart); then restart the stack (with the
@@ -79,8 +79,8 @@
 # the environment wins):
 #   DEPLOY_EDGE       caddy (the bundled Caddy, default) or traefik (a host
 #                     Traefik, docker-compose.traefik.yml)
-#   DEPLOY_IMAGE_SOURCE build (default) or registry (ghcr.io images of the
-#                     checkout's release tag)
+#   DEPLOY_IMAGE_SOURCE build (default) or registry (the ghcr.io images CI
+#                     built for the checkout's commit)
 #   SMOKE_URL         WEB_PUBLIC_URL with Caddy, https://<DOMAIN> (the host
 #                     every router matches) with Traefik (smoke check and
 #                     live-smoke)
@@ -175,7 +175,9 @@ if [[ "${DEPLOY_IMAGE_SOURCE}" != build && "${DEPLOY_IMAGE_SOURCE}" != registry 
   echo "ERROR: DEPLOY_IMAGE_SOURCE must be build or registry: ${DEPLOY_IMAGE_SOURCE}" >&2
   exit 2
 fi
-# The published images (.github/workflows/release-images.yml).
+# The images CI pushes for every commit on main, tagged with the full commit
+# (.github/workflows/ci.yml, publish; private packages until the release
+# images are published, release-images.yml).
 IMAGE_REPO="ghcr.io/yurtbayemre/sinnlos"
 
 # Whether the caller named the smoke URL (another project must). Without
@@ -986,19 +988,26 @@ record_last_known_good() {
   rm -f "${BOOTSTRAP_FILE}" 2>/dev/null || true
 }
 
-# DEPLOY_IMAGE_SOURCE=registry: pulls the release's web and cms images, both
-# before any local tag moves, refuses them unless their labels name this
-# commit and version (a moved or foreign tag), then tags them as the images
-# compose runs (<project>-web, <project>-cms). No fallback to a build.
-# PULLED_DIGESTS: what was pulled, for the state.
+# DEPLOY_IMAGE_SOURCE=registry: pulls the commit's web and cms images (CI
+# tags them with the full SHA), both before any local tag moves, refuses them
+# unless their labels name this commit and version (a foreign or mistagged
+# image), then tags them as the images compose runs (<project>-web,
+# <project>-cms). No fallback to a build. PULLED_DIGESTS: what was pulled,
+# for the state.
 pull_release_images() {
   local app ref labels
   PULLED_DIGESTS=""
   for app in web cms; do
-    docker pull "${IMAGE_REPO}-${app}:${RELEASE_VERSION}"
+    ref="${IMAGE_REPO}-${app}:${HEAD_SHA}"
+    if ! docker pull "${ref}"; then
+      echo "ERROR: could not pull ${ref}. CI pushes the images of each commit on main, and this host" >&2
+      echo "       needs 'docker login ghcr.io' with a read:packages token while the packages are private." >&2
+      echo "       Nothing was tagged. To build this checkout instead: DEPLOY_IMAGE_SOURCE=build." >&2
+      return 1
+    fi
   done
   for app in web cms; do
-    ref="${IMAGE_REPO}-${app}:${RELEASE_VERSION}"
+    ref="${IMAGE_REPO}-${app}:${HEAD_SHA}"
     labels="$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}} {{index .Config.Labels "org.opencontainers.image.version"}}' "${ref}")"
     if [[ "${labels}" != "${HEAD_SHA} ${RELEASE_VERSION}" ]]; then
       echo "ERROR: ${ref} is labelled revision/version '${labels}', not ${HEAD_SHA} ${RELEASE_VERSION}:" >&2
@@ -1008,7 +1017,7 @@ pull_release_images() {
     PULLED_DIGESTS+="${PULLED_DIGESTS:+ }$(docker image inspect --format '{{index .RepoDigests 0}}' "${ref}")"
   done
   for app in web cms; do
-    docker tag "${IMAGE_REPO}-${app}:${RELEASE_VERSION}" "${PROJECT}-${app}:latest"
+    docker tag "${IMAGE_REPO}-${app}:${HEAD_SHA}" "${PROJECT}-${app}:latest"
   done
   echo "  pulled: ${PULLED_DIGESTS}"
 }
@@ -1553,20 +1562,17 @@ else
   echo "         The deploy goes ahead anyway (infra/deploy.sh --require-green-ci refuses it)." >&2
 fi
 
-# Registry images: the checkout's one release tag names them, and it must be
-# the version package.json carries (the images' labels are checked after the
-# pull, step 3).
+# Registry images: the commit names them (CI tags them with the full SHA),
+# and their labels must carry this commit and the version package.json
+# carries (checked after the pull, step 3).
 if [[ "${DEPLOY_IMAGE_SOURCE}" == registry ]]; then
-  RELEASE_TAGS="$("${GIT[@]}" tag --points-at HEAD --list 'v*')"
-  PACKAGE_VERSION="$(sed -n 's/^  "version": "\([^"]*\)",$/\1/p' "${CHECKOUT}/package.json" 2>/dev/null || true)"
-  if [[ -z "${RELEASE_TAGS}" || "${RELEASE_TAGS}" == *$'\n'* || "${RELEASE_TAGS#v}" != "${PACKAGE_VERSION}" ]]; then
-    echo "ERROR: DEPLOY_IMAGE_SOURCE=registry needs exactly one release tag v<version> on ${NEW_TAG}, the version of" >&2
-    echo "       package.json (${PACKAGE_VERSION:-none}); found: $(tr '\n' ' ' <<<"${RELEASE_TAGS:-none}")" >&2
-    echo "       Check out a release tag (git checkout v<version>), or build: DEPLOY_IMAGE_SOURCE=build. Nothing was changed." >&2
+  RELEASE_VERSION="$(sed -n 's/^  "version": "\([^"]*\)",$/\1/p' "${CHECKOUT}/package.json" 2>/dev/null || true)"
+  if [[ -z "${RELEASE_VERSION}" ]]; then
+    echo "ERROR: DEPLOY_IMAGE_SOURCE=registry needs the version in ${CHECKOUT}/package.json, which the images'" >&2
+    echo "       labels are checked against; found none. Build instead: DEPLOY_IMAGE_SOURCE=build. Nothing was changed." >&2
     exit 1
   fi
-  RELEASE_VERSION="${PACKAGE_VERSION}"
-  echo "  release: v${RELEASE_VERSION} (${IMAGE_REPO}-{web,cms}:${RELEASE_VERSION})"
+  echo "  images: ${IMAGE_REPO}-{web,cms}:${HEAD_SHA} (v${RELEASE_VERSION})"
 fi
 
 if ((DRY_RUN)); then
@@ -1581,7 +1587,7 @@ if ((DRY_RUN)); then
   resolve_rollback_target
   echo "     -> ${ROLLBACK_ORIGIN:-none: nothing ran here before (first install)}"
   if [[ "${DEPLOY_IMAGE_SOURCE}" == registry ]]; then
-    echo "  3. docker pull ${IMAGE_REPO}-{web,cms}:${RELEASE_VERSION}, check their labels, tag them ${PROJECT}-{web,cms}, check the boot values in the cms image, then ${COMPOSE[*]} up -d --no-build"
+    echo "  3. docker pull ${IMAGE_REPO}-{web,cms}:${HEAD_SHA}, check their labels, tag them ${PROJECT}-{web,cms}, check the boot values in the cms image, then ${COMPOSE[*]} up -d --no-build"
   else
     echo "  3. SINNLOS_VERSION=<package.json> SINNLOS_REVISION=${NEW_TAG} BUILDX_NO_DEFAULT_ATTESTATIONS=1 ${COMPOSE[*]} build, check the boot values in the cms image, then ${COMPOSE[*]} up -d --no-build"
   fi

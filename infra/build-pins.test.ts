@@ -139,6 +139,59 @@ describe("GitHub Actions", () => {
   });
 });
 
+describe("CI's arm64 images for the registry deploy (v0.33)", () => {
+  const ci = read("../.github/workflows/ci.yml");
+  const job = ci.slice(ci.indexOf("\n  publish:\n"));
+  const at = (text: string) => {
+    const index = job.indexOf(text);
+    expect(index, text).toBeGreaterThan(-1);
+    return index;
+  };
+
+  it("runs after every check, on a push to main or a manual run that asks for it", () => {
+    expect(job).toContain(
+      "    needs: [changes, build, datetime, integration, e2e, infra, images]\n",
+    );
+    expect(job).toContain(
+      "      (github.event_name == 'push' && github.ref == 'refs/heads/main') ||\n" +
+        "      (github.event_name == 'workflow_dispatch' && inputs.publish)\n",
+    );
+    expect(ci).toMatch(
+      /workflow_dispatch:\n {4}inputs:\n {6}publish:\n[^]*?type: boolean\n {8}default: false\n/,
+    );
+    expect(job).toContain("    runs-on: ubuntu-24.04-arm\n");
+    expect(job).toContain("    permissions:\n      contents: read\n      packages: write\n");
+  });
+
+  it("pushes only the image it checked, tagged with the commit, between two private checks", () => {
+    const before = at("- name: The package is private (before the push)");
+    const build = at("- name: Build apps/${{ matrix.app }}/Dockerfile for arm64");
+    const boot = at("- name: Boot-value check in the arm64 cms image");
+    const login = at("- name: Log in to ghcr.io");
+    const push = at('run: docker push "${IMAGE}"');
+    const after = at("- name: The package is still private (after the push)");
+    expect([before, build, boot, login, push, after]).toEqual(
+      [before, build, boot, login, push, after].sort((a, b) => a - b),
+    );
+    expect(job).toContain("IMAGE: ghcr.io/yurtbayemre/sinnlos-${{ matrix.app }}:${{ github.sha }}");
+    expect(job).toContain("SINNLOS_REVISION=${{ github.sha }}");
+    expect(job).toContain("          load: true\n");
+    expect(job).not.toMatch(/^\s+push: true$/m);
+    expect(job).toContain("scope=image-${{ matrix.app }}-arm64");
+    // Only the exact answer "private" lets the push happen.
+    expect(job.match(/if \[\[ "\$\{visibility\}" != private \]\]; then/g)).toHaveLength(2);
+    expect(job.match(/curl -fsS /g)).toHaveLength(2);
+  });
+
+  it("leaves the public release images off (the lawyer gate, owner decision 2026-10-22)", () => {
+    const release = read("../.github/workflows/release-images.yml");
+    const on = release.slice(release.indexOf("\non:\n"), release.indexOf("\npermissions:"));
+    // No push trigger (the `push` input of the manual run stays false by default).
+    expect(on).not.toMatch(/^ {2}push:/m);
+    expect(on).toContain("workflow_dispatch:");
+  });
+});
+
 describe("pnpm", () => {
   const manifest = JSON.parse(read("../package.json")) as {
     packageManager: string;

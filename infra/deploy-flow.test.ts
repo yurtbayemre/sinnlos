@@ -1485,12 +1485,15 @@ describe.skipIf(!RUN_SEQUENCES)(
   () => {
     let r: StepReport[] = [];
     const REGISTRY = { DEPLOY_IMAGE_SOURCE: "registry" };
-    const RELEASE = [
+    // A version in package.json, and no release tag (v0.33: CI tags the
+    // images with the commit, so a merge to main deploys untagged).
+    const VERSIONED = [
       `printf '{\\n  "name": "sinnlos",\\n  "version": "0.26.0",\\n  "private": true\\n}\\n' > "$REPO/package.json"`,
       '"${G[@]}" add package.json',
-      '"${G[@]}" commit -q -m release',
-      '"${G[@]}" tag v0.26.0',
+      '"${G[@]}" commit -q -m version',
     ].join("; ");
+    const LABELS = (version: string) => `STUB_LABELS="$("\${G[@]}" rev-parse HEAD) ${version}"`;
+    const PULL = /^docker pull ghcr\.io\/yurtbayemre\/sinnlos-(web|cms):[0-9a-f]{40}$/;
     beforeAll(() => {
       r = deploys([
         // The default edge: the bundled Caddy, the base compose file only.
@@ -1501,19 +1504,27 @@ describe.skipIf(!RUN_SEQUENCES)(
         /* 3 */ { env: { DEPLOY_EDGE: "caddy" } },
         // … and deployed with DEPLOY_EDGE=traefik.
         /* 4 */ { before: "export DEPLOY_EDGE=traefik" },
-        // Registry images need one release tag on the commit …
+        // Registry images need the package.json version their labels carry …
         /* 5 */ { before: "STUB_TRAEFIK=", env: REGISTRY },
         // … a failed second pull tags nothing …
-        /* 6 */ { before: `${RELEASE}; STUB_PULL_FAIL=sinnlos-cms`, env: REGISTRY },
-        // … images labelled for another commit are refused …
+        /* 6 */ { before: `${VERSIONED}; STUB_PULL_FAIL=sinnlos-cms`, env: REGISTRY },
+        // … images labelled for another commit, or another version, are refused …
         /* 7 */ {
           before: `STUB_PULL_FAIL=; STUB_LABELS="${"0".repeat(40)} 0.26.0"`,
           env: REGISTRY,
         },
-        // … and the release's own images deploy without a build.
-        /* 8 */ { before: 'STUB_LABELS="$("${G[@]}" rev-parse HEAD) 0.26.0"', env: REGISTRY },
+        /* 8 */ { before: LABELS("0.25.0"), env: REGISTRY },
+        // … a dry run pulls, builds and starts nothing …
+        /* 9 */ { before: LABELS("0.26.0"), env: REGISTRY, args: ["--dry-run"] },
+        // … and the commit's own images deploy without a build, untagged.
+        /* 10 */ { env: REGISTRY },
+        // The next commit's images fail the smoke check: the rollback goes to the pulled ones.
+        /* 11 */ {
+          before: `commit; ${LABELS("0.26.0")}; STUB_SMOKE_CODE=502`,
+          env: REGISTRY,
+        },
         // The Caddy edge, and the container listing fails: refused, not "no Traefik".
-        /* 9 */ { before: "STUB_PS_FAIL=1", env: { DEPLOY_EDGE: "caddy" } },
+        /* 12 */ { before: "STUB_SMOKE_CODE=200; STUB_PS_FAIL=1", env: { DEPLOY_EDGE: "caddy" } },
       ]);
     }, SEQUENCE_BUDGET);
 
@@ -1551,7 +1562,7 @@ describe.skipIf(!RUN_SEQUENCES)(
     });
 
     it("refuses the Caddy edge when the container listing fails, before the backup", () => {
-      const run = r[9];
+      const run = r[12];
       expect(run.status).toBe(1);
       expect(run.stderr).toContain(
         "ERROR: docker ps failed, so deploy.sh cannot tell whether this host runs a Traefik edge",
@@ -1560,59 +1571,92 @@ describe.skipIf(!RUN_SEQUENCES)(
       expect(called(run, / build$| up -d|^docker pull /)).toEqual([]);
     });
 
-    it("refuses registry images without one release tag on the commit, before the backup", () => {
+    it("refuses registry images without a package.json version, before the backup", () => {
       const run = r[5];
       expect(run.status).toBe(1);
-      expect(run.stderr).toContain(
-        "ERROR: DEPLOY_IMAGE_SOURCE=registry needs exactly one release tag v<version>",
-      );
+      expect(run.stderr).toContain("ERROR: DEPLOY_IMAGE_SOURCE=registry needs the version in");
       expect(run.stdout).not.toMatch(BACKED_UP);
       expect(called(run, /^docker pull /)).toEqual([]);
     });
 
-    it("pulls both images before it tags any, and refuses images of another commit", () => {
-      const [pullFailed, foreign] = [r[6], r[7]];
-      for (const run of [pullFailed, foreign]) {
+    it("pulls both images before it tags any, and refuses images of another commit or version", () => {
+      const [pullFailed, foreign, otherVersion] = [r[6], r[7], r[8]];
+      for (const run of [pullFailed, foreign, otherVersion]) {
         expect(run.status).toBe(1);
         expect(run.stderr).toContain("The running containers are untouched.");
         expect(called(run, /^docker tag \S*ghcr\.io/)).toEqual([]);
         expect(called(run, / build$| up -d/)).toEqual([]);
         expect(run.state).toEqual(r[4].state);
       }
-      expect(called(pullFailed, /^docker pull /)).toEqual([
-        "docker pull ghcr.io/yurtbayemre/sinnlos-web:0.26.0",
-        "docker pull ghcr.io/yurtbayemre/sinnlos-cms:0.26.0",
-      ]);
+      // No release tag on the commit: the images are named by the full SHA.
+      const pulls = called(pullFailed, /^docker pull /);
+      expect(pulls).toHaveLength(2);
+      expect(pulls[0]).toMatch(PULL);
+      expect(pulls[1]).toBe(pulls[0].replace("sinnlos-web", "sinnlos-cms"));
+      expect(pullFailed.stderr).toContain(`ERROR: could not pull ${pulls[1].slice(12)}.`);
+      expect(pullFailed.stderr).toContain(
+        "To build this checkout instead: DEPLOY_IMAGE_SOURCE=build.",
+      );
       expect(foreign.stderr).toContain(
-        `ghcr.io/yurtbayemre/sinnlos-web:0.26.0 is labelled revision/version '${"0".repeat(40)} 0.26.0'`,
+        `${pulls[0].slice(12)} is labelled revision/version '${"0".repeat(40)} 0.26.0'`,
+      );
+      expect(otherVersion.stderr).toMatch(
+        /sinnlos-web:[0-9a-f]{40} is labelled revision\/version '[0-9a-f]{40} 0\.25\.0', not [0-9a-f]{40} 0\.26\.0/,
       );
     });
 
-    it("deploys the release's own images without a build, and records what it pulled", () => {
-      const run = r[8];
+    it("plans the pull in a dry run, and pulls, builds and starts nothing", () => {
+      const run = r[9];
       expect(run.status, run.stderr).toBe(0);
+      expect(run.stdout).toMatch(
+        /3\. docker pull ghcr\.io\/yurtbayemre\/sinnlos-\{web,cms\}:[0-9a-f]{40}, check their labels/,
+      );
+      expect(called(run, /^docker pull |^docker tag | build$| up -d/)).toEqual([]);
+      expect(run.state).toEqual(r[4].state);
+    });
+
+    it("deploys the commit's own images without a build or a release tag, and records what it pulled", () => {
+      const run = r[10];
+      expect(run.status, run.stderr).toBe(0);
+      const sha = run.state.SHA;
+      expect(sha).toMatch(/^[0-9a-f]{40}$/);
       expect(run.stdout).toContain(
-        "release: v0.26.0 (ghcr.io/yurtbayemre/sinnlos-{web,cms}:0.26.0)",
+        `images: ghcr.io/yurtbayemre/sinnlos-{web,cms}:${sha} (v0.26.0)`,
       );
       expect(called(run, / build$|^build-env /)).toEqual([]);
-      expect(run.calls).toEqual(
-        expect.arrayContaining([
-          "docker tag ghcr.io/yurtbayemre/sinnlos-web:0.26.0 infra-web:latest",
-          "docker tag ghcr.io/yurtbayemre/sinnlos-cms:0.26.0 infra-cms:latest",
-        ]),
-      );
+      expect(called(run, /^docker pull /)).toEqual([
+        `docker pull ghcr.io/yurtbayemre/sinnlos-web:${sha}`,
+        `docker pull ghcr.io/yurtbayemre/sinnlos-cms:${sha}`,
+      ]);
       // The boot values are checked in the retagged cms image, before `up`.
       const retag = run.calls.indexOf(
-        "docker tag ghcr.io/yurtbayemre/sinnlos-cms:0.26.0 infra-cms:latest",
+        `docker tag ghcr.io/yurtbayemre/sinnlos-cms:${sha} infra-cms:latest`,
       );
       const check = run.calls.indexOf(BOOT_CHECK);
       const up = run.calls.findIndex((c) => / up -d --no-build$/.test(c));
+      expect(run.calls).toContain(
+        `docker tag ghcr.io/yurtbayemre/sinnlos-web:${sha} infra-web:latest`,
+      );
       expect(retag).toBeGreaterThan(-1);
       expect(check).toBeGreaterThan(retag);
       expect(up).toBeGreaterThan(check);
-      expect(run.state.WEB_IMAGE).toBe("sha256:pulled-sinnlos-web:0.26.0");
+      expect(run.state.WEB_IMAGE).toBe(`sha256:pulled-sinnlos-web:${sha}`);
       expect(run.state.PULLED).toMatch(
         /^ghcr\.io\/yurtbayemre\/sinnlos-web@sha256:\S+ ghcr\.io\/yurtbayemre\/sinnlos-cms@sha256:\S+$/,
+      );
+    });
+
+    it("rolls a failed registry deploy back to the images the previous registry deploy pulled", () => {
+      const [good, failed] = [r[10], r[11]];
+      expect(failed.status).toBe(1);
+      expect(called(failed, /^docker pull /).every((c) => PULL.test(c))).toBe(true);
+      expect(failed.state).toEqual(good.state);
+      expect(failed.stderr).toContain(`docker tag infra-web:${tagOf(good)} infra-web:latest`);
+      expect(failed.stderr).toContain(`docker tag infra-cms:${tagOf(good)} infra-cms:latest`);
+      expect(failed.images).toEqual(
+        expect.arrayContaining([
+          `infra-web:${tagOf(good)}=sha256:pulled-sinnlos-web:${good.state.SHA}`,
+        ]),
       );
     });
   },
