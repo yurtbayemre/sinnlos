@@ -68,7 +68,6 @@ const HEARTBEAT_MS = 25_000;
  */
 const MAX_LIFETIME_MS_MIN = 15 * 60_000;
 const MAX_LIFETIME_MS_MAX = 30 * 60_000;
-const SESSION_CLOSE_CAP_MS = 4 * 60 * 60_000;
 
 const encoder = new TextEncoder();
 
@@ -178,7 +177,7 @@ export async function GET(req: Request) {
       const reason: ByeReason = sessionMs <= lifetime ? "expired" : "rotate";
       lifetimeTimer = setTimeout(
         () => cleanup(reason),
-        Math.max(60_000, Math.min(lifetime, sessionMs, SESSION_CLOSE_CAP_MS)),
+        Math.max(60_000, Math.min(lifetime, sessionMs)),
       );
       lifetimeTimer.unref?.();
 
