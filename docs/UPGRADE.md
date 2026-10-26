@@ -160,6 +160,17 @@ format`: a scanner posted to a page with a made-up Server Action id,
 
 Newest first. Older releases: [archive/deployment-history.md](archive/deployment-history.md).
 
+**Upgrading to v0.31 (scale).** No required env, no edge change, no schema change.
+
+- **Indexes:** the first boot creates three plain indexes, `notifications (source_type, source_document_id)`, `comments (target_type, target_document_id)` and `reactions (target_type, target_document_id)`, and logs `[document-indexes] created 3 index(es): …` once. While one builds, writes to its table wait; on a large notifications table that can take minutes, so upgrade a big installation outside working hours. Later boots create and log nothing.
+- **Permissions:** two new actions, `api::profile.profile.openAcks` (every role) and `api::acknowledgement.acknowledgement.reportIndex` (`admin_role`). The first boot logs `granted 8`; the drift check then counts 220 managed actions.
+- **Dashboard banner:** one cms read (`GET /api/me/open-acks`) instead of a page walk over every mandatory announcement and document. Same rules as before.
+- **Acknowledgement report** (`/manage/acknowledgements`): 20 items per section and page (`?page=`, `?documentsPage=`), in the same order as before; receipts are read for the shown items only, and the "incomplete" warning refers to them.
+- **/manage lists:** without a status filter, a moderator's list reads only the shown page in full.
+- **Search** (Meilisearch on): each minute reads a cheap probe and loads the content only when it moved, at least once an hour. Publishing, unpublishing, deleting and scheduled runs still show within a minute; a raw database write that changes text in place shows within the hour ([OPERATIONS.md](OPERATIONS.md#meilisearch-optional-search)).
+- **Data export:** unrelated files and duty plans no longer count against the 100,000-row limit; only the person's rows do.
+- **Rollback** to v0.30.1 is a plain retag. The indexes stay (v0.30.1 ignores them); the two new routes answer 404 there, and the next forward boot grants them again.
+
 **Upgrading to v0.30.1.** No required env, no edge change, no schema change.
 
 - **Recovery codes:** the sign-in refuses the 10-character recovery codes issued before v0.30 ([GHSA-2jjv-m669-5cqh](https://github.com/yurtbayemre/sinnlos/security/advisories/GHSA-2jjv-m669-5cqh)). The authenticator app keeps working. Everyone who enrolled before v0.30 has no working recovery code until they enrol again. Reset their second factor at `/manage/users`; your own needs another admin, or `infra/mfa-reset.sh <email>` on the host. The reset ends their sessions. A role in `MFA_REQUIRED_ROLES` enrols again at the next sign-in, with new codes; others turn it on again in their profile. Reset admins one at a time: reset the next only after the previous one has enrolled again, so one admin can always use `/manage`.
