@@ -167,7 +167,7 @@ Newest first. Older releases: [archive/deployment-history.md](archive/deployment
 - **Dates:** an instant on an impossible day (`2026-02-30T…`) is refused everywhere, as the cms parser already did.
 - **Kudos:** a message has at most 1,000 characters (the cms answers 400 above it).
 - **Invitations:** more than 100 addresses are refused as a whole, with the text kept; blank lines do not count.
-- **Backup** (`infra/backup/pg-backup.sh`, hosts without `backup-run`): the uploads are captured right after the database dump, before either is encrypted, and the tar runs without network. The backup directory needs room for both plaintext artifacts at once ([OPERATIONS.md](OPERATIONS.md)).
+- **Backup** (`infra/backup/pg-backup.sh`, hosts without `backup-run`): the uploads are captured right after the database dump, before either is encrypted, and the tar runs without network. The backup directory needs room for both plaintext artifacts at once, plus their compressed and encrypted copies while they are written ([OPERATIONS.md](OPERATIONS.md)).
 - **Search:** the index is uploaded in parts of at most 10 MB.
 - **Rollback** to v0.31.0 is a plain retag. The compose pins live in the checkout, not in the images: a retag keeps the pinned Postgres.
 

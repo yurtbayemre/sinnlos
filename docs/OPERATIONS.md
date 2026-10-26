@@ -487,7 +487,8 @@ manual snippets above:
   `--network none`. The window between the two captures is now about the
   dump check, not the dump's compression and encryption: narrowed, not
   closed (the cms keeps running). The backup directory needs room for the
-  plaintext dump and tar at the same time;
+  plaintext dump and tar at the same time, plus the gzip and GPG output of
+  each while its input still exists, plus the retained backups;
 - gzips each artifact, then **GPG-encrypts** it to the VPS backup public key
   (asymmetric — a host/NAS compromise can't decrypt; the private key lives
   off-box). gpg runs with `--no-random-seed-file`, so it never reads or

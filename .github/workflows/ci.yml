@@ -37,6 +37,7 @@ jobs:
     outputs:
       full: ${{ steps.scope.outputs.full }}
       database: ${{ steps.scope.outputs.database }}
+      postgres: ${{ steps.pins.outputs.postgres }}
       e2e: ${{ steps.scope.outputs.e2e }}
     steps:
       - name: Checkout history for PR and push comparisons
@@ -50,6 +51,13 @@ jobs:
       - name: Determine CI scope
         id: scope
         run: node scripts/ci-scope.mjs
+
+      - name: Read the Postgres image the compose file pins
+        id: pins
+        run: |
+          image="$(sed -n 's/^    image: \(postgres:[^ ]*\)$/\1/p' infra/docker-compose.yml)"
+          test -n "$image"
+          echo "postgres=$image" >> "$GITHUB_OUTPUT"
 
   build:
     needs: changes
@@ -136,7 +144,7 @@ jobs:
     timeout-minutes: 30
     services:
       postgres:
-        image: ${{ needs.changes.outputs.database == 'true' && 'postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea' || '' }}
+        image: ${{ needs.changes.outputs.database == 'true' && needs.changes.outputs.postgres || '' }}
         env:
           POSTGRES_USER: sinnlos
           POSTGRES_PASSWORD: sinnlos
@@ -190,7 +198,7 @@ jobs:
     timeout-minutes: 20
     services:
       postgres:
-        image: postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
+        image: ${{ needs.changes.outputs.postgres }}
         env:
           POSTGRES_USER: sinnlos
           POSTGRES_PASSWORD: sinnlos

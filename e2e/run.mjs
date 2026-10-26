@@ -9,6 +9,14 @@ import { promisify } from "node:util";
 
 const execute = promisify(execFile);
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+
+/** The Postgres image infra/docker-compose.yml pins: the e2e stack runs what production runs. */
+async function pinnedPostgres() {
+  const compose = await readFile(join(root, "infra", "docker-compose.yml"), "utf8");
+  const image = /^ {4}image: (postgres:\S+)$/m.exec(compose)?.[1];
+  assert.ok(image, "infra/docker-compose.yml pins no postgres image");
+  return image;
+}
 const runPattern = /^sinnlos-e2e-[a-f0-9]{24}$/;
 const projectLabel = "com.docker.compose.project";
 
@@ -269,6 +277,7 @@ export async function main(args) {
       NEXT_TELEMETRY_DISABLED: "1",
     });
     await envFile("compose", {
+      E2E_POSTGRES_IMAGE: await pinnedPostgres(),
       E2E_RUN_ID: runId,
       E2E_RUNTIME: runtime.replaceAll("\\", "/"),
       E2E_WEB_PORT: String(webPort),

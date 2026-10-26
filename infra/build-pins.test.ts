@@ -214,15 +214,23 @@ describe("compose images (v0.32, #196)", () => {
     expect(ci.match(/Caddyfile:ro" "\$\{image\}"/g)).toHaveLength(2);
   });
 
-  it("lets CI and the e2e stack test the postgres the compose file pins", () => {
-    const postgres = images.find((image) => image.startsWith("postgres:"));
+  it("lets CI and the e2e stack run the postgres the compose file pins, read from it", () => {
+    // A Dependabot digest bump of /infra then reaches both without a second copy.
     const ci = read("../.github/workflows/ci.yml");
-    const e2e = read("../e2e/compose.yaml");
-    for (const text of [ci, e2e]) {
-      const refs = [...text.matchAll(/postgres:16-alpine[^\s']*/g)].map((match) => match[0]);
-      expect(refs.length).toBeGreaterThan(0);
-      for (const ref of refs) expect(ref).toBe(postgres);
-    }
+    expect(ci).not.toMatch(/postgres:16/);
+    expect(ci).toContain("postgres: ${{ steps.pins.outputs.postgres }}");
+    expect(ci).toContain(
+      "image=\"$(sed -n 's/^    image: \\(postgres:[^ ]*\\)$/\\1/p' infra/docker-compose.yml)\"",
+    );
+    expect(ci.match(/needs\.changes\.outputs\.postgres/g)).toHaveLength(2);
+    expect(read("../e2e/compose.yaml")).toContain("image: ${E2E_POSTGRES_IMAGE:?}");
+    const runner = read("../e2e/run.mjs");
+    expect(runner).toContain("E2E_POSTGRES_IMAGE: await pinnedPostgres(),");
+    expect(runner).toContain("/^ {4}image: (postgres:\\S+)$/m.exec(compose)");
+    // Both readers find the pinned image in the compose file.
+    expect(/^ {4}image: (postgres:\S+)$/m.exec(compose)?.[1]).toMatch(
+      /^postgres:16-alpine@sha256:[0-9a-f]{64}$/,
+    );
   });
 
   it("has Dependabot propose new digests of the same tags, never a Postgres or Caddy major", () => {
