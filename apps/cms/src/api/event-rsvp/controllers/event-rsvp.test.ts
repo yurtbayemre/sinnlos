@@ -850,3 +850,86 @@ describe("event-rsvp raw reads: own rows, no user filter, no v4 shape (FX21)", (
     expect(filtered.ctx.badRequest).not.toHaveBeenCalled();
   });
 });
+
+describe("event-rsvp update: the capacity gate counts against the RSVP's owner (v0.32, #180)", () => {
+  const EVENT = { documentId: "e".repeat(24), rsvpEnabled: true, capacity: 1, publishedAt: "x" };
+  const ADMIN_USER = { id: 1, role: { type: "admin_role" } };
+
+  /** The admin holds the one seat; RSVP 20 is Bob's (user 7) "maybe", or ownerless. */
+  function edit(
+    caller: { id: number; role: { type: string } },
+    owner: number | null,
+    capacity = 1,
+  ) {
+    const rsvps = [
+      {
+        id: 10,
+        documentId: "r".repeat(24),
+        status: "yes",
+        respondedAt: "2026-01-01T00:00:00.000Z",
+        targetDocumentId: EVENT.documentId,
+        user: { id: 1 },
+      },
+      {
+        id: 20,
+        documentId: "s".repeat(24),
+        status: "maybe",
+        respondedAt: "2026-01-01T00:00:00.000Z",
+        targetDocumentId: EVENT.documentId,
+        user: owner === null ? null : { id: owner },
+      },
+    ];
+    const strapi = {
+      db: {
+        query: vi.fn((uid: string) =>
+          uid === "api::event.event"
+            ? { findOne: vi.fn(async () => ({ ...EVENT, capacity })) }
+            : {
+                // The row carries `user` only when the caller populates it.
+                findOne: vi.fn(
+                  async ({ where, populate }: { where: { id?: number }; populate?: unknown }) => {
+                    const row = rsvps.find((r) => r.id === where.id);
+                    if (!row) return null;
+                    const { user, ...rest } = row;
+                    return populate ? { ...rest, user } : rest;
+                  },
+                ),
+                findMany: vi.fn(async () => rsvps),
+              },
+        ),
+      },
+    };
+    const controller = (
+      eventRsvpController as unknown as (deps: { strapi: unknown }) => {
+        update(ctx: Ctx): Promise<unknown>;
+      }
+    )({ strapi });
+    const ctx = {
+      params: { id: "20" },
+      state: { user: caller },
+      request: { body: { data: { status: "yes" } } },
+      notFound: vi.fn(() => ({ status: 404 })),
+      badRequest: vi.fn((message: string) => ({ status: 400, message })),
+      unauthorized: vi.fn(() => ({ status: 401 })),
+    } as unknown as Ctx;
+    return { controller, ctx };
+  }
+
+  it("refuses an admin moving Bob to yes when the admin's own yes fills the event", async () => {
+    const { controller, ctx } = edit(ADMIN_USER, 7);
+    expect(await controller.update(ctx)).toEqual({ status: 400, message: "Event is at capacity" });
+    expect(mocks.superUpdate).not.toHaveBeenCalled();
+  });
+
+  it("lets the edit through when a seat is free for Bob", async () => {
+    const { controller, ctx } = edit(ADMIN_USER, 7, 2);
+    await controller.update(ctx);
+    expect(ctx.badRequest).not.toHaveBeenCalled();
+    expect(mocks.superUpdate).toHaveBeenCalledTimes(1);
+  });
+
+  it("counts every seat for an ownerless RSVP, never excluding the caller", async () => {
+    const { controller, ctx } = edit(ADMIN_USER, null);
+    expect(await controller.update(ctx)).toEqual({ status: 400, message: "Event is at capacity" });
+  });
+});

@@ -19,6 +19,7 @@ import {
   loadReceipts,
   loadRosterCourses,
   type RosterCourse,
+  type RosterUser,
 } from "../../../utils/training-roster";
 
 const USER_UID = "plugin::users-permissions.user";
@@ -51,9 +52,12 @@ export default factories.createCoreController("api::course.course", ({ strapi })
     } as Scope;
   }
 
-  async function report(scope: Scope, course: RosterCourse) {
-    const learners = await loadLearners(strapi, scope.departmentId);
-    const people = courseAudience(course, learners);
+  /** One course's report; `learners` is the scope's list when the caller already read it (#179). */
+  async function report(scope: Scope, course: RosterCourse, learners?: RosterUser[]) {
+    const people = courseAudience(
+      course,
+      learners ?? (await loadLearners(strapi, scope.departmentId)),
+    );
     const receipts = await loadReceipts(
       strapi,
       people.map((person) => person.id),
@@ -93,8 +97,10 @@ export default factories.createCoreController("api::course.course", ({ strapi })
       if (!scope) return ctx.forbidden();
       ctx.set("Cache-Control", "private, no-store");
       const courses = (await loadRosterCourses(strapi)).filter((course) => inScope(scope, course));
+      // One read of the scope's learners for every course of the page (v0.32, #179).
+      const learners = courses.length ? await loadLearners(strapi, scope.departmentId) : [];
       const summaries = [];
-      for (const course of courses) summaries.push((await report(scope, course)).course);
+      for (const course of courses) summaries.push((await report(scope, course, learners)).course);
       const body: TrainingReportSummaryResponse = {
         data: { ...publicScope(scope), courses: summaries },
       };

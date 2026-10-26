@@ -1,3 +1,5 @@
+import { lockUserRow, type UserLockHost, type UserLockTrx } from "./mfa-core";
+
 const USER_UID = "plugin::users-permissions.user";
 
 /** The slice of the Strapi instance the write needs (the Entra and OIDC exchange hosts fit). */
@@ -5,19 +7,8 @@ export interface UnblockedWriteHost {
   db: {
     query(uid: string): { findOne(params: Record<string, unknown>): Promise<unknown> };
     /** Queries and Document Service calls inside join it (@strapi/database's AsyncLocalStorage). */
-    transaction<T>(callback: () => Promise<T>): Promise<T>;
-    /** Joins the ambient transaction on execute(). */
-    queryBuilder(uid: string): UserRowLock;
-    /** 'postgres' or 'sqlite'. */
-    dialect: { client: string };
-  };
-}
-
-interface UserRowLock {
-  select(columns: string[]): UserRowLock;
-  where(where: Record<string, unknown>): UserRowLock;
-  forUpdate(): UserRowLock;
-  execute(): Promise<unknown>;
+    transaction<T>(callback: (scope: { trx: UserLockTrx }) => Promise<T>): Promise<T>;
+  } & UserLockHost["db"];
 }
 
 /**
@@ -41,15 +32,8 @@ export async function writeWhileUnblocked(
   userId: number,
   write: () => Promise<unknown>,
 ): Promise<boolean> {
-  return strapi.db.transaction(async () => {
-    if (strapi.db.dialect.client === "postgres") {
-      await strapi.db
-        .queryBuilder(USER_UID)
-        .select(["id"])
-        .where({ id: userId })
-        .forUpdate()
-        .execute();
-    }
+  return strapi.db.transaction(async ({ trx }) => {
+    await lockUserRow(strapi, trx, userId);
     const row = (await strapi.db
       .query(USER_UID)
       .findOne({ where: { id: userId }, select: ["id", "blocked"] })) as {

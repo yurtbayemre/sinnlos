@@ -112,7 +112,7 @@ export default {
     // D-ENTRA-01 spec A: with ENTRA_ENABLED=1 an invalid Entra configuration
     // refuses the boot, naming every bad variable; with Entra off it only
     // parses (MS_* values are ignored then). bootstrap() re-reads it.
-    checkEntraConfig(strapi.log);
+    checkEntraConfig();
     // v0.25.0, the same for OIDC sign-in (and ENTRA_ENABLED=1 next to it is refused).
     checkOidcConfig(strapi.log);
     // v0.21: with MEILISEARCH_ENABLED=1 a missing URL or write key refuses

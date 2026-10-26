@@ -17,6 +17,12 @@ const COURSE_UID = "api::course.course";
 const USER_UID = "plugin::users-permissions.user";
 const PROGRESS_UID = "api::lesson-progress.lesson-progress";
 const ID_CHUNK = 500;
+/**
+ * Receipts per query (v0.32, #176): the user populate binds every returned
+ * row id, so a result page must stay below Postgres's 65,535 parameters,
+ * however many receipts (lessons × renewals) a chunk of learners holds.
+ */
+export const RECEIPT_PAGE = 5000;
 
 type DbStrapi = Pick<Core.Strapi, "db">;
 
@@ -70,6 +76,7 @@ interface UserRow {
   department?: { id?: number; name?: string | null } | null;
 }
 interface ProgressRow {
+  id: number;
   targetDocumentId: string;
   completedAt?: unknown;
   user?: { id?: number } | null;
@@ -169,19 +176,31 @@ export async function loadReceipts(
   const out: ReceiptRow[] = [];
   for (const userChunk of chunks(userIds, ID_CHUNK)) {
     for (const lessonChunk of chunks(lessonIds, ID_CHUNK)) {
-      const found = await strapi.db.query(PROGRESS_UID).findMany({
-        where: { user: { id: { $in: userChunk } }, targetDocumentId: { $in: lessonChunk } },
-        select: ["id", "targetDocumentId", "completedAt"],
-        populate: { user: { select: ["id"] } },
-        orderBy: [{ id: "asc" }],
-      });
-      for (const row of rows<ProgressRow>(found)) {
-        if (typeof row.user?.id !== "number") continue;
-        out.push({
-          userId: row.user.id,
-          targetDocumentId: row.targetDocumentId,
-          completedAt: toIso(row.completedAt),
-        });
+      for (let afterId = 0; ;) {
+        const page = rows<ProgressRow>(
+          await strapi.db.query(PROGRESS_UID).findMany({
+            where: {
+              user: { id: { $in: userChunk } },
+              targetDocumentId: { $in: lessonChunk },
+              id: { $gt: afterId },
+            },
+            select: ["id", "targetDocumentId", "completedAt"],
+            populate: { user: { select: ["id"] } },
+            orderBy: [{ id: "asc" }],
+            limit: RECEIPT_PAGE,
+          }),
+        );
+        // The cursor moves with the fetched page, rows without a user included.
+        if (page.length > 0) afterId = page[page.length - 1].id;
+        for (const row of page) {
+          if (typeof row.user?.id !== "number") continue;
+          out.push({
+            userId: row.user.id,
+            targetDocumentId: row.targetDocumentId,
+            completedAt: toIso(row.completedAt),
+          });
+        }
+        if (page.length < RECEIPT_PAGE) break;
       }
     }
   }

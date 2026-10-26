@@ -117,9 +117,11 @@ import { errors } from "@strapi/utils";
 import {
   consumeSecondFactor,
   isEnrolled,
+  lockUserRow,
   mfaRequiredRoles,
   recordMfaGate,
   requiredMfa,
+  versionOf,
   type MfaHost,
 } from "../../utils/mfa-core";
 import { passwordProblem } from "../../utils/password-rule";
@@ -344,11 +346,6 @@ function isThenable(value: unknown): value is PromiseLike<unknown> {
 function userIdOf(value: unknown): number | null {
   const id = typeof value === "string" && /^\d+$/.test(value) ? Number(value) : value;
   return typeof id === "number" && Number.isSafeInteger(id) && id > 0 ? id : null;
-}
-
-/** A stored or claimed version: a non-negative integer, anything else is 0. */
-export function versionOf(value: unknown): number {
-  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : 0;
 }
 
 /** The version a verified JWT payload carries (0 without the claim). */
@@ -909,13 +906,7 @@ async function refuseTombstone(
   const found = await users.findOne({ where: { documentId }, select: ["id"] });
   const id = isRecord(found) ? userIdOf(found.id) : null;
   if (id === null) return;
-  const target = tokenVersionTarget(strapi);
-  if (target.client === "postgres") {
-    await trx.raw(
-      `SELECT 1 FROM ${quote(target.schema)}.${quote(target.table)} WHERE ${quote(target.idColumn)} = ? FOR UPDATE`,
-      [id],
-    );
-  }
+  await lockUserRow(strapi, trx, id);
   const row = await users.findOne({ where: { id }, select: ["id", ANONYMISED_ATTRIBUTE] });
   if (isRecord(row) && row[ANONYMISED_ATTRIBUTE] != null) {
     throw new errors.ApplicationError("anonymised", { code: "anonymised" });

@@ -54,7 +54,6 @@ describe("parseOidcConfig", () => {
       sessionTtlSeconds: 12 * 3600,
       allowHttp: false,
       localEnabled: false,
-      localRegistration: false,
     });
   });
 
@@ -66,7 +65,6 @@ describe("parseOidcConfig", () => {
       OIDC_DEFAULT_ROLE: "member",
       OIDC_SESSION_TTL: "8h",
       AUTH_LOCAL_ENABLED: "1",
-      LOCAL_REGISTRATION: "1",
     });
     expect(settings).toMatchObject({
       rolesClaim: ["resource_access", "sinnlos-web", "roles"],
@@ -74,7 +72,6 @@ describe("parseOidcConfig", () => {
       defaultRole: "member",
       sessionTtlSeconds: 8 * 3600,
       localEnabled: true,
-      localRegistration: true,
     });
   });
 
@@ -144,7 +141,7 @@ describe("parseOidcConfig", () => {
 });
 
 describe("oidcStatusLine / oidcConfigWarnings", () => {
-  it("one line, no secret; warnings for http and registration", () => {
+  it("one line, no secret; a warning for http only (registration is gone, v0.32 #189)", () => {
     expect(oidcStatusLine(parseOidcConfig({}))).toBe("[oidc] disabled");
     const line = oidcStatusLine(parseOidcConfig(VALID));
     expect(line).toBe(
@@ -160,6 +157,6 @@ describe("oidcStatusLine / oidcConfigWarnings", () => {
         LOCAL_REGISTRATION: "1",
       }),
     );
-    expect(warnings).toHaveLength(2);
+    expect(warnings).toEqual([expect.stringMatching(/^\[oidc\] OIDC_ALLOW_HTTP=1/)]);
   });
 });

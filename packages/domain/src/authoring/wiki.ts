@@ -309,10 +309,5 @@ export interface WikiRestoreRequest {
   revisionId: number;
 }
 
-/** The query keys of the wiki lists (anything else answers 400 with the keys). */
-export const WIKI_SPACE_LIST_QUERY_KEYS = ["q", "page"] as const;
-export const WIKI_PAGE_LIST_QUERY_KEYS = ["space", "status", "q", "page"] as const;
-export const WIKI_REVISIONS_QUERY_KEYS = ["page"] as const;
-
 /** History entries per page of `revisions`. */
 export const WIKI_REVISIONS_PAGE_SIZE = 25;

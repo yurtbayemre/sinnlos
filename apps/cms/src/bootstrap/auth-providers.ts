@@ -19,12 +19,7 @@
  * Also here: the Entra configuration check of register() and the one
  * `[entra]` status line of bootstrap() (src/index.ts wires all three).
  */
-import {
-  entraConfigWarnings,
-  entraStatusLine,
-  parseEntraConfig,
-  type EntraSettings,
-} from "../entra/config";
+import { entraStatusLine, parseEntraConfig, type EntraSettings } from "../entra/config";
 import {
   oidcConfigWarnings,
   oidcStatusLine,
@@ -40,16 +35,14 @@ interface BootLog {
 
 /**
  * register(): parses the Entra configuration from the env. Throws (and so
- * refuses the boot) only when ENTRA_ENABLED=1 and it is invalid; logs the
- * warnings of a valid one.
+ * refuses the boot) only when ENTRA_ENABLED=1 and it is invalid. The
+ * obsolete LOCAL_REGISTRATION is warned about by bootstrap/advanced-settings.ts
+ * (v0.32, #189).
  */
 export function checkEntraConfig(
-  log: BootLog,
   env: Record<string, string | undefined> = process.env,
 ): EntraSettings {
-  const settings = parseEntraConfig(env);
-  for (const warning of entraConfigWarnings(settings)) log.warn(warning);
-  return settings;
+  return parseEntraConfig(env);
 }
 
 /** bootstrap(): `[entra] disabled` or `[entra] enabled tenant=… mode=… …`. */

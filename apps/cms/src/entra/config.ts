@@ -84,7 +84,6 @@ export interface EntraConfig {
   sessionTtlSeconds: number;
   /** AUTH_LOCAL_ENABLED=1: local sign-in stays on next to Entra (break-glass). */
   localEnabled: boolean;
-  localRegistration: boolean;
 }
 
 export interface EntraDisabled {
@@ -246,28 +245,7 @@ export function parseEntraConfig(env: Env = process.env): EntraSettings {
     sessionTtl,
     sessionTtlSeconds: sessionTtlSeconds as number,
     localEnabled: localSignInEnabled(env),
-    localRegistration: env.LOCAL_REGISTRATION === "1",
   };
-}
-
-/**
- * Boot warnings for a valid, enabled configuration. LOCAL_REGISTRATION=1
- * next to Entra is allowed (nothing links accounts by e-mail, so a
- * pre-registered address only produces a 409), but worth one line: the
- * registered address is not verified, so the admin binding of the 409
- * procedure must first check whose account it is.
- */
-export function entraConfigWarnings(settings: EntraSettings): string[] {
-  if (!settings.enabled) return [];
-  const warnings: string[] = [];
-  if (settings.localRegistration) {
-    warnings.push(
-      "[entra] LOCAL_REGISTRATION=1 next to Entra sign-in: anyone can register a local account. " +
-        "An Entra user whose e-mail was registered first gets 409 entra_account_exists; " +
-        "check who registered that account before an admin binds it (docs/SSO.md, the 409 procedure).",
-    );
-  }
-  return warnings;
 }
 
 /** The one `[entra]` status line of every boot (spec L). */

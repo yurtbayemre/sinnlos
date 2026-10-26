@@ -23,6 +23,7 @@ import type { RoleType } from "../bootstrap/roles";
 import { pickDepartment } from "../entra/profile";
 import { lockDocument, type DocumentLockHost } from "../utils/document-lock";
 import { USER_DIRECTORY_LOCK_DOCUMENT_ID, USER_DIRECTORY_LOCK_UID } from "../utils/user-admin";
+import { lockUserRow, type UserLockHost, type UserLockTrx } from "../utils/mfa-core";
 import { writeWhileUnblocked } from "../utils/unblocked-write";
 
 export const USER_UID = "plugin::users-permissions.user";
@@ -63,13 +64,6 @@ interface Query {
 }
 
 /** The query builder slice that locks a user row (Postgres). */
-interface LockQuery {
-  select(columns: string[]): LockQuery;
-  where(where: Record<string, unknown>): LockQuery;
-  forUpdate(): LockQuery;
-  execute(): Promise<unknown>;
-}
-
 /** The slice of the Strapi instance an exchange uses. */
 export interface ExchangeHost {
   db: {
@@ -79,11 +73,8 @@ export interface ExchangeHost {
      * (@strapi/database keeps it in AsyncLocalStorage, and a nested
      * transaction() reuses it), commit on return, rollback on a throw.
      */
-    transaction<T>(callback: () => Promise<T>): Promise<T>;
-    queryBuilder(uid: string): LockQuery;
-    /** 'postgres' or 'sqlite'. */
-    dialect: { client: string };
-  };
+    transaction<T>(callback: (scope: { trx: UserLockTrx }) => Promise<T>): Promise<T>;
+  } & UserLockHost["db"];
   documents(uid: string): {
     findMany(params: Record<string, unknown>): Promise<{ documentId: string }[]>;
     update(params: { documentId: string; data: Record<string, unknown> }): Promise<unknown>;
@@ -385,7 +376,7 @@ async function writeRole(
   userId: number,
   admission: Admission,
 ): Promise<RoleStep> {
-  return strapi.db.transaction(async () => {
+  return strapi.db.transaction(async ({ trx }) => {
     if (strapi.db.dialect.client === "postgres") {
       // The user administration's directory lock first (utils/user-admin.ts, same order):
       // a sign-in's demotion and a web demotion never both pass the last-admin check.
@@ -394,13 +385,8 @@ async function writeRole(
         USER_DIRECTORY_LOCK_UID,
         USER_DIRECTORY_LOCK_DOCUMENT_ID,
       );
-      await strapi.db
-        .queryBuilder(USER_UID)
-        .select(["id"])
-        .where({ id: userId })
-        .forUpdate()
-        .execute();
     }
+    await lockUserRow(strapi, trx, userId);
     const users = strapi.db.query(USER_UID);
     const row = await users.findOne({
       where: { id: userId },

@@ -23,12 +23,6 @@ import type { WikiEditorClass, WikiSpaceVisibility } from "./wiki.js";
  */
 export type AuthoringDocumentStatus = "draft" | "published" | "modified";
 
-export const AUTHORING_DOCUMENT_STATUSES: readonly AuthoringDocumentStatus[] = [
-  "draft",
-  "published",
-  "modified",
-];
-
 /** The write the `?status=` of a create or update asks for (explicit types). */
 export type AuthoringWriteStatus = "draft" | "published";
 
