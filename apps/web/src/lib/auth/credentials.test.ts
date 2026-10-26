@@ -17,6 +17,8 @@ import {
   authorizeCredentials,
   countsAsFailure,
   LOCAL_SIGN_IN_TIMEOUT_MS,
+  MAX_IDENTIFIER_LENGTH,
+  MAX_PASSWORD_LENGTH,
   type CredentialsDeps,
 } from "./credentials";
 
@@ -205,6 +207,24 @@ describe("authorizeCredentials: the second factor (v0.27)", () => {
   it("answers any other 401 like wrong credentials", async () => {
     h.answers.local = { status: 401, body: { error: { name: "UnauthorizedError" } } };
     await expect(h.signIn()).resolves.toBeNull();
+  });
+});
+
+describe("authorizeCredentials: input bounds (v0.30)", () => {
+  it("refuses an over-long identifier or password before the limiter and the cms", async () => {
+    for (const [identifier, password] of [
+      ["a".repeat(MAX_IDENTIFIER_LENGTH + 1), "pw"],
+      [EMAIL, "p".repeat(MAX_PASSWORD_LENGTH + 1)],
+    ]) {
+      await expect(h.signIn(identifier, password)).resolves.toBeNull();
+    }
+    expect(h.calls).toEqual([]);
+    expect(h.limiter.size()).toBe(0);
+  });
+
+  it("still signs in at exactly the bounds", async () => {
+    const identifier = "a".repeat(MAX_IDENTIFIER_LENGTH);
+    await expect(h.signIn(identifier, "p".repeat(MAX_PASSWORD_LENGTH))).resolves.not.toBeNull();
   });
 });
 

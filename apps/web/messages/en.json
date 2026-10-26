@@ -510,7 +510,8 @@
     "sendComment": "Send comment",
     "sendFailed": "Couldn't post your comment — please try again.",
     "deleteFailed": "Couldn't delete the comment — please try again.",
-    "reactionFailed": "Couldn't save your reaction — please try again."
+    "reactionFailed": "Couldn't save your reaction — please try again.",
+    "loadFailed": "Comments couldn't be loaded right now. They appear once the connection is back."
   },
   "relativeTime": {
     "justNow": "just now",

@@ -55,25 +55,44 @@ const COMMENT_READS_IN_PARALLEL = 25;
 /** A target that can be queried: a comment target type and a usable documentId. */
 type AnchoredTarget = CommentTarget & { documentId: string };
 
-/** A list answer, or the empty fallback of a failed read. */
+/** A list answer. */
 type ListPage<T> = {
   data?: T[] | null;
   meta?: { pagination?: { total?: number } };
 };
 
 /**
- * GET a list; a failed read gives an empty page. The fallback rethrows
- * Next.js control-flow errors (redirect on 401), so an expired session
- * navigates to sign-in instead of polling forever.
+ * GET a list. A failed read rejects (v0.30): the client keeps showing what
+ * it has (its refetches catch), and the server render shows its own notice
+ * (comment-section.tsx). An empty page here would overwrite a thread with
+ * nothing.
  */
 function readList<T>(path: string): Promise<ListPage<T>> {
-  return strapi<StrapiListResponse<T>>(path).catch((e: unknown): ListPage<T> => {
-    unstable_rethrow(e);
-    return { data: [] };
-  });
+  return strapi<StrapiListResponse<T>>(path);
 }
 
 const readReactions = (query: string) => readList<Reaction>(`/api/reactions?${query}`);
+
+/**
+ * The optional own-reaction lookup: a failed read keeps the window's answer.
+ * The fallback rethrows Next.js control-flow errors (redirect on 401).
+ */
+const readOwnReactions = (query: string) =>
+  readReactions(query).catch((e: unknown): ListPage<Reaction> => {
+    unstable_rethrow(e);
+    return { data: [] };
+  });
+
+/**
+ * What the browser gets of a comment's author (v0.30): the id (the delete
+ * control compares it with the viewer) and the two names the thread shows.
+ * The rest of the user row stays on the server.
+ */
+function authorShape(author: Comment["author"]): Comment["author"] {
+  return author
+    ? { id: author.id, displayName: author.displayName, username: author.username }
+    : null;
+}
 
 /** The anchored form of `target`, or null (unknown type, no usable documentId). */
 function anchored(target: unknown): AnchoredTarget | null {
@@ -121,7 +140,10 @@ async function readCommentWindow(target: AnchoredTarget): Promise<Comment[]> {
   // a mis-built filter must never leak a foreign discussion into a section.
   // .reverse() restores the display order (oldest first) after the
   // descending fetch.
-  return (page.data ?? []).filter((comment) => matchesTarget(comment, target)).reverse();
+  return (page.data ?? [])
+    .filter((comment) => matchesTarget(comment, target))
+    .map((comment) => ({ ...comment, author: authorShape(comment.author) }))
+    .reverse();
 }
 
 /**
@@ -136,7 +158,7 @@ async function withOwnLookup(
   target: AnchoredTarget,
   userId: number,
 ): Promise<CommentSectionData["reactions"]> {
-  const own = await readReactions(
+  const own = await readOwnReactions(
     `${targetFilterQuery(target)}&filters[author][id][$eq]=${userId}&populate[author]=true&pagination[pageSize]=${OWN_REACTIONS_PAGE}`,
   );
   return withOwnReactions(summary, own.data ?? [], userId, target);

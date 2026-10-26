@@ -261,7 +261,17 @@ describe("createClassified: the two-step write", () => {
     expect(new Headers(init.headers).get("authorization")).toBe("Bearer jwt-1");
     expect((init.body as FormData).getAll("files")).toHaveLength(2);
     expect(init.cache).toBe("no-store");
+    expect(init.signal).toBeInstanceOf(AbortSignal);
     expect((strapiCalls()[0][2] as { data: { images: unknown } }).data.images).toEqual([11, 12]);
+  });
+
+  it("sends a revoked session to the sign-in page when the upload answers 401 (v0.30)", async () => {
+    fetchMock.mockResolvedValueOnce(new Response("Unauthorized", { status: 401 }));
+    const error = await createClassified({}, form({ images: [image("a.jpg")] })).catch(
+      (e: unknown) => e,
+    );
+    expect(digestOf(error)).toBe(digestOf(signInRedirect()));
+    expect(strapiMock).not.toHaveBeenCalled();
   });
 
   it("sweeps the just-uploaded ids AFTER a failed ad write, and answers 'failed' with the values", async () => {

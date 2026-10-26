@@ -20,6 +20,7 @@ import {
   MFA_INVALID_SIGN_IN_CODE,
   MFA_REQUIRED_SIGN_IN_CODE,
 } from "@/lib/auth-errors";
+import { credentialsTooLong } from "@/lib/auth/credentials";
 import { clientIpFrom, loginRateLimiter } from "@/lib/login-rate-limit";
 import { getSession } from "@/lib/session";
 import { safeInternalPath } from "@/lib/utils";
@@ -61,6 +62,11 @@ export async function signInWithCredentials(
   formData: FormData,
 ): Promise<SignInFormState> {
   const identifier = String(formData.get("identifier") ?? "");
+  // v0.30: input longer than a sign-in accepts is answered before the
+  // limiter peek and never echoed back (authorize() refuses it as well).
+  if (credentialsTooLong(identifier, String(formData.get("password") ?? ""))) {
+    return { error: "invalidCredentials" };
+  }
   const values = { identifier };
   // Read-only peek (never counts as an attempt): a blocked source gets its
   // answer without a sign-in round trip. Enforcement lives in authorize()

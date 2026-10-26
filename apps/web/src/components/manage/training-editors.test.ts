@@ -2,7 +2,7 @@ import { createElement } from "react";
 import { describe, expect, it, vi } from "vitest";
 import type { CourseEditable, LessonEditable } from "@sinnlos/domain";
 import type { AreaAccess } from "@/lib/manage/access";
-import { MESSAGES, render, tagById } from "./render.test.helper";
+import { MESSAGES, isDisabled, render, tagById } from "./render.test.helper";
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn(), replace: vi.fn(), refresh: vi.fn() }),
@@ -101,6 +101,24 @@ describe("training editor presentation", () => {
       expect(html).not.toContain(`>${MESSAGES[locale].manage.common.actions.discard}</button>`);
     },
   );
+  it("a new course whose department options failed cannot be saved, published or scheduled", () => {
+    const html = render(
+      createElement(TrainingCourseEditor, {
+        editable: null,
+        access,
+        timeZone: "Europe/Berlin",
+        departments: [],
+        optionsFailed: true,
+        optionsTruncated: false,
+      }),
+    );
+    const actions = MESSAGES.en.manage.common.actions;
+    for (const text of [actions.saveDraft, actions.publish, actions.schedule]) {
+      const button = html.match(new RegExp(`<button[^>]*>${text}</button>`))?.[0] ?? "";
+      expect(button, text).not.toBe("");
+      expect(isDisabled(button), text).toBe(true);
+    }
+  });
   it("offers discard only for a currently published version and never a web move or delete", () => {
     const html = render(
       createElement(TrainingLessonEditor, {

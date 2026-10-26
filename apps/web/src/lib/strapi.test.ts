@@ -36,6 +36,9 @@ vi.stubGlobal("fetch", fetchMock);
 const { api, findPollResults, pollRef, strapi } = await import("./strapi");
 const { demo } = await import("./demo");
 const { StrapiError } = await import("./strapi-error");
+const { STRAPI_TIMEOUT_MS } = await import("./strapi/client");
+const { fetchUserExport, sendAnonymise, sendUserInvite, sendUserLink } =
+  await import("./api/manage/users");
 
 /** A one-page Strapi list body — ends every page walk after one request. */
 const onePage = {
@@ -224,6 +227,56 @@ describe("strapi() — responses", () => {
   it("returns undefined for a 204 without a body", async () => {
     fetchMock.mockImplementation(async () => new Response(null, { status: 204 }));
     await expect(strapi("/api/classifieds/1", { method: "DELETE" })).resolves.toBeUndefined();
+  });
+});
+
+describe("strapi() — timeouts (v0.30)", () => {
+  /** A fetch that only ends when its signal aborts, like a hung cms. */
+  const hangUntilAborted = async (_: string, init: RequestInit) =>
+    new Promise<Response>((_resolve, reject) => {
+      const signal = init.signal!;
+      if (signal.aborted) reject(signal.reason);
+      signal.addEventListener("abort", () => reject(signal.reason));
+    });
+
+  it("gives up after the default when the caller passes no signal", async () => {
+    const timeout = vi
+      .spyOn(AbortSignal, "timeout")
+      .mockImplementation(() => AbortSignal.abort(new DOMException("timed out", "TimeoutError")));
+    fetchMock.mockImplementation(hangUntilAborted);
+    try {
+      await expect(strapi("/api/me")).rejects.toMatchObject({ name: "TimeoutError" });
+      expect(timeout).toHaveBeenCalledWith(STRAPI_TIMEOUT_MS);
+      expect(STRAPI_TIMEOUT_MS).toBe(15_000);
+    } finally {
+      timeout.mockRestore();
+    }
+  });
+
+  it("uses the caller's signal instead of the default", async () => {
+    const timeout = vi.spyOn(AbortSignal, "timeout");
+    const controller = new AbortController();
+    try {
+      await strapi("/api/me", { signal: controller.signal });
+      expect(inits()[0]!.signal).toBe(controller.signal);
+      expect(timeout).not.toHaveBeenCalled();
+    } finally {
+      timeout.mockRestore();
+    }
+  });
+
+  it("bounds the export by 120 s, the anonymisation by 300 s and the account mails by 30 s", async () => {
+    const timeout = vi.spyOn(AbortSignal, "timeout");
+    try {
+      await fetchUserExport(4);
+      await sendAnonymise(4, "ada");
+      await sendUserInvite({ email: "ada@example.test" } as Parameters<typeof sendUserInvite>[0]);
+      await sendUserLink(4);
+      expect(timeout.mock.calls).toEqual([[120_000], [300_000], [30_000], [30_000]]);
+      for (const init of inits()) expect(init.signal).toBeInstanceOf(AbortSignal);
+    } finally {
+      timeout.mockRestore();
+    }
   });
 });
 

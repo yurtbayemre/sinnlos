@@ -1,3 +1,4 @@
+import { redirect } from "next/navigation";
 import { createElement, isValidElement, type ReactElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { NextIntlClientProvider } from "next-intl";
@@ -44,7 +45,7 @@ const own: Comment = {
 } as Comment;
 const data: CommentSectionData = { comments: [own], reactions: [] };
 
-const render = (controls: Controls) =>
+const render = (controls: Controls, loadFailed?: boolean) =>
   renderToStaticMarkup(
     // eslint-disable-next-line react/no-children-prop -- a .test.ts has no JSX, and createElement's types want the provider's required children in the props
     createElement(NextIntlClientProvider, {
@@ -55,6 +56,7 @@ const render = (controls: Controls) =>
         target,
         currentUserId: 7,
         initial: data,
+        loadFailed,
         controls,
       }),
     }),
@@ -87,6 +89,39 @@ describe("CommentSection hands the viewer's controls to the client section", () 
     expect(isValidElement(element)).toBe(true);
     expect(element.props.controls).toEqual(commentControlsFor(role));
     expect(element.props.initial).toBe(data);
+  });
+});
+
+describe("CommentSection when the load fails (v0.30)", () => {
+  it("renders the section with the notice flag instead of the page's error screen", async () => {
+    const element = (await CommentSection({
+      target,
+      sections: Promise.reject(new Error("cms down")),
+    })) as ReactElement<{ loadFailed?: boolean; initial: CommentSectionData }>;
+    expect(element.props.loadFailed).toBe(true);
+    expect(element.props.initial.comments).toEqual([]);
+  });
+
+  it("lets the sign-in redirect of an expired session through", async () => {
+    let redirectError: unknown;
+    try {
+      redirect("/sign-in?expired=1");
+    } catch (e) {
+      redirectError = e;
+    }
+    await expect(CommentSection({ target, sections: Promise.reject(redirectError) })).rejects.toBe(
+      redirectError,
+    );
+  });
+
+  it("shows the notice only for a failed load", () => {
+    const controls = { comment: true, react: true, deleteOwn: true };
+    // The markup escapes the apostrophe of the English text.
+    const notice = en.comments.loadFailed.replace("'", "&#x27;");
+    expect(render(controls, true)).toContain(
+      `<p role="status" class="text-sm text-muted-foreground">${notice}</p>`,
+    );
+    expect(render(controls)).not.toContain('role="status"');
   });
 });
 

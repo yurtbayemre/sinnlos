@@ -6,14 +6,14 @@ let full = true;
 let database = true;
 let e2e = true;
 let range;
+// Only pull requests are narrowed. A push to main always runs everything, because
+// deploy.sh --require-green-ci accepts that run as proof for the commit.
 if (process.env.GITHUB_EVENT_NAME === "pull_request") {
   range = `${event.pull_request.base.sha}...${event.pull_request.head.sha}`;
-} else if (process.env.GITHUB_EVENT_NAME === "push" && !/^0+$/.test(event.before)) {
-  range = `${event.before}..${event.after}`;
 }
 
 if (range) {
-  if (!/^[a-f0-9]{40}\.{2,3}[a-f0-9]{40}$/.test(range)) {
+  if (!/^[a-f0-9]{40}\.{3}[a-f0-9]{40}$/.test(range)) {
     throw new Error("Invalid CI comparison commits");
   }
   const changesIn = (...pathspecs) => {

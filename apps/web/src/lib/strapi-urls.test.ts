@@ -182,8 +182,9 @@ function describeCall([url, init]: Call): string {
     .map(([name, value]) => `${name}=${value}`)
     .sort()
     .join(",");
+  // `signal` (v0.30) is on every call and sends no bytes; strapi.test.ts pins its bound.
   const other = Object.keys(init)
-    .filter((key) => !["method", "headers", "cache", "body"].includes(key))
+    .filter((key) => !["method", "headers", "cache", "body", "signal"].includes(key))
     .sort();
   return [
     `${init.method ?? "GET"} ${url}`,

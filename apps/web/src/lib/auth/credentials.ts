@@ -61,6 +61,19 @@ import {
 /** Timeout of each Strapi request of a sign-in. */
 export const LOCAL_SIGN_IN_TIMEOUT_MS = 5_000;
 
+/**
+ * The longest identifier and password a sign-in accepts (v0.30): an email
+ * address is at most 254 characters, and no password manager makes 1,024.
+ * Anything longer is refused at once, before the limiter and the cms.
+ */
+export const MAX_IDENTIFIER_LENGTH = 254;
+export const MAX_PASSWORD_LENGTH = 1024;
+
+/** True when either value is longer than a sign-in accepts. */
+export function credentialsTooLong(identifier: string, password: string): boolean {
+  return identifier.length > MAX_IDENTIFIER_LENGTH || password.length > MAX_PASSWORD_LENGTH;
+}
+
 export interface CredentialsDeps {
   /** Internal Strapi URL (STRAPI_URL). */
   strapiUrl: string;
@@ -185,9 +198,10 @@ export async function authorizeCredentials(
 ): Promise<User | null> {
   const identifier = typeof input.identifier === "string" ? input.identifier : "";
   const password = typeof input.password === "string" ? input.password : "";
-  // A code is at most a recovery code (xxxxx-xxxxx); anything longer is not one.
+  // A code is at most a recovery code (xxxx-xxxx-xxxx-xxxx, or the older
+  // xxxxx-xxxxx); anything longer is not one.
   const otp = typeof input.otp === "string" ? input.otp.trim().slice(0, 32) : "";
-  if (!identifier || !password) return null;
+  if (!identifier || !password || credentialsTooLong(identifier, password)) return null;
   const { clientIp } = input;
 
   // Reserve BEFORE touching Strapi (FX39). No log for a blocked attempt:

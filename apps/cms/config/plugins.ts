@@ -102,6 +102,8 @@ export default ({ env }: { env: Env }) => ({
           "image/svg+xml",
           "text/html",
           "application/xhtml+xml",
+          "application/xml",
+          "text/xml",
           "text/javascript",
           "application/javascript",
           "application/x-sh",

@@ -252,6 +252,21 @@ describe.each(testEngines())("blocked people hidden on %s", (engine) => {
     expect(headless.body.data.map((row) => row.slug)).toContain("it-sales");
     await empty(`/api/teams?filters[lead]=${gone.id}`);
     await empty(`/api/teams?filters[lead][$eq]=${gone.id}`);
+
+    // Nor a sort through a directory relation (v0.30): refused for every
+    // caller, at the root and inside a populate.
+    for (const caller of ["member", "admin_role"] as const) {
+      for (const path of [
+        "/api/departments?sort=head.id:asc",
+        "/api/departments?sort=head.blocked:desc",
+        "/api/teams?sort=lead.id",
+        "/api/users?sort=manager.id:asc",
+        "/api/departments?populate[members][sort]=manager.id:asc",
+      ]) {
+        expect((await t.api(caller, path)).status, `${caller} ${path}`).toBe(400);
+      }
+    }
+    expect((await t.api("member", "/api/departments?sort=name:asc")).status).toBe(200);
   });
 
   it("refuses kudos to a blocked person, and /api/me names no blocked manager", async () => {

@@ -122,10 +122,11 @@ describe("config/plugins.ts upload backstop (decision 06 §E1, amendment 2)", ()
     "sldx",
   ];
 
-  it("keeps the twelve earlier types and adds the three macro patterns", () => {
-    expect(security().deniedTypes).toHaveLength(15);
+  it("keeps the fourteen earlier types (XML since v0.30) and adds the three macro patterns", () => {
+    expect(security().deniedTypes).toHaveLength(17);
     expect(security().deniedTypes.slice(-3)).toEqual([...OFFICE_MACRO_DENIED_TYPES]);
     expect(security().deniedTypes).toContain("image/svg+xml");
+    expect(security().deniedTypes).toEqual(expect.arrayContaining(["application/xml", "text/xml"]));
   });
 
   it("matches every macro-enabled Office mime of mime-types and file-type", () => {

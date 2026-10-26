@@ -41,12 +41,21 @@ test("CI scopes use the whole change and keep the browser E2E exclusions narrow"
     });
     return { ...result, output: readFileSync(output, "utf8") };
   };
-  const check = (name, event, full, database = full, e2e = full) => {
+  const pr = (base, head) => ({ pull_request: { base: { sha: base }, head: { sha: head } } });
+  const expect = (name, event, full, database, e2e) => {
     const result = run(name, event);
     assert.equal(result.status, 0, result.stderr);
     assert.equal(result.output, `full=${full}\ndatabase=${database}\ne2e=${e2e}\n`);
   };
-  const pr = (base, head) => ({ pull_request: { base: { sha: base }, head: { sha: head } } });
+  // A push to main always runs everything (deploy.sh --require-green-ci trusts that run);
+  // the narrowed expectation of a push range is checked as the same range in a pull request.
+  const check = (name, event, full, database = full, e2e = full) => {
+    if (name !== "push") return expect(name, event, full, database, e2e);
+    expect(name, event, true, true, true);
+    if (!/^0+$/.test(event.before)) {
+      expect("pull_request", pr(event.before, event.after), full, database, e2e);
+    }
+  };
 
   git("init", "-q");
   git("config", "core.autocrlf", "false");

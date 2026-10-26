@@ -162,13 +162,16 @@
       "confirm": "Endgültig anonymisieren",
       "blockFirst": "Zum Anonymisieren die Person zuerst sperren (im Formular oben).",
       "done": "Die Person ist anonymisiert.",
-      "doneAvatarKept": "Die Person ist anonymisiert. Das Profilbild (Datei {id}) wird noch anderswo verwendet oder ließ sich nicht entfernen: bitte in der Medienbibliothek prüfen."
+      "avatarKept": "Das Profilbild (Datei {id}) wird noch anderswo verwendet oder ließ sich nicht entfernen: bitte in der Medienbibliothek prüfen.",
+      "remaining": "{count, plural, one {Eine Benachrichtigung steht} other {# Benachrichtigungen stehen}} noch aus; die nächtliche Bereinigung wiederholt das.",
+      "remainingUnknown": "Einige Benachrichtigungen stehen möglicherweise noch aus; die nächtliche Bereinigung wiederholt das."
     },
     "error": {
       "notBlocked": "Die Person ist nicht gesperrt. Bitte zuerst sperren.",
       "anonymised": "Die Person ist bereits anonymisiert.",
       "confirm": "Der Benutzername stimmt nicht.",
-      "failed": "Das hat nicht geklappt. Bitte erneut versuchen."
+      "failed": "Das hat nicht geklappt. Bitte erneut versuchen.",
+      "uncertain": "Es kam keine Antwort. Die Seite zeigt jetzt den aktuellen Stand: Steht die Person als anonymisiert da, hat es geklappt; sonst bitte erneut versuchen."
     },
     "classes": {
       "reactions": "Reaktionen",

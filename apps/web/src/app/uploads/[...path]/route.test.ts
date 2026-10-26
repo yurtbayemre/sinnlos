@@ -87,6 +87,49 @@ describe("GET /uploads/[...path] (FX41)", () => {
     expect(new Headers(fileInit.headers).get("authorization")).toBeNull();
   });
 
+  it("answers a video range request with 206 and the partial bytes, inline (v0.30)", async () => {
+    fetchMock.mockImplementation(async (url: string) =>
+      url === CHECK
+        ? active()
+        : new Response("0123", {
+            status: 206,
+            headers: {
+              "content-type": "video/mp4",
+              "content-range": "bytes 0-3/100",
+              "accept-ranges": "bytes",
+            },
+          }),
+    );
+    const res = await GET(
+      new NextRequest("http://web.test/uploads/clip_abc123.mp4", {
+        headers: { range: "bytes=0-3" },
+      }),
+      { params: Promise.resolve({ path: ["clip_abc123.mp4"] }) },
+    );
+    expect(res.status).toBe(206);
+    expect(await res.text()).toBe("0123");
+    expect(res.headers.get("content-range")).toBe("bytes 0-3/100");
+    expect(res.headers.get("accept-ranges")).toBe("bytes");
+    expect(res.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(res.headers.get("content-disposition")).toBeNull();
+    expect(res.headers.get("content-security-policy")).toBeNull();
+    const [, fileInit] = fetchMock.mock.calls[1];
+    expect(new Headers(fileInit.headers).get("range")).toBe("bytes=0-3");
+  });
+
+  it("delivers a type outside the inline list as a sandboxed download (v0.30)", async () => {
+    fetchMock.mockImplementation(async (url: string) =>
+      url === CHECK
+        ? active()
+        : new Response("<svg/>", { status: 200, headers: { "content-type": "image/svg+xml" } }),
+    );
+    const res = await get(["logo_abc123.svg"]);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-disposition")).toBe("attachment");
+    expect(res.headers.get("content-security-policy")).toBe("sandbox");
+    expect(res.headers.get("x-content-type-options")).toBe("nosniff");
+  });
+
   it("answers 401 for a blocked or rejected account, without any bytes", async () => {
     cms(rejected);
     const res = await get();

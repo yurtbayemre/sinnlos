@@ -74,7 +74,7 @@ Stand: v0.28. Dieses Dokument richtet sich an die Datenschutzbeauftragte bzw. de
 3. Die **Anonymisierung** aufrufen: eine Vorschau zeigt, was gelöscht wird, was neutral weiterbesteht und was aufbewahrt bleibt.
 4. Mit dem Benutzernamen der Person bestätigen.
 
-Die Anonymisierung ist **endgültig**. Das Konto lässt sich danach weder entsperren noch bearbeiten, auch nicht im Strapi-Adminpanel. Sie läuft in einer einzigen Datenbanktransaktion und wird im Aktivitätsprotokoll vermerkt (Aktion `anonymise`, nur Zahlen, keine Namen).
+Die Anonymisierung ist **endgültig**. Das Konto lässt sich danach weder entsperren noch bearbeiten, auch nicht im Strapi-Adminpanel. Sie wird im Aktivitätsprotokoll vermerkt (Aktion `anonymise`, nur Zahlen, keine Namen); den Ablauf beschreibt „Ablauf seit v0.30“ unten.
 
 **Gelöscht:** Profil (Name, E-Mail, Benutzername, Stellenbezeichnung, Telefon, Büro, Eintrittsdatum, Geburtstag, Sprache, die Digest-Abos), Passwort, Zweiter Faktor und Links, Profilbild, Reaktionen, Umfragestimmen, Zusagen, Kudos **an** die Person, alle Benachrichtigungen der Person, ihre Lesebestätigungen, ihre Marktplatz-Anzeigen mit Bildern.
 
@@ -93,7 +93,16 @@ Die Anonymisierung ist **endgültig**. Das Konto lässt sich danach weder entspe
 - die Abteilungs- und Teamzuordnung am anonymisierten Konto (im Intranet ausgeblendet);
 - **Sicherungen**, bis sie rotieren.
 
-**Nächtlicher Löschlauf (03:20):** Er wiederholt für alle anonymisierten Konten das Löschen von Reaktionen, Umfragestimmen, Zusagen, Kudos an die Person, ihren Benachrichtigungen, Lesebestätigungen und Marktplatz-Anzeigen (mit ihren Bildern) sowie die Namensersetzung. So verschwindet auch, was in den Sekunden um die Anonymisierung noch entstand, etwa eine Benachrichtigung aus einem gerade laufenden Versand oder eine Anzeige, deren Speichern noch vor der Sperre begann: spätestens in der folgenden Nacht. Das Profilbild wiederholt er nicht.
+**Ablauf seit v0.30:**
+
+1. Sperre prüfen, Konto ersetzen und die Löschungen: eine Transaktion, ganz oder gar nicht.
+2. Danach, in derselben Anfrage: Die Benachrichtigungen anderer Personen, die die Person nannten, werden seitenweise umgeschrieben, jede Seite für sich gespeichert, nachdem die Sperre des Verzeichnisses schon freigegeben ist. Bricht das ab, bleibt das Konto trotzdem anonymisiert.
+3. Das Profilbild wird entfernt, auch wenn Schritt 2 abbrach, sofern keine andere Stelle es verwendet (sonst wie oben). Schlägt das Löschen fehl, meldet die Seite das ebenso.
+4. Die Antwort nennt, wie viele Benachrichtigungen beim letzten Zählen noch ausstanden, oder dass diese Zählung fehlschlug. Ein zweiter Eintrag im Aktivitätsprotokoll hält das fest, wenn er sich schreiben lässt.
+
+Was aussteht, wiederholt der nächtliche Löschlauf, solange die nächtlichen Aufgaben laufen (`CRON_ENABLED`).
+
+**Nächtlicher Löschlauf (03:20):** Er wiederholt für alle anonymisierten Konten das Löschen von Reaktionen, Umfragestimmen, Zusagen, Kudos an die Person, ihren Benachrichtigungen, Lesebestätigungen und Marktplatz-Anzeigen (mit ihren Bildern) sowie die Namensersetzung. So verschwindet auch, was in den Sekunden um die Anonymisierung noch entstand, etwa eine Benachrichtigung aus einem gerade laufenden Versand oder eine Anzeige, deren Speichern noch vor der Sperre begann: beim nächsten Lauf, also bei laufenden nächtlichen Aufgaben in der folgenden Nacht. Das Profilbild wiederholt er nicht.
 
 **Rückkehr zu einer älteren Version:** Versionen vor v0.28 kennen die Anonymisierung nicht. Ob nach der ersten Anonymisierung auf eine ältere Version zurückgewechselt wird, entscheidet der Betreiber; solange sie läuft, dürfen Konten „Ehemalige Person“ nicht entsperrt werden ([UPGRADE.md](UPGRADE.md#release-notes), „Upgrading to v0.28“).
 

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { TrainingEvidenceRow } from "@sinnlos/domain";
+import type { AnonymiseResponse, TrainingEvidenceRow } from "@sinnlos/domain";
 import { StrapiError } from "@/lib/strapi-error";
 import type { Viewer } from "@/lib/viewer";
 import { evidenceCsv } from "@/lib/training-report-csv";
@@ -76,7 +76,14 @@ describe("anonymisation actions (v0.28)", () => {
   });
 
   it("runs with the trimmed username, refreshes, and hands the outcome on", async () => {
-    const data = { id: 12, anonymisedAt: "2026-10-23T12:00:00.000Z", counts: COUNTS, avatar: null };
+    // The shared contract (packages/domain), so the fixture is what the UI reads.
+    const data: AnonymiseResponse["data"] = {
+      id: 12,
+      anonymisedAt: "2026-10-23T12:00:00.000Z",
+      counts: COUNTS,
+      notifications: { rewritten: 2, remaining: 0 },
+      avatar: null,
+    };
     strapi.mockResolvedValue({ data });
     await expect(anonymiseUser(12, " casey ")).resolves.toEqual({ ok: true, data });
     const [path, init] = strapi.mock.calls.at(-1)! as [string, { method: string; body: string }];
@@ -123,7 +130,9 @@ describe("the downloads (v0.28)", () => {
   it("downloads the export as JSON named by the username, never cached", async () => {
     strapi.mockResolvedValue({ meta: {}, account: { username: "casey.jones" }, content: {} });
     const res = await exportDownload("12");
-    expect(strapi).toHaveBeenCalledWith("/api/user-management/12/export");
+    expect(strapi).toHaveBeenCalledWith("/api/user-management/12/export", {
+      signal: expect.any(AbortSignal),
+    });
     expect(res.status).toBe(200);
     expect(res.headers.get("cache-control")).toBe("private, no-store");
     expect(res.headers.get("content-type")).toBe("application/json; charset=utf-8");

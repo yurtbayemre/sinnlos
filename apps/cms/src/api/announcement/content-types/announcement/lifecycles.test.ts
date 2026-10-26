@@ -142,6 +142,20 @@ describe("announcement afterCreate: audience = targeting AND read grant AND acti
     expect(recipientsOf(strapi)).toEqual([USER.dave, USER.anna]);
   });
 
+  it("an announcement published after its end notifies nobody (v0.30)", async () => {
+    const strapi = setup();
+    const row = publish(strapi, { expiresAt: "2020-01-01T00:00:00.000Z" });
+    await lifecycles.afterCreate({ result: row });
+    expect(notificationRows(strapi)).toEqual([]);
+  });
+
+  it("an end still ahead notifies as usual", async () => {
+    const strapi = setup();
+    const row = publish(strapi, { expiresAt: "2999-01-01T00:00:00.000Z" });
+    await lifecycles.afterCreate({ result: row });
+    expect(recipientsOf(strapi)).toEqual(READERS.filter((id) => id !== USER.carol));
+  });
+
   it("a user whose blocked flag is NULL is active", async () => {
     const strapi = setup();
     for (const user of strapi.tables["plugin::users-permissions.user"]) {
@@ -254,6 +268,34 @@ describe("announcement re-publish dedup (issue #12)", () => {
 });
 
 describe("announcement hooks", () => {
+  it("an expired republish reaches nobody new, not even through a fan-out queued before it (v0.30)", async () => {
+    const strapi = setup();
+    const first = publish(strapi, { department: { id: DEPT.engineering } });
+    await lifecycles.afterCreate({ result: first });
+    const engineering = recipientsOf(strapi);
+    const draft = () => {
+      const row = strapi.tables[ANNOUNCEMENT_UID].find(
+        (r) => r.documentId === first.documentId && r.publishedAt === null,
+      );
+      if (!row) throw new Error("no draft");
+      return row;
+    };
+    const republish = async () =>
+      (await strapi.documents(ANNOUNCEMENT_UID).publish({ documentId: String(first.documentId) }))
+        .entries[0];
+    // Opened to everyone (bob was never notified); before that publish's
+    // fan-out ran, a moderator ended it and published again.
+    draft().department = null;
+    const opened = await republish();
+    draft().expiresAt = "2020-01-01T00:00:00.000Z";
+    const ended = await republish();
+
+    await lifecycles.afterCreate({ result: opened });
+    await lifecycles.afterCreate({ result: ended });
+    expect(recipientsOf(strapi)).toEqual(engineering);
+    expect(engineering).not.toContain(USER.bob);
+  });
+
   it("a draft (publishedAt null) touches no data at all", async () => {
     const strapi = setup();
     await lifecycles.afterCreate({ result: { id: 1, documentId: "d1", publishedAt: null } });

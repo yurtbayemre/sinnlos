@@ -510,7 +510,8 @@
     "sendComment": "Kommentar senden",
     "sendFailed": "Kommentar konnte nicht gesendet werden – bitte erneut versuchen.",
     "deleteFailed": "Kommentar konnte nicht gelöscht werden – bitte erneut versuchen.",
-    "reactionFailed": "Reaktion konnte nicht gespeichert werden – bitte erneut versuchen."
+    "reactionFailed": "Reaktion konnte nicht gespeichert werden – bitte erneut versuchen.",
+    "loadFailed": "Die Kommentare konnten gerade nicht geladen werden. Sie erscheinen, sobald die Verbindung wieder steht."
   },
   "relativeTime": {
     "justNow": "gerade eben",
