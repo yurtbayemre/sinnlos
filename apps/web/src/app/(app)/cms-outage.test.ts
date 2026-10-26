@@ -17,6 +17,8 @@ import { StrapiError } from "@/lib/strapi-error";
  * real. The pages' returned element trees are searched, not rendered.
  */
 const outage = () => Promise.reject(new StrapiError(502, "Bad Gateway", ""));
+/** The ack report's page readers (v0.31), spied on so the test sees them fail. */
+const reportPages = vi.hoisted(() => ({ announcements: vi.fn(), documents: vi.fn() }));
 
 vi.mock("@/lib/strapi", async () => {
   const polls = await import("@/lib/api/polls");
@@ -40,7 +42,12 @@ vi.mock("@/lib/acknowledgements", async (importOriginal) => ({
   fetchMyAnnouncementAcks: outage,
   fetchAnnouncementAckIndex: outage,
 }));
-vi.mock("@/lib/api/announcements", () => ({ listAckReportAnnouncements: outage }));
+vi.mock("@/lib/api/announcements", () => ({
+  ackReportAnnouncementsPage: (page: number) => reportPages.announcements(page),
+}));
+vi.mock("@/lib/api/documents", () => ({
+  ackReportDocumentsPage: (page: number) => reportPages.documents(page),
+}));
 vi.mock("@/lib/api/analytics", () => ({
   countPage: outage,
   reactionsPage: outage,
@@ -98,6 +105,8 @@ function elements(node: ReactNode): Array<{ type: unknown; props: Record<string,
 
 beforeEach(() => {
   vi.spyOn(console, "error").mockImplementation(() => {});
+  reportPages.announcements.mockReset().mockImplementation(outage);
+  reportPages.documents.mockReset().mockImplementation(outage);
 });
 
 describe("the CMS is down", () => {
@@ -112,6 +121,12 @@ describe("the CMS is down", () => {
       }
     },
   );
+
+  it("the ack report asked both page readers, and both failed", async () => {
+    await pages["/manage/acknowledgements"]!();
+    expect(reportPages.announcements.mock.calls).toEqual([[1]]);
+    expect(reportPages.documents.mock.calls).toEqual([[1]]);
+  });
 
   it("the dashboard's news widget keeps its heading and link, without the empty state", async () => {
     const news = elements(await pages["/"]!()).find((el) => el.type === LatestNews);

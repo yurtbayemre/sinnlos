@@ -157,6 +157,25 @@ describe("DEMO_MODE: every read has a fixture route", () => {
     },
   );
 
+  it("refuses a report index request the cms refuses (v0.31)", () => {
+    const post = (body: unknown) =>
+      demo("/api/acknowledgements/report-index", { method: "POST", body: JSON.stringify(body) });
+    for (const body of [
+      { targetType: "poll", documentIds: [] },
+      { targetType: "announcement" },
+      { targetType: "announcement", documentIds: [5] },
+      { targetType: "announcement", documentIds: [""] },
+      { targetType: "announcement", documentIds: ["x".repeat(65)] },
+      { targetType: "document", documentIds: Array.from({ length: 21 }, (_, i) => `d${i}`) },
+    ]) {
+      expect(() => post(body), JSON.stringify(body).slice(0, 60)).toThrow(StrapiError);
+    }
+    expect(post({ targetType: "document", documentIds: ["d1"] })).toEqual({
+      data: { acks: { d1: [] } },
+      meta: { truncated: false },
+    });
+  });
+
   it("warns (outside production) and answers an empty list for an unknown path", () => {
     expect(listOf(demo("/api/nothing-here?x=1")).data).toEqual([]);
     expect(warnings()).toEqual(["[demo] no fixture for GET /api/nothing-here?x=1"]);

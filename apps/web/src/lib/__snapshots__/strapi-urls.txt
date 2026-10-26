@@ -98,8 +98,7 @@ GET http://cms.test/api/acknowledgements?filters[targetType][$eq]=document&filte
 GET http://cms.test/api/me cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
 
 ## acknowledgements.fetchAnnouncementAckIndex
-POST http://cms.test/api/acknowledgements/report-index cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json] body={"targetType":"announcement","documentIds":["ann doc 0","ann doc 1","ann doc 2","ann doc 3","ann doc 4","ann doc 5","ann doc 6","ann doc 7","ann doc 8","ann doc 9","ann doc 10","ann doc 11","ann doc 12","ann doc 13","ann doc 14","ann doc 15","ann doc 16","ann doc 17","ann doc 18","ann doc 19"]}
-POST http://cms.test/api/acknowledgements/report-index cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json] body={"targetType":"announcement","documentIds":["ann doc 20"]}
+POST http://cms.test/api/acknowledgements/report-index cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json] body={"targetType":"announcement","documentIds":["ann doc 0","ann doc 1"]}
 
 ## acknowledgements.fetchDocumentAckIndex
 POST http://cms.test/api/acknowledgements/report-index cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json] body={"targetType":"document","documentIds":["doc doc 0"]}

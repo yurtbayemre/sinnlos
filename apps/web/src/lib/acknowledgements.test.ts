@@ -15,7 +15,7 @@ vi.mock("@/lib/strapi/client", () => ({
 const viewer = { id: 7 as number | null };
 vi.mock("@/lib/viewer", () => ({ getViewer: async () => viewer }));
 
-const { REPORT_ACK_CHUNK, computeOpenAcks, fetchAnnouncementAckIndex, fetchMyAnnouncementAcks } =
+const { computeOpenAcks, fetchAnnouncementAckIndex, fetchMyAnnouncementAcks } =
   await import("./acknowledgements");
 
 beforeEach(() => {
@@ -64,8 +64,8 @@ describe("computeOpenAcks", () => {
 
 /**
  * The report's index (FX32; v0.31, #173): one POST to the cms report index
- * per REPORT_ACK_CHUNK listed documentIds. The mock answers like the cms:
- * every requested id with its user ids, and `meta.truncated`.
+ * for the shown page's documentIds. The mock answers like the cms: every
+ * requested id with its user ids, and `meta.truncated`.
  */
 describe("fetchAnnouncementAckIndex (FX32)", () => {
   const doc = (n: number) => `ann${String(n).padStart(21, "0")}`;
@@ -93,18 +93,6 @@ describe("fetchAnnouncementAckIndex (FX32)", () => {
         },
       ],
     ]);
-  });
-
-  it(`asks in chunks of ${REPORT_ACK_CHUNK} and merges them into one index`, async () => {
-    const ids = Array.from({ length: 45 }, (_, i) => doc(i + 1));
-    serve(Object.fromEntries(ids.map((id, i) => [id, [i + 1, 1000]])));
-    const { index, truncated } = await fetchAnnouncementAckIndex(ids);
-    expect(truncated).toBe(false);
-    expect(index.size).toBe(45);
-    expect([...index.get(doc(3))!]).toEqual([3, 1000]);
-    expect(
-      strapiMock.mock.calls.map(([, init]) => JSON.parse(init.body).documentIds.length),
-    ).toEqual([20, 20, 5]);
   });
 
   it("keeps an entry for a listed item nobody confirmed and ignores what was not asked or no id", async () => {

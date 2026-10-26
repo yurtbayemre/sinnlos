@@ -24,9 +24,6 @@ const PAGE_SIZE = 100;
 /** The caller's own acks: 20 pages x 100 = 2000 confirmations. */
 const MY_ACKS_MAX_PAGES = 20;
 
-/** The most documentIds the cms report index takes per request (v0.31). */
-export const REPORT_ACK_CHUNK = 20;
-
 /** All matching announcement acks, plus whether the page walk finished. */
 export interface AnnouncementAcksResult {
   acks: Acknowledgement[];
@@ -61,20 +58,20 @@ async function fetchMyAcks(
 export interface AnnouncementAckIndexResult {
   /** documentId → ids of the users who acknowledged it (every listed id has an entry). */
   index: AckIndex;
-  /** true when the cms stopped any request at its budget (2,000 receipts per item). */
+  /** true when the cms stopped at its budget (2,000 receipts per item). */
   truncated: boolean;
 }
 
 /**
  * The acknowledgements of exactly the given announcements, across ALL users
  * — only useful for admin_role, for the /manage/acknowledgements report
- * (FX32). v0.31 (#173): the cms reads them (POST
- * /api/acknowledgements/report-index, REPORT_ACK_CHUNK documentIds a
- * request; the report shows 20 items a page, so one request per section)
- * and answers documentId → user ids. Any failure rejects (the page's
- * tryFetch turns it into its CMS-down banner); a request cut short at the
- * cms's budget sets `truncated`, which the report treats as incomplete
- * (reportCompleteness). Only the requested ids and numeric user ids count.
+ * (FX32). v0.31 (#173): the cms reads them in one request (POST
+ * /api/acknowledgements/report-index, up to 20 documentIds: one report
+ * page of a section) and answers documentId → user ids. Any failure
+ * rejects (the page's tryFetch turns it into its CMS-down banner), more
+ * than 20 ids too; an answer cut short at the cms's budget sets
+ * `truncated`, which the report treats as incomplete (reportCompleteness).
+ * Only the requested ids and numeric user ids count.
  */
 export function fetchAnnouncementAckIndex(
   documentIds: string[],
@@ -93,17 +90,14 @@ async function fetchAckIndex(
 ): Promise<AnnouncementAckIndexResult> {
   const ids = [...new Set(documentIds.filter((id) => typeof id === "string" && id !== ""))];
   const index: AckIndex = new Map(ids.map((id) => [id, new Set<number>()]));
-  let truncated = false;
-  for (let start = 0; start < ids.length; start += REPORT_ACK_CHUNK) {
-    const answer = await ackReportIndex(targetType, ids.slice(start, start + REPORT_ACK_CHUNK));
-    for (const [documentId, users] of Object.entries(answer.data?.acks ?? {})) {
-      const set = index.get(documentId);
-      if (!set || !Array.isArray(users)) continue;
-      for (const id of users) if (typeof id === "number") set.add(id);
-    }
-    truncated ||= answer.meta?.truncated === true;
+  if (ids.length === 0) return { index, truncated: false };
+  const answer = await ackReportIndex(targetType, ids);
+  for (const [documentId, users] of Object.entries(answer.data?.acks ?? {})) {
+    const set = index.get(documentId);
+    if (!set || !Array.isArray(users)) continue;
+    for (const id of users) if (typeof id === "number") set.add(id);
   }
-  return { index, truncated };
+  return { index, truncated: answer.meta?.truncated === true };
 }
 
 /**

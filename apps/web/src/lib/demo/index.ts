@@ -91,7 +91,11 @@ function reportIndex(data: DemoData, body: unknown) {
   if (targetType !== "announcement" && targetType !== "document") {
     throw cmsError(400, "Invalid targetType");
   }
-  if (!Array.isArray(documentIds) || documentIds.length > 20) {
+  if (
+    !Array.isArray(documentIds) ||
+    documentIds.length > 20 ||
+    !documentIds.every((id) => typeof id === "string" && id !== "" && id.length <= 64)
+  ) {
     throw cmsError(400, "documentIds must be up to 20 documentIds");
   }
   const receipts = receiptsOf(data, targetType);
@@ -103,7 +107,7 @@ function reportIndex(data: DemoData, body: unknown) {
     ),
   ];
   return {
-    data: { acks: Object.fromEntries(documentIds.map((id) => [String(id), users(id)])) },
+    data: { acks: Object.fromEntries(documentIds.map((id: string) => [id, users(id)])) },
     meta: { truncated: false },
   };
 }

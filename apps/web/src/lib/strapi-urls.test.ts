@@ -273,9 +273,7 @@ const DIRECT_READS: Record<string, () => Promise<unknown>> = {
   "acknowledgements.fetchMyAnnouncementAcks": () => fetchMyAnnouncementAcks(),
   "acknowledgements.fetchMyDocumentAcks": () => fetchMyDocumentAcks(),
   "acknowledgements.fetchAnnouncementAckIndex": () =>
-    fetchAnnouncementAckIndex(
-      Array.from({ length: 21 }, (_, i) => `ann doc ${i}`).concat(["ann doc 0", ""]),
-    ),
+    fetchAnnouncementAckIndex(["ann doc 0", "ann doc 1", "ann doc 0", ""]),
   "acknowledgements.fetchDocumentAckIndex": () => fetchDocumentAckIndex(["doc doc 0"]),
   "announcements.loadOpenAckCount": () => loadOpenAckCount(),
   "training.fetchCourses": () => training.fetchCourses(),

@@ -134,6 +134,19 @@ describe("openAckCounts", () => {
     });
   });
 
+  it("a visible set past the bind limit fails closed like the policy (counts nothing)", async () => {
+    // SQLite: 32,766 parameters minus the 1,000 of headroom (utils/policy-query.ts).
+    const oversized = Array.from({ length: 31_767 }, (_, i) => i + 1);
+    visible.announcement = oversized;
+    visible.document = Array.from({ length: 31_767 }, (_, i) => i + 11);
+    expect(await openAckCounts(strapi as never, MEMBER)).toEqual({
+      announcements: 0,
+      documents: 0,
+    });
+    visible.announcement = oversized.slice(0, 31_766);
+    expect((await openAckCounts(strapi as never, MEMBER)).announcements).toBe(2);
+  });
+
   it("a kind whose read grant the role lacks is null, never 0", async () => {
     expect(await openAckCounts(strapi as never, GUEST)).toEqual({
       announcements: null,
