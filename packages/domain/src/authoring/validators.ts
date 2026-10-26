@@ -1,5 +1,6 @@
 import type { AuthoringFieldCode } from "./codes.js";
 import { isIconKey } from "./icons.js";
+import { startsWithRealDay } from "../plain-date.js";
 
 /**
  * The value checks of v2 authoring (deep-dive decision 06 §B1.3; batch 15
@@ -42,7 +43,12 @@ const OFFSET_INSTANT =
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,9})?)?(?:Z|[+-]\d{2}:\d{2})$/;
 
 export function isOffsetInstant(value: unknown): value is string {
-  return isString(value) && OFFSET_INSTANT.test(value) && !Number.isNaN(Date.parse(value));
+  return (
+    isString(value) &&
+    OFFSET_INSTANT.test(value) &&
+    startsWithRealDay(value) &&
+    !Number.isNaN(Date.parse(value))
+  );
 }
 
 /** The epoch milliseconds of an offset instant, or null. */

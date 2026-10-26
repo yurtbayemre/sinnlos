@@ -74,6 +74,8 @@ describe("validateDutyShifts", () => {
     const cases: [unknown, string][] = [
       [[{ startsAt: "2026-10-21T04:00:00Z", endsAt: "2026-10-21T12:00:00Z" }], "invalid"],
       [[shift(1, "2026-10-21T06:00:00", "2026-10-21T14:00:00")], "invalid"],
+      // #188: an impossible day is refused, not stored as March 2
+      [[shift(1, "2026-02-30T06:00:00Z", "2026-02-30T14:00:00Z")], "invalid"],
       [[shift(1, "2026-10-21T12:00:00Z", "2026-10-21T04:00:00Z")], "endBeforeStart"],
       [[shift(1, "2026-10-01T00:00:00Z", "2026-10-16T00:00:00Z")], "endBeforeStart"],
       [

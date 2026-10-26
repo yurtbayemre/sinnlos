@@ -73,6 +73,8 @@ describe("instants (DT-OFFSETLESS)", () => {
       "2026-10-01T07:00Z",
       "2026-10-01T09:00:00+02:00",
       "2026-10-01T09:00:00.123456-05:30",
+      "2028-02-29T07:00:00Z",
+      "0099-01-01T06:00:00Z", // an early year stays an instant (#188)
     ]) {
       expect(isOffsetInstant(value), value).toBe(true);
       expect(checkInstant(value), value).toBeNull();
@@ -86,6 +88,10 @@ describe("instants (DT-OFFSETLESS)", () => {
       "2026-10-01T09:00:00",
       "2026-10-01",
       "2026-13-01T09:00:00Z",
+      // #188: Date.parse would roll these over into the next month
+      "2026-02-30T06:00:00Z",
+      "2027-02-29T06:00:00Z",
+      "2026-04-31T06:00:00+02:00",
       "yesterday",
       "",
       1_700_000_000_000,

@@ -43,6 +43,28 @@ export function isPlainDate(value: unknown): value is string {
   );
 }
 
+/**
+ * False when `value` starts with a 'YYYY-MM-DD' that is no calendar day of
+ * that year (#188): Date.parse rolls 2026-02-30 over into March 2, the cms's
+ * Temporal parser refuses it. Unlike isPlainDate's Date.UTC probe it keeps
+ * the years 0000–0099 (Date.UTC reads them as 1900–1999), so an early-year
+ * instant stays valid; isPlainDate keeps its own range. True for a value
+ * without that prefix: the caller's own format check decides.
+ */
+export function startsWithRealDay(value: string): boolean {
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(value);
+  if (!match) return true;
+  const [year, month, day] = [Number(match[1]), Number(match[2]), Number(match[3])];
+  if (month < 1 || month > 12 || day < 1) return false;
+  const probe = new Date(0);
+  probe.setUTCFullYear(year, month - 1, day);
+  return (
+    probe.getUTCFullYear() === year &&
+    probe.getUTCMonth() === month - 1 &&
+    probe.getUTCDate() === day
+  );
+}
+
 /** True when Intl knows the IANA zone name. */
 export function isValidTimeZone(timeZone: string): boolean {
   return canonicalTimeZone(timeZone) !== null;
@@ -167,7 +189,7 @@ export function instantEpochMs(instant: Date | string): number | null {
   }
   if (typeof instant !== "string") return null;
   const trimmed = instant.trim();
-  if (!INSTANT_RE.test(trimmed)) return null;
+  if (!INSTANT_RE.test(trimmed) || !startsWithRealDay(trimmed)) return null;
   const ms = Date.parse(trimmed);
   return Number.isNaN(ms) ? null : ms;
 }
