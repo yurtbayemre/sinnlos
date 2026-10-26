@@ -1,7 +1,8 @@
 /**
  * Calendar dates and zone lookups with Intl only (datetime contract,
- * deep-dive decision 04, C5). No imports and no process access, so the file
- * runs anywhere: cms, web server code and web client components.
+ * deep-dive decision 04, C5). No process access and no import beyond the
+ * pure authoring/validators.js, so the file runs anywhere: cms, web server
+ * code and web client components.
  *
  * One implementation for both apps (SH01): apps/cms/src/utils/plain-date.ts
  * and apps/web/src/lib/plain-date.ts re-export it. The cms's Temporal module
@@ -15,6 +16,8 @@
  * Every zone is explicit (an IANA name, normally APP_TIME_ZONE); the process
  * zone is never used.
  */
+
+import { startsWithRealDay } from "./authoring/validators.js";
 
 const PLAIN_DATE_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
 const WALL_TIME_RE = /^([01]\d|2[0-3]):([0-5]\d)(?::([0-5]\d))?$/;
@@ -36,28 +39,6 @@ export function isPlainDate(value: unknown): value is string {
   const [year, month, day] = [Number(match[1]), Number(match[2]), Number(match[3])];
   if (month < 1 || month > 12 || day < 1) return false;
   const probe = new Date(Date.UTC(year, month - 1, day));
-  return (
-    probe.getUTCFullYear() === year &&
-    probe.getUTCMonth() === month - 1 &&
-    probe.getUTCDate() === day
-  );
-}
-
-/**
- * False when `value` starts with a 'YYYY-MM-DD' that is no calendar day of
- * that year (#188): Date.parse rolls 2026-02-30 over into March 2, the cms's
- * Temporal parser refuses it. Unlike isPlainDate's Date.UTC probe it keeps
- * the years 0000–0099 (Date.UTC reads them as 1900–1999), so an early-year
- * instant stays valid; isPlainDate keeps its own range. True for a value
- * without that prefix: the caller's own format check decides.
- */
-export function startsWithRealDay(value: string): boolean {
-  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(value);
-  if (!match) return true;
-  const [year, month, day] = [Number(match[1]), Number(match[2]), Number(match[3])];
-  if (month < 1 || month > 12 || day < 1) return false;
-  const probe = new Date(0);
-  probe.setUTCFullYear(year, month - 1, day);
   return (
     probe.getUTCFullYear() === year &&
     probe.getUTCMonth() === month - 1 &&
