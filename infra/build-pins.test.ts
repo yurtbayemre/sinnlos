@@ -196,6 +196,9 @@ describe("CI's arm64 images for the registry deploy (v0.33)", () => {
     // No Actions cache for image layers: a fork's pull request may read main's caches.
     expect(ci).not.toContain("type=gha");
     expect(job).toContain("    environment: ghcr-publish\n");
+    // The package must not be linked to the public repository (inherited access).
+    expect(job).toContain("          labels: org.opencontainers.image.source=\n");
+    expect(job.match(/p\.get\("repository"\)/g)).toHaveLength(2);
     // Only the exact answer "private" lets the push happen.
     expect(job.match(/if \[\[ "\$\{visibility\}" != private \]\]; then/g)).toHaveLength(2);
     expect(job.match(/curl -fsS /g)).toHaveLength(2);

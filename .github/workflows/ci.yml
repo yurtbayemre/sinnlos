@@ -549,9 +549,9 @@ jobs:
           fi
           visibility="$(curl -fsS -H "Authorization: Bearer ${GHCR_TOKEN}" -H "Accept: application/vnd.github+json" \
             "https://api.github.com/users/yurtbayemre/packages/container/sinnlos-${APP}" |
-            python3 -c 'import json, sys; print(json.load(sys.stdin).get("visibility", ""))')"
+            python3 -c 'import json, sys; p = json.load(sys.stdin); print("linked to " + p["repository"]["full_name"] if p.get("repository") else p.get("visibility", ""))')"
           if [[ "${visibility}" != private ]]; then
-            echo "::error::ghcr.io/yurtbayemre/sinnlos-${APP} is '${visibility:-unknown}', not private: nothing is pushed"
+            echo "::error::ghcr.io/yurtbayemre/sinnlos-${APP} is '${visibility:-unknown}', not private and unlinked: nothing is pushed"
             exit 1
           fi
 
@@ -573,6 +573,10 @@ jobs:
           tags: ${{ env.IMAGE }}
           load: true
           provenance: false
+          # No source label: GHCR would link the package to this public
+          # repository on the push, and a linked package can inherit the
+          # repository's access (a fork's pull request among it).
+          labels: org.opencontainers.image.source=
 
       # The full boot-value matrix runs on amd64 (images); here the arm64 image
       # that is pushed next must start the check and refuse a bad value.
@@ -612,7 +616,7 @@ jobs:
           fi
           visibility="$(curl -fsS -H "Authorization: Bearer ${GHCR_TOKEN}" -H "Accept: application/vnd.github+json" \
             "https://api.github.com/users/yurtbayemre/packages/container/sinnlos-${APP}" |
-            python3 -c 'import json, sys; print(json.load(sys.stdin).get("visibility", ""))')"
+            python3 -c 'import json, sys; p = json.load(sys.stdin); print("linked to " + p["repository"]["full_name"] if p.get("repository") else p.get("visibility", ""))')"
           if [[ "${visibility}" != private ]]; then
             echo "::error::ghcr.io/yurtbayemre/sinnlos-${APP} is '${visibility:-unknown}' after the push. A public package cannot be made private again: stop this job (no further pushes) and have the owner withdraw or replace the package"
             exit 1
