@@ -1,12 +1,13 @@
 import { factories } from "@strapi/strapi";
 import { isInScopedAudience } from "@sinnlos/domain";
 
-import { MODERATORS, hasRole } from "../../../bootstrap/roles";
+import { ADMIN, MODERATORS, hasRole } from "../../../bootstrap/roles";
 import {
   isAnnouncementVisible,
   type AnnouncementTargeting,
 } from "../../../utils/announcement-audience";
 import { isAnnouncementExpired, type ExpiringRow } from "../../../utils/announcement-expiry";
+import { REPORT_INDEX_MAX_IDS, reportAckIndex } from "../../../utils/ack-report-index";
 import {
   loadUserScope,
   toAudienceScope,
@@ -161,6 +162,33 @@ export default factories.createCoreController(
         },
       });
       return ctx.send({ data: ack });
+    },
+
+    /**
+     * POST /api/acknowledgements/report-index (v0.31, utils/ack-report-index.ts):
+     * `{ targetType, documentIds }` → who confirmed which. admin_role only,
+     * checked here whatever the grants say (editor reads its own receipts
+     * only); gated by `read-confirmations` like the admin's read bypass.
+     */
+    async reportIndex(ctx) {
+      const user = ctx.state.user;
+      if (!user) return ctx.unauthorized();
+      if (!hasRole(user, [ADMIN])) return ctx.forbidden();
+      const body = (ctx.request.body ?? {}) as { targetType?: unknown; documentIds?: unknown };
+      const { targetType, documentIds } = body;
+      if (targetType !== "announcement" && targetType !== "document") {
+        return ctx.badRequest("Invalid targetType");
+      }
+      if (
+        !Array.isArray(documentIds) ||
+        documentIds.length > REPORT_INDEX_MAX_IDS ||
+        !documentIds.every((id) => typeof id === "string" && id !== "" && id.length <= 64)
+      ) {
+        return ctx.badRequest(`documentIds must be up to ${REPORT_INDEX_MAX_IDS} documentIds`);
+      }
+      ctx.set("Cache-Control", "private, no-store");
+      const { acks, truncated } = await reportAckIndex(strapi, targetType, documentIds);
+      return ctx.send({ data: { acks }, meta: { truncated } });
     },
   }),
 );

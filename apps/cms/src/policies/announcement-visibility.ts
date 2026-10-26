@@ -1,8 +1,6 @@
 import { MODERATORS } from "../bootstrap/roles";
-import { isAnnouncementVisible, type AnnouncementTargeting } from "../utils/announcement-audience";
-import { notExpiredWhere } from "../utils/announcement-expiry";
-import { visibleIdsPolicy, type VisibleIdsInput } from "../utils/policy-factories";
-import { loadUserScope, toAudienceScope, withFreshAnnouncementFlags } from "../utils/visible-ids";
+import { visibleIdsPolicy } from "../utils/policy-factories";
+import { visibleAnnouncementIds } from "../utils/visible-ids";
 
 /**
  * Enforces announcement targeting on reads of the `announcement` content
@@ -48,33 +46,7 @@ import { loadUserScope, toAudienceScope, withFreshAnnouncementFlags } from "../u
  * both fields.
  */
 
-type AnnouncementRow = AnnouncementTargeting & { id: number };
-
 const ANNOUNCEMENT_UID = "api::announcement.announcement";
-
-async function visibleAnnouncementIds({
-  strapi,
-  user,
-}: VisibleIdsInput<unknown>): Promise<number[]> {
-  // Team targeting covers members AND the team lead — a lead is not
-  // automatically listed in `team.members` (toAudienceScope).
-  const scope = user ? toAudienceScope(await loadUserScope(strapi, user.id)) : null;
-  const where = notExpiredWhere(new Date());
-  const rows = (await strapi.db.query(ANNOUNCEMENT_UID).findMany({
-    where,
-    // The predicate reads the flag and the marker (D-PT01, retargetRequired).
-    select: ["id", "audience", "retargetRequired"],
-    populate: {
-      department: { select: ["id"] },
-      team: { select: ["id"] },
-      audienceRoles: { select: ["id"] },
-    },
-  })) as AnnouncementRow[];
-  // Flags read again after the relations: a delete between the statements
-  // must not pair an old marker with the new links (utils/targeting-flags.ts).
-  const checked = await withFreshAnnouncementFlags(strapi, rows, where);
-  return checked.filter((row) => isAnnouncementVisible(row, scope)).map((row) => row.id);
-}
 
 export default visibleIdsPolicy({
   uid: ANNOUNCEMENT_UID,

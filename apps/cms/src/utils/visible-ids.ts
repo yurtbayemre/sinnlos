@@ -48,6 +48,8 @@ import {
   type AnnouncementTargeting,
   type AudienceScope,
 } from "./announcement-audience";
+import { notExpiredWhere } from "./announcement-expiry";
+import type { VisibleIdsInput } from "./policy-factories";
 
 const USER_UID = "plugin::users-permissions.user";
 const ANNOUNCEMENT_UID = "api::announcement.announcement";
@@ -425,6 +427,39 @@ export async function withFreshAnnouncementFlags<T extends AnnouncementFlagRow>(
       retargetRequired: row.retargetRequired === true || now.retargetRequired === true,
     };
   });
+}
+
+type AnnouncementRow = AnnouncementTargeting & { id: number };
+
+/**
+ * The announcement row ids `user` may read (draft and published rows
+ * alike): not expired, and targeted at the caller by the shared predicate
+ * over member-or-lead teams. The announcement-visibility policy injects
+ * them as its id filter; GET /api/me/open-acks (v0.31) counts the published
+ * mandatory rows among them. The moderator bypass is the callers'.
+ */
+export async function visibleAnnouncementIds({
+  strapi,
+  user,
+}: VisibleIdsInput<unknown>): Promise<number[]> {
+  // Team targeting covers members AND the team lead — a lead is not
+  // automatically listed in `team.members` (toAudienceScope).
+  const scope = user ? toAudienceScope(await loadUserScope(strapi, user.id)) : null;
+  const where = notExpiredWhere(new Date());
+  const rows = (await strapi.db.query(ANNOUNCEMENT_UID).findMany({
+    where,
+    // The predicate reads the flag and the marker (D-PT01, retargetRequired).
+    select: ["id", "audience", "retargetRequired"],
+    populate: {
+      department: { select: ["id"] },
+      team: { select: ["id"] },
+      audienceRoles: { select: ["id"] },
+    },
+  })) as AnnouncementRow[];
+  // Flags read again after the relations: a delete between the statements
+  // must not pair an old marker with the new links (utils/targeting-flags.ts).
+  const checked = await withFreshAnnouncementFlags(strapi, rows, where);
+  return checked.filter((row) => isAnnouncementVisible(row, scope)).map((row) => row.id);
 }
 
 /** Decide whether a single space is visible to the given scope. */

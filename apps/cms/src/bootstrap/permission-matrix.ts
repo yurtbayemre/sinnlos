@@ -494,6 +494,13 @@ export const CUSTOM_ACTION_GRANTS: Record<string, readonly MatrixRoleType[] | "*
   "api::profile.profile.mfaSetup": "*",
   "api::profile.profile.mfaActivate": "*",
   "api::profile.profile.mfaDisable": "*",
+  // v0.31: the dashboard banner's open confirmations. Every role; the
+  // controller counts a kind only while the role holds its find and
+  // acknowledgement.find, else null (utils/open-acks.ts).
+  "api::profile.profile.openAcks": "*",
+  // v0.31: who confirmed which items of the admin's report page
+  // (utils/ack-report-index.ts); the controller checks admin_role again.
+  "api::acknowledgement.acknowledgement.reportIndex": [ADMIN],
   // Built-in auth action local users need to change their password
   "plugin::users-permissions.auth.changePassword": "*",
   // The admin ack report populates announcement.audienceRoles to restrict
