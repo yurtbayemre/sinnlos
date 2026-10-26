@@ -250,6 +250,8 @@ interface RunOptions {
   quickAccess?: boolean;
   /** gpg fails. */
   gpgFails?: boolean;
+  /** The uploads tar fails (exit 3) after writing a few bytes. */
+  tarFails?: boolean;
   /** Send TERM to the run while gpg works on the first artifact. */
   killDuringGpg?: boolean;
   /** Run as if root ran it (deploy.sh): EUID reads 0, chown is recorded, not run. */
@@ -283,6 +285,8 @@ interface RunReport {
   dirs: Record<string, string>;
   /** The stubbed docker calls. */
   docker: string[];
+  /** docker subcommands and gpg inputs (file names), in the order they ran. */
+  order: string[];
 }
 
 /**
@@ -311,11 +315,13 @@ function backupRun(options: RunOptions = {}): RunReport {
     options.quickAccess === false ? "" : 'echo "old copy" > "$BK/quick/.env"',
     `STUB_UPLOADS=${options.uploads === false ? "" : "1"}`,
     `STUB_GPG_FAIL=${options.gpgFails ? "1" : ""}`,
+    `STUB_TAR_FAIL=${options.tarFails ? "1" : ""}`,
     `STUB_GPG_SLEEP=${options.killDuringGpg ? "2" : ""}`,
     'STUB_MARK="$T/gpg-started"',
-    "export STUB_UPLOADS STUB_GPG_FAIL STUB_GPG_SLEEP STUB_MARK",
+    "export STUB_UPLOADS STUB_GPG_FAIL STUB_TAR_FAIL STUB_GPG_SLEEP STUB_MARK",
     "docker() {",
     '  printf "docker %s\n" "$*" >> "$T/docker.log"',
+    '  printf "docker %s\n" "$1" >> "$T/order.log"',
     '  case "$1" in',
     "    exec)",
     '      shift; if [[ "$1" == "-i" ]]; then shift; fi; shift',
@@ -326,7 +332,8 @@ function backupRun(options: RunOptions = {}): RunReport {
     "        *) return 9 ;;",
     "      esac ;;",
     '    volume) [[ -n "$STUB_UPLOADS" ]] ;;',
-    "    run) printf 'stub tar bytes\\n' ;;",
+    '    run) if [[ -n "$STUB_TAR_FAIL" ]]; then printf cut; return 3; fi',
+    "         printf 'stub tar bytes\\n' ;;",
     "    *) return 9 ;;",
     "  esac",
     "}",
@@ -334,6 +341,7 @@ function backupRun(options: RunOptions = {}): RunReport {
     '  printf "gpg %s\n" "${*//$BK/BK}" >> "$T/gpg.log"',
     '  local out="" in=""',
     '  while (($#)); do case "$1" in --output) out="$2"; shift 2 ;; *) in="$1"; shift ;; esac; done',
+    '  printf "gpg %s\n" "${in##*/}" >> "$T/order.log"',
     '  [[ -z "$STUB_GPG_FAIL" ]] || return 2',
     '  if [[ -n "$STUB_GPG_SLEEP" ]]; then : > "$STUB_MARK"; sleep "$STUB_GPG_SLEEP"; fi',
     '  { echo "ENCRYPTED"; cat "$in"; } > "$out"',
@@ -387,6 +395,7 @@ function backupRun(options: RunOptions = {}): RunReport {
     'if [[ -f "$T/chown.log" ]]; then sed "s/^/CHOWN /" "$T/chown.log"; fi',
     'if [[ -f "$T/gpg.log" ]]; then sed "s/^/GPG /" "$T/gpg.log"; fi',
     'if [[ -f "$T/docker.log" ]]; then sed "s/^/DOCKER /" "$T/docker.log"; fi',
+    'if [[ -f "$T/order.log" ]]; then sed "s/^/ORDER /" "$T/order.log"; fi',
     'for d in offsite offsite/sinnlos; do if [[ -d "$BK/$d" ]]; then echo "DIR $d $(stat -c %a "$BK/$d")"; fi; done',
     "",
   ].join("\n");
@@ -410,6 +419,7 @@ function backupRun(options: RunOptions = {}): RunReport {
     gpgCalls: pick("GPG"),
     dirs: Object.fromEntries(pick("DIR").map((l) => l.split(" "))),
     docker: pick("DOCKER"),
+    order: pick("ORDER"),
   };
 }
 
@@ -445,6 +455,31 @@ describe.skipIf(!HAS_BASH)("pg-backup.sh runs (docker and gpg stubbed)", BASH_BU
         expect(run.modes[name], name).toBe("600");
       }
     }
+  });
+
+  it("takes the uploads right after the dump, before either is encrypted, with no network (#187, #195)", () => {
+    const run = backupRun();
+    expect(run.status, run.stderr).toBe(0);
+    const gpgs = run.order.filter((step) => step.startsWith("gpg "));
+    expect(run.order.slice(-gpgs.length)).toEqual(gpgs);
+    expect(gpgs.map((step) => step.split(/[-.]/)[1])).toEqual(["db", "uploads", "env"]);
+    expect(run.order.indexOf("docker run")).toBe(run.order.length - gpgs.length - 1);
+    expect(run.docker.find((call) => call.startsWith("docker run "))).toBe(
+      "docker run --rm --network none -v infra_cms_uploads:/u:ro alpine tar -cf - -C /u .",
+    );
+  });
+
+  it("keeps the database artifact when the uploads tar fails, and leaves no plaintext", () => {
+    const nightly = "2026-09-28T03:00:07+02:00 nightly sinnlos-db-20260928-030000.dump.gz.gpg";
+    const run = backupRun({ tarFails: true, setup: `echo '${nightly}' > "$OFFSITE/last-success"` });
+    expect(run.status).toBe(3);
+    expect(run.root.filter((n) => PLAINTEXT_RE.test(n))).toEqual([]);
+    const artifacts = run.offsite.filter((name) => name.endsWith(".gz.gpg"));
+    expect(artifacts).toHaveLength(1);
+    expect(ARTIFACT_RE("sinnlos-db", "", "dump").test(artifacts[0])).toBe(true);
+    expect(run.log[0]).toMatch(/^ok sinnlos-db /);
+    expect(run.log.at(-1)).toMatch(/^FAIL nightly sinnlos-uploads line \d+ \(exit 3\)$/);
+    expect(run.lastSuccess).toBe(nightly);
   });
 
   it("names pre-deploy artifacts -predeploy, and records them apart from last-success", () => {
