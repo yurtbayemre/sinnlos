@@ -21,7 +21,8 @@ import { uploadedByOf } from "./upload-orphans";
  * uploads); the audit trail by actor and by target. export-coverage.test.ts
  * walks the schemas and fails on a relation to the user model that is in
  * neither list. A walk longer than EXPORT_MAX_ROWS fails the export rather
- * than cutting it. Draft-and-publish types list each stored state
+ * than cutting it; the cap counts the person's rows, not the rows read
+ * (v0.31). Draft-and-publish types list each stored state
  * (`publishedAt` null = the draft).
  *
  * NOT INCLUDED (`notIncluded`, with the reason the data subject reads): see
@@ -284,7 +285,20 @@ function pick(row: Row, keys: string[]): Row {
   return out;
 }
 
-async function walk(strapi: ExportHost, uid: string, where: Row, select: string[], populate?: Row) {
+/**
+ * The rows of `uid` matching `where`, in id pages. `keep` (v0.31, #168)
+ * drops the rows that are not the person's on each page, before they are
+ * held or counted, so a source read whole (files, duty plans) costs one
+ * page of memory and the cap counts the person's rows only.
+ */
+async function walk(
+  strapi: ExportHost,
+  uid: string,
+  where: Row,
+  select: string[],
+  populate?: Row,
+  keep?: (row: Row) => boolean,
+) {
   const out: Row[] = [];
   let afterId = 0;
   for (;;) {
@@ -297,7 +311,7 @@ async function walk(strapi: ExportHost, uid: string, where: Row, select: string[
     })) as unknown;
     const rows = Array.isArray(page) ? page.filter(isRecord) : [];
     if (rows.length === 0) return out;
-    out.push(...rows);
+    out.push(...(keep ? rows.filter(keep) : rows));
     if (out.length > EXPORT_MAX_ROWS) {
       throw new errors.ApplicationError(`The export of ${uid} exceeds ${EXPORT_MAX_ROWS} rows`);
     }
@@ -446,16 +460,19 @@ export async function exportUser(
 
 /** Every shift of every duty plan (each stored state) that names the person. */
 async function dutyShifts(strapi: ExportHost, id: number): Promise<Row[]> {
-  const plans = await walk(strapi, "api::duty-plan.duty-plan", {}, [
-    "documentId",
-    "name",
-    "publishedAt",
-    "shifts",
-  ]);
+  const names = (shift: unknown) => isRecord(shift) && shift.userId === id;
+  const plans = await walk(
+    strapi,
+    "api::duty-plan.duty-plan",
+    {},
+    ["documentId", "name", "publishedAt", "shifts"],
+    undefined,
+    (plan) => Array.isArray(plan.shifts) && plan.shifts.some(names),
+  );
   const out: Row[] = [];
   for (const plan of plans) {
     for (const shift of Array.isArray(plan.shifts) ? plan.shifts : []) {
-      if (!isRecord(shift) || shift.userId !== id) continue;
+      if (!names(shift)) continue;
       out.push({
         plan: { documentId: plan.documentId, name: plan.name, publishedAt: iso(plan.publishedAt) },
         startsAt: shift.startsAt ?? null,
@@ -468,20 +485,19 @@ async function dutyShifts(strapi: ExportHost, id: number): Promise<Row[]> {
 
 /** Files the hardened upload stamped with the person (utils/upload-orphans.ts). */
 async function stampedUploads(strapi: ExportHost, id: number): Promise<Row[]> {
-  const files = await walk(strapi, FILE_UID, {}, [
-    "name",
-    "mime",
-    "size",
-    "createdAt",
-    "provider_metadata",
-  ]);
-  return files
-    .filter((file) => uploadedByOf(file) === id)
-    .map((file) => ({
-      id: file.id,
-      name: file.name,
-      mime: file.mime,
-      size: file.size,
-      createdAt: iso(file.createdAt),
-    }));
+  const files = await walk(
+    strapi,
+    FILE_UID,
+    {},
+    ["name", "mime", "size", "createdAt", "provider_metadata"],
+    undefined,
+    (file) => uploadedByOf(file) === id,
+  );
+  return files.map((file) => ({
+    id: file.id,
+    name: file.name,
+    mime: file.mime,
+    size: file.size,
+    createdAt: iso(file.createdAt),
+  }));
 }
