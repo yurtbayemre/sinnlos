@@ -1,3 +1,4 @@
+import type { SearchIndexDocument } from "@sinnlos/domain";
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -156,10 +157,24 @@ const fresh = () => ({
   checkedAt: 0,
 });
 
-/** A fake Meilisearch: records calls, enqueues tasks that succeed (or fail when told). */
-function fakeMeili(options: { liveExists?: boolean; failTask?: string } = {}) {
+/**
+ * A fake Meilisearch: records calls, enqueues tasks that succeed (or fail
+ * when told). `refuseOver`: a request body over that many UTF-8 bytes is
+ * answered 413, like Meilisearch's payload limit; `failUpload`: the task of
+ * that document upload (1-based) fails.
+ */
+function fakeMeili(
+  options: {
+    liveExists?: boolean;
+    failTask?: string;
+    refuseOver?: number;
+    failUpload?: number;
+  } = {},
+) {
   const calls: string[] = [];
   const bodies: Record<string, unknown> = {};
+  /** The body of every document upload, in order. */
+  const uploads: unknown[][] = [];
   let liveExists = options.liveExists ?? false;
   let buildExists = false;
   let task = 0;
@@ -177,7 +192,12 @@ function fakeMeili(options: { liveExists?: boolean; failTask?: string } = {}) {
       return json(200, { status: tasks.get(uid) === options.failTask ? "failed" : "succeeded" });
     }
     calls.push(`${method} ${path}`);
+    if (options.refuseOver && Buffer.byteLength(String(init?.body ?? "")) > options.refuseOver) {
+      return json(413, { code: "payload_too_large" });
+    }
     if (init?.body) bodies[`${method} ${path}`] = JSON.parse(String(init.body));
+    const upload = method === "POST" && path === "/indexes/sinnlos_search_build/documents";
+    if (upload) uploads.push(JSON.parse(String(init?.body)) as unknown[]);
     if (method === "GET" && path === "/indexes/sinnlos_search") {
       return liveExists ? json(200, { uid: "sinnlos_search" }) : json(404, {});
     }
@@ -189,6 +209,7 @@ function fakeMeili(options: { liveExists?: boolean; failTask?: string } = {}) {
       liveExists = true;
     }
     tasks.set(++task, `${method} ${path}`);
+    if (upload && uploads.length === options.failUpload) failed.set(task, "internal");
     if (method === "POST" && path === "/indexes" && String(init?.body).includes("_build")) {
       buildExists = true;
     }
@@ -199,7 +220,7 @@ function fakeMeili(options: { liveExists?: boolean; failTask?: string } = {}) {
     }
     return json(202, { taskUid: task });
   });
-  return { fetchImpl: fetchImpl as unknown as typeof fetch, calls, bodies };
+  return { fetchImpl: fetchImpl as unknown as typeof fetch, calls, bodies, uploads };
 }
 
 const ROWS = {
@@ -243,6 +264,65 @@ describe("rebuildSearchIndex", () => {
       filterableAttributes: ["kind"],
       localizedAttributes: [{ attributePatterns: ["*"], locales: ["deu"] }],
     });
+  });
+
+  it("uploads in batches that stay within the byte limit, each document once, then swaps (#177)", async () => {
+    // Umlauts and an emoji: UTF-8 bytes, not characters, decide the batches.
+    const documents: SearchIndexDocument[] = Array.from({ length: 7 }, (_, i) => ({
+      id: `announcement_d${i}`,
+      kind: "announcement",
+      documentId: `d${i}`,
+      title: `Übersicht ${i} 🎉`,
+      text: "Größenänderung ".repeat(4),
+    }));
+    const size = (batch: unknown[]) => Buffer.byteLength(JSON.stringify(batch));
+    const limit = size(documents.slice(0, 2));
+    expect(JSON.stringify(documents.slice(0, 2)).length).toBeLessThan(limit);
+    const meili = fakeMeili({ refuseOver: limit });
+    const count = await rebuildSearchIndex(
+      documents,
+      parseMeiliConfig(ON)!,
+      meili.fetchImpl,
+      async () => {},
+      limit,
+    );
+    expect(count).toBe(7);
+    // Two documents fill a batch exactly: the limit itself is allowed.
+    expect(meili.uploads.map((batch) => batch.length)).toEqual([2, 2, 2, 1]);
+    for (const batch of meili.uploads) expect(size(batch)).toBeLessThanOrEqual(limit);
+    expect(meili.uploads.flat()).toEqual(documents);
+    expect(meili.calls.filter((call) => call === "POST /swap-indexes")).toHaveLength(1);
+    expect(meili.calls.indexOf("POST /swap-indexes")).toBeGreaterThan(
+      meili.calls.lastIndexOf("POST /indexes/sinnlos_search_build/documents"),
+    );
+  });
+
+  it("refuses a single document over the limit before it touches Meilisearch", async () => {
+    const meili = fakeMeili();
+    const documents: SearchIndexDocument[] = [
+      { id: "poll_w1", kind: "poll", documentId: "w1", title: "Groß", text: "x".repeat(200) },
+    ];
+    await expect(
+      rebuildSearchIndex(documents, parseMeiliConfig(ON)!, meili.fetchImpl, async () => {}, 100),
+    ).rejects.toThrow(/^\[search\] poll_w1 is \d+ bytes, over the 100-byte upload limit$/);
+    expect(meili.calls).toEqual([]);
+  });
+
+  it("never swaps when a later batch fails, leaving the live index as it was", async () => {
+    const documents: SearchIndexDocument[] = Array.from({ length: 4 }, (_, i) => ({
+      id: `poll_p${i}`,
+      kind: "poll",
+      documentId: `p${i}`,
+      title: `Frage ${i}`,
+      text: "",
+    }));
+    const limit = Buffer.byteLength(JSON.stringify(documents.slice(0, 2)));
+    const meili = fakeMeili({ liveExists: true, failUpload: 2 });
+    await expect(
+      rebuildSearchIndex(documents, parseMeiliConfig(ON)!, meili.fetchImpl, async () => {}, limit),
+    ).rejects.toThrow(/task \d+ internal/);
+    expect(meili.uploads).toHaveLength(2);
+    expect(meili.calls).not.toContain("POST /swap-indexes");
   });
 
   it("stops before the swap when a task fails, leaving the live index as it was", async () => {
