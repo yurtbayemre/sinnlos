@@ -200,6 +200,22 @@ export function ListPagination({
   pagination: AuthoringPagination;
   basePath?: Route;
 }) {
+  return (
+    <PageNav
+      pagination={pagination}
+      hrefOf={(page) => listHref(area, { ...filters, page }, basePath)}
+    />
+  );
+}
+
+/** The total and the previous/next links of a paged list; `hrefOf` builds a page's URL. */
+export function PageNav({
+  pagination,
+  hrefOf,
+}: {
+  pagination: Pick<AuthoringPagination, "page" | "pageCount" | "total">;
+  hrefOf: (page: number) => Route;
+}) {
   const t = useTranslations("manage.common.list");
   const { page, pageCount, total } = pagination;
   return (
@@ -212,7 +228,7 @@ export function ListPagination({
         <div className="flex items-center gap-2">
           {page > 1 ? (
             <Link
-              href={listHref(area, { ...filters, page: page - 1 }, basePath)}
+              href={hrefOf(page - 1)}
               className={buttonVariants({ variant: "outline", size: "sm" })}
               rel="prev"
             >
@@ -223,7 +239,7 @@ export function ListPagination({
           <span aria-current="page">{t("page", { page, pageCount })}</span>
           {page < pageCount ? (
             <Link
-              href={listHref(area, { ...filters, page: page + 1 }, basePath)}
+              href={hrefOf(page + 1)}
               className={buttonVariants({ variant: "outline", size: "sm" })}
               rel="next"
             >

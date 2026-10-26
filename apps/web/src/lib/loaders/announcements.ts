@@ -1,12 +1,9 @@
-import {
-  computeOpenAcks,
-  fetchMyAnnouncementAcks,
-  fetchMyDocumentAcks,
-} from "@/lib/acknowledgements";
+import { computeOpenAcks, fetchMyAnnouncementAcks } from "@/lib/acknowledgements";
 import type { AnnouncementListItem } from "@/lib/api/announcements";
 import { isReadDenied } from "@/lib/roles";
 import { SKIPPED_READ, tryFetch } from "@/lib/safe-fetch";
 import { api } from "@/lib/strapi";
+import { strapi } from "@/lib/strapi/client";
 import { isOff } from "@/lib/switches";
 import type { Acknowledgement } from "@/lib/types";
 
@@ -113,41 +110,30 @@ export async function loadAnnouncements(role: Role): Promise<AnnouncementsView> 
 
 /** The dashboard banner's numbers (AckBanner). */
 export interface OpenAckCount {
-  /** Mandatory announcements the caller has not confirmed; null: a read failed. */
+  /** Mandatory announcements the caller has not confirmed; null: the read failed or the role may not read them. */
   count: number | null;
-  /** Documents requiring acknowledgement the caller has not confirmed (v0.20); null: a read failed. */
+  /** Documents requiring acknowledgement the caller has not confirmed (v0.20); null as for `count`. */
   documents: number | null;
-  /** A walk stopped at its cap: a count may be off. */
-  truncated: boolean;
 }
+
+type OpenAcksResponse = { data?: { announcements?: number | null; documents?: number | null } };
+
+const countOrNull = (value: unknown): number | null =>
+  typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : null;
 
 /**
  * How many mandatory announcements and documents the caller has not
- * confirmed: the same rule as the open section on /announcements and the
- * buttons on /documents (computeOpenAcks). A failed read gives null for its
- * kind and that line of the banner stays away (the dashboard shows its own
- * CMS-down banner).
+ * confirmed, counted by the cms in one read (v0.31, GET /api/me/open-acks:
+ * the rule of the open section on /announcements and the buttons on
+ * /documents, computeOpenAcks, over what the caller may read). A failed
+ * read gives null for both and the banner stays away (the dashboard shows
+ * its own CMS-down banner); so does a kind the role may not read.
  */
 export async function loadOpenAckCount(): Promise<OpenAckCount> {
-  const [mandatory, receipts, documents, documentReceipts] = await Promise.all([
-    tryFetch(() => api.announcements.requiringAck(), "ack-banner"),
-    tryFetch(() => fetchMyAnnouncementAcks(), "ack-banner"),
-    tryFetch(() => api.documents.requiringAck(), "ack-banner"),
-    tryFetch(() => fetchMyDocumentAcks(), "ack-banner"),
-  ]);
-  const open = (
-    targets: { data: { data: { requiresAck?: boolean; documentId?: string }[] } | null },
-    acks: typeof receipts,
-  ): number | null =>
-    !targets.data || acks.failed
-      ? null
-      : computeOpenAcks(targets.data.data, acks.data?.acks ?? []).length;
+  const read = await tryFetch(() => strapi<OpenAcksResponse>("/api/me/open-acks"), "ack-banner");
   return {
-    count: open(mandatory, receipts),
-    documents: open(documents, documentReceipts),
-    truncated: [mandatory, receipts, documents, documentReceipts].some(
-      (read) => !read.failed && !!read.data?.truncated,
-    ),
+    count: countOrNull(read.data?.data?.announcements),
+    documents: countOrNull(read.data?.data?.documents),
   };
 }
 

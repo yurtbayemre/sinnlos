@@ -1,5 +1,5 @@
-import { indexAcks, type AckIndex } from "@/lib/ack-report";
-import { acksPage, myAcksPage } from "@/lib/api/announcements";
+import type { AckIndex } from "@/lib/ack-report";
+import { ackReportIndex, myAcksPage } from "@/lib/api/announcements";
 import { walkAllPages } from "@/lib/paginate";
 import type { Acknowledgement } from "@/lib/types";
 import { getViewer } from "@/lib/viewer";
@@ -13,30 +13,19 @@ import { getViewer } from "@/lib/viewer";
  * never caches (D-DC01), so no user's acknowledgement state can be served
  * to anyone else.
  *
- * A single request is bounded by its `pageSize`, so both helpers walk the
- * pagination until exhausted and report back whether the walk actually
- * finished — a truncated ack list makes the compliance report undercount
+ * A single request is bounded by its `pageSize`, so the own-receipt reads
+ * walk the pagination until exhausted and report back whether the walk
+ * actually finished; the report's index says the same through its
+ * `truncated`. A truncated ack list makes the compliance report undercount
  * confirmations, so it must NOT be mistaken for a complete one (issue #14).
- * Each walk has its own cap.
  */
 const PAGE_SIZE = 100;
 
 /** The caller's own acks: 20 pages x 100 = 2000 confirmations. */
 const MY_ACKS_MAX_PAGES = 20;
 
-/**
- * The admin report fetches the acks of the listed mandatory announcements
- * in chunks of this many documentIds per request (FX32): the filter list
- * stays well inside any URL limit.
- */
+/** The most documentIds the cms report index takes per request (v0.31). */
 export const REPORT_ACK_CHUNK = 20;
-
-/**
- * Cap per chunk walk: one ack per user and announcement, for up to 2000
- * users (the directory cap in lib/users.ts, which fails the report closed
- * on its own). Only duplicate rows could push a chunk past it.
- */
-export const REPORT_ACK_MAX_PAGES = (REPORT_ACK_CHUNK * 2000) / PAGE_SIZE;
 
 /** All matching announcement acks, plus whether the page walk finished. */
 export interface AnnouncementAcksResult {
@@ -72,21 +61,20 @@ async function fetchMyAcks(
 export interface AnnouncementAckIndexResult {
   /** documentId → ids of the users who acknowledged it (every listed id has an entry). */
   index: AckIndex;
-  /** true when any chunk's walk stopped at REPORT_ACK_MAX_PAGES. */
+  /** true when the cms stopped any request at its budget (2,000 receipts per item). */
   truncated: boolean;
 }
 
 /**
  * The acknowledgements of exactly the given announcements, across ALL users
  * — only useful for admin_role, for the /manage/acknowledgements report
- * (FX32). It used to walk every announcement ack of the whole intranet
- * (capped at 2000 rows, then permanently "incomplete"); now it asks per
- * chunk of REPORT_ACK_CHUNK listed documentIds
- * (`filters[targetDocumentId][$in]`), each chunk walk with its own cap, and
- * transfers only the target and the user's id. Sorted by id so the pages
- * of a walk stay stable. Any failure rejects (the page's tryFetch turns it
- * into its CMS-down banner); a cut-short chunk sets `truncated`, which the
- * report treats as incomplete (reportCompleteness).
+ * (FX32). v0.31 (#173): the cms reads them (POST
+ * /api/acknowledgements/report-index, REPORT_ACK_CHUNK documentIds a
+ * request; the report shows 20 items a page, so one request per section)
+ * and answers documentId → user ids. Any failure rejects (the page's
+ * tryFetch turns it into its CMS-down banner); a request cut short at the
+ * cms's budget sets `truncated`, which the report treats as incomplete
+ * (reportCompleteness). Only the requested ids and numeric user ids count.
  */
 export function fetchAnnouncementAckIndex(
   documentIds: string[],
@@ -107,13 +95,13 @@ async function fetchAckIndex(
   const index: AckIndex = new Map(ids.map((id) => [id, new Set<number>()]));
   let truncated = false;
   for (let start = 0; start < ids.length; start += REPORT_ACK_CHUNK) {
-    const chunk = ids.slice(start, start + REPORT_ACK_CHUNK);
-    const walk = await walkAllPages((page) => acksPage(targetType, chunk, page, PAGE_SIZE), {
-      maxPages: REPORT_ACK_MAX_PAGES,
-      label: `ack-report ${targetType} acknowledgements ${start / REPORT_ACK_CHUNK + 1}`,
-    });
-    indexAcks(walk.data, index);
-    truncated ||= walk.truncated;
+    const answer = await ackReportIndex(targetType, ids.slice(start, start + REPORT_ACK_CHUNK));
+    for (const [documentId, users] of Object.entries(answer.data?.acks ?? {})) {
+      const set = index.get(documentId);
+      if (!set || !Array.isArray(users)) continue;
+      for (const id of users) if (typeof id === "number") set.add(id);
+    }
+    truncated ||= answer.meta?.truncated === true;
   }
   return { index, truncated };
 }

@@ -3,7 +3,7 @@
  * caller (department scoping) — same as wiki/people/announcements.
  * Uncached (D-DC01).
  */
-import { walkAllPages, type WalkResult } from "@/lib/paginate";
+import { ACK_REPORT_PAGE_SIZE } from "@/lib/ack-report";
 import { strapi, type StrapiListResponse } from "@/lib/strapi/client";
 import { strapiQuery, withQuery } from "@/lib/strapi/query";
 import type { Document } from "@/lib/types";
@@ -38,25 +38,22 @@ export type AckDocument = Pick<
 >;
 
 /**
- * The documents that require acknowledgement (v0.20): the dashboard banner
- * and, as admin_role (which bypasses document-visibility), the ack report.
+ * One page of the documents that require acknowledgement (v0.20), for the
+ * ack report as admin_role, which bypasses document-visibility (v0.31: the
+ * report pages, ACK_REPORT_PAGE_SIZE items; the old walk stopped at 1,000).
  * requiresAck is a plain boolean attribute, so the filter validates for
- * every reading role. Full walk with the library's cap.
+ * every reading role.
  */
-export function listDocumentsRequiringAck(): Promise<WalkResult<AckDocument>> {
-  return walkAllPages<AckDocument>(
-    (page) =>
-      strapi<StrapiListResponse<AckDocument>>(
-        withQuery(
-          "/api/documents",
-          strapiQuery()
-            .filter("requiresAck", "$eq", true)
-            .fields(["title", "requiresAck", "audience"])
-            .populateFields("departments", ["name"])
-            .sort(["id:asc"])
-            .page(page, 100),
-        ),
-      ),
-    { maxPages: 10, label: "mandatory documents" },
+export function ackReportDocumentsPage(page: number): Promise<StrapiListResponse<AckDocument>> {
+  return strapi<StrapiListResponse<AckDocument>>(
+    withQuery(
+      "/api/documents",
+      strapiQuery()
+        .filter("requiresAck", "$eq", true)
+        .fields(["title", "requiresAck", "audience"])
+        .populateFields("departments", ["name"])
+        .sort(["id:asc"])
+        .page(page, ACK_REPORT_PAGE_SIZE),
+    ),
   );
 }

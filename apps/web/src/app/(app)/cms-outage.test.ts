@@ -78,7 +78,10 @@ const pages: Record<string, () => Promise<ReactNode>> = {
   "/polls": (await import("./polls/page")).default,
   "/kudos": (await import("./kudos/page")).default,
   "/training": (await import("./training/page")).default,
-  "/manage/acknowledgements": (await import("./manage/acknowledgements/page")).default,
+  "/manage/acknowledgements": () =>
+    import("./manage/acknowledgements/page").then((page) =>
+      page.default({ searchParams: Promise.resolve({}) }),
+    ),
   "/manage/analytics": (await import("./manage/analytics/page")).default,
 };
 

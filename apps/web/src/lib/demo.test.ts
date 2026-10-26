@@ -85,7 +85,6 @@ const API_READS: Record<string, () => Promise<unknown>> = {
   "polls.results": () => api.polls.results("demopoll0000000000000001"),
   "polls.resultsMany": () => api.polls.resultsMany([1, "demopoll0000000000000002"]),
   "documents.list": () => api.documents.list(),
-  "documents.requiringAck": () => api.documents.requiringAck(),
   "kudos.list": () => api.kudos.list(),
   "classifieds.list": () => api.classifieds.list(zonedDateKey(NOW, ZONE)),
   "classifieds.mine": () => api.classifieds.mine(1),
@@ -117,6 +116,7 @@ const DIRECT_READS: Record<string, () => Promise<unknown>> = {
   "analytics recentComments": () => analytics.recentComments(),
   "analytics searchSummary": () => analytics.searchSummary(),
   "me (/api/me)": () => strapi("/api/me"),
+  "open-acks (/api/me/open-acks)": () => strapi("/api/me/open-acks"),
   "person (/api/users/:id)": () => strapi("/api/users/2?populate[department]=true"),
 };
 

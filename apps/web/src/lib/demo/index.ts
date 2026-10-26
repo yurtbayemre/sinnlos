@@ -62,6 +62,52 @@ function userList(directory: UserLite[], params: URLSearchParams): UserLite[] {
   return query(directory, params).slice(start, start + limit);
 }
 
+/** The demo's receipts of one type: all of them are the demo user's. */
+const receiptsOf = ({ acknowledgements }: DemoData, targetType: string) =>
+  acknowledgements.filter((row) => row.targetType === targetType);
+
+/** GET /api/me/open-acks (v0.31): the mandatory items not confirmed yet. */
+function openAcks(data: DemoData) {
+  const open = (items: { documentId?: string; requiresAck?: boolean }[], targetType: string) => {
+    const acked = new Set(receiptsOf(data, targetType).map((row) => row.targetDocumentId));
+    return items.filter(
+      (item) => item.requiresAck && item.documentId && !acked.has(item.documentId),
+    ).length;
+  };
+  return {
+    data: {
+      announcements: open(data.announcements, "announcement"),
+      documents: open(data.documents, "document"),
+    },
+  };
+}
+
+/** POST /api/acknowledgements/report-index (v0.31): who confirmed which listed item. */
+function reportIndex(data: DemoData, body: unknown) {
+  const { targetType, documentIds } = (body ?? {}) as {
+    targetType?: unknown;
+    documentIds?: unknown;
+  };
+  if (targetType !== "announcement" && targetType !== "document") {
+    throw cmsError(400, "Invalid targetType");
+  }
+  if (!Array.isArray(documentIds) || documentIds.length > 20) {
+    throw cmsError(400, "documentIds must be up to 20 documentIds");
+  }
+  const receipts = receiptsOf(data, targetType);
+  const users = (id: unknown) => [
+    ...new Set(
+      receipts
+        .filter((row) => row.targetDocumentId === id && typeof row.user?.id === "number")
+        .map((row) => row.user!.id),
+    ),
+  ];
+  return {
+    data: { acks: Object.fromEntries(documentIds.map((id) => [String(id), users(id)])) },
+    meta: { truncated: false },
+  };
+}
+
 /** GET /api/event-rsvps/summary?targets=: the FX21 aggregate per listed event. */
 function rsvpSummaries({ eventRsvps }: DemoData, params: URLSearchParams) {
   const targets = (params.get("targets") ?? "").split(",").filter(Boolean);
@@ -140,6 +186,7 @@ const ROUTES: [method: string, pattern: RegExp, handler: DemoHandler][] = [
   ["GET", /^\/api\/announcements$/, ({ data, params }) => list(data.announcements, params)],
   ["GET", /^\/api\/acknowledgements$/, ({ data, params }) => list(data.acknowledgements, params)],
   ["POST", /^\/api\/acknowledgements$/, write.acknowledge],
+  ["POST", /^\/api\/acknowledgements\/report-index$/, ({ data, body }) => reportIndex(data, body)],
   ["GET", /^\/api\/events$/, ({ data, params }) => list(data.events, params)],
   ["GET", /^\/api\/event-rsvps\/summary$/, ({ data, params }) => rsvpSummaries(data, params)],
   ["GET", /^\/api\/event-rsvps$/, ({ data, params }) => list(data.eventRsvps, params)],
@@ -199,6 +246,7 @@ const ROUTES: [method: string, pattern: RegExp, handler: DemoHandler][] = [
     ({ data, match }) => data.directory.find((u) => String(u.id) === match[1]),
   ],
   ["GET", /^\/api\/me$/, ({ data }) => ({ data: data.me })],
+  ["GET", /^\/api\/me\/open-acks$/, ({ data }) => openAcks(data)],
   ["PUT", /^\/api\/me$/, write.updateMe],
 ];
 

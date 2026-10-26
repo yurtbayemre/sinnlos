@@ -52,9 +52,6 @@ GET http://cms.test/api/poll-results?ids=k3m9x0000000000000000000,k3m9x000000000
 ## api.documents.list
 GET http://cms.test/api/documents?populate[file]=true&populate[departments]=true&populate[uploadedBy]=true&sort[0]=updatedAt:desc&sort[1]=id:desc&pagination[page]=1&pagination[pageSize]=100 cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
 
-## api.documents.requiringAck
-GET http://cms.test/api/documents?filters[requiresAck][$eq]=true&fields[0]=title&fields[1]=requiresAck&fields[2]=audience&populate[departments][fields][0]=name&sort[0]=id:asc&pagination[page]=1&pagination[pageSize]=100 cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
-
 ## api.kudos.list
 GET http://cms.test/api/kudos-entries?populate[from]=true&populate[to]=true&sort=createdAt:desc&pagination[pageSize]=30 cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
 
@@ -101,11 +98,14 @@ GET http://cms.test/api/acknowledgements?filters[targetType][$eq]=document&filte
 GET http://cms.test/api/me cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
 
 ## acknowledgements.fetchAnnouncementAckIndex
-GET http://cms.test/api/acknowledgements?filters[targetType][$eq]=announcement&filters[targetDocumentId][$in][0]=ann%20doc%200&filters[targetDocumentId][$in][1]=ann%20doc%201&filters[targetDocumentId][$in][2]=ann%20doc%202&filters[targetDocumentId][$in][3]=ann%20doc%203&filters[targetDocumentId][$in][4]=ann%20doc%204&filters[targetDocumentId][$in][5]=ann%20doc%205&filters[targetDocumentId][$in][6]=ann%20doc%206&filters[targetDocumentId][$in][7]=ann%20doc%207&filters[targetDocumentId][$in][8]=ann%20doc%208&filters[targetDocumentId][$in][9]=ann%20doc%209&filters[targetDocumentId][$in][10]=ann%20doc%2010&filters[targetDocumentId][$in][11]=ann%20doc%2011&filters[targetDocumentId][$in][12]=ann%20doc%2012&filters[targetDocumentId][$in][13]=ann%20doc%2013&filters[targetDocumentId][$in][14]=ann%20doc%2014&filters[targetDocumentId][$in][15]=ann%20doc%2015&filters[targetDocumentId][$in][16]=ann%20doc%2016&filters[targetDocumentId][$in][17]=ann%20doc%2017&filters[targetDocumentId][$in][18]=ann%20doc%2018&filters[targetDocumentId][$in][19]=ann%20doc%2019&fields[0]=targetDocumentId&populate[user][fields][0]=id&sort[0]=id:asc&pagination[page]=1&pagination[pageSize]=100 cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
-GET http://cms.test/api/acknowledgements?filters[targetType][$eq]=announcement&filters[targetDocumentId][$in][0]=ann%20doc%2020&fields[0]=targetDocumentId&populate[user][fields][0]=id&sort[0]=id:asc&pagination[page]=1&pagination[pageSize]=100 cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
+POST http://cms.test/api/acknowledgements/report-index cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json] body={"targetType":"announcement","documentIds":["ann doc 0","ann doc 1","ann doc 2","ann doc 3","ann doc 4","ann doc 5","ann doc 6","ann doc 7","ann doc 8","ann doc 9","ann doc 10","ann doc 11","ann doc 12","ann doc 13","ann doc 14","ann doc 15","ann doc 16","ann doc 17","ann doc 18","ann doc 19"]}
+POST http://cms.test/api/acknowledgements/report-index cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json] body={"targetType":"announcement","documentIds":["ann doc 20"]}
 
 ## acknowledgements.fetchDocumentAckIndex
-GET http://cms.test/api/acknowledgements?filters[targetType][$eq]=document&filters[targetDocumentId][$in][0]=doc%20doc%200&fields[0]=targetDocumentId&populate[user][fields][0]=id&sort[0]=id:asc&pagination[page]=1&pagination[pageSize]=100 cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
+POST http://cms.test/api/acknowledgements/report-index cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json] body={"targetType":"document","documentIds":["doc doc 0"]}
+
+## announcements.loadOpenAckCount
+GET http://cms.test/api/me/open-acks cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
 
 ## training.fetchCourses
 GET http://cms.test/api/courses?populate[lessons][fields][0]=documentId&populate[lessons][fields][1]=title&populate[lessons][fields][2]=order&populate[coverImage]=true&sort[0]=title:asc&sort[1]=id:asc&pagination[page]=1&pagination[pageSize]=100 cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
@@ -242,12 +242,21 @@ GET http://cms.test/api/reactions?filters[targetType][$eq]=announcement&filters[
 GET http://cms.test/api/reactions?filters[targetType][$eq]=announcement&filters[targetDocumentId][$eq]=overflow-doc&populate[author]=true&sort[0]=createdAt:desc&sort[1]=id:desc&pagination[pageSize]=500 cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
 
 ## page.manage/acknowledgements
-GET http://cms.test/api/acknowledgements?filters[targetType][$eq]=announcement&filters[targetDocumentId][$in][0]=ann-doc-1&fields[0]=targetDocumentId&populate[user][fields][0]=id&sort[0]=id:asc&pagination[page]=1&pagination[pageSize]=100 cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
-GET http://cms.test/api/announcements?filters[requiresAck][$eq]=true&populate[department][fields][0]=name&populate[team][fields][0]=name&populate[audienceRoles][fields][0]=type&populate[audienceRoles][fields][1]=name&sort[0]=createdAt:desc&sort[1]=id:desc&pagination[page]=1&pagination[pageSize]=100 cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
-GET http://cms.test/api/documents?filters[requiresAck][$eq]=true&fields[0]=title&fields[1]=requiresAck&fields[2]=audience&populate[departments][fields][0]=name&sort[0]=id:asc&pagination[page]=1&pagination[pageSize]=100 cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
+GET http://cms.test/api/announcements?filters[requiresAck][$eq]=true&populate[department][fields][0]=name&populate[team][fields][0]=name&populate[audienceRoles][fields][0]=type&populate[audienceRoles][fields][1]=name&sort[0]=createdAt:desc&sort[1]=id:desc&pagination[page]=1&pagination[pageSize]=20 cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
+GET http://cms.test/api/documents?filters[requiresAck][$eq]=true&fields[0]=title&fields[1]=requiresAck&fields[2]=audience&populate[departments][fields][0]=name&sort[0]=id:asc&pagination[page]=1&pagination[pageSize]=20 cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
 GET http://cms.test/api/me cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
 GET http://cms.test/api/teams?populate[lead][fields][0]=username&populate[members][fields][0]=username&sort=id:asc&pagination[page]=1&pagination[pageSize]=100 cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
 GET http://cms.test/api/users?fields[0]=id&fields[1]=username&fields[2]=displayName&fields[3]=email&fields[4]=blocked&populate[department][fields][0]=name&populate[role]=true&sort=id:asc&start=0&limit=100 cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
+POST http://cms.test/api/acknowledgements/report-index cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json] body={"targetType":"announcement","documentIds":["ann-doc-1"]}
+
+## page.manage/acknowledgements?page=3&documentsPage=2
+GET http://cms.test/api/announcements?filters[requiresAck][$eq]=true&populate[department][fields][0]=name&populate[team][fields][0]=name&populate[audienceRoles][fields][0]=type&populate[audienceRoles][fields][1]=name&sort[0]=createdAt:desc&sort[1]=id:desc&pagination[page]=3&pagination[pageSize]=20 cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
+GET http://cms.test/api/documents?filters[requiresAck][$eq]=true&fields[0]=title&fields[1]=requiresAck&fields[2]=audience&populate[departments][fields][0]=name&sort[0]=id:asc&pagination[page]=1&pagination[pageSize]=20 cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
+GET http://cms.test/api/documents?filters[requiresAck][$eq]=true&fields[0]=title&fields[1]=requiresAck&fields[2]=audience&populate[departments][fields][0]=name&sort[0]=id:asc&pagination[page]=2&pagination[pageSize]=20 cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
+GET http://cms.test/api/me cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
+GET http://cms.test/api/teams?populate[lead][fields][0]=username&populate[members][fields][0]=username&sort=id:asc&pagination[page]=1&pagination[pageSize]=100 cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
+GET http://cms.test/api/users?fields[0]=id&fields[1]=username&fields[2]=displayName&fields[3]=email&fields[4]=blocked&populate[department][fields][0]=name&populate[role]=true&sort=id:asc&start=0&limit=100 cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
+POST http://cms.test/api/acknowledgements/report-index cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json] body={"targetType":"announcement","documentIds":["ann-doc-1"]}
 
 ## page.manage/analytics
 GET http://cms.test/api/announcements?&pagination[pageSize]=1 cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
