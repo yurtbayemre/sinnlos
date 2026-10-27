@@ -160,6 +160,12 @@ format`: a scanner posted to a page with a made-up Server Action id,
 
 Newest first. Older releases: [archive/deployment-history.md](archive/deployment-history.md).
 
+**Upgrading to v0.33.2.** No required env, no edge change, no schema change.
+
+- **Dependencies:** the `node:24-alpine` base image digest, `docker/login-action` 4.7.0, Next 16.4.3, vite 8.3.5, jose 6.2.13, lucide-react 1.61.0, postcss 8.5.31, typescript-eslint 8.72.0, @axe-core/playwright 4.14.0.
+- **Screen-reader names in the header (WCAG 2.5.3, Label in Name):** each control's name now contains the text it shows. Search: the placeholder text, with the shortcut as `aria-keyshortcuts`; the bell: "Notifications, 3 unread" (above 99: "99+ unread (150)": the badge text plus the exact count); the language menu: "Choose language EN English"; the profile link: "My profile" plus the initials. Nothing changes on screen.
+- **Rollback** to v0.33.1 is a plain retag.
+
 **Upgrading to v0.33.1.** No required env, no edge change, no schema change.
 
 - **Registry mode** (`DEPLOY_IMAGE_SOURCE=registry`): `deploy.sh` drops the `ghcr.io/…:<sha>` tag once the local tags hold a pulled image, so the prune of old SHA tags removes old pulled images too (#210). Images pulled by v0.33.0 keep their `ghcr.io` tag: list them with `docker images ghcr.io/yurtbayemre/sinnlos-*` and remove those no container uses with `docker image rm <ref>` (only untags while a local tag still names the image).
