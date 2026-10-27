@@ -19,7 +19,7 @@ const LOCALES: { value: Locale; short: string; label: string }[] = [
  * The topbar's language menu, on the shared SelectMenu (UI02): Radix
  * DropdownMenu with keyboard navigation, typeahead and focus return, the
  * panel portaled out of the blurred topbar. The closed trigger shows the
- * short code; its accessible name is "<label> <language>".
+ * short code; its accessible name is "<label> <code> <language>".
  *
  * The switch is awaited inside the transition, so it counts as pending
  * until switchLocale has set the cookie and the page came back in the new

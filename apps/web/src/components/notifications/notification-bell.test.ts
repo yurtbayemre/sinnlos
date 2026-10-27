@@ -173,14 +173,15 @@ describe("NotificationBell badge: the unread total (WD10)", () => {
     const loaded = [unread, ...Array.from({ length: 19 }, (_, i) => read(i + 2))];
     const bell = render(loaded, 25);
     expect(bell.badge).toBe("25");
-    expect(bell.label).toBe("title (25 unread)");
+    expect(bell.label).toBe("title, 25 unread");
   });
 
-  it("caps the badge at 99+ and keeps the exact count for screen readers", () => {
+  it("caps the badge at 99+; the name says what the badge shows and keeps the exact count", () => {
     const bell = render([unread], 150);
     expect(bell.badge).toBe("99+");
-    expect(bell.label).toBe("title (150 unread)");
+    expect(bell.label).toBe("title, 99+ unread (150)");
     expect(render([unread], 99).badge).toBe("99");
+    expect(render([unread], 99).label).toBe("title, 99 unread");
   });
 
   it("never shows fewer than the panel's own unread items", () => {

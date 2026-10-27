@@ -65,7 +65,8 @@ export async function Topbar() {
             </div>
             <Link
               href="/profile"
-              aria-label={tProfile("title")}
+              // The shown initials are part of the name (WCAG 2.5.3).
+              aria-label={`${tProfile("title")} ${initials(name)}`}
               className="rounded-full outline-hidden transition-opacity hover:opacity-80 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
             >
               <Avatar>

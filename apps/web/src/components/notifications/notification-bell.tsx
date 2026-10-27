@@ -39,6 +39,17 @@ export function unreadBadge(count: number): string {
 }
 
 /**
+ * The bell's name: the badge text unbracketed, so the shown text is part of
+ * the name (WCAG 2.5.3), and the exact count in brackets when the badge is
+ * capped (axe ignores bracketed text when it compares).
+ */
+export function bellLabel(title: string, unread: string, count: number): string {
+  if (count <= 0) return title;
+  const badge = unreadBadge(count);
+  return `${title}, ${badge} ${unread}${badge === String(count) ? "" : ` (${count})`}`;
+}
+
+/**
  * The feed the bell shows after a refetch (batch-12 deferral): an
  * unavailable answer (the cms unreachable, or the call itself failed) keeps
  * the last feed and flags it, so the bell no longer empties itself — badge
@@ -176,7 +187,7 @@ export function NotificationBell({
         <button
           type="button"
           className="relative inline-flex h-9 w-9 items-center justify-center rounded-xl border bg-muted/40 text-muted-foreground outline-hidden transition-colors hover:bg-muted/60 focus-visible:bg-background focus-visible:ring-2 focus-visible:ring-ring"
-          aria-label={`${t("title")}${unreadCount > 0 ? ` (${unreadCount} ${t("unread")})` : ""}`}
+          aria-label={bellLabel(t("title"), t("unread"), unreadCount)}
           aria-describedby={unavailable ? unavailableNoteId : undefined}
         >
           <Bell aria-hidden="true" className="h-4 w-4" />

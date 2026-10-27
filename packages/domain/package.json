@@ -1,7 +1,7 @@
 {
   "name": "@sinnlos/domain",
   "private": true,
-  "version": "0.33.1",
+  "version": "0.33.2",
   "license": "AGPL-3.0-only",
   "description": "Pure domain rules shared by the Sinnlos cms and web: no runtime dependencies, no I/O",
   "sideEffects": false,
@@ -32,6 +32,6 @@
     "@types/node": "24.19.2",
     "eslint": "^10.12.0",
     "typescript": "5.9.3",
-    "typescript-eslint": "^8.71.2"
+    "typescript-eslint": "^8.72.0"
   }
 }

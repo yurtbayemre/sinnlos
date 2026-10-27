@@ -533,7 +533,6 @@
     "delayedHint": "Die Live-Verbindung zum Intranet ist unterbrochen. Neue Kommentare und Benachrichtigungen kommen trotzdem an, einige Sekunden später."
   },
   "search": {
-    "label": "Suche (Strg+K)",
     "resultsCount": "{count, plural, =0 {Keine Treffer} one {# Treffer} other {# Treffer}}",
     "placeholder": "Wiki, Personen, Teams suchen…",
     "searchPlaceholder": "Suchen…",
