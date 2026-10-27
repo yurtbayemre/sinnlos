@@ -8,7 +8,7 @@ import { SelectMenu } from "./select-menu";
  * classified-form and people-grid rely on stays — the hidden input carries
  * the value into the form's FormData (only with `name`), the trigger shows
  * the current option — and the trigger's accessible name is the label plus
- * the current option's full label. The open menu is portaled on the client
+ * the current option's short text (when it has one) and full label. The open menu is portaled on the client
  * and never part of the server markup.
  */
 const OPTIONS = [
@@ -57,14 +57,18 @@ describe("SelectMenu", () => {
     expect(html).not.toContain("menuitemradio");
   });
 
-  it("names the trigger by its label and the current option's full label", () => {
+  it("names the trigger by its label and the current option's shown and full label", () => {
     const html = render({ value: "wanted" });
     const labelledBy = /aria-labelledby="([^"]+)"/.exec(html)?.[1] ?? "";
     const ids = labelledBy.split(" ");
     expect(ids).toHaveLength(2);
-    expect(ids.map((id) => textOf(html, id))).toEqual(["Category", "Wanted"]);
+    expect(ids.map((id) => textOf(html, id))).toEqual(["Category", "W Wanted"]);
     // The closed trigger shows the short text.
     expect(html).toContain(">W</span>");
+    // Without a short text the name is the full label alone.
+    const plain = render({ value: "sale" });
+    const plainIds = (/aria-labelledby="([^"]+)"/.exec(plain)?.[1] ?? "").split(" ");
+    expect(plainIds.map((id) => textOf(plain, id))).toEqual(["Category", "For sale"]);
   });
 
   it("disables the trigger on request", () => {

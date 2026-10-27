@@ -489,11 +489,14 @@ export function SearchCommand() {
 
   return (
     <>
-      {/* Trigger — icon-only on phones, full search-input look from sm up */}
+      {/* Trigger — icon-only on phones, full search-input look from sm up.
+          Its name is the visible placeholder (WCAG 2.5.3); the ⌘K hint is
+          CSS content, a keyboard hint and no part of the label. */}
       <button
         ref={triggerRef}
         type="button"
-        aria-label={tSearch("label")}
+        aria-label={tSearch("placeholder")}
+        aria-keyshortcuts="Control+K Meta+K"
         onClick={() => {
           rememberOpener();
           setOpen(true);
@@ -505,9 +508,11 @@ export function SearchCommand() {
           className="h-4 w-4 sm:pointer-events-none sm:absolute sm:left-3 sm:top-1/2 sm:-translate-y-1/2"
         />
         <span className="hidden truncate sm:inline">{tSearch("placeholder")}</span>
-        <kbd className="ml-auto hidden rounded border bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground sm:inline-block">
-          ⌘K
-        </kbd>
+        <kbd
+          aria-hidden="true"
+          data-keys="⌘K"
+          className="ml-auto hidden rounded border bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground after:content-[attr(data-keys)] sm:inline-block"
+        />
       </button>
 
       {/* Command palette as a real modal (issue #31): Command.Dialog wraps

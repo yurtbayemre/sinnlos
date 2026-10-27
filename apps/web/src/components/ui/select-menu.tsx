@@ -69,7 +69,9 @@ type SelectMenuProps = {
  *
  * Accessible name: "<ariaLabel> <current label>" (aria-labelledby on two
  * hidden spans), so a screen reader hears the current value on the trigger
- * as a native select would; the menu itself is named by `ariaLabel`.
+ * as a native select would; the menu itself is named by `ariaLabel`. An
+ * option with `short` shows it and names "<short> <label>", so the shown
+ * text is part of the name (WCAG 2.5.3).
  *
  * Contract kept for classified-form and people-grid: the props and the
  * hidden input (`name`) that puts the value into the form's FormData — it
@@ -111,7 +113,7 @@ export function SelectMenu({
         {ariaLabel}
       </span>
       <span id={valueId} hidden>
-        {active?.label ?? placeholder}
+        {active?.short ? `${active.short} ${active.label}` : (active?.label ?? placeholder)}
       </span>
       <DropdownMenu.Trigger asChild disabled={disabled}>
         <button
