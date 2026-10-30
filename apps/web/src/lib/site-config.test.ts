@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import pkg from "../../package.json";
 import {
   brand,
+  buildRevision,
   DEFAULT_SOURCE_URL,
   plausibleScript,
   shortRevision,
@@ -45,6 +46,16 @@ describe("site config", () => {
     expect(shortRevision({ SINNLOS_REVISION: "0c26656e98f9" })).toBe("0c26656");
     expect(shortRevision({ SINNLOS_REVISION: "unknown" })).toBeNull();
     expect(shortRevision({})).toBeNull();
+  });
+
+  it("builds the tab revision from the first 12 hex characters (#214)", () => {
+    expect(buildRevision({ SINNLOS_REVISION: "c0a7334c3024" })).toBe("c0a7334c3024");
+    expect(buildRevision({ SINNLOS_REVISION: "C0A7334C30242A520DC1962FCC363E4298188507" })).toBe(
+      "c0a7334c3024",
+    );
+    for (const value of [undefined, "", "unknown", "c0a7334c302", "c0a7334c302g"]) {
+      expect(buildRevision({ SINNLOS_REVISION: value }), String(value)).toBeNull();
+    }
   });
 
   it("loads analytics only with an https script URL and a domain", () => {

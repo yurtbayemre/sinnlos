@@ -62,6 +62,16 @@ export function shortRevision(env: Env): string | null {
   return value && value !== "unknown" ? value.slice(0, 7) : null;
 }
 
+/**
+ * The revision a tab compares with the live stream's hello (#214): the first
+ * 12 hex characters, lower-cased, because a build-mode deploy passes 12 and
+ * the registry and release images the full SHA. Null without one.
+ */
+export function buildRevision(env: Env): string | null {
+  const value = env.SINNLOS_REVISION?.trim().toLowerCase() ?? "";
+  return /^[0-9a-f]{12}/.test(value) ? value.slice(0, 12) : null;
+}
+
 /** The Plausible script: only with both PLAUSIBLE_SCRIPT_URL (https) and PLAUSIBLE_DOMAIN. */
 export function plausibleScript(env: Env): { src: string; domain: string } | null {
   const src = urlFromEnv(env, "PLAUSIBLE_SCRIPT_URL", ["https:"]);

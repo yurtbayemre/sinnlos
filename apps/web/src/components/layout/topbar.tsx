@@ -46,8 +46,8 @@ export async function Topbar() {
       </div>
 
       <div className="flex flex-1 items-center justify-end gap-2 sm:gap-3">
-        {/* The live stream's delayed note (LF05 degraded, 8C-T01): empty
-            while the stream is healthy. */}
+        {/* The live stream's delayed note (LF05 degraded, 8C-T01) or, after
+            a deploy, the reload note (#214): empty while all is well. */}
         {session?.user && <LiveStatus />}
         {session?.user && <LiveNotificationBell initial={notifications} />}
         <ThemeToggle />

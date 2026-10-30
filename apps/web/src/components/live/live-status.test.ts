@@ -19,17 +19,35 @@ import { DEGRADED_NOTICE_DELAY_MS, LiveStatusView, useDegradedNotice } from "./l
  */
 
 describe("LiveStatusView", () => {
-  function render(degraded: boolean, locale: "en" | "de" = "en"): string {
+  function render(degraded: boolean, locale: "en" | "de" = "en", newVersion = false): string {
     return renderToStaticMarkup(
       // eslint-disable-next-line react/no-children-prop -- a .test.ts has no JSX, and createElement's types want the provider's required children in the props
       createElement(NextIntlClientProvider, {
         locale,
         messages: locale === "en" ? en : de,
         timeZone: "Europe/Berlin",
-        children: createElement(LiveStatusView, { degraded }),
+        children: createElement(LiveStatusView, { degraded, newVersion }),
       }),
     );
   }
+
+  it.each([
+    ["en", en],
+    ["de", de],
+  ] as const)(
+    "offers a reload after a deploy in %s, in place of the delayed note (#214)",
+    (locale, messages) => {
+      const html = render(true, locale, true);
+      expect(html).toContain('role="status"');
+      expect(html).toContain('<button type="button"');
+      expect(html).toContain(`title="${messages.live.newVersionHint}"`);
+      // The label is the button's name at every width, visible from xl.
+      expect(html).toContain(
+        `<span class="sr-only xl:not-sr-only xl:whitespace-nowrap">${messages.live.newVersion}</span>`,
+      );
+      expect(html).not.toContain(messages.live.delayed);
+    },
+  );
 
   it("renders an empty polite status region while the stream is fine", () => {
     expect(render(false)).toBe(

@@ -173,9 +173,11 @@ export function frameChannel(frame: LiveFrame): LiveChannel {
 
 /**
  * The data of the stream's first event, `hello`: the connection id the
- * subscribe POSTs name, and whether the cms leg is fresh (EMIT_FRESH_MS).
+ * subscribe POSTs name, whether the cms leg is fresh (EMIT_FRESH_MS), and
+ * (v0.33.3, #214) the web server's build revision, so a tab from before a
+ * deploy can tell that its Server Actions are gone.
  */
-export type HelloFrame = { connId: string; emitFresh: boolean };
+export type HelloFrame = { connId: string; emitFresh: boolean; revision: string | null };
 
 /**
  * The data of the heartbeat, `hb`, sent every 25 s and at once when the cms
@@ -187,13 +189,26 @@ export type HeartbeatFrame = { emitFresh: boolean };
 
 /**
  * A `hello` event's data, or null without a connection id. A hello without
- * `emitFresh` (a web from before LF05) counts as fresh.
+ * `emitFresh` (a web from before LF05) counts as fresh. The revision is 7 to
+ * 64 hex characters, lower-cased; anything else (a web from before v0.33.3,
+ * a build without a revision) is null.
  */
 export function parseHelloFrame(value: unknown): HelloFrame | null {
   if (typeof value !== "object" || value === null) return null;
-  const { connId, emitFresh } = value as { connId?: unknown; emitFresh?: unknown };
+  const { connId, emitFresh, revision } = value as {
+    connId?: unknown;
+    emitFresh?: unknown;
+    revision?: unknown;
+  };
   if (typeof connId !== "string" || connId === "") return null;
-  return { connId, emitFresh: emitFresh !== false };
+  return {
+    connId,
+    emitFresh: emitFresh !== false,
+    revision:
+      typeof revision === "string" && /^[0-9a-f]{7,64}$/i.test(revision)
+        ? revision.toLowerCase()
+        : null,
+  };
 }
 
 /**
