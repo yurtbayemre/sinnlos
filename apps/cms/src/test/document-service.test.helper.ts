@@ -176,7 +176,8 @@ export async function openDocumentService(
     contentType: (uid: string) => contentTypes[uid],
     getModel: (uid: string) => contentTypes[uid],
     config: { get: (_key: string, fallback?: unknown) => fallback },
-    eventHub: { emit: async () => undefined },
+    // hasListeners (5.60): true keeps the entry-event path (re-read, emit) running.
+    eventHub: { emit: async () => undefined, hasListeners: () => true },
     log: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
     requestContext: { get: () => undefined },
   };

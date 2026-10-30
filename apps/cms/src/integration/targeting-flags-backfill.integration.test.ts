@@ -29,6 +29,10 @@ interface Backfill {
   backfillTargetingFlags(strapi: unknown): Promise<Record<string, number>>;
 }
 
+interface Notify {
+  __fanoutsSettledForTest(): Promise<void>;
+}
+
 describe.each(testEngines())("the targeting-flag backfill on %s", (engine) => {
   let database: TestDatabase;
   let t: TestStrapi;
@@ -130,6 +134,10 @@ describe.each(testEngines())("the targeting-flag backfill on %s", (engine) => {
       data: { title: "Marked announcement", audience: "departments" },
       status: "published",
     });
+    // The publishes' notification fan-out runs after the commit. Since Strapi
+    // 5.60 skips the entry-event re-read when nothing listens, the writes
+    // below met it on SQLite ("database is locked"); let it finish first.
+    await t.requireBuilt<Notify>("src/utils/notify").__fanoutsSettledForTest();
     await t.database.sql(
       "UPDATE events SET notify_audience = 'departments' WHERE document_id = ?",
       [event.documentId],
