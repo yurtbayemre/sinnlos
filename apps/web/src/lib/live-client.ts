@@ -67,6 +67,8 @@
  *    `{ connId, add, remove }` body and would take the set body as an empty
  *    change. Such a connection gets the difference to what it was sent,
  *    in the same chunks.
+ *  - Every hello reports the web's build revision (#214) to the provider,
+ *    which compares it with the tab's own; the machine itself ignores it.
  */
 import {
   ANNOUNCEMENTS_CHANNEL,
@@ -225,10 +227,14 @@ export class LiveClient {
   private subscribeRetryTimer: Timer | null = null;
   private syncScheduled = false;
 
-  /** `onHealth` gets every health change (the provider's state setter). */
+  /**
+   * `onHealth` gets every health change (the provider's state setter);
+   * `onRevision` every hello's web revision (#214, null without one).
+   */
   constructor(
     private readonly deps: LiveClientDeps,
     private readonly onHealth: (healthy: boolean) => void,
+    private readonly onRevision: (revision: string | null) => void = () => {},
   ) {}
 
   /**
@@ -303,6 +309,7 @@ export class LiveClient {
       // Degraded while the cms leg is not fresh (LF05): the stream is up
       // but no ping can come, so the owners poll at the short intervals.
       this.streamFresh = hello?.emitFresh ?? true;
+      if (hello) this.onRevision(hello.revision);
       // A new connection starts with no channels and no failed POST: send
       // the set if there is one.
       this.subscribeFailed = false;

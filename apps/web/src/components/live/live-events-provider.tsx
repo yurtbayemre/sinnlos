@@ -10,7 +10,8 @@
  * terminal stop and self-heal, heartbeat watchdog, hidden-tab teardown,
  * ping coalescing, catch-up queue, subscription sync — its header has the
  * rules). This component only creates one client per mount, starts it
- * while live events are enabled, and mirrors its health flag into state.
+ * while live events are enabled, and mirrors its health flag into state,
+ * and whether a hello came from another web build (#214).
  * The hooks below are the API every consumer uses; keep them unchanged.
  */
 
@@ -35,25 +36,46 @@ export type LiveContextValue = {
    * provider does, WD04).
    */
   streaming: boolean;
+  /**
+   * A stream hello came from another web build than the one that rendered
+   * this tab (#214): after a deploy the tab's Server Actions are gone, so
+   * the header offers a reload.
+   */
+  newVersion: boolean;
 };
 
 const LiveEventsContext = createContext<LiveContextValue>({
   register: () => () => {},
   healthy: false,
   streaming: false,
+  newVersion: false,
 });
 
 export function LiveEventsProvider({
   enabled,
+  revision = null,
   children,
 }: {
   enabled: boolean;
+  /** The build revision of the server that rendered the tab (layout). */
+  revision?: string | null;
   children: React.ReactNode;
 }) {
   const [healthy, setHealthy] = useState(false);
+  // The tab's own revision, taken once: a later render (router.refresh, a
+  // navigation) never replaces it, and a hello is compared, never adopted.
+  const [ownRevision] = useState(revision);
+  const [newVersion, setNewVersion] = useState(false);
   // One client per mount. Its constructor touches no browser API, so this
   // also runs during the server render; start() runs only in the effect.
-  const [client] = useState(() => new LiveClient(browserLiveClientDeps, setHealthy));
+  // A hello without a revision counts as another build once the tab has
+  // one (a web rolled back to before v0.33.3).
+  const [client] = useState(
+    () =>
+      new LiveClient(browserLiveClientDeps, setHealthy, (helloRevision) => {
+        if (ownRevision !== null && helloRevision !== ownRevision) setNewVersion(true);
+      }),
+  );
 
   useEffect(() => {
     if (!enabled) return;
@@ -62,7 +84,9 @@ export function LiveEventsProvider({
   }, [enabled, client]);
 
   return (
-    <LiveEventsContext value={{ register: client.register, healthy, streaming: enabled }}>
+    <LiveEventsContext
+      value={{ register: client.register, healthy, streaming: enabled, newVersion }}
+    >
       {children}
     </LiveEventsContext>
   );

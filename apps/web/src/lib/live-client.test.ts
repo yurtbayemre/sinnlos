@@ -16,6 +16,8 @@ interface Harness {
   deps: LiveClientDeps;
   client: LiveClient;
   health: boolean[];
+  /** Every revision a hello reported (#214). */
+  revisions: (string | null)[];
   posts: { url: string; body: unknown }[];
   clock: { now: number };
   rng: { value: number };
@@ -30,6 +32,7 @@ function harness(): Harness {
   const visibilityListeners = new Set<() => void>();
   const posts: { url: string; body: unknown }[] = [];
   const health: boolean[] = [];
+  const revisions: (string | null)[] = [];
   const deps: LiveClientDeps = {
     createEventSource: (url) => new FakeEventSource(url),
     now: () => clock.now,
@@ -48,8 +51,13 @@ function harness(): Harness {
   };
   return {
     deps,
-    client: new LiveClient(deps, (healthy) => health.push(healthy)),
+    client: new LiveClient(
+      deps,
+      (healthy) => health.push(healthy),
+      (revision) => revisions.push(revision),
+    ),
     health,
+    revisions,
     posts,
     clock,
     rng,
@@ -339,6 +347,24 @@ describe("two-leg health (LF05)", () => {
     source.emit("hello", { connId: "c1" });
     source.emit("hb", "1");
     expect(h.health).toEqual([true, true]);
+    h.client.stop();
+  });
+});
+
+describe("the web's build revision (#214)", () => {
+  it("reports every hello's revision, also while the cms leg is stale, and nothing else", () => {
+    const h = harness();
+    h.client.start();
+    const source = FakeEventSource.latest();
+    source.emit("hello", { connId: "c1", emitFresh: false, revision: "c0a7334c3024" });
+    expect(h.revisions).toEqual(["c0a7334c3024"]);
+    // Heartbeats and pings carry none.
+    source.emit("hb", { emitFresh: true });
+    expect(h.revisions).toEqual(["c0a7334c3024"]);
+    // A web from before v0.33.3 says none; a hello without a connection id is no hello.
+    source.emit("hello", { connId: "c2", emitFresh: true });
+    source.emit("hello", { emitFresh: true, revision: "aaaaaaaaaaaa" });
+    expect(h.revisions).toEqual(["c0a7334c3024", null]);
     h.client.stop();
   });
 });

@@ -123,16 +123,44 @@ describe("stream events (LF05)", () => {
     expect(parseHelloFrame({ connId: "c1", emitFresh: false })).toEqual({
       connId: "c1",
       emitFresh: false,
+      revision: null,
     });
     expect(parseHelloFrame({ connId: "c1", emitFresh: true })).toEqual({
       connId: "c1",
       emitFresh: true,
+      revision: null,
     });
     // The hello of a web from before LF05.
-    expect(parseHelloFrame({ connId: "c1" })).toEqual({ connId: "c1", emitFresh: true });
+    expect(parseHelloFrame({ connId: "c1" })).toEqual({
+      connId: "c1",
+      emitFresh: true,
+      revision: null,
+    });
     for (const value of [null, "c1", {}, { connId: "" }, { connId: 7 }]) {
       expect(parseHelloFrame(value), JSON.stringify(value)).toBeNull();
     }
+  });
+
+  it("reads the hello's revision (#214): hex, lower-cased; anything else is null", () => {
+    const revision = (value: unknown) =>
+      parseHelloFrame({ connId: "c1", emitFresh: true, revision: value })?.revision;
+    expect(revision("c0a7334c3024")).toBe("c0a7334c3024");
+    expect(revision("C0A7334C30242A520DC1962FCC363E4298188507")).toBe(
+      "c0a7334c30242a520dc1962fcc363e4298188507",
+    );
+    for (const value of [
+      undefined,
+      null,
+      "",
+      "unknown",
+      "c0a733",
+      "c0a7334c-3024",
+      "g".repeat(12),
+      7,
+    ]) {
+      expect(revision(value), JSON.stringify(value)).toBeNull();
+    }
+    expect(revision("a".repeat(65))).toBeNull();
   });
 
   it("calls a heartbeat stale only when it says emitFresh false", () => {

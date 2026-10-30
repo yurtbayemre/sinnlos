@@ -174,7 +174,7 @@ describe("GET /live/stream", () => {
     expect(stream.res.headers.get("cache-control")).toBe("no-store, no-transform");
     expect(stream.res.headers.get("x-accel-buffering")).toBe("no");
     expect(await stream.read()).toMatch(
-      /^retry: 3000\nevent: hello\ndata: \{"connId":"[^"]+","emitFresh":false\}\n\n$/,
+      /^retry: 3000\nevent: hello\ndata: \{"connId":"[^"]+","emitFresh":false,"revision":null\}\n\n$/,
     );
     expect(getLiveBus().connectionCount()).toBe(1);
   });
@@ -266,8 +266,20 @@ describe("GET /live/stream", () => {
     getLiveBus().publish([{ kind: "keepalive" }]);
     const stream = await open();
     expect(await stream.read()).toMatch(
-      /event: hello\ndata: \{"connId":"[^"]+","emitFresh":true\}/,
+      /event: hello\ndata: \{"connId":"[^"]+","emitFresh":true,"revision":null\}/,
     );
+  });
+
+  it("names the web's build revision in the hello (#214), its first 12 characters", async () => {
+    vi.stubEnv("SINNLOS_REVISION", "C0A7334C30242A520DC1962FCC363E4298188507");
+    try {
+      const stream = await open();
+      expect(await stream.read()).toMatch(
+        /event: hello\ndata: \{"connId":"[^"]+","emitFresh":false,"revision":"c0a7334c3024"\}/,
+      );
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
   it("beats at once when the cms leg comes back, not at the next tick", async () => {
