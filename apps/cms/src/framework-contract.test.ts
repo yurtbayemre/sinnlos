@@ -30,7 +30,7 @@ import { getMutableQuery, restrictiveIdFilter } from "./utils/policy-query";
  * Framework contract (roadmap S04): the Strapi behaviour this cms is built
  * on, pinned against the INSTALLED packages (@strapi/utils, @strapi/core,
  * @strapi/database, @strapi/upload, @strapi/plugin-users-permissions
- * 5.59.0; first pinned on 5.55.1). Each block names the code that relies
+ * 5.60.0; first pinned on 5.55.1). Each block names the code that relies
  * on it. The utils, core and upload traps run the real modules; the
  * database traps run @strapi/database on a throwaway SQLite file
  * (src/test/sqlite-engine.test.helper.ts), like
@@ -47,7 +47,7 @@ import { getMutableQuery, restrictiveIdFilter } from "./utils/policy-query";
  * longer holds, not that the test is wrong.
  */
 
-const STRAPI_VERSION = "5.59.0";
+const STRAPI_VERSION = "5.60.0";
 
 afterEach(() => {
   vi.unstubAllGlobals();
