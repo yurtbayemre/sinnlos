@@ -75,7 +75,7 @@ function TreeNode({ node, level }: { node: PersonNode; level: number }) {
           )}
           <Link
             href={`/people/${person.id}`}
-            className="flex items-center gap-3 rounded-lg outline-hidden transition-opacity hover:opacity-80 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+            className="flex min-w-0 items-center gap-3 rounded-lg outline-hidden transition-opacity hover:opacity-80 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
           >
             <Avatar className="h-9 w-9">
               {avatarUrl ? <AvatarImage src={avatarUrl} alt={name} /> : null}

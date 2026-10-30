@@ -73,7 +73,7 @@ export default async function KudosPage() {
       {view.celebrations.length > 0 && (
         <section className="space-y-3">
           <SectionLabel icon={PartyPopper}>{t("celebrations")}</SectionLabel>
-          <div className="stagger grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="stagger grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {view.celebrations.map((c) => {
               const name = c.name ?? tCommon("unknown");
               const isBirthday = c.type === "birthday";

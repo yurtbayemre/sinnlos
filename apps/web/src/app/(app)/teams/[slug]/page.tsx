@@ -75,7 +75,7 @@ export default async function TeamPage({ params }: Props) {
         )}
       </header>
 
-      <section className="grid gap-6 lg:grid-cols-3">
+      <section className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         <Card>
           <CardHeader>
             <CardTitle as="h2">{t("lead")}</CardTitle>
@@ -105,7 +105,7 @@ export default async function TeamPage({ params }: Props) {
             <CardTitle as="h2">{t("members")}</CardTitle>
             <CardDescription>{tCommon("member", { count: members.length })}</CardDescription>
           </CardHeader>
-          <CardContent className="stagger grid gap-3 sm:grid-cols-2">
+          <CardContent className="stagger grid grid-cols-1 gap-3 sm:grid-cols-2">
             {members.length === 0 ? (
               <p className="text-sm text-muted-foreground">{t("noMembersYet")}</p>
             ) : (

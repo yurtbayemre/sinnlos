@@ -198,7 +198,8 @@ test("a11y-learner", async ({ browser }) => {
  * Part of the manual pass that a browser can repeat: the skip link, the
  * palette's keyboard round trip, arrow keys in a quiz, and 200 % zoom
  * (640 × 360 CSS pixels) without horizontal scrolling, including the
- * mobile navigation's More sheet.
+ * mobile navigation's More sheet, and a 320 px phone whose dashboard
+ * truncates a quick link label wider than the screen (v0.33.4).
  */
 test("a11y-keyboard-and-zoom", async ({ browser }) => {
   const fixtures = loadFixtures();
@@ -249,6 +250,15 @@ test("a11y-keyboard-and-zoom", async ({ browser }) => {
       `/training/${fixtures.training.course.slug}/${fixtures.training.lesson.documentId}`,
     );
     await expect(main.getByRole("heading", { level: 1 })).toBeVisible();
+    expect(await noHorizontalScroll()).toBe(true);
+  });
+
+  await test.step("320 px: a quick link label wider than the screen is truncated", async () => {
+    await page.setViewportSize({ width: 320, height: 640 });
+    await page.goto("/");
+    const label = main.getByText(fixtures.quickLink.label, { exact: true });
+    await expect(label).toBeVisible();
+    expect(await label.evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true);
     expect(await noHorizontalScroll()).toBe(true);
   });
 

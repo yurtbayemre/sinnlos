@@ -21,6 +21,7 @@ type Fixtures = {
     a11y: Account;
   };
   poll: { question: string; documentId: string };
+  quickLink: { label: string; documentId: string };
   privacy: { announcement: { title: string; documentId: string }; comment: string };
   teams: { editable: Team; readonly: Team };
   training: TrainingFixture;

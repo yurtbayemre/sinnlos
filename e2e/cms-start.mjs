@@ -33,6 +33,7 @@ const progressUid = "api::lesson-progress.lesson-progress";
 const announcementUid = "api::announcement.announcement";
 const commentUid = "api::comment.comment";
 const pollUid = "api::poll.poll";
+const quickLinkUid = "api::quick-link.quick-link";
 let phase = "environment check";
 /** @type {Cms | undefined} */
 let strapi;
@@ -134,6 +135,11 @@ async function start() {
       },
     },
     poll: { question: "E2E Lunch poll", documentId: "" },
+    // v0.33.4 (a11y.spec.ts): a label far wider than a 320 px screen.
+    quickLink: {
+      label: "E2E Travel expenses and reimbursement portal for all locations",
+      documentId: "",
+    },
     privacy: {
       announcement: { title: "E2E Privacy Announcement", documentId: "" },
       comment: "E2E leaver comment",
@@ -329,6 +335,16 @@ async function start() {
     status: "published",
   });
   fixtures.poll.documentId = poll.documentId;
+  const quickLink = await cms.documents(quickLinkUid).create({
+    data: {
+      label: fixtures.quickLink.label,
+      url: "https://example.com/e2e-expenses",
+      category: "tools",
+      audience: "all",
+    },
+    status: "published",
+  });
+  fixtures.quickLink.documentId = quickLink.documentId;
   await cms.documents(commentUid).create({
     data: {
       body: fixtures.privacy.comment,
@@ -467,7 +483,7 @@ async function start() {
     });
   });
   console.log(
-    "[e2e-cms] Ready: normal bootstrap and fixture assertions passed (1 department, 8 users, 2 teams, 3 published quiz courses and lessons, 1 commented announcement, 1 poll).",
+    "[e2e-cms] Ready: normal bootstrap and fixture assertions passed (1 department, 8 users, 2 teams, 3 published quiz courses and lessons, 1 commented announcement, 1 poll, 1 quick link).",
   );
 }
 

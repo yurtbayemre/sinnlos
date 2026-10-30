@@ -92,7 +92,7 @@ export function PeopleGrid({ people }: { people: PersonCard[] }) {
         {tCommon("person", { count: filtered.length })}
       </p>
 
-      <div className="stagger grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+      <div className="stagger grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
         {filtered.slice(0, shown).map((p) => {
           const name = p.name ?? tCommon("unknown");
           return (
@@ -105,7 +105,7 @@ export function PeopleGrid({ people }: { people: PersonCard[] }) {
                     ) : null}
                     <AvatarFallback className="text-lg">{initials(name)}</AvatarFallback>
                   </Avatar>
-                  <div className="min-w-0">
+                  <div className="w-full min-w-0">
                     <div className="truncate font-medium transition-colors group-hover:text-primary">
                       {name}
                     </div>
