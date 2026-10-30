@@ -104,7 +104,7 @@ export default async function AnnouncementsPage() {
           {view.openAcks.length > 0 && (
             <section className="space-y-3">
               <SectionLabel icon={CheckCircle2}>{t("openAcks")}</SectionLabel>
-              <div className="stagger grid gap-4 md:grid-cols-2">
+              <div className="stagger grid grid-cols-1 gap-4 md:grid-cols-2">
                 {view.openAcks.map((e) => card(e, true, e.item.documentId ?? e.item.id))}
               </div>
             </section>
@@ -116,8 +116,8 @@ export default async function AnnouncementsPage() {
               <div
                 className={
                   view.pinned.length > 1
-                    ? "stagger grid gap-4 md:grid-cols-2"
-                    : "stagger grid gap-4"
+                    ? "stagger grid grid-cols-1 gap-4 md:grid-cols-2"
+                    : "stagger grid grid-cols-1 gap-4"
                 }
               >
                 {view.pinned.map((e) => card(e, true, e.item.id))}

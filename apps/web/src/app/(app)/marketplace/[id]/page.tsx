@@ -114,7 +114,7 @@ export default async function ClassifiedDetailPage({ params }: Params) {
         </div>
       )}
 
-      <div className="grid gap-6 lg:grid-cols-3">
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         <div className="space-y-6 lg:col-span-2">
           <header>
             <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
@@ -194,12 +194,12 @@ export default async function ClassifiedDetailPage({ params }: Params) {
                   {ad.author ? (
                     <Link
                       href={`/people/${ad.author.id}`}
-                      className="truncate font-medium hover:underline"
+                      className="block truncate font-medium hover:underline"
                     >
                       {authorName}
                     </Link>
                   ) : (
-                    <span className="truncate font-medium">{authorName}</span>
+                    <span className="block truncate font-medium">{authorName}</span>
                   )}
                   {ad.author?.jobTitle && (
                     <div className="truncate text-xs text-muted-foreground">

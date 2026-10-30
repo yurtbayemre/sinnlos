@@ -56,7 +56,7 @@ export async function QuickLinks({ items }: { items: QuickLink[] }) {
             <h3 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
               {t(`categories.${group.category}`)}
             </h3>
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
               {group.links.map((link) => (
                 <QuickLinkCard key={link.id} link={link} newTabLabel={t("openInNewTab")} />
               ))}
