@@ -160,6 +160,12 @@ format`: a scanner posted to a page with a made-up Server Action id,
 
 Newest first. Older releases: [archive/deployment-history.md](archive/deployment-history.md).
 
+**Upgrading to v0.33.3.** No required env, no edge change. Strapi adds one nullable column.
+
+- **Strapi 5.60.0** (every `@strapi/*` package). At the first boot Strapi adds the nullable column `strapi_webhooks.content_type_events` (webhook events chosen per content type); nothing else in the database changes.
+- **Open tabs offer a reload after a deploy (#214).** A tab opened before a deploy runs the old web bundle, so its Server Actions (the bell's refresh, comments, saving) fail until it is reloaded. The live stream's first event now names the web's build revision; a tab whose own revision differs shows a "New version – reload" button in the header, in place of the "Live updates delayed" note. It never reloads by itself. Tabs opened before v0.33.3 do not have the button yet: reload them once by hand. Without the live stream (`LIVE_EVENTS_DISABLED=1`) there is no button. On phones narrower than 360 px the button overlaps the search button, like the delayed note.
+- **Rollback** to v0.33.2 is a plain retag of both images. The new column stays, and v0.33.2 ignores it (`DATABASE_FORCE_MIGRATION` stays off); webhook events chosen per content type under v0.33.3 do not apply on v0.33.2. Tabs of v0.33.3 then show the reload button once.
+
 **Upgrading to v0.33.2.** No required env, no edge change, no schema change.
 
 - **Dependencies:** the `node:24-alpine` base image digest, `docker/login-action` 4.7.0, Next 16.4.3, vite 8.3.5, jose 6.2.13, lucide-react 1.61.0, postcss 8.5.31, typescript-eslint 8.72.0, @axe-core/playwright 4.14.0.
