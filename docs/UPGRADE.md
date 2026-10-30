@@ -163,6 +163,11 @@ format`: a scanner posted to a page with a made-up Server Action id,
 
 Newest first. Older releases: [archive/deployment-history.md](archive/deployment-history.md).
 
+**Upgrading to v0.33.4.** No required env, no edge change, no schema change.
+
+- **Phone pages no longer scroll sideways.** Below the first breakpoint, a long single-line text (a quick link label, a name, job title or department, an author) made its list wider than the screen instead of ending in "…", so the whole page could be pushed sideways. Fixed on the dashboard's quick links, people, the org chart, the person detail, department and team members, kudos, announcements and the marketplace detail. Only the web changes; the columns from the first breakpoint up are as before.
+- **Rollback** to v0.33.3 is a plain retag.
+
 **Upgrading to v0.33.3.** No required env, no edge change. Strapi adds one nullable column.
 
 - **Strapi 5.60.0** (every `@strapi/*` package). At the first boot Strapi adds the nullable column `strapi_webhooks.content_type_events` (webhook events chosen per content type); nothing else in the database changes.
