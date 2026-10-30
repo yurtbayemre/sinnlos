@@ -301,6 +301,9 @@ image names stay `infra-web-1`, `infra-cms-1`, `infra-db-1` / `infra-web`,
 
 ```bash
 cd ~/sinnlos
+# The release identity, as infra/deploy.sh passes it (footer; reload button of #214).
+export SINNLOS_VERSION="$(sed -n 's/^  "version": "\([^"]*\)",$/\1/p' package.json)"
+export SINNLOS_REVISION="$(git rev-parse --short=12 HEAD)"
 docker compose -p infra \
   -f infra/docker-compose.yml \
   -f infra/docker-compose.traefik.yml \
