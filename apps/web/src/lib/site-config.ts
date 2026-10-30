@@ -69,7 +69,7 @@ export function shortRevision(env: Env): string | null {
  */
 export function buildRevision(env: Env): string | null {
   const value = env.SINNLOS_REVISION?.trim().toLowerCase() ?? "";
-  return /^[0-9a-f]{12}/.test(value) ? value.slice(0, 12) : null;
+  return /^[0-9a-f]{12,64}$/.test(value) ? value.slice(0, 12) : null;
 }
 
 /** The Plausible script: only with both PLAUSIBLE_SCRIPT_URL (https) and PLAUSIBLE_DOMAIN. */

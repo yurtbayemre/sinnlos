@@ -5,9 +5,19 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import de from "../../../messages/de.json";
 import en from "../../../messages/en.json";
-import { FakeEventSource, installFakeBrowser, type FakeBrowser } from "./fake-browser.test.helper";
+import {
+  FakeEventSource,
+  installFakeBrowser,
+  type FakeBrowser,
+  type FakeNode,
+} from "./fake-browser.test.helper";
 import { LiveEventsProvider } from "./live-events-provider";
-import { DEGRADED_NOTICE_DELAY_MS, LiveStatusView, useDegradedNotice } from "./live-status";
+import {
+  DEGRADED_NOTICE_DELAY_MS,
+  LiveStatus,
+  LiveStatusView,
+  useDegradedNotice,
+} from "./live-status";
 
 /**
  * The header's "live updates delayed" note (batch 13 merge, 8C-T01): shown
@@ -163,5 +173,79 @@ describe("useDegradedNotice", () => {
     await emit("hello", { connId: "conn-2", emitFresh: true });
     await advance(10 * DEGRADED_NOTICE_DELAY_MS);
     expect(shown.every((value) => !value)).toBe(true);
+  });
+});
+
+describe("LiveStatus after a deploy (#214)", () => {
+  let browser: FakeBrowser;
+  const reload = vi.fn();
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    browser = installFakeBrowser();
+    reload.mockClear();
+    (window as unknown as { location: { reload: () => void } }).location = { reload };
+  });
+
+  afterEach(async () => {
+    await browser.unmount();
+    browser.uninstall();
+    vi.useRealTimers();
+  });
+
+  /** The first element named `tag` below `node`, depth first. */
+  function find(node: FakeNode, tag: string): FakeNode | null {
+    for (const child of node.childNodes) {
+      if (child.nodeName === tag) return child;
+      const hit = find(child, tag);
+      if (hit) return hit;
+    }
+    return null;
+  }
+
+  /** The props React DOM keeps on a host node (its onClick among them). */
+  function reactProps(node: FakeNode): { onClick?: () => void } {
+    const key = Object.keys(node).find((name) => name.startsWith("__reactProps$"));
+    return key ? (node as unknown as Record<string, { onClick?: () => void }>)[key] : {};
+  }
+
+  it("shows the reload button once a hello names another build, and reloads only on a click", async () => {
+    await browser.render(
+      // eslint-disable-next-line react/no-children-prop -- as above
+      createElement(NextIntlClientProvider, {
+        locale: "en",
+        messages: en,
+        timeZone: "Europe/Berlin",
+        // eslint-disable-next-line react/no-children-prop -- as above
+        children: createElement(LiveEventsProvider, {
+          enabled: true,
+          revision: "aaaaaaaaaaaa",
+          children: createElement(LiveStatus),
+        }),
+      }) as ReactElement,
+    );
+    await browser.act(() =>
+      FakeEventSource.latest().emit("hello", {
+        connId: "c1",
+        emitFresh: true,
+        revision: "aaaaaaaaaaaa",
+      }),
+    );
+    expect(find(browser.container, "BUTTON")).toBeNull();
+
+    await browser.act(() =>
+      FakeEventSource.latest().emit("hello", {
+        connId: "c2",
+        emitFresh: true,
+        revision: "bbbbbbbbbbbb",
+      }),
+    );
+    const button = find(browser.container, "BUTTON");
+    expect(button?.getAttribute("title")).toBe(en.live.newVersionHint);
+    await browser.act(() => vi.advanceTimersByTimeAsync(60_000).then(() => {}));
+    expect(reload).not.toHaveBeenCalled();
+
+    await browser.act(() => reactProps(button!).onClick?.());
+    expect(reload).toHaveBeenCalledTimes(1);
   });
 });

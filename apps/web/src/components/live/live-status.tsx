@@ -76,7 +76,7 @@ export function LiveStatusView({
           type="button"
           title={t("newVersionHint")}
           onClick={() => window.location.reload()}
-          className="inline-flex h-9 w-9 shrink-0 items-center justify-center gap-1.5 rounded-full border border-amber-500/40 bg-amber-500/10 px-0 text-xs xl:w-auto xl:px-2.5 font-medium text-amber-700 outline-hidden hover:bg-amber-500/20 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background dark:text-amber-300"
+          className="inline-flex h-9 w-9 shrink-0 items-center justify-center gap-1.5 rounded-full border border-amber-500/40 bg-amber-500/10 px-0 text-xs xl:w-auto xl:px-2.5 font-medium text-amber-800 outline-hidden hover:bg-amber-500/20 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background dark:text-amber-300"
         >
           <RefreshCw aria-hidden="true" className="h-3.5 w-3.5 shrink-0" />
           <span className="sr-only xl:not-sr-only xl:whitespace-nowrap">{t("newVersion")}</span>

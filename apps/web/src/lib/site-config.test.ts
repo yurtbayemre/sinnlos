@@ -53,7 +53,14 @@ describe("site config", () => {
     expect(buildRevision({ SINNLOS_REVISION: "C0A7334C30242A520DC1962FCC363E4298188507" })).toBe(
       "c0a7334c3024",
     );
-    for (const value of [undefined, "", "unknown", "c0a7334c302", "c0a7334c302g"]) {
+    for (const value of [
+      undefined,
+      "",
+      "unknown",
+      "c0a7334c302",
+      "c0a7334c302g",
+      "aaaaaaaaaaaa-not-a-sha",
+    ]) {
       expect(buildRevision({ SINNLOS_REVISION: value }), String(value)).toBeNull();
     }
   });

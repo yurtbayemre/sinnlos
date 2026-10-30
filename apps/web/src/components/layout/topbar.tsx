@@ -45,7 +45,11 @@ export async function Topbar() {
         <SearchCommand />
       </div>
 
-      <div className="flex flex-1 items-center justify-end gap-2 sm:gap-3">
+      {/* gap-1.5 below sm: the reload button (#214) needs 36 px more, which
+          a 360 px phone has with these gaps (measured: 2 px over with
+          gap-2). A 320 px phone has no room for it, nor for the delayed
+          pill: there it overlaps the search button. */}
+      <div className="flex flex-1 items-center justify-end gap-1.5 sm:gap-3">
         {/* The live stream's delayed note (LF05 degraded, 8C-T01) or, after
             a deploy, the reload note (#214): empty while all is well. */}
         {session?.user && <LiveStatus />}
