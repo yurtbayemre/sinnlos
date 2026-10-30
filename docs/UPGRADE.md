@@ -51,8 +51,11 @@ docker tag "$(docker inspect -f '{{.Image}}' infra-cms-1)" infra-cms:manual-prev
 cd ~/sinnlos && git fetch --tags && git checkout v<new version>
 infra/deploy.sh --check
 
-# 3. Rebuild and restart (no data loss)
-cd infra && docker compose up -d --build
+# 3. Rebuild and restart (no data loss). The release identity goes into the
+#    images like deploy.sh does it: the footer shows it, and since v0.33.3
+#    open tabs compare the revision to offer a reload after a deploy.
+cd infra && SINNLOS_VERSION="$(sed -n 's/^  "version": "\([^"]*\)",$/\1/p' ../package.json)" \
+  SINNLOS_REVISION="$(git rev-parse --short=12 HEAD)" docker compose up -d --build
 
 # 4. Watch the logs until both containers report healthy
 docker compose -p infra logs -f --tail=50 cms web
@@ -163,7 +166,7 @@ Newest first. Older releases: [archive/deployment-history.md](archive/deployment
 **Upgrading to v0.33.3.** No required env, no edge change. Strapi adds one nullable column.
 
 - **Strapi 5.60.0** (every `@strapi/*` package). At the first boot Strapi adds the nullable column `strapi_webhooks.content_type_events` (webhook events chosen per content type); nothing else in the database changes.
-- **Open tabs offer a reload after a deploy (#214).** A tab opened before a deploy runs the old web bundle, so its Server Actions (the bell's refresh, comments, saving) fail until it is reloaded. The live stream's first event now names the web's build revision; a tab whose own revision differs shows a "New version – reload" button in the header, in place of the "Live updates delayed" note. It never reloads by itself. Tabs opened before v0.33.3 do not have the button yet: reload them once by hand. Without the live stream (`LIVE_EVENTS_DISABLED=1`) there is no button. On phones narrower than 360 px the button overlaps the search button, like the delayed note.
+- **Open tabs offer a reload after a deploy (#214).** A tab opened before a deploy runs the old web bundle, so its Server Actions (the bell's refresh, comments, saving) fail until it is reloaded. The live stream's first event now names the web's build revision; a tab whose own revision differs shows a "New version – reload" button in the header, in place of the "Live updates delayed" note. It never reloads by itself. Limits: tabs opened before v0.33.3 do not have the button yet (reload them once by hand); an image built without a revision (`SINNLOS_REVISION` unset, see the manual steps above) never shows it; rebuilding the same commit can change the Server Actions without a button; a hidden tab, and one whose stream was evicted or expired, shows it once it is visible again; without the live stream (`LIVE_EVENTS_DISABLED=1`) there is no button; on phones narrower than 360 px it overlaps the search button, like the delayed note.
 - **Rollback** to v0.33.2 is a plain retag of both images. The new column stays, and v0.33.2 ignores it (`DATABASE_FORCE_MIGRATION` stays off); webhook events chosen per content type under v0.33.3 do not apply on v0.33.2. Tabs of v0.33.3 then show the reload button once.
 
 **Upgrading to v0.33.2.** No required env, no edge change, no schema change.
