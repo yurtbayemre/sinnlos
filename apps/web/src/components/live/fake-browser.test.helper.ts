@@ -188,6 +188,11 @@ class FakeDocument extends FakeEventTarget {
     return new FakeNode(1, tag.toUpperCase(), this);
   }
 
+  /** SVG elements (an icon in the tree); their names keep their case. */
+  createElementNS(_namespace: string, tag: string): FakeNode {
+    return new FakeNode(1, tag, this);
+  }
+
   createTextNode(text: string): FakeNode {
     return Object.assign(new FakeNode(3, "#text", this), { nodeValue: text });
   }

@@ -530,7 +530,9 @@
   },
   "live": {
     "delayed": "Live-Updates verzögert",
-    "delayedHint": "Die Live-Verbindung zum Intranet ist unterbrochen. Neue Kommentare und Benachrichtigungen kommen trotzdem an, einige Sekunden später."
+    "delayedHint": "Die Live-Verbindung zum Intranet ist unterbrochen. Neue Kommentare und Benachrichtigungen kommen trotzdem an, einige Sekunden später.",
+    "newVersion": "Neue Version – neu laden",
+    "newVersionHint": "Das Intranet wurde aktualisiert. Bitte laden Sie die Seite neu, damit Benachrichtigungen, Kommentare und Speichern wieder funktionieren."
   },
   "search": {
     "resultsCount": "{count, plural, =0 {Keine Treffer} one {# Treffer} other {# Treffer}}",

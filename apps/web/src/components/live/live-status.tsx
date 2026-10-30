@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useSyncExternalStore } from "react";
-import { WifiOff } from "lucide-react";
+import { RefreshCw, WifiOff } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useLiveRegistry } from "./live-events-provider";
 
@@ -54,19 +54,43 @@ export function useDegradedNotice(): boolean {
  * stream is fine), so screen readers announce the text when it appears.
  * The label is visible from xl and read out below it; the hint is the
  * pill's tooltip.
+ *
+ * A newer web build (#214) takes the place of the delayed note: the tab's
+ * Server Actions are gone, so it offers a reload, never by itself (an
+ * editor may hold unsaved input; its beforeunload guard still asks). Below
+ * xl it is a square icon button like the header's other h-9 controls, so a
+ * 360 px phone keeps its width (topbar.tsx PHONE_ICON_BUTTON).
  */
-export function LiveStatusView({ degraded }: { degraded: boolean }) {
+export function LiveStatusView({
+  degraded,
+  newVersion = false,
+}: {
+  degraded: boolean;
+  newVersion?: boolean;
+}) {
   const t = useTranslations("live");
   return (
     <div role="status" aria-live="polite" className="flex items-center">
-      {degraded && (
-        <span
-          title={t("delayedHint")}
-          className="inline-flex items-center gap-1.5 rounded-full border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-xs font-medium text-amber-700 dark:text-amber-300"
+      {newVersion ? (
+        <button
+          type="button"
+          title={t("newVersionHint")}
+          onClick={() => window.location.reload()}
+          className="inline-flex h-9 w-9 shrink-0 items-center justify-center gap-1.5 rounded-full border border-amber-500/40 bg-amber-500/10 px-0 text-xs xl:w-auto xl:px-2.5 font-medium text-amber-800 outline-hidden hover:bg-amber-500/20 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background dark:text-amber-300"
         >
-          <WifiOff aria-hidden="true" className="h-3.5 w-3.5 shrink-0" />
-          <span className="sr-only xl:not-sr-only xl:whitespace-nowrap">{t("delayed")}</span>
-        </span>
+          <RefreshCw aria-hidden="true" className="h-3.5 w-3.5 shrink-0" />
+          <span className="sr-only xl:not-sr-only xl:whitespace-nowrap">{t("newVersion")}</span>
+        </button>
+      ) : (
+        degraded && (
+          <span
+            title={t("delayedHint")}
+            className="inline-flex items-center gap-1.5 rounded-full border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-xs font-medium text-amber-700 dark:text-amber-300"
+          >
+            <WifiOff aria-hidden="true" className="h-3.5 w-3.5 shrink-0" />
+            <span className="sr-only xl:not-sr-only xl:whitespace-nowrap">{t("delayed")}</span>
+          </span>
+        )
       )}
     </div>
   );
@@ -74,5 +98,6 @@ export function LiveStatusView({ degraded }: { degraded: boolean }) {
 
 /** The header's live status, from the page's LiveEventsProvider. */
 export function LiveStatus() {
-  return <LiveStatusView degraded={useDegradedNotice()} />;
+  const { newVersion } = useLiveRegistry();
+  return <LiveStatusView degraded={useDegradedNotice()} newVersion={newVersion} />;
 }

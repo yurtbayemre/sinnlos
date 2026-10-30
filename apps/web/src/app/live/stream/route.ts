@@ -46,6 +46,7 @@
  */
 import { STRAPI_URL } from "@/lib/config";
 import { getSession, getStrapiToken } from "@/lib/session";
+import { buildRevision } from "@/lib/site-config";
 import { strapiJwtExp } from "@/lib/strapi-jwt";
 import { checkUploadAccess } from "@/lib/upload-block-cache";
 
@@ -141,7 +142,13 @@ export async function GET(req: Request) {
 
       // retry: native EventSource reconnect hint for mid-stream network
       // drops (HTTP errors close it permanently — the provider owns that).
-      const hello: HelloFrame = { connId, emitFresh: bus.emitFresh() };
+      // The revision (#214) tells a tab from before a deploy that its
+      // Server Actions are gone; the layout gave the tab its own.
+      const hello: HelloFrame = {
+        connId,
+        emitFresh: bus.emitFresh(),
+        revision: buildRevision(process.env),
+      };
       write(`retry: 3000\nevent: hello\ndata: ${JSON.stringify(hello)}\n\n`);
 
       heartbeat = setInterval(() => {

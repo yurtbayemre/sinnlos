@@ -530,7 +530,9 @@
   },
   "live": {
     "delayed": "Live updates delayed",
-    "delayedHint": "The live connection to the intranet is interrupted. New comments and notifications still arrive, a few seconds later."
+    "delayedHint": "The live connection to the intranet is interrupted. New comments and notifications still arrive, a few seconds later.",
+    "newVersion": "New version – reload",
+    "newVersionHint": "The intranet was updated. Reload the page so notifications, comments and saving work again."
   },
   "search": {
     "resultsCount": "{count, plural, =0 {No results} one {# result} other {# results}}",

@@ -20,7 +20,7 @@ Every command below runs on the host as the **deploy user**, the user that owns 
 ## 2. The code
 
 ```sh
-git clone --branch v0.33.2 https://github.com/yurtbayemre/sinnlos.git
+git clone --branch v0.33.3 https://github.com/yurtbayemre/sinnlos.git
 cd sinnlos
 ```
 
@@ -301,6 +301,9 @@ image names stay `infra-web-1`, `infra-cms-1`, `infra-db-1` / `infra-web`,
 
 ```bash
 cd ~/sinnlos
+# The release identity, as infra/deploy.sh passes it (footer; reload button of #214).
+export SINNLOS_VERSION="$(sed -n 's/^  "version": "\([^"]*\)",$/\1/p' package.json)"
+export SINNLOS_REVISION="$(git rev-parse --short=12 HEAD)"
 docker compose -p infra \
   -f infra/docker-compose.yml \
   -f infra/docker-compose.traefik.yml \

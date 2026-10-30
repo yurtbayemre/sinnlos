@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { AppShell } from "@/components/layout/app-shell";
 import { LiveEventsProvider } from "@/components/live/live-events-provider";
 import { DEMO_MODE } from "@/lib/config";
+import { buildRevision } from "@/lib/site-config";
 import { getViewer } from "@/lib/viewer";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
@@ -14,8 +15,10 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   // wrappers poll at today's 10s/30s intervals. DEMO_MODE has no live
   // backend wiring either.
   const liveEnabled = process.env.LIVE_EVENTS_DISABLED !== "1" && !DEMO_MODE;
+  // The tab's own build revision; a stream hello with another one shows the
+  // header's reload note (#214).
   return (
-    <LiveEventsProvider enabled={liveEnabled}>
+    <LiveEventsProvider enabled={liveEnabled} revision={buildRevision(process.env)}>
       <AppShell>{children}</AppShell>
     </LiveEventsProvider>
   );

@@ -605,3 +605,73 @@ describe("subscription sync (WD04, LF05: the full set with a revision)", () => {
     ]);
   });
 });
+
+describe("another web build (#214)", () => {
+  /** The provider with the tab's own revision, as the (app) layout renders it. */
+  async function mountWithRevision(revision: string | null, enabled = true) {
+    await browser.render(
+      // eslint-disable-next-line react/no-children-prop -- as in mount()
+      createElement(LiveEventsProvider, {
+        enabled,
+        revision,
+        children: createElement(ExposeRegistry),
+      }),
+    );
+  }
+
+  const helloWith = (revision?: string) =>
+    browser.act(() =>
+      FakeEventSource.latest().emit("hello", { connId: "conn-1", emitFresh: true, revision }),
+    );
+
+  it("stays quiet before any hello, however long the stream takes", async () => {
+    await mountWithRevision("aaaaaaaaaaaa");
+    await advance(60_000);
+    expect(registry.newVersion).toBe(false);
+  });
+
+  it("stays quiet without a stream (LIVE_EVENTS_DISABLED, DEMO_MODE)", async () => {
+    await mountWithRevision("aaaaaaaaaaaa", false);
+    await advance(10 * 60_000);
+    expect(FakeEventSource.instances).toEqual([]);
+    expect(registry.newVersion).toBe(false);
+  });
+
+  it("stays quiet while the hello names the tab's own build", async () => {
+    await mountWithRevision("aaaaaaaaaaaa");
+    expect(registry.newVersion).toBe(false);
+    await helloWith("AAAAAAAAAAAA");
+    expect(registry.newVersion).toBe(false);
+  });
+
+  it("flags a hello from another build, and keeps the flag", async () => {
+    await mountWithRevision("aaaaaaaaaaaa");
+    await helloWith("bbbbbbbbbbbb");
+    expect(registry.newVersion).toBe(true);
+    // A later hello of the tab's own build (a rollback) does not clear it.
+    await helloWith("aaaaaaaaaaaa");
+    expect(registry.newVersion).toBe(true);
+  });
+
+  it("counts a hello without a revision as another build once the tab has one", async () => {
+    await mountWithRevision("aaaaaaaaaaaa");
+    await helloWith();
+    expect(registry.newVersion).toBe(true);
+  });
+
+  it("never flags without the tab's own revision (development, a build without one)", async () => {
+    await mountWithRevision(null);
+    await helloWith("bbbbbbbbbbbb");
+    await helloWith();
+    expect(registry.newVersion).toBe(false);
+  });
+
+  it("keeps the revision it was mounted with: a re-render with another one is no baseline", async () => {
+    await mountWithRevision("aaaaaaaaaaaa");
+    await mountWithRevision("bbbbbbbbbbbb");
+    await helloWith("aaaaaaaaaaaa");
+    expect(registry.newVersion).toBe(false);
+    await helloWith("bbbbbbbbbbbb");
+    expect(registry.newVersion).toBe(true);
+  });
+});
