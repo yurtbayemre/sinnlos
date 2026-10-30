@@ -411,14 +411,6 @@ export interface TestStrapi {
   api<T = unknown>(caller: Caller, path: string, init?: ApiInit): Promise<ApiResponse<T>>;
   /** A compiled cms module from the running build (shares its module state). */
   requireBuilt<T>(path: string): T;
-  /**
-   * Waits until the cms's database pool is idle (untilPoolIdle): the work a
-   * write starts after its commit (notification fan-out, entry events) is
-   * done. Call it before `database.sql` writes while Strapi runs: on SQLite
-   * that second connection otherwise meets the after-commit writes and gets
-   * "database is locked".
-   */
-  idle(): Promise<void>;
   /** Destroys Strapi, restores env and listeners, drops an owned database. */
   stop(): Promise<void>;
 }
@@ -812,9 +804,6 @@ async function boot(options: TestStrapiOptions): Promise<TestStrapi> {
     },
     requireBuilt<T>(path: string): T {
       return requireFromBuild(`./${path}`) as T;
-    },
-    idle() {
-      return untilPoolIdle(booted);
     },
     async stop() {
       if (stopped) return;
