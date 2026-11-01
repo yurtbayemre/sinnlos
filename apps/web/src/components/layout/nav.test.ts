@@ -246,6 +246,7 @@ describe("MoreSheetLinks", () => {
       "/marketplace",
       "/polls",
       "/documents",
+      "/secrets",
     ]);
     const admin = render(
       createElement(MoreSheetLinks, { items: more("admin_role"), pathname: "/", onChoose() {} }),
@@ -304,7 +305,7 @@ describe("pending feedback (UI05)", () => {
         onChoose() {},
       }),
     );
-    expect(pendingDots(sheet)).toBe(10);
+    expect(pendingDots(sheet)).toBe(11);
   });
 });
 

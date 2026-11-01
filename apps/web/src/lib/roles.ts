@@ -151,6 +151,9 @@ export const KUDOS_READER_ROLES: ReadonlySet<string> = roleSet(...STAFF_AND_FALL
  */
 export const CELEBRATION_ROLES: ReadonlySet<string> = roleSet(...STAFF);
 
+/** secret-share.list and findOne (v0.35): the staff roles only, no fallback. */
+export const SECRET_SHARE_ROLES: ReadonlySet<string> = roleSet(...STAFF);
+
 /** classified.find: the marketplace. guest reads no ads (they carry contact data). */
 export const AD_READER_ROLES: ReadonlySet<string> = roleSet(...STAFF_AND_FALLBACK);
 
@@ -235,7 +238,8 @@ export type ReadSection =
   | "marketplace"
   | "training"
   | "duties"
-  | "kpis";
+  | "kpis"
+  | "secrets";
 
 export const READ_SECTIONS: Readonly<Record<ReadSection, ReadonlySet<string>>> = Object.freeze({
   announcements: ANNOUNCEMENT_READER_ROLES,
@@ -248,6 +252,7 @@ export const READ_SECTIONS: Readonly<Record<ReadSection, ReadonlySet<string>>> =
   training: TRAINING_ROLES,
   duties: DUTY_READER_ROLES,
   kpis: KPI_READER_ROLES,
+  secrets: SECRET_SHARE_ROLES,
 });
 
 /** Fail-closed like every gate: only a listed role reads the section. */

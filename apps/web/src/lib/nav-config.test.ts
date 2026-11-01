@@ -101,6 +101,7 @@ describe("navItemsFor", () => {
     "/announcements",
     "/kudos",
     "/marketplace",
+    "/secrets",
   ];
 
   it.each(["admin_role", "editor", "department_head", "team_lead"])(
@@ -110,9 +111,17 @@ describe("navItemsFor", () => {
     },
   );
 
-  it.each(["member", "authenticated"])("gives %s every section but /manage", (role) => {
-    expect(hrefs(role)).toEqual(
+  it("gives member every section but /manage", () => {
+    expect(hrefs("member")).toEqual(
       NAV_ITEMS.map((item) => item.href).filter((href) => href !== "/manage"),
+    );
+  });
+
+  it("gives the `authenticated` fallback every section but /manage and /secrets (v0.35)", () => {
+    expect(hrefs("authenticated")).toEqual(
+      NAV_ITEMS.map((item) => item.href).filter(
+        (href) => href !== "/manage" && href !== "/secrets",
+      ),
     );
   });
 
@@ -136,6 +145,7 @@ describe("navItemsFor", () => {
       "training",
       "kudos",
       "marketplace",
+      "secrets",
     ] as const);
     expect(navItemsFor("admin_role", off).map((item) => item.href)).toEqual([
       "/",

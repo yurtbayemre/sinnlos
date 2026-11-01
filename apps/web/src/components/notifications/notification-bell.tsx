@@ -4,7 +4,15 @@ import { useId, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import type { Route } from "next";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
-import { Bell, Megaphone, MessageCircle, Calendar, Award, GraduationCap } from "lucide-react";
+import {
+  Award,
+  Bell,
+  Calendar,
+  GraduationCap,
+  KeyRound,
+  Megaphone,
+  MessageCircle,
+} from "lucide-react";
 import { confirmLeave } from "@/components/manage/unsaved-guard";
 import { cn } from "@/lib/utils";
 import {
@@ -31,6 +39,7 @@ const typeIcon: Record<string, typeof Bell> = {
   kudos: Award,
   trainingDue: GraduationCap,
   trainingExpired: GraduationCap,
+  secretShared: KeyRound,
 };
 
 /** The badge text: the count, capped at "99+". */

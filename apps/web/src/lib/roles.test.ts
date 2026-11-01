@@ -37,6 +37,7 @@ import {
   READ_SECTIONS,
   REACTOR_ROLES,
   RSVP_ROLES,
+  SECRET_SHARE_ROLES,
   TRAINING_ROLES,
   type ReadSection,
 } from "./roles";
@@ -206,6 +207,7 @@ describe("read sections", () => {
     training: [TRAINING_ROLES, STAFF_AND_FALLBACK],
     duties: [DUTY_READER_ROLES, STAFF_AND_FALLBACK],
     kpis: [KPI_READER_ROLES, STAFF_AND_FALLBACK],
+    secrets: [SECRET_SHARE_ROLES, STAFF],
   };
 
   it("lists exactly these sections, each with its role set", () => {
@@ -238,12 +240,13 @@ describe("read sections", () => {
     }
   });
 
-  it("denies guest every section and the `authenticated` fallback only the celebrations", () => {
+  it("denies guest every section and the `authenticated` fallback only the celebrations and secrets", () => {
     expect(SECTIONS.filter((section) => isReadDenied("guest", section)).sort()).toEqual(
       [...SECTIONS].sort(),
     );
     expect(SECTIONS.filter((section) => isReadDenied("authenticated", section))).toEqual([
       "celebrations",
+      "secrets",
     ]);
   });
 
