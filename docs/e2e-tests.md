@@ -75,6 +75,20 @@ that edit before publication. A member in a separate browser session must see
 the final content and pass the quiz with the new answer. The course and lesson
 are created by browser actions; no authoring target is pre-seeded.
 
+The `secret-sharing` case in `e2e/secrets.spec.ts` (v0.35) has the member send
+secrets to the team lead through `/secrets/new`. The lead's bell links to the
+secret (after a page load: live events stay off). The secret's page holds
+no text before "Show and delete" (also in its HTML, sent with
+`Cache-Control: no-store`); one session gets the text once, a second session
+of the lead loses, and reload, back and forward show no text. A replayed reveal
+Server Action with a foreign `Origin` is refused while the same call from the
+site's origin works. A share revoked or expired while the lead's page is open
+cannot be opened; the expiry is the one change made in the database, through
+the run's psql (`SINNLOS_E2E_PSQL`). A reveal answer held until the lead has
+navigated away never shows its text. A guest has no Secrets entry and gets the
+"not available" page. Further browser contexts of the lead reuse its stored
+session instead of signing in again.
+
 The two Teams cases live in `e2e/teams.spec.ts`. All six cases reuse
 fixture reading and visible-form login from `e2e/helpers.ts`, including the
 signed-in email assertion. They use fresh browser sessions and independent
@@ -91,6 +105,7 @@ pnpm test:e2e --grep training-quiz-completion
 pnpm test:e2e --grep training-exam-completion
 pnpm test:e2e --grep training-confirm-completion
 pnpm test:e2e --grep training-authoring
+pnpm test:e2e --grep secret-sharing
 ```
 
 `check:setup` is a runtime smoke check, not a browser E2E pass. An empty
@@ -203,7 +218,8 @@ during CMS startup, and its login is tested through the actual browser form.
 Preflight JWTs stay in memory; browser cases must log in through the UI.
 
 Playwright receives `SINNLOS_E2E_BASE_URL` and `SINNLOS_E2E_FIXTURES` from
-the runner. The private fixture JSON contains `runId`, `users.lead/member/editor`
+the runner, and `SINNLOS_E2E_PSQL`: the psql command of the run's database
+(a `docker exec` on the pinned endpoint), used only to move a secret's expiry. The private fixture JSON contains `runId`, `users.lead/member/editor`
 (email/password/documentId) and `teams.editable/readonly`
 (slug/name/description/documentId), plus `training.course` (title/slug/documentId)
 and `training.lesson` (title/documentId). `exam` and `confirm` have

@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { createHmac } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { expect, type Page } from "@playwright/test";
@@ -19,6 +20,7 @@ type Fixtures = {
     privacy: Account;
     leaver: Account & { id: number };
     a11y: Account;
+    guest: Account;
   };
   poll: { question: string; documentId: string };
   quickLink: { label: string; documentId: string };
@@ -112,4 +114,15 @@ export async function signInAndEnroll(
   await expect(page).toHaveURL("/");
   await expect(page.getByRole("banner").getByText(account.email, { exact: true })).toBeVisible();
   return { secret, step, recoveryCodes };
+}
+
+/**
+ * v0.35: one SQL statement in this run's database (run.mjs passes the psql
+ * command), for what no browser can do: moving a secret's expiry.
+ */
+export function sql(statement: string): string {
+  const command = process.env.SINNLOS_E2E_PSQL;
+  if (!command) throw new Error("Run this test through pnpm test:e2e.");
+  const [file, ...args] = ["docker", ...(JSON.parse(command) as string[])];
+  return execFileSync(file!, [...args, "-c", statement], { encoding: "utf8" }).trim();
 }

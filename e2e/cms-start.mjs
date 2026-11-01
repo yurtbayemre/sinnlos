@@ -137,6 +137,12 @@ async function start() {
         password: fixturePassword("E2E_A11Y_PASSWORD"),
         documentId: "",
       },
+      // v0.35 (secrets.spec.ts): a guest, who neither sends nor receives secrets.
+      guest: {
+        email: "guest@e2e.test",
+        password: fixturePassword("E2E_GUEST_PASSWORD"),
+        documentId: "",
+      },
     },
     poll: { question: "E2E Lunch poll", documentId: "" },
     // v0.33.4 (a11y.spec.ts): a label far wider than a 320 px screen.
@@ -404,7 +410,7 @@ async function start() {
     2,
     "Expected two published documents",
   );
-  assert.equal(await cms.db.query(userUid).count(), 8, "Expected eight local users");
+  assert.equal(await cms.db.query(userUid).count(), 9, "Expected nine local users");
   assert.equal(await cms.db.query(teamUid).count(), 2, "Expected two teams");
   for (const [key, fixture] of Object.entries(fixtures.users)) {
     const user = await cms.db.query(userUid).findOne({
