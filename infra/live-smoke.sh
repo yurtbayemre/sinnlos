@@ -107,11 +107,11 @@ fail() {
   exit 1
 }
 
-# psql in the db container; extra arguments go to psql (after -X -q -tA).
+# psql in the db container, the SQL on stdin.
 db_psql() {
   # $POSTGRES_USER / $POSTGRES_DB expand in the db container's sh.
   # shellcheck disable=SC2016
-  docker exec -i "${DB_CONTAINER}" sh -c 'psql -X -q -tA -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" "$@"' psql "$@"
+  docker exec -i "${DB_CONTAINER}" sh -c 'psql -X -q -tA -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"'
 }
 
 # --- 0. Datetime contract -----------------------------------------------------
