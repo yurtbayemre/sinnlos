@@ -1,17 +1,24 @@
-import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { EventEmitter } from "node:events";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, request, type RequestListener, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { requirePackageFile, strapiPackageDir } from "../test/sqlite-engine.test.helper";
 import {
+  requireFromPackage,
+  requirePackageFile,
+  strapiPackageDir,
+} from "../test/sqlite-engine.test.helper";
+import {
+  CLOSE_WAIT_MS,
   MAX_FILE_PARTS,
   registerMultipartCleanup,
   removeTempFiles,
   withTempFileCleanup,
   type BodyFactory,
+  type TempFile,
 } from "./multipart-cleanup";
 
 /**
@@ -78,14 +85,34 @@ afterEach(async () => {
   vi.unstubAllGlobals();
 });
 
+/** Every file formidable opens: Strapi's body middleware with the opened files recorded. */
+let opened: TempFile[] = [];
+const recordingBody: BodyFactory = (config, deps) =>
+  body(
+    {
+      ...config,
+      formidable: {
+        ...config?.formidable,
+        onFileBegin: (name: string, file: TempFile) => {
+          opened.push(file);
+          (config?.formidable?.onFileBegin as (name: string, file: TempFile) => void)(name, file);
+        },
+      },
+    },
+    deps,
+  );
+
 /** Our middleware with Strapi's body middleware, then `downstream`; formidable writes to a fresh dir. */
 async function serve(downstream: Middleware, maxFileSize = 1024): Promise<number> {
+  opened = [];
   uploadDir = mkdtempSync(join(tmpdir(), "sinnlos-multipart-"));
   vi.stubGlobal("strapi", { log: { error: () => undefined } });
   const strapi = { plugin: () => undefined, log: { warn } };
   const app = createKoaApp({ proxy: false });
   app.use(errorMiddleware());
-  app.use(withTempFileCleanup(body)({ formidable: { maxFileSize, uploadDir } }, { strapi }));
+  app.use(
+    withTempFileCleanup(recordingBody)({ formidable: { maxFileSize, uploadDir } }, { strapi }),
+  );
   app.use(downstream);
   server = createServer(app.callback());
   await new Promise<void>((resolve) => server!.listen(0, "127.0.0.1", resolve));
@@ -215,7 +242,68 @@ describe("multipart-cleanup (C1)", () => {
     expect(res.status).toBe(413);
     expect(JSON.parse(res.body).error.name).toBe("PayloadTooLargeError");
     expect(route).not.toHaveBeenCalled();
+    expect(opened).toHaveLength(MAX_FILE_PARTS);
     expect(leftovers()).toEqual([]);
+  });
+
+  it("closes and removes a file formidable opens after its own error cleanup (Codex lane r1 #1)", async () => {
+    const route = vi.fn(ok);
+    const port = await serve(route);
+    // An empty base64 file fails formidable's minFileSize at its end; the
+    // next part, in the same chunk, still gets a file that formidable
+    // never ends or destroys.
+    const payload = Buffer.concat([
+      Buffer.from(
+        `--${BOUNDARY}\r\nContent-Disposition: form-data; name="files"; filename="a.bin"\r\n` +
+          "Content-Type: application/octet-stream\r\nContent-Transfer-Encoding: base64\r\n\r\n\r\n",
+      ),
+      filePart("orphan", "b.bin", "unfinished"),
+    ]);
+    const started = Date.now();
+    const res = await post(port, payload);
+    expect(res.status).toBeGreaterThanOrEqual(400);
+    expect(Date.now() - started).toBeLessThan(5_000);
+    expect(route).not.toHaveBeenCalled();
+    expect(opened.length).toBeGreaterThanOrEqual(2);
+    for (const file of opened) expect(file._writeStream?.closed, file.filepath).toBe(true);
+    expect(leftovers()).toEqual([]);
+  });
+
+  it("keeps overlapping requests apart and removes the files of both", async () => {
+    const seen: number[] = [];
+    const port = await serve(async (ctx) => {
+      const files = ctx.request.files.files;
+      seen.push(Array.isArray(files) ? files.length : 1);
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      ctx.status = 200;
+    });
+    const [one, two] = await Promise.all([
+      post(port, multipart(filePart("files", "a.bin", "a"))),
+      post(port, multipart(filePart("files", "b.bin", "b"), filePart("files", "c.bin", "c"))),
+    ]);
+    expect([one.status, two.status]).toEqual([200, 200]);
+    expect(seen.sort()).toEqual([1, 2]);
+    expect(leftovers()).toEqual([]);
+  });
+
+  it("leaves Strapi's own unawaited removal nothing to do (no unhandled rejection, Codex lane r1 #3)", async () => {
+    const fse = requireFromPackage<{ remove(path: string): Promise<void> }>(coreDir(), "fs-extra");
+    const coreRemove = vi
+      .spyOn(fse, "remove")
+      .mockRejectedValue(Object.assign(new Error("EACCES"), { code: "EACCES" }));
+    const unhandled = vi.fn();
+    process.on("unhandledRejection", unhandled);
+    try {
+      const port = await serve(ok);
+      const res = await post(port, multipart(filePart("files", "a.bin", "a")));
+      expect(res.status).toBe(200);
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(coreRemove).not.toHaveBeenCalled();
+      expect(unhandled).not.toHaveBeenCalled();
+      expect(leftovers()).toEqual([]);
+    } finally {
+      process.off("unhandledRejection", unhandled);
+    }
   });
 
   it("still serves exactly MAX_FILE_PARTS file parts", async () => {
@@ -319,6 +407,29 @@ describe("removeTempFiles", () => {
       await removeTempFiles([{ filepath: dir }], log);
       expect(log.warn).toHaveBeenCalledTimes(1);
     } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("answers after CLOSE_WAIT_MS but removes a slow stream's file only once it closes (Codex lane r1 #2)", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const dir = mkdtempSync(join(tmpdir(), "sinnlos-c1-slow-"));
+    try {
+      const filepath = join(dir, "slow");
+      const stream = Object.assign(new EventEmitter(), { closed: false, destroy: vi.fn() });
+      const log = { warn: vi.fn() };
+      const done = removeTempFiles([{ filepath, _writeStream: stream }], log);
+      expect(stream.destroy).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(CLOSE_WAIT_MS);
+      await done;
+      expect(log.warn).toHaveBeenCalledTimes(1);
+      // The stream opens its file late, after the answer: removed on close.
+      writeFileSync(filepath, "late");
+      stream.closed = true;
+      stream.emit("close");
+      await vi.waitFor(() => expect(existsSync(filepath)).toBe(false), { interval: 10 });
+    } finally {
+      vi.useRealTimers();
       rmSync(dir, { recursive: true, force: true });
     }
   });

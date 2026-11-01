@@ -27,12 +27,17 @@
  *     file is opened) and the request answers 413 before any route runs.
  *     Refusing in `fileBegin` would come too late: formidable opens the
  *     file right after that event, whatever a listener did;
- *   - `finally`, around the parse AND the rest of the request: wait until
- *     each file's write stream is closed (formidable's own error cleanup
- *     destroys it and unlinks unawaited, and an fs stream may still be
+ *   - `finally`, around the parse AND the rest of the request: destroy
+ *     each file's write stream that is still open (after a parse error
+ *     formidable can still open a later part's file, which it never ends
+ *     or destroys), wait until it is closed (an fs stream may still be
  *     opening its file), then remove the file, awaited, ignoring a file
  *     that is already gone. Aborted, malformed and oversized bodies end up
- *     here too.
+ *     here too. A stream that does not close within CLOSE_WAIT_MS no
+ *     longer holds the answer: its file is removed once it closes;
+ *   - Strapi's own removal of the `files` field after the route (unawaited,
+ *     its failure an unhandled rejection) is left nothing to do: the
+ *     request's `files` are dropped from ctx once the route is done.
  *
  * Residual (edge request-size limits were cut, v0.34 plan rev2): until a
  * request ends, its files stay on disk, up to the 50 MB formidable limit
@@ -49,18 +54,23 @@ import { errors } from "@strapi/utils";
  */
 export const MAX_FILE_PARTS = 20;
 
-/** How long the cleanup waits for a write stream to close before it removes the file anyway. */
+/** How long the answer waits for a write stream to close (the removal still follows the close). */
 export const CLOSE_WAIT_MS = 10_000;
 
 /** What the cleanup reads of a formidable 2.x PersistentFile. */
 export interface TempFile {
   filepath?: string;
   /** Created by `file.open()` (formidable 2.x, not part of its public API). */
-  _writeStream?: { closed?: boolean; once(event: "close", listener: () => void): unknown };
+  _writeStream?: {
+    closed?: boolean;
+    destroy(): void;
+    once(event: "close", listener: () => void): unknown;
+  };
 }
 
-/** Koa's context, passed through untouched. */
-type Middleware = (ctx: unknown, next: () => Promise<void>) => Promise<void>;
+/** Koa's context; only the parsed files are read (and dropped). */
+type Ctx = { request?: { files?: unknown } };
+type Middleware = (ctx: Ctx, next: () => Promise<void>) => Promise<void>;
 /** strapi::body's config (config/middlewares.ts); only `formidable` is read here. */
 export type BodyConfig =
   { formidable?: Record<string, unknown>; [key: string]: unknown } | undefined;
@@ -74,32 +84,44 @@ export interface MiddlewareRegistryHost {
   };
 }
 
-function closed(file: TempFile): Promise<void> {
-  const stream = file._writeStream;
-  if (!stream || stream.closed) return Promise.resolve();
-  return new Promise((resolve) => {
-    const timer = setTimeout(resolve, CLOSE_WAIT_MS);
-    stream.once("close", () => {
-      clearTimeout(timer);
-      resolve();
-    });
-  });
+type Log = { warn(message: string): void };
+
+async function remove(file: TempFile, log: Log): Promise<void> {
+  if (!file.filepath) return;
+  try {
+    await rm(file.filepath, { force: true });
+  } catch (error) {
+    log.warn(`[multipart-cleanup] could not remove a temp file: ${(error as Error).message}`);
+  }
 }
 
-/** Waits for each file's stream to close, then removes it (exported for the tests). */
-export async function removeTempFiles(
-  files: readonly TempFile[],
-  log: { warn(message: string): void },
-): Promise<void> {
+/**
+ * Destroys each file's stream that is still open, waits for it to close and
+ * removes the file (exported for the tests). A stream that takes longer
+ * than CLOSE_WAIT_MS is removed once it closes, without holding the answer.
+ */
+export async function removeTempFiles(files: readonly TempFile[], log: Log): Promise<void> {
   await Promise.all(
     files.map(async (file) => {
-      await closed(file);
-      if (!file.filepath) return;
-      try {
-        await rm(file.filepath, { force: true });
-      } catch (error) {
-        log.warn(`[multipart-cleanup] could not remove a temp file: ${(error as Error).message}`);
+      const stream = file._writeStream;
+      if (stream && !stream.closed) {
+        const closed = new Promise<void>((resolve) => stream.once("close", resolve));
+        stream.destroy();
+        let timer: NodeJS.Timeout | undefined;
+        const late = await Promise.race([
+          closed.then(() => false),
+          new Promise<boolean>((resolve) => {
+            timer = setTimeout(() => resolve(true), CLOSE_WAIT_MS);
+          }),
+        ]);
+        clearTimeout(timer);
+        if (late) {
+          log.warn("[multipart-cleanup] a temp file did not close in time; removed once it does");
+          void closed.then(() => remove(file, log));
+          return;
+        }
       }
+      await remove(file, log);
     }),
   );
 }
@@ -130,7 +152,13 @@ export function withTempFileCleanup(original: BodyFactory): BodyFactory {
         if (fileParts > MAX_FILE_PARTS) {
           throw new errors.PayloadTooLargeError(`At most ${MAX_FILE_PARTS} files per request`);
         }
-        await next();
+        try {
+          await next();
+        } finally {
+          // The removal below owns these files: Strapi's own (body.js, after
+          // the route) is unawaited and would race it.
+          if (ctx.request) delete ctx.request.files;
+        }
       });
     } finally {
       await removeTempFiles(files, deps.strapi.log);
