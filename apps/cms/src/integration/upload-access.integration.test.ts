@@ -602,7 +602,20 @@ describe.each(testEngines())("upload access on %s", (engine) => {
         expect(unused).toContain(shadow.id);
         expect(unused).not.toContain(panel.id);
         expect(unused).not.toContain(spaced.id);
-        expect(Number(summary[0].inline_unstamped)).toBeGreaterThanOrEqual(2);
+        // The counts are the listing's, section by section (collision claimants included).
+        const rows = (section: string) => listing.filter((row) => row.section === section).length;
+        expect({
+          inline_unstamped: Number(summary[0].inline_unstamped),
+          inline_stamped: Number(summary[0].inline_stamped),
+          unresolvable: Number(summary[0].unresolvable),
+          unused_panel_files: Number(summary[0].unused_panel_files),
+        }).toEqual({
+          inline_unstamped: rows("1 inline_unstamped"),
+          inline_stamped: rows("2 inline_stamped"),
+          unresolvable: rows("3 unresolvable"),
+          unused_panel_files: rows("4 unused_panel_files"),
+        });
+        expect(rows("1 inline_unstamped")).toBeGreaterThanOrEqual(6);
       } finally {
         await client.end();
       }

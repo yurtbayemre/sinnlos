@@ -224,11 +224,14 @@ WITH upload_names AS (
    CROSS JOIN LATERAL regexp_matches(coalesce(t.text, ''), '/uploads/([^\t\n\v\f\r \u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff/"''<>()\[\]\x5c?#]+)', 'g')
          AS m(name)
 ), upload_refs AS (
-  SELECT DISTINCT tok.host, tok.row_id, n.file_id, n.uploaded_by
+  -- Every claimant, as listed in sections 1 and 2.
+  SELECT DISTINCT tok.host, tok.row_id, n.file_id, n.uploaded_by,
+         EXISTS (SELECT 1 FROM upload_resolved r
+                  WHERE r.ref_name = tok.ref_name AND r.file_id = n.file_id) AS means
     FROM upload_tokens tok
-    JOIN upload_resolved n ON n.ref_name = tok.ref_name
+    JOIN upload_names n ON n.ref_name = tok.ref_name
 )
--- 5. The counts (a reference counts once per text row and file).
+-- 5. The counts of sections 1-4 (a reference counts once per text row and file).
 SELECT 'summary' AS section,
        (SELECT count(*) FROM upload_refs WHERE uploaded_by IS NULL) AS inline_unstamped,
        (SELECT count(*) FROM upload_refs ref
@@ -243,7 +246,7 @@ SELECT 'summary' AS section,
        (SELECT count(*) FROM files f
          WHERE f.provider_metadata->>'uploadedBy' IS NULL
            AND NOT EXISTS (SELECT 1 FROM files_related_mph r WHERE r.file_id = f.id)
-           AND NOT EXISTS (SELECT 1 FROM upload_refs ref WHERE ref.file_id = f.id))
+           AND NOT EXISTS (SELECT 1 FROM upload_refs ref WHERE ref.file_id = f.id AND ref.means))
          AS unused_panel_files;
 
 ROLLBACK;
