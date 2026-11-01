@@ -274,7 +274,11 @@ function shareTable(strapi: SecretShareHost): ShareTable {
 }
 
 /** Locks the share row for the rest of the transaction (Postgres; SQLite has one writer). */
-async function lockShareRow(strapi: SecretShareHost, trx: KnexTrx, id: number): Promise<void> {
+export async function lockShareRow(
+  strapi: SecretShareHost,
+  trx: KnexTrx,
+  id: number,
+): Promise<void> {
   if (strapi.db.dialect.client !== "postgres") return;
   const t = shareTable(strapi);
   const quote = (name: string) => `"${name.replace(/"/g, '""')}"`;

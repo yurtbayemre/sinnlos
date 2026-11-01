@@ -6,6 +6,7 @@ import {
   deleteShares,
   endShare,
   isEligible,
+  lockShareRow,
   type SecretShareHost,
 } from "../utils/secret-shares";
 import { reportRunFailure } from "./run-context";
@@ -156,15 +157,7 @@ async function endEach(
   for (const id of ids) {
     try {
       const done = await confirmed(strapi, `janitor ${to}`, async (trx) => {
-        if (strapi.db.dialect.client === "postgres") {
-          const meta = strapi.db.metadata.get(SECRET_SHARE_UID);
-          const quote = (name: string) => `"${name.replace(/"/g, '""')}"`;
-          const schema = strapi.db.getSchemaName() || "public";
-          await trx.raw(
-            `SELECT 1 FROM ${quote(schema)}.${quote(meta.tableName)} WHERE ${quote(meta.attributes.id?.columnName ?? "id")} = ? FOR UPDATE`,
-            [id],
-          );
-        }
+        await lockShareRow(strapi, trx, id);
         const share = await strapi.db.query(SECRET_SHARE_UID).findOne({
           where: { id, state: "pending" },
           select: ["id", "documentId", "senderId", "recipientId", "expiresAt"],
