@@ -46,7 +46,7 @@ export async function createSecret(
     () =>
       strapi<StrapiDataResponse<SecretShareCreated>>("/api/secret-shares", {
         method: "POST",
-        body: JSON.stringify({ recipient, text, lifetime }),
+        body: JSON.stringify({ data: { recipient, text, lifetime } }),
       }),
     (res) => (isRecord(res?.data) && isDocumentId(res.data.id) ? { id: res.data.id } : malformed()),
   );

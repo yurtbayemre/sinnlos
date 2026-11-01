@@ -78,7 +78,9 @@ describe("createSecret", () => {
     const [path, init] = strapiMock.mock.calls[0] as [string, { method: string; body: string }];
     expect(path).toBe("/api/secret-shares");
     expect(init.method).toBe("POST");
-    expect(JSON.parse(init.body)).toEqual({ recipient: 7, text: " pass word ", lifetime: "24h" });
+    expect(JSON.parse(init.body)).toEqual({
+      data: { recipient: 7, text: " pass word ", lifetime: "24h" },
+    });
     expect(refreshMock).not.toHaveBeenCalled();
   });
 
