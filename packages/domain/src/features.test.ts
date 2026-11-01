@@ -37,6 +37,7 @@ describe("parseFeaturesOff", () => {
       "polls",
       "duty-plans",
       "kpis",
+      "secrets",
     ]);
     expect(FEATURE_NAMES).toEqual(["read-confirmations", "training-reports", "search-logging"]);
     const all = [...MODULE_NAMES, ...FEATURE_NAMES].join(",");

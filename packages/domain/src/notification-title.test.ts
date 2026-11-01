@@ -24,6 +24,11 @@ describe("notificationTitle", () => {
     expect(notificationTitle("trainingExpired", {}, "en")).toBe(
       'Training "a course" has expired, please repeat it',
     );
+    expect(notificationTitle("secretShared", params, "de")).toBe(
+      "Ada hat Ihnen ein Geheimnis geschickt",
+    );
+    expect(notificationTitle("secretShared", params, "en")).toBe("Ada sent you a secret");
+    expect(notificationTitle("secretShared", {}, "en")).toBe("Someone sent you a secret");
   });
 
   it("uses the fallback for a blank or missing value, and English for any other locale", () => {
