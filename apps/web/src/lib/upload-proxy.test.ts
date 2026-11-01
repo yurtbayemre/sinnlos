@@ -169,7 +169,7 @@ describe("downstreamResponseHeaders", () => {
     for (const name of FORWARD_RESPONSE_HEADERS) {
       expect(out.get(name)).toBe(upstream.get(name));
     }
-    expect(out.get("cache-control")).toBe("private, max-age=3600");
+    expect(out.get("cache-control")).toBe("private, no-cache");
     expect([...out.keys()].sort()).toEqual(
       [...FORWARD_RESPONSE_HEADERS, "cache-control", "x-content-type-options"].sort(),
     );
@@ -177,7 +177,7 @@ describe("downstreamResponseHeaders", () => {
 
   it("sets private caching even when upstream sends no headers", () => {
     const out = downstreamResponseHeaders(new Headers());
-    expect(out.get("cache-control")).toBe("private, max-age=3600");
+    expect(out.get("cache-control")).toBe("private, no-cache");
   });
 
   it("shows images, PDF, video and audio in place, with nosniff", () => {

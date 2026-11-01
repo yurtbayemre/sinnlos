@@ -45,17 +45,21 @@ export const BLOCK_STATUS_MAX_ENTRIES = 1000;
 /** How long the check may wait for Strapi's answer. */
 export const BLOCK_CHECK_TIMEOUT_MS = 10_000;
 
-interface Entry {
-  status: AccountStatus;
+interface Entry<T> {
+  status: T;
   expiresAt: number;
 }
 
 /** One session token: the user id and the tag of its JWT. */
 const entryKey = (userId: number, tag: string) => `${userId}:${tag}`;
 
-/** A bounded map (user id, JWT tag) → account status, with a TTL. */
-export class BlockStatusCache {
-  private readonly entries = new Map<string, Entry>();
+/**
+ * A bounded map (user id, tag) → status, with a TTL: here (user id, JWT tag)
+ * → account status; the upload decisions (lib/upload-decision.ts) reuse it
+ * as (user id, file name) → allow/deny.
+ */
+export class BlockStatusCache<T extends string = AccountStatus> {
+  private readonly entries = new Map<string, Entry<T>>();
 
   constructor(
     private readonly ttlMs: number = BLOCK_STATUS_TTL_MS,
@@ -63,8 +67,8 @@ export class BlockStatusCache {
     private readonly now: () => number = () => Date.now(),
   ) {}
 
-  /** The status remembered for this user AND this JWT, while it is fresh. */
-  get(userId: number, tag: string): AccountStatus | undefined {
+  /** The status remembered for this user AND this tag, while it is fresh. */
+  get(userId: number, tag: string): T | undefined {
     const key = entryKey(userId, tag);
     const entry = this.entries.get(key);
     if (!entry) return undefined;
@@ -75,7 +79,7 @@ export class BlockStatusCache {
     return entry.status;
   }
 
-  set(userId: number, tag: string, status: AccountStatus): void {
+  set(userId: number, tag: string, status: T): void {
     const key = entryKey(userId, tag);
     // Re-inserting moves the token to the end: the first key is the oldest write.
     this.entries.delete(key);
