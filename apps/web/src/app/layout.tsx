@@ -6,7 +6,7 @@ import Script from "next/script";
 import "./globals.css";
 import { ThemeProvider } from "@/components/theme-provider";
 import { paletteCss } from "@/lib/contrast";
-import { brand, DEFAULT_SITE_NAME, plausibleScript } from "@/lib/site-config";
+import { analyticsScript, brand, DEFAULT_SITE_NAME } from "@/lib/site-config";
 
 const inter = Inter({ subsets: ["latin"], variable: "--font-inter", display: "swap" });
 
@@ -55,7 +55,7 @@ export const viewport: Viewport = {
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   const locale = await getLocale();
   const messages = await getMessages();
-  const plausible = plausibleScript(process.env);
+  const plausible = analyticsScript(process.env);
   const { palette } = brand(process.env);
 
   return (
@@ -70,8 +70,8 @@ export default async function RootLayout({ children }: { children: React.ReactNo
       )}
       <body className="font-sans antialiased">
         {/* Plausible (cookieless) only when the operator configures it
-            (v0.26, M2); script.js follows Next.js client navigations via
-            the History API. */}
+            (v0.26, M2) and the module secrets is off (v0.35); script.js
+            follows Next.js client navigations via the History API. */}
         {plausible && (
           <Script data-domain={plausible.domain} src={plausible.src} strategy="afterInteractive" />
         )}

@@ -82,12 +82,23 @@ describe("next.config.mjs body limits (S8)", () => {
   });
 });
 
+describe("next.config.mjs secret pages (v0.35)", () => {
+  it("are never stored, below /secrets and on /secrets itself", async () => {
+    const config = await loadConfig();
+    expect(await config.headers?.()).toContainEqual({
+      source: "/secrets/:path*",
+      headers: [{ key: "Cache-Control", value: "private, no-store" }],
+    });
+  });
+});
+
 describe("next.config.mjs robots (v0.34)", () => {
   it("marks every web response noindex, and robots.txt disallows everything", async () => {
     const config = await loadConfig();
-    expect(await config.headers?.()).toEqual([
-      { source: "/:path*", headers: [{ key: "X-Robots-Tag", value: "noindex, nofollow" }] },
-    ]);
+    expect((await config.headers?.())?.[0]).toEqual({
+      source: "/:path*",
+      headers: [{ key: "X-Robots-Tag", value: "noindex, nofollow" }],
+    });
     expect(readFileSync(resolve(WEB_DIR, "public/robots.txt"), "utf8")).toBe(
       "User-agent: *\nDisallow: /\n",
     );

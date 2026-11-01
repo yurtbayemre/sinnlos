@@ -5,6 +5,7 @@ import {
   buildRevision,
   DEFAULT_SOURCE_URL,
   plausibleScript,
+  analyticsScript,
   shortRevision,
   siteLinks,
   VERSION,
@@ -79,6 +80,19 @@ describe("site config", () => {
     expect(
       plausibleScript({ PLAUSIBLE_SCRIPT_URL: src, PLAUSIBLE_DOMAIN: "intranet.example.com" }),
     ).toEqual({ src, domain: "intranet.example.com" });
+  });
+
+  it("renders no analytics script while the module secrets is on (v0.35)", () => {
+    const env = {
+      PLAUSIBLE_SCRIPT_URL: "https://plausible.example.com/js/script.js",
+      PLAUSIBLE_DOMAIN: "intranet.example.com",
+    };
+    expect(analyticsScript(env)).toBeNull();
+    expect(analyticsScript({ ...env, FEATURES_OFF: "kudos" })).toBeNull();
+    expect(analyticsScript({ ...env, FEATURES_OFF: "kudos,secrets" })).toEqual(
+      plausibleScript(env),
+    );
+    expect(analyticsScript({ FEATURES_OFF: "secrets" })).toBeNull();
   });
 });
 

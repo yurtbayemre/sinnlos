@@ -9,6 +9,7 @@
  */
 import { featuresOff } from "@sinnlos/domain";
 import { canonicalTimeZone, resolveAppTimeZone } from "./lib/plain-date";
+import { analyticsScript, plausibleScript } from "./lib/site-config";
 
 /**
  * Datetime phase 2: the web renders every date with an explicit zone
@@ -51,4 +52,7 @@ export function register(): void {
   if (warning) console.warn(warning);
   const off = [...featuresOff(process.env)].sort();
   console.info(off.length ? `[switches] off: ${off.join(", ")}` : "[switches] everything on");
+  if (plausibleScript(process.env) && !analyticsScript(process.env)) {
+    console.info("[site] Plausible is configured but not loaded while the module secrets is on");
+  }
 }
