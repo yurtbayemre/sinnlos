@@ -266,7 +266,7 @@ jobs:
     name: e2e · browser
     runs-on: ubuntu-latest
     # Runner bounds build/start/browser work; leave time for cleanup and upload.
-    timeout-minutes: 50
+    timeout-minutes: 65
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -294,6 +294,12 @@ jobs:
       - name: Run browser E2E tests
         timeout-minutes: 36
         run: pnpm test:e2e
+
+      # v0.35: the live-events case in a stack of its own (the build reuses
+      # the layer cache of the step above).
+      - name: Run the live-events E2E case
+        timeout-minutes: 15
+        run: pnpm --filter @sinnlos/e2e test:live
 
       - name: Upload E2E diagnostics
         if: ${{ !cancelled() }}

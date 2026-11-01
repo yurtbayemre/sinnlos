@@ -166,9 +166,10 @@ change can start the E2E job's private PostgreSQL without enabling the
 separate integration or timezone database suites. A change containing only
 `docs/**/*.md` starts neither E2E nor any database tests.
 
-The job budget is 50 minutes, with at most five minutes each for dependency
-and browser installation, 36 minutes for the runner and three minutes for
-upload. Within the runner, builds have 15 minutes, startup has 210 seconds
+The job budget is 65 minutes, with at most five minutes each for dependency
+and browser installation, 36 minutes for the runner, 15 for the separate
+live-events run (`test:live`, which rebuilds from the same layer cache) and
+three minutes for upload. Within the runner, builds have 15 minutes, startup has 210 seconds
 (including a 180-second readiness limit), and Playwright has five minutes
 with an outer six-minute limit. These limits leave time for normal failure
 cleanup and diagnostics. A forced GitHub cancellation can kill the process
