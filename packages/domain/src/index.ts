@@ -31,6 +31,7 @@ export * from "./plain-date.js";
 export * from "./poll-close.js";
 export * from "./roles.js";
 export * from "./search.js";
+export * from "./secret-share.js";
 export * from "./site-name.js";
 export * from "./training.js";
 export * from "./user-admin.js";
