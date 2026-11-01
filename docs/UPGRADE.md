@@ -172,7 +172,7 @@ Newest first. Older releases: [archive/deployment-history.md](archive/deployment
 
 **Upgrading to v0.35.0 (secret sharing).** No required env, no edge change. The schema gains one table.
 
-- **New module `secrets`** ("Geheimnisse" / "Secrets"): one employee sends one short text (a password, a link, an access code; at most 8 KiB) to one colleague, who opens it once with an explicit click; the stored copy is deleted then. Lifetime 1 hour (the default) or 24 hours; staff only, no guests. The sender sees for 7 days whether it was retrieved, never the text. What it promises and what not, for your data-protection officer and works council: [security.md](security.md) and [data-protection.md](data-protection.md), "Geheimnisse".
+- **New module `secrets`** ("Geheimnisse" / "Secrets"): one employee sends one short text (a password, a link, an access code; at most 8 KiB) to one colleague, who opens it once with an explicit click; the stored copy is deleted then. Lifetime 1 hour (the default) or 24 hours; staff only, no guests. The sender sees for 7 days whether it was retrieved, never the text. What it promises and what not, for your data-protection officer and works council: [security.md](security.md#secret-sharing) and [data-protection.md](data-protection.md), "Geheimnisse".
 - **On after the upgrade**, like every module. To wait for the works council's agreement, add `secrets` to `FEATURES_OFF` in `infra/.env` before the deploy and remove it after the agreement. This note informs; the software does not enforce the consent.
 - **Analytics:** while `secrets` is on, no page loads the Plausible script, also when `PLAUSIBLE_SCRIPT_URL` and `PLAUSIBLE_DOMAIN` are set (the web logs one line at start). To keep Plausible, switch `secrets` off.
 - **Key:** derived from `ENCRYPTION_KEY`; nothing new to set. With a key shorter than 32 characters the cms logs one error line at boot and the module refuses to send or open; the rest of the intranet runs. Never rotate `ENCRYPTION_KEY` to purge shares ([OPERATIONS.md](OPERATIONS.md#secret-shares-v035)).
@@ -181,7 +181,14 @@ Newest first. Older releases: [archive/deployment-history.md](archive/deployment
 - **Rollback** to v0.34.0, in this order:
   1. remove `secrets` from `FEATURES_OFF` if it is there (v0.34 refuses the unknown name at the cms boot, the web start and in `infra/deploy.sh`);
   2. retag both images to v0.34.0 (`84ebeb217a05`);
-  3. run `infra/diagnostics/secret-shares-rollback.sql` ([infra/diagnostics/README.md](../infra/diagnostics/README.md); a cms with another `DATABASE_SCHEMA` than `public` names it there). It deletes **every** share and every `secretShared` notification and prints the counts; v0.34 has no janitor, so the shares' metadata would otherwise stay forever.
+  3. run `infra/diagnostics/secret-shares-rollback.sql`. It deletes **every** share and every `secretShared` notification in one transaction and prints the schema and the counts; v0.34 has no janitor, so the shares' metadata would otherwise stay forever:
+
+     ```bash
+     docker exec -i infra-db-1 sh -c 'psql -X -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"' \
+       < infra/diagnostics/secret-shares-rollback.sql
+     ```
+
+     It works in the schema `public`. A cms with another `DATABASE_SCHEMA` names it by adding `-e PGOPTIONS='-c sinnlos.schema=<DATABASE_SCHEMA>'` after `docker exec -i` (a space in the name as `\ `; [infra/diagnostics/README.md](../infra/diagnostics/README.md)).
 
   The rollback is complete only when the SQL ran successfully. Until then v0.34's bell shows those notifications with its fallback icon and a dead link (they are not in the digest). The empty table and the inert permission rows stay (`DATABASE_FORCE_MIGRATION` stays off); v0.34 writes nothing to the table. v0.34's `infra/restore-db.sh` does not close restored shares: after a restore on v0.34 of a backup taken under v0.35, run the SQL again before the site opens.
 
