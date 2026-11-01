@@ -1,4 +1,4 @@
-import { expect, test, type Browser, type Page } from "@playwright/test";
+import { expect, test, type Browser, type Page, type Request } from "@playwright/test";
 import { loadFixtures, signIn, sql } from "./helpers";
 
 /**
@@ -197,25 +197,61 @@ test("secret-sharing", async ({ browser }) => {
     const held = new Promise<void>((done) => (release = done));
     let sent = () => {};
     const posted = new Promise<void>((done) => (sent = done));
-    let delivered = () => {};
-    const fulfilled = new Promise<void>((done) => (delivered = done));
+    let heldBody = "";
     await lead.route(`**/secrets/${id}`, async (route) => {
       if (route.request().method() !== "POST") return route.continue();
       const response = await route.fetch();
+      heldBody = await response.text();
       sent();
       await held;
-      await route.fulfill({ response });
-      delivered();
+      await route.fulfill({ response, body: heldBody }).catch(() => undefined);
+    });
+    // How the held action request ends in the browser: delivered, or cancelled.
+    const isAction = (r: Request) => r.method() === "POST" && r.url().endsWith(`/secrets/${id}`);
+    const ended = new Promise<"finished" | "failed">((done) => {
+      lead.on("requestfinished", (r) => isAction(r) && done("finished"));
+      lead.on("requestfailed", (r) => isAction(r) && done("failed"));
     });
     await lead.getByRole("button", { name: "Show and delete" }).click();
     await posted;
+    // The held answer is the real one: it carries the text.
+    expect(heldBody).toContain(secret(5));
     await lead.getByRole("link", { name: "All secrets" }).click();
     // The destination has rendered before the answer is let through.
     await expect(lead).toHaveURL("/secrets");
     await expect(lead.getByRole("heading", { name: "Secrets", exact: true })).toBeVisible();
     release();
-    await fulfilled;
-    await expect(lead.getByRole("heading", { name: "Secrets", exact: true })).toBeVisible();
+    const outcome = await ended;
+    test.info().annotations.push({ type: "late answer", description: outcome });
+    if (outcome === "finished") {
+      // Delivered: wait until the browser has the whole body, then let the
+      // client decode it and run its continuation before looking.
+      await expect
+        .poll(() =>
+          lead.evaluate(
+            (path) =>
+              performance
+                .getEntriesByType("resource")
+                .some(
+                  (e) =>
+                    new URL(e.name).pathname === path &&
+                    (e as PerformanceResourceTiming).responseEnd > 0,
+                ),
+            `/secrets/${id}`,
+          ),
+        )
+        .toBe(true);
+      await lead.evaluate(
+        () =>
+          new Promise<void>((done) =>
+            requestAnimationFrame(() =>
+              requestAnimationFrame(() => setTimeout(() => setTimeout(done, 0), 0)),
+            ),
+          ),
+      );
+    }
+    // Delivered and dropped, or cancelled and never delivered: no text.
+    await expect(lead).toHaveURL("/secrets");
     expect(await lead.content()).not.toContain(secret(5));
     await lead.unroute(`**/secrets/${id}`);
     await lead.goto(`/secrets/${id}`);
