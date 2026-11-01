@@ -119,6 +119,8 @@ export const ANONYMISE_DELETED = [
   "notifications",
   "acknowledgements",
   "classifieds",
+  // v0.35.0: every share they sent or received, with its notification.
+  "secretShares",
 ] as const;
 
 export type AnonymiseDeletedClass = (typeof ANONYMISE_DELETED)[number];

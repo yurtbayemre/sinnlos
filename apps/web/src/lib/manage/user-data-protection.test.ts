@@ -35,6 +35,7 @@ const COUNTS = {
     notifications: 5,
     acknowledgements: 1,
     classifieds: 0,
+    secretShares: 0,
   },
   rewritten: { notifications: 2 },
   kept: {

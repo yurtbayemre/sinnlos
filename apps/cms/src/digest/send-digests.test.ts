@@ -367,6 +367,27 @@ describe("sendDigests orchestrator", () => {
     expect(mails()).toHaveLength(2);
   });
 
+  it("never mails a secretShared notification (v0.35.0): the digest selects its types", async () => {
+    const shared = (id: number, recipient: number): Row => ({
+      id,
+      type: "secretShared",
+      title: "Ada sent you a secret",
+      titleParams: { actor: "Ada" },
+      link: "/secrets/a1b2c3d4e5f6g7h8i9j0k1l2",
+      createdAt: minutesAfter(MONDAY_RUN, 70),
+      recipient: { id: recipient },
+    });
+    const { strapi, mails } = digestStub({
+      users: { [USER.alice]: optIn({ digestMentions: true, digestKudos: true }) },
+      announcements: [news("All hands", minutesAfter(MONDAY_RUN, 5))],
+      notifications: [shared(1, USER.alice)],
+    });
+    await sendDigests(strapi, NOW);
+    const text = mailTo(mails(), "alice")?.text ?? "";
+    expect(text).toContain("All hands");
+    expect(text).not.toMatch(/secret|Geheimnis|a1b2c3d4e5f6g7h8i9j0k1l2/i);
+  });
+
   it("sends nobody a digest when the training reminders cannot be read", async () => {
     const { strapi, mails } = digestStub({
       users: { [USER.alice]: optIn() },
