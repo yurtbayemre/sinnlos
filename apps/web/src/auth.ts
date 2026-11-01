@@ -55,6 +55,7 @@ import { ENTRA, LOCAL_ENABLED, OIDC } from "@/lib/auth-config";
 import { createAuthCallbacks, ENTRA_PROVIDER_ID, OIDC_PROVIDER_ID } from "@/lib/auth/callbacks";
 import { oidcFetch } from "@/lib/auth/oidc-fetch";
 import { authorizeCredentials } from "@/lib/auth/credentials";
+import { logAuthError } from "@/lib/auth/log-error";
 import { clientIpFrom, loginRateLimiter } from "@/lib/login-rate-limit";
 
 const IS_BUILD = process.env.NEXT_PHASE === "phase-production-build";
@@ -219,4 +220,7 @@ export const { handlers, auth, signIn, signOut, unstable_update } = NextAuth({
   pages: { signIn: "/sign-in", error: "/sign-in" },
   providers,
   callbacks,
+  // v0.34: a refused sign-in is one short line, not a stack trace each
+  // (lib/auth/log-error.ts); every other error is logged as before.
+  logger: { error: (error) => logAuthError(error) },
 });
