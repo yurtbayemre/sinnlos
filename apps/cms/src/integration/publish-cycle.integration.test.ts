@@ -260,6 +260,86 @@ describe.each(testEngines())("publish cycles on %s", (engine) => {
       );
       expect(res.body.data.map((c) => c.body)).toEqual(["on a page"]);
     });
+
+    it("an unpublished or never-published wiki page is no target but for moderators; the next publish brings the thread back (v0.34, B2)", async () => {
+      const PAGE = "api::wiki-page.wiki-page";
+      const space = await t.strapi.documents("api::wiki-space.wiki-space").create({
+        data: { name: "IT B2 space", slug: "it-b2-space", visibility: "public" },
+        status: "published",
+      });
+      const page = await t.strapi.documents(PAGE).create({
+        data: { title: "IT B2 page", slug: "it-b2-page", space: space.documentId },
+        status: "published",
+      });
+      const draftOnly = await t.strapi.documents(PAGE).create({
+        data: { title: "IT B2 draft", slug: "it-b2-draft", space: space.documentId },
+      });
+      const comment = (role: TestRole, documentId: string, body: string) =>
+        t.api(role, "/api/comments", {
+          json: { data: { body, targetType: "wiki-page", targetDocumentId: documentId } },
+        });
+      const react = (role: TestRole, documentId: string) =>
+        t.api(role, "/api/reactions", {
+          json: {
+            data: {
+              emoji: "heart",
+              reacted: true,
+              targetType: "wiki-page",
+              targetDocumentId: documentId,
+            },
+          },
+        });
+      expect((await comment("member", page.documentId, "while published")).status).toBe(201);
+      // The moderators' bypass keeps writes on a page without a published row.
+      expect((await comment("editor", draftOnly.documentId, "on a draft")).status).toBe(201);
+
+      await t.strapi.documents(PAGE).unpublish({ documentId: page.documentId });
+      expect(await rowIds(PAGE, page.documentId)).toMatchObject({ published: [] });
+
+      const GHOST = "zzzzzzzzzzzzzzzzzzzzzzzz";
+      const filterOf = (documentId: string) =>
+        `filters[targetType][$eq]=wiki-page&filters[targetDocumentId][$eq]=${documentId}`;
+      const threadOf = async (role: TestRole, documentId: string) => {
+        const comments = await t.api(role, `/api/comments?${filterOf(documentId)}`);
+        const reactions = await t.api(role, `/api/reactions?${filterOf(documentId)}`);
+        return [comments.status, comments.text, reactions.status, reactions.text];
+      };
+      // The web's batched read: several anchors in one list query (the full path).
+      const batched = (role: TestRole) =>
+        t.api<{ data: unknown[] }>(
+          role,
+          "/api/comments?filters[targetType][$eq]=wiki-page" +
+            `&filters[targetDocumentId][$in][0]=${page.documentId}` +
+            `&filters[targetDocumentId][$in][1]=${draftOnly.documentId}`,
+        );
+      for (const role of ["member", "team_lead", "guest"] as const) {
+        const ghost = await threadOf(role, GHOST);
+        expect(await threadOf(role, page.documentId), role).toEqual(ghost);
+        expect(await threadOf(role, draftOnly.documentId), role).toEqual(ghost);
+        expect(ghost.slice(0, 1), role).toEqual([200]);
+        const list = await batched(role);
+        expect([list.status, list.body.data], role).toEqual([200, []]);
+      }
+      for (const documentId of [page.documentId, draftOnly.documentId]) {
+        const [refused, ghost] = await Promise.all([
+          comment("member", documentId, "while unpublished"),
+          comment("member", GHOST, "while unpublished"),
+        ]);
+        expect([refused.status, refused.text]).toEqual([ghost.status, ghost.text]);
+        expect(refused.status).toBe(400);
+        expect((await react("member", documentId)).status).toBe(400);
+      }
+      // admin_role and editor still read both threads.
+      expect((await batched("editor")).body.data).toHaveLength(2);
+
+      await t.strapi.documents(PAGE).publish({ documentId: page.documentId });
+      const back = await t.api<{ data: { body: string }[] }>(
+        "member",
+        `/api/comments?${filterOf(page.documentId)}`,
+      );
+      expect(back.body.data.map((c) => c.body)).toEqual(["while published"]);
+      expect((await batched("member")).body.data).toHaveLength(1);
+    });
   });
 
   it("a poll vote follows the poll to its new published row", async () => {
