@@ -2,14 +2,15 @@
 
 Status: 2026-10-25, owner-approved. Baseline was v0.25.0 (`0c26656e`). This file lists **everything that still has to be done before v1.0.0**. Each item gets ticked when its release ships.
 
-**Current state (2026-10-25):**
+**Current state (2026-11-01):**
 
 - **v0.26.0 "portable"** is shipped and live since 2026-10-23 03:26 CEST.
 - **v0.27.0 "accounts"** is shipped and live since 2026-10-23 12:47 CEST; the owner's browser check passed.
 - **v0.28.0 "data protection"** is shipped and live since 2026-10-23 18:06 CEST. The data inventory for the data-protection officer and the works council is `docs/data-protection.md`.
 - **v0.29.0 "polish"** is shipped and live since 2026-10-24 09:55 CEST: branding by config, the accessibility pass, `/healthz` and `infra/ops-check.sh`, the closed-door restore, the v0.25 upgrade floor and the docs split (INSTALL, UPGRADE, OPERATIONS, SSO).
 - **v0.29.1** (dependency fixes, live since 2026-10-25 11:35 CET) and **v0.29.2** (Strapi 5.59.0) follow it.
-- **Next is v1.0.0-rc.1** (below). v1.0.0 itself waits for the lawyer review of the packages (S5 and the GHCR publication; owner decisions 2026-10-24 and 2026-10-25).
+- **v0.34.0 "security hardening"** is shipped and live since 2026-11-01 11:17 CET.
+- **Next is v0.35.0 "secret sharing"** (owner request 2026-11-01; plan: [plan-v035-secret-sharing.md](plan-v035-secret-sharing.md)), **then v1.0.0-rc.1** (below). v1.0.0 itself waits for the lawyer review of the packages (S5 and the GHCR publication; owner decisions 2026-10-24 and 2026-10-25).
 
 ## What v1.0.0 means
 
@@ -160,7 +161,8 @@ The owner rule still applies: **no bloat**. Every item below has the smallest sc
   - Team leads see their whole department's training reports.
 - [x] **Remove the pre-v0.25 upgrade machinery from the main path** (decision 5). `DATETIME_LEGACY_*` and the old migration runbooks move to the archive.
 - [x] **Final rehearsal** on the final schema and authentication: fresh install, upgrade from v0.25.x and restore (including re-applied anonymisations). Done 2026-10-24 on a fresh host (Caddy) and on staging (Traefik).
-- [ ] **v0.34.0 security hardening** (owner request 2026-11-01): the findings of the security review of v0.33.4. Sign-out ends every session, the second-factor forms have an attempt budget, a file opens only for readers of its content, multipart temp files are removed, unpublished wiki pages have no comments, one backup at a time. Before rc.1.
+- [x] **v0.34.0 security hardening** (owner request 2026-11-01): the findings of the security review of v0.33.4. Sign-out ends every session, the second-factor forms have an attempt budget, a file opens only for readers of its content, multipart temp files are removed, unpublished wiki pages have no comments, one backup at a time. Shipped 2026-11-01.
+- [ ] **v0.35.0 secret sharing** (owner request 2026-11-01): one person sends one short text (a password, a link, an access code) to one colleague, who can open it once; stored encrypted, at most 24 hours, staff only, no admin view of the content. External recipients come later as their own release. Design, scope, owner decisions and work breakdown: [plan-v035-secret-sharing.md](plan-v035-secret-sharing.md). Before rc.1.
 - [ ] **v1.0.0-rc.1:** all package versions at 1.0.0-rc.1, the immutable images validated, then at least one week on the owner's instance with backup, cron-status and restore evidence.
 - [ ] **v1.0.0:** after the lawyer review (S5 and the GHCR publication), all package versions at 1.0.0.
 
@@ -177,7 +179,7 @@ The owner rule still applies: **no bloat**. Every item below has the smallest sc
 
 ## After v1.0.0
 
-These are deliberately not part of v1.0.0: SCIM or directory sync, OIDC single logout, web push (with quiet hours), a Microsoft Teams personal-app manifest, audit CSV export, S3 media storage, HA/Helm, LTS releases (a natural paid item), the Azure Container Apps test, the AI assistant, and the canteen menu / vending API.
+These are deliberately not part of v1.0.0: SCIM or directory sync, OIDC single logout, web push (with quiet hours), a Microsoft Teams personal-app manifest, audit CSV export, S3 media storage, HA/Helm, LTS releases (a natural paid item), the Azure Container Apps test, the AI assistant, the canteen menu / vending API, and secret sharing with external recipients (its own review; see [plan-v035-secret-sharing.md](plan-v035-secret-sharing.md#9-external-recipients-later)).
 
 ## Not planned (bloat)
 
