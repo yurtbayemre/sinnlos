@@ -187,7 +187,7 @@ const TRAEFIK_LABEL = "$REPO/infra/docker-compose.yml,$REPO/infra/docker-compose
  * containers carry the label of base + Traefik overlay. Fake dumps in $T:
  * good.dump (up_users, posts), cut.dump (good.dump without its end),
  * garbage.dump, grant.dump (fails to restore), nousers.dump, older.dump
- * (up_users 2).
+ * (up_users 2), shares.dump (with secret_shares, v0.35).
  */
 function restoreSteps(steps: readonly Step[], mode: ShellMode): StepReport[] {
   const script: string[] = [
@@ -218,9 +218,10 @@ function restoreSteps(steps: readonly Step[], mode: ShellMode): StepReport[] {
     }),
     fakeDump("nousers.dump", ["notes 1", "tags 2"]),
     fakeDump("older.dump", ["up_users 2"]),
+    fakeDump("shares.dump", ["up_users 3", "secret_shares 2", "notifications 4"]),
     "STEP_CWD=",
     `STUB_LABEL_WEB="${TRAEFIK_LABEL}" STUB_LABEL_CMS="${TRAEFIK_LABEL}" STUB_LABEL_DB="${TRAEFIK_LABEL}"`,
-    "export T REPO STUB_LABEL_WEB STUB_LABEL_CMS STUB_LABEL_DB STUB_STOP_FAIL= STUB_UP_FAIL= STUB_ON_STOP= STUB_RM_AS_USER= STUB_KILL_AFTER_STARTED= STUB_KILL_AFTER_ARCHIVE= STUB_STATE_WRITE_FAIL= STUB_PGDUMP_FAIL= STUB_CREATEDB_FAIL= STUB_RESTORE_FAIL= STUB_PURGE_FAIL= STUB_LOCK_HELD= STUB_SITE_ALLOW=",
+    "export T REPO STUB_LABEL_WEB STUB_LABEL_CMS STUB_LABEL_DB STUB_STOP_FAIL= STUB_UP_FAIL= STUB_ON_STOP= STUB_RM_AS_USER= STUB_KILL_AFTER_STARTED= STUB_KILL_AFTER_ARCHIVE= STUB_STATE_WRITE_FAIL= STUB_PGDUMP_FAIL= STUB_CREATEDB_FAIL= STUB_RESTORE_FAIL= STUB_PURGE_FAIL= STUB_DB_SCHEMA= STUB_LOCK_HELD= STUB_SITE_ALLOW=",
     'S="$REPO/.git/sinnlos-deploy/restore"',
     HARNESS_STUBS,
   ];
@@ -535,7 +536,7 @@ describe.skipIf(!FAST)(`restore-db.sh: dumps that must not be restored${FAST_TIT
     expect(r[4].status, r[4].stderr).toBe(0);
     expect(r[5].status).toBe(1);
     expect(stopLine(r[5])).toContain(
-      "the check queries failed (no up_users table: not a sinnlos dump?)",
+      "the check queries failed (no up_users table in schema public: not a sinnlos dump?)",
     );
     expect(r[5].state.APPLIED_AT).toBe("");
     expect(r[6].status).toBe(1);
@@ -803,14 +804,18 @@ describe.skipIf(!FAST)(`restore-db.sh: the secret-share purge (v0.35)${FAST_TITL
   beforeAll(() => {
     r = restoreSteps(
       [
-        /* 0 */ { args: ["prepare", "good.dump"] },
+        /* 0 */ { args: ["prepare", "shares.dump"] },
         /* 1 */ { before: "STUB_PURGE_FAIL=1", args: ["apply"] },
         /* 2 */ { before: "STUB_PURGE_FAIL=", args: ["rotate-jwt"] },
         /* 3 */ { args: ["start"] },
         /* 4 */ { args: ["apply"] },
-        /* 5 */ { args: ["apply"] },
+        /* 5 */ { before: `STUB_DB_SCHEMA='"Sinnlos App"'`, args: ["apply"] },
         /* 6 */ { args: ["rotate-jwt"] },
         /* 7 */ { args: ["start"] },
+        /* 8 */ { before: "STUB_DB_SCHEMA=null", args: ["prepare", "good.dump"] },
+        /* 9 */ { args: ["apply"] },
+        /* 10 */ { before: `STUB_DB_SCHEMA='"a\\u0022b"'`, args: ["apply"] },
+        /* 11 */ { before: `STUB_DB_SCHEMA='"x", "DATABASE_SCHEMA": "y"'`, args: ["apply"] },
       ],
       MODE as ShellMode,
     );
@@ -819,6 +824,10 @@ describe.skipIf(!FAST)(`restore-db.sh: the secret-share purge (v0.35)${FAST_TITL
   const purge = (rep: StepReport) => rep.calls.indexOf("psql: secret-share purge");
   const restore = (rep: StepReport) =>
     rep.calls.findIndex((c) => c.includes("--single-transaction"));
+  /** The schema every psql call of the step was handed (its last argument). */
+  const schemas = (rep: StepReport) => [
+    ...new Set(rep.calls.filter((c) => c.includes("-v schema=")).map((c) => c.split(" sh ").pop())),
+  ];
 
   it("a failing purge stops apply before it passes, so nothing starts", () => {
     expect(r[1].status).toBe(1);
@@ -833,15 +842,33 @@ describe.skipIf(!FAST)(`restore-db.sh: the secret-share purge (v0.35)${FAST_TITL
     expect(r[3].jwt).toEqual(["old-secret"]);
   });
 
-  it("runs after the restore and before apply passes, on every apply", () => {
+  it("runs after the restore and before apply passes, on every apply, in the cms's schema", () => {
     for (const n of [4, 5]) {
       expect(r[n].status, r[n].stderr).toBe(0);
       expect(restore(r[n])).toBeGreaterThanOrEqual(0);
       expect(purge(r[n])).toBeGreaterThan(restore(r[n]));
       expect(r[n].state.APPLIED_AT).not.toBe("");
     }
+    expect(schemas(r[4])).toEqual(["public"]);
+    expect(schemas(r[5])).toEqual(["Sinnlos App"]);
     expect(r[7].status, r[7].stderr).toBe(0);
     expect(r[7].apps).toBe("running");
+  });
+
+  it("does nothing without the table (a dump from before v0.35)", () => {
+    expect(r[9].status, r[9].stderr).toBe(0);
+    expect(purge(r[9])).toBe(-1);
+    expect(schemas(r[9])).toEqual(["public"]);
+  });
+
+  it("refuses a schema it cannot read for sure, before anything is dropped", () => {
+    for (const n of [10, 11]) {
+      expect(r[n].status, `step ${n}`).toBe(1);
+      expect(stopLine(r[n])).toBe(
+        "STOP: the cms's DATABASE_SCHEMA could not be read from the compose configuration (one plain value, or unset for public); nothing dropped",
+      );
+      expect(dropped(r[n])).toBe(false);
+    }
   });
 });
 
@@ -1721,6 +1748,8 @@ describe.skipIf(!RUN_SLOW)(`restore-db.sh against Postgres 16${SLOW_TITLE}`, () 
     expect(pend).toMatch(/^pend cancelled \d{4}-\d\d-\d\dT[\d:.]+ true$/);
     expect(stale).toBe("stale expired 2026-10-02T00:00:00.000000 true");
     expect(one("p1.notifications")).toBe("comment");
+    // The deleted notification's link rows went with it (ON DELETE CASCADE), the other's stay.
+    expect(one("p1.links")).toBe("1 1");
     // apply again restores and purges again (the cancellation gets its own time).
     const untimed = (key: string) =>
       (o.get(key) ?? []).map((l) => l.replace(/^pend cancelled \S+/, "pend cancelled _"));
@@ -1740,14 +1769,35 @@ describe.skipIf(!RUN_SLOW)(`restore-db.sh against Postgres 16${SLOW_TITLE}`, () 
     expect(one("p.boom.prepare.rc")).toBe("0");
     expect(one("p.boom.apply.rc")).toBe("1");
     expect(stopOf("p.boom.apply")).toContain("closing the restored secret shares failed");
-    // The purge rolled back as a whole: the share could still be opened, so nothing starts.
-    expect(o.get("p4.shares")?.[1]).toBe("pend pending - false");
+    // The deletion of the notification failed last, and the purge rolled back as a whole,
+    // both updates included: the share could still be opened, so nothing starts.
+    expect(o.get("p4.shares")).toEqual([
+      "done retrieved 2026-10-01T00:00:00.000000 true",
+      "pend pending - false",
+      "stale expired 2026-10-02T00:00:00.000000 false",
+    ]);
     expect(one("p4.notifications")).toBe("secretShared comment");
+    expect(one("p4.links")).toBe("2 2");
     expect(one("p.boom.start.rc")).toBe("1");
     expect(one("p4.running")).toBe("db ");
     for (const step of ["p.back", "p.back.apply", "p.back.rotate", "p.back.start"]) {
       expect(one(`${step}.rc`), `${step}: ${one(`${step}.err`)}`).toBe("0");
     }
     expect(one("p5.running")).toBe("cms db web ");
+  });
+
+  it("checks and purges the cms's own schema (a quoted DATABASE_SCHEMA), never public's tables", () => {
+    for (const step of ["q.prepare", "q.apply"]) {
+      expect(one(`${step}.rc`), `${step}: ${one(`${step}.err`)}`).toBe("0");
+    }
+    // The users of the cms's schema, not public's three.
+    expect(one("q.apply.out")).toContain(" and 5 users into a clean database.");
+    expect(o.get("q.app.shares")).toEqual([
+      expect.stringMatching(/^app cancelled \d{4}-\d\d-\d\dT[\d:.]+ true$/),
+    ]);
+    expect(one("q.app.notifications")).toBe("");
+    expect(one("q.app.links")).toBe("0 0");
+    expect(o.get("q.public.shares")).toContain("decoy pending - false");
+    expect(one("q.public.notifications")).toBe("comment secretShared");
   });
 });

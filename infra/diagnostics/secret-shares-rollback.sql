@@ -14,8 +14,14 @@
 --   docker exec -i infra-db-1 sh -c 'psql -X -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"' \
 --     < infra/diagnostics/secret-shares-rollback.sql
 --
--- It prints how many rows went. On a database that never ran v0.35 it stops
--- with 'relation "secret_shares" does not exist' and changes nothing.
+-- It works in the cms's schema only: public, or the setting sinnlos.schema
+-- when the cms runs with another DATABASE_SCHEMA (add
+-- -e PGOPTIONS='-c sinnlos.schema=<DATABASE_SCHEMA>' after `docker exec -i`;
+-- a space in the name is written as "\ "). Tables of the same names in other
+-- schemas are never touched. It prints the schema and how many rows went.
+-- Where that schema has no secret_shares table (it never ran v0.35, or
+-- another schema was meant) it stops with 'relation "secret_shares" does
+-- not exist' and changes nothing.
 -- Deleted rows come back only from a backup. v0.34's infra/restore-db.sh
 -- does not close restored shares: after a restore on v0.34 of a backup taken
 -- under v0.35, run this file again before the site opens.
@@ -23,6 +29,9 @@
 -- Pure SQL, no psql meta-commands.
 BEGIN;
 SET LOCAL statement_timeout = '30s';
+SELECT set_config('search_path',
+                  quote_ident(coalesce(nullif(current_setting('sinnlos.schema', true), ''), 'public')),
+                  true) AS schema;
 
 WITH shares AS (
   DELETE FROM secret_shares RETURNING id

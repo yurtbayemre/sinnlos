@@ -118,5 +118,16 @@ docker exec -i infra-db-1 sh -c 'psql -X -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" 
   < infra/diagnostics/secret-shares-rollback.sql
 ```
 
-On a database that never ran v0.35 it stops with `relation "secret_shares"
-does not exist` and changes nothing.
+It works in the cms's schema only, `public` by default. When the cms runs
+with another `DATABASE_SCHEMA`, name it (a space in the name as `\ `):
+
+```bash
+docker exec -i -e PGOPTIONS='-c sinnlos.schema=<DATABASE_SCHEMA>' infra-db-1 \
+  sh -c 'psql -X -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"' \
+  < infra/diagnostics/secret-shares-rollback.sql
+```
+
+Tables of the same names in other schemas are never touched. Where the
+schema has no `secret_shares` table (a database that never ran v0.35, or
+the wrong schema) it stops with `relation "secret_shares" does not exist`
+and changes nothing.

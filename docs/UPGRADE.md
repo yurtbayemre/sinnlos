@@ -176,7 +176,7 @@ Newest first. Older releases: [archive/deployment-history.md](archive/deployment
 - **Rollback** to v0.34.0, in this order:
   1. remove `secrets` from `FEATURES_OFF` if it is there (v0.34 refuses the unknown name at the cms boot, the web start and in `infra/deploy.sh`);
   2. retag both images to v0.34.0 (`84ebeb217a05`);
-  3. run `infra/diagnostics/secret-shares-rollback.sql` ([infra/diagnostics/README.md](../infra/diagnostics/README.md)). It deletes **every** share and every `secretShared` notification and prints the counts; v0.34 has no janitor, so the shares' metadata would otherwise stay forever.
+  3. run `infra/diagnostics/secret-shares-rollback.sql` ([infra/diagnostics/README.md](../infra/diagnostics/README.md); a cms with another `DATABASE_SCHEMA` than `public` names it there). It deletes **every** share and every `secretShared` notification and prints the counts; v0.34 has no janitor, so the shares' metadata would otherwise stay forever.
 
   The rollback is complete only when the SQL ran successfully. Until then v0.34's bell shows those notifications with its fallback icon and a dead link (they are not in the digest). The empty table and the inert permission rows stay (`DATABASE_FORCE_MIGRATION` stays off); v0.34 writes nothing to the table. v0.34's `infra/restore-db.sh` does not close restored shares: after a restore on v0.34 of a backup taken under v0.35, run the SQL again before the site opens.
 

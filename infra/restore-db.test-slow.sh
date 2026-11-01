@@ -180,15 +180,21 @@ facts f
 
 # P. v0.35 secret shares in the dump: a pending one, a retrieved one, an
 # expired one whose envelope the janitor had not deleted yet, and their
-# notification next to another one.
-shares() { # <name>
-  q -c "SELECT document_id || ' ' || state || ' ' || coalesce(to_char(terminal_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.US'), '-') || ' ' || (envelope IS NULL) FROM secret_shares ORDER BY document_id" |
+# notification next to another one, with Strapi's two link tables.
+shares() { # <name> [schema]
+  local s="${2:-public}"
+  q -c "SELECT document_id || ' ' || state || ' ' || coalesce(to_char(terminal_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.US'), '-') || ' ' || (envelope IS NULL) FROM \"$s\".secret_shares ORDER BY document_id" |
     sed "s/^/@@$1.shares /"
-  echo "@@$1.notifications $(q -c "SELECT string_agg(type, ' ' ORDER BY id) FROM notifications")"
+  echo "@@$1.notifications $(q -c "SELECT string_agg(type, ' ' ORDER BY id) FROM \"$s\".notifications")"
+  echo "@@$1.links $(q -c "SELECT (SELECT count(*) FROM \"$s\".notifications_actor_lnk) || ' ' || (SELECT count(*) FROM \"$s\".notifications_recipient_lnk)")"
 }
 echo "@@before.noshares $(q -c "SELECT to_regclass('secret_shares') IS NULL")"
 q <<'SQL'
 CREATE TABLE notifications (id serial PRIMARY KEY, type varchar(255), link varchar(255));
+CREATE TABLE notifications_actor_lnk (id serial PRIMARY KEY,
+  notification_id int REFERENCES notifications ON DELETE CASCADE, user_id int REFERENCES up_users ON DELETE CASCADE);
+CREATE TABLE notifications_recipient_lnk (id serial PRIMARY KEY,
+  notification_id int REFERENCES notifications ON DELETE CASCADE, user_id int REFERENCES up_users ON DELETE CASCADE);
 CREATE TABLE secret_shares (id serial PRIMARY KEY, document_id varchar(255), sender_id int,
   recipient_id int, expires_at timestamptz, state varchar(255), terminal_at timestamptz,
   envelope text, created_at timestamptz, updated_at timestamptz);
@@ -197,12 +203,15 @@ INSERT INTO secret_shares (document_id, sender_id, recipient_id, expires_at, sta
   ('done', 1, 2, now(), 'retrieved', '2026-10-01T00:00:00Z', NULL, now(), now()),
   ('stale', 2, 1, now(), 'expired', '2026-10-02T00:00:00Z', 'v1.c.d', now(), now());
 INSERT INTO notifications (type, link) VALUES ('secretShared', '/secrets/pend'), ('comment', '/announcements');
+INSERT INTO notifications_actor_lnk (notification_id, user_id) VALUES (1, 1), (2, 2);
+INSERT INTO notifications_recipient_lnk (notification_id, user_id) VALUES (1, 2), (2, 1);
 SQL
 docker exec "${P}-db-1" pg_dump -U sinnlos -d sinnlos --format=custom >"${T}/shares.dump"
-# A dump whose purge fails: a trigger refuses every update of a share.
+# A dump whose purge fails at its last statement: a trigger refuses the
+# deletion of a notification, after both updates of the shares ran.
 q <<'SQL'
 CREATE FUNCTION boom() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'injected'; END $$;
-CREATE TRIGGER boom BEFORE UPDATE ON secret_shares FOR EACH ROW EXECUTE FUNCTION boom();
+CREATE TRIGGER boom BEFORE DELETE ON notifications FOR EACH ROW EXECUTE FUNCTION boom();
 SQL
 docker exec "${P}-db-1" pg_dump -U sinnlos -d sinnlos --format=custom >"${T}/boom.dump"
 run p.prepare prepare shares.dump
@@ -229,4 +238,33 @@ run p.back.apply apply
 run p.back.rotate rotate-jwt
 run p.back.start start
 facts p5
+
+# Q. the cms in a schema of its own whose name needs quoting
+# (DATABASE_SCHEMA "Sinnlos App"), with tables of the same names in public:
+# the checks and the purge use the cms's schema, public stays as it is.
+q <<'SQL'
+CREATE SCHEMA "Sinnlos App";
+CREATE TABLE "Sinnlos App".up_users (id int PRIMARY KEY);
+INSERT INTO "Sinnlos App".up_users SELECT generate_series(1, 5);
+CREATE TABLE "Sinnlos App".notifications (id serial PRIMARY KEY, type varchar(255), link varchar(255));
+CREATE TABLE "Sinnlos App".notifications_actor_lnk (id serial PRIMARY KEY,
+  notification_id int REFERENCES "Sinnlos App".notifications ON DELETE CASCADE, user_id int);
+CREATE TABLE "Sinnlos App".notifications_recipient_lnk (id serial PRIMARY KEY,
+  notification_id int REFERENCES "Sinnlos App".notifications ON DELETE CASCADE, user_id int);
+CREATE TABLE "Sinnlos App".secret_shares (LIKE public.secret_shares INCLUDING ALL);
+INSERT INTO "Sinnlos App".secret_shares (document_id, sender_id, recipient_id, expires_at, state, envelope, created_at, updated_at)
+  VALUES ('app', 1, 2, now() + interval '1 hour', 'pending', 'v1.g.h', now(), now());
+INSERT INTO "Sinnlos App".notifications (type, link) VALUES ('secretShared', '/secrets/app');
+INSERT INTO "Sinnlos App".notifications_actor_lnk (notification_id, user_id) VALUES (1, 1);
+INSERT INTO "Sinnlos App".notifications_recipient_lnk (notification_id, user_id) VALUES (1, 2);
+INSERT INTO public.secret_shares (document_id, sender_id, recipient_id, expires_at, state, envelope, created_at, updated_at)
+  VALUES ('decoy', 1, 2, now() + interval '1 hour', 'pending', 'v1.i.j', now(), now());
+INSERT INTO public.notifications (type, link) VALUES ('secretShared', '/secrets/decoy');
+SQL
+docker exec "${P}-db-1" pg_dump -U sinnlos -d sinnlos --format=custom >"${T}/schema.dump"
+printf 'services:\n  cms:\n    environment:\n      TZ: Europe/Berlin\n      DATABASE_SCHEMA: Sinnlos App\n' >"${REPO}/infra/docker-compose.traefik.yml"
+run q.prepare prepare schema.dump
+run q.apply apply
+shares q.app "Sinnlos App"
+shares q.public
 echo "@@done 1"

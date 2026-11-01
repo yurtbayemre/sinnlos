@@ -26,7 +26,9 @@ set +x # first: never trace this script (rotate-jwt handles a secret), also unde
 #                                        --force + createdb, pg_restore --no-owner
 #                                        --exit-on-error --single-transaction of the
 #                                        staged dump, then the database must hold the
-#                                        dump's tables and at least one up_users row;
+#                                        dump's tables and at least one up_users row in
+#                                        the cms's schema (DATABASE_SCHEMA as Compose
+#                                        hands it to the cms, unset: public);
 #                                        then every restored secret share is closed
 #                                        (envelopes deleted, pending ones cancelled,
 #                                        their notifications deleted); may be run
@@ -566,31 +568,52 @@ dump_tables() { # <file>
   printf '%s\n' "${n}"
 }
 
-# psql on the project's database (SQL on stdin), stopping at the first error.
-# shellcheck disable=SC2016 # $POSTGRES_USER and $POSTGRES_DB expand in the db container
-db_query() { compose exec -T db sh -c 'psql -X -q -tA -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"'; }
+# The cms's schema: DATABASE_SCHEMA as Compose hands it to the cms (unset:
+# public, as apps/cms/config/database.ts). Only that one key leaves the
+# rendered config. Fails on several values, or on a value the JSON escapes.
+DB_SCHEMA=""
+cms_schema() {
+  local values
+  values="$(compose config --format json cms </dev/null | awk '
+    /^[ \t]*"DATABASE_SCHEMA": / {
+      v = $0; sub(/^[ \t]*"DATABASE_SCHEMA":[ \t]*/, "", v); sub(/,[ \t]*$/, "", v)
+      if (v == "null") v = "\"\""
+      print v
+    }' | sort -u)" || return 1
+  [[ "${values}" != *$'\n'* && "${values}" != *\\* && "${values}" != *[[:cntrl:]]* ]] || return 1
+  values="${values#\"}" values="${values%\"}"
+  [[ "${values}" != *\"* ]] || return 1
+  printf '%s\n' "${values:-public}"
+}
+
+# psql on the project's database (SQL on stdin), stopping at the first error;
+# the cms's schema is the variable `schema` (:"schema" quotes it as a name,
+# :'schema' as a value), never part of the SQL text.
+# shellcheck disable=SC2016 # $POSTGRES_USER, $POSTGRES_DB and $1 expand in the db container
+db_query() {
+  compose exec -T db sh -c 'psql -X -q -tA -v ON_ERROR_STOP=1 -v schema="$1" -U "$POSTGRES_USER" -d "$POSTGRES_DB"' \
+    sh "${DB_SCHEMA}"
+}
 
 # v0.35 secret shares (docs/plan-v035-secret-sharing.md, section 5): a dump
 # holds the envelopes of shares that were pending when it was taken, also
 # of shares opened since; restored as they are, they could be opened again.
 # So every envelope goes, pending shares turn cancelled (terminal states and
 # their times stay, so a second run changes nothing) and every secretShared
-# notification goes, in one statement. A dump from before v0.35 has no
-# secret_shares table: nothing to do.
+# notification goes, in one transaction. A dump from before v0.35 has no
+# secret_shares table in the cms's schema: nothing to do.
 purge_secret_shares() {
+  local exists
+  exists="$(db_query <<<"SELECT to_regclass(format('%I.secret_shares', :'schema')) IS NOT NULL;")" || return 1
+  [[ "${exists}" == t ]] || return 0
   db_query <<'SQL'
-DO $$
-BEGIN
-  IF to_regclass('secret_shares') IS NULL THEN
-    RETURN;
-  END IF;
-  UPDATE secret_shares
-     SET state = 'cancelled', envelope = NULL, terminal_at = now(), updated_at = now()
-   WHERE state = 'pending';
-  UPDATE secret_shares SET envelope = NULL WHERE envelope IS NOT NULL;
-  DELETE FROM notifications WHERE type = 'secretShared';
-END
-$$;
+BEGIN;
+UPDATE :"schema".secret_shares
+   SET state = 'cancelled', envelope = NULL, terminal_at = now(), updated_at = now()
+ WHERE state = 'pending';
+UPDATE :"schema".secret_shares SET envelope = NULL WHERE envelope IS NOT NULL;
+DELETE FROM :"schema".notifications WHERE type = 'secretShared';
+COMMIT;
 SQL
 }
 
@@ -885,6 +908,9 @@ cmd_apply() {
     stop "attempt ${S_ATTEMPT} was ended at ${S_SUPERSEDED_AT} (a later prepare, back or cancel): run infra/restore-db.sh prepare <dump> (or back) again; nothing dropped"
   require_env_file
   use_recorded_compose_files "${S_COMPOSE_FILES}"
+  if ! DB_SCHEMA="$(cms_schema)"; then
+    stop "the cms's DATABASE_SCHEMA could not be read from the compose configuration (one plain value, or unset for public); nothing dropped"
+  fi
 
   # This step's result and the rotation after it go first.
   S_APPLIED_AT="" S_RESTORED_TABLES="" S_USERS="" S_ROTATED_AT="" S_ROTATED_SUM=""
@@ -939,8 +965,8 @@ cmd_apply() {
   fi
   exec 7<&-
   if ! t="$(db_query <<<"SELECT count(*) FROM pg_tables WHERE schemaname NOT IN ('pg_catalog', 'information_schema');")" ||
-    ! u="$(db_query <<<"SELECT count(*) FROM up_users;")"; then
-    stop "the check queries failed (no up_users table: not a sinnlos dump?); do not start the apps: infra/restore-db.sh back, or apply another dump"
+    ! u="$(db_query <<<"SELECT count(*) FROM :\"schema\".up_users;")"; then
+    stop "the check queries failed (no up_users table in schema ${DB_SCHEMA}: not a sinnlos dump?); do not start the apps: infra/restore-db.sh back, or apply another dump"
   fi
   if ! [[ "${t}" =~ ${COUNT_RE} && "${u}" =~ ${COUNT_RE} ]] || [[ "${t}" != "${S_DUMP_TABLES}" ]] || ((u <= 0)); then
     stop "the database holds ${t:-?} tables (the dump ${S_DUMP_TABLES}) and ${u:-?} users; do not start the apps: infra/restore-db.sh back, or apply another dump"
