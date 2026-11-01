@@ -1,4 +1,9 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+
+import { PG_URL } from "../database/pg-test-db.test.helper";
+import { requireCmsDependency } from "../database/strapi-knex.test.helper";
 
 import {
   createTestStrapi,
@@ -9,6 +14,7 @@ import {
   type TestStrapi,
 } from "./harness.test.helper";
 import { storedRevision } from "./authoring.test.helper";
+import { testSchema } from "./pg-lock.test.helper";
 import { WIKI_PAGE, seedPage, seedSpace, wikiApi, type WikiApi } from "./wiki.test.helper";
 
 /**
@@ -273,6 +279,62 @@ describe.each(testEngines())("upload access on %s", (engine) => {
     });
     expect(await openers(file.name, ["editor", "member", "guest"])).toEqual(["editor", "member"]);
   });
+
+  it.runIf(engine === "postgres")(
+    "infra/diagnostics/upload-references.sql runs read-only and lists the references",
+    async () => {
+      const { Client } = requireCmsDependency<{
+        Client: new (config: { connectionString: string }) => {
+          connect(): Promise<void>;
+          query(sql: string): Promise<unknown>;
+          end(): Promise<void>;
+        };
+      }>("pg");
+      const panel = await storeFile();
+      const stamped = await storeFile({ stampedBy: t.fixtures.users.member.id });
+      const page = await seedPage(t, {
+        space: space.documentId,
+        body: `${ref(panel)} ${ref(stamped)} /uploads/gone_000000.png.`,
+      });
+      const client = new Client({ connectionString: PG_URL });
+      await client.connect();
+      try {
+        await client.query(`SET search_path TO "${testSchema(t)}"`);
+        const sql = readFileSync(
+          join(__dirname, "..", "..", "..", "..", "infra", "diagnostics", "upload-references.sql"),
+          "utf8",
+        );
+        const results = (await client.query(sql)) as Array<{
+          command: string;
+          rows: Array<Record<string, unknown>>;
+        }>;
+        expect(results[0].command).toBe("BEGIN");
+        expect(results[results.length - 1].command).toBe("ROLLBACK");
+        const [listing, summary] = results
+          .filter((result) => result.command === "SELECT")
+          .map((result) => result.rows);
+        const ofPage = listing.filter((row) => row.document_id === page.documentId);
+        expect(ofPage.map((row) => [row.section, row.file_name, row.status]).sort()).toEqual(
+          // The page's draft and published rows, and the revision its
+          // lifecycle recorded (listed under the page's documentId).
+          [
+            ["1 inline_unstamped", panel.name, "published"],
+            ["1 inline_unstamped", panel.name, "draft"],
+            ["1 inline_unstamped", panel.name, "history"],
+            ["2 inline_stamped", stamped.name, "published"],
+            ["2 inline_stamped", stamped.name, "draft"],
+            ["2 inline_stamped", stamped.name, "history"],
+            ["3 unresolvable", "gone_000000.png", "published"],
+            ["3 unresolvable", "gone_000000.png", "draft"],
+            ["3 unresolvable", "gone_000000.png", "history"],
+          ].sort(),
+        );
+        expect(Number(summary[0].inline_unstamped)).toBeGreaterThanOrEqual(2);
+      } finally {
+        await client.end();
+      }
+    },
+  );
 
   describe("the write check on Markdown references", () => {
     let forbidden: StoredFile;
