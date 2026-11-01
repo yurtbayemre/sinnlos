@@ -14,6 +14,7 @@ import {
   ensureOidcIdentityIndex,
 } from "./bootstrap/entra-identity-index";
 import { removeHiddenTypeWritePermissions } from "./bootstrap/hidden-type-permissions";
+import { registerMultipartCleanup } from "./bootstrap/multipart-cleanup";
 import { registerRestrictedRelationGuard } from "./bootstrap/restricted-relation-guard";
 import { ensureRoles, syncRolePermissions } from "./bootstrap/sync-permissions";
 import { registerUserContactSanitizer } from "./bootstrap/user-contact-sanitizer";
@@ -60,7 +61,9 @@ import { trainingEvidenceRetentionYears } from "./utils/training-evidence";
  *     slot order (decision 06 §K);
  *   - document-indexes.ts: the revision, schedule and wiki history indexes;
  *   - user-contact-sanitizer.ts and restricted-relation-guard.ts: the two
- *     content-API hooks register() installs.
+ *     content-API hooks register() installs;
+ *   - multipart-cleanup.ts: strapi::body extended to remove every
+ *     multipart temp file (v0.34, C1).
  * The ORDER of the calls below is load-bearing (see the comments), and
  * index.register.test.ts pins the register() side.
  */
@@ -140,6 +143,10 @@ export default {
         `[auth] users-permissions jwtManagement=${String(jwtMode)} is not supported: only legacy-support keeps the token version and the second factor (v0.27)`,
       );
     }
+    // v0.34 (C1): every multipart temp file is removed when its request
+    // ends, at most 20 file parts per request; throws (no boot) without a
+    // strapi::body to extend (bootstrap/multipart-cleanup.ts).
+    registerMultipartCleanup(strapi);
     registerUserContactSanitizer(strapi);
     registerRestrictedRelationGuard(strapi);
     // Every Document Service middleware, in its slot order

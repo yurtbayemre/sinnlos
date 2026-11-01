@@ -333,6 +333,29 @@ describe("hasZipEndRecord (the PDF polyglot refusal)", () => {
     expect(await hasZipEndRecord(fileOf(Buffer.concat([pdf, shifted])))).toBe(true);
   });
 
+  it("refuses a file packed with end-record signatures after a bounded number of reads (v0.34, C3)", async () => {
+    // The audit probe: `%PDF-1.7\n` + 4096 × (signature + 18 zero bytes).
+    const record = Buffer.alloc(22);
+    record.writeUInt32LE(0x06054b50, 0);
+    const probe = Buffer.concat([Buffer.from("%PDF-1.7\n"), ...Array(4096).fill(record)]);
+    const file = fileOf(probe);
+    await expect(hasZipEndRecord(file)).rejects.toThrow("too many end-record signatures");
+    // One chunk read plus at most three reads per examined signature
+    // (before: 8,191 reads for this file).
+    expect(file.reads.length).toBeLessThanOrEqual(1 + 3 * ZIP_LIMITS.maxEndSignatures);
+  });
+
+  it("still answers for exactly maxEndSignatures signatures", async () => {
+    const record = Buffer.alloc(22);
+    record.writeUInt32LE(0x06054b50, 0);
+    const pdf = Buffer.concat([
+      minimalPdf(),
+      ...Array(ZIP_LIMITS.maxEndSignatures).fill(record),
+      minimalPdf(),
+    ]);
+    expect(await hasZipEndRecord(fileOf(pdf))).toBe(false);
+  });
+
   it("does not take a lone end-record signature in PDF data for a zip", async () => {
     const lone = Buffer.alloc(22);
     lone.writeUInt32LE(0x06054b50, 0);
