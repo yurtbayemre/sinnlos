@@ -35,6 +35,11 @@ const DOCUMENT = "api::document.document";
 const ANNOUNCEMENT = "api::announcement.announcement";
 const REVISION = "api::wiki-revision.wiki-revision";
 const USER = "plugin::users-permissions.user";
+const COURSE = "api::course.course";
+const LESSON = "api::lesson.lesson";
+const DEPARTMENT = "api::department.department";
+const TEAM = "api::team.team";
+const EVENT = "api::event.event";
 
 interface StoredFile {
   id: number;
@@ -280,6 +285,161 @@ describe.each(testEngines())("upload access on %s", (engine) => {
     expect(await openers(file.name, ["editor", "member", "guest"])).toEqual(["editor", "member"]);
   });
 
+  it("every Markdown host counts, by the audience its pages apply", async () => {
+    const [lessonFile, courseFile, departmentFile, teamFile, eventFile, expiredFile] =
+      await Promise.all(Array.from({ length: 6 }, () => storeFile()));
+    const course = await t.strapi.documents(COURSE).create({
+      data: {
+        title: `IT course ${++serial}`,
+        slug: `it-course-${serial}`,
+        description: ref(courseFile),
+      },
+      status: "published",
+    });
+    await t.strapi.documents(LESSON).create({
+      data: {
+        title: `IT lesson ${serial}`,
+        body: ref(lessonFile),
+        order: 0,
+        course: course.documentId,
+      },
+      status: "published",
+    });
+    await t.strapi.documents(DEPARTMENT).update({
+      documentId: engineering(),
+      data: { description: ref(departmentFile) },
+    });
+    await t.strapi.documents(TEAM).update({
+      documentId: t.fixtures.teams.platform.documentId as string,
+      data: { description: ref(teamFile) },
+    });
+    await t.strapi.documents(EVENT).create({
+      data: {
+        title: `IT event ${serial}`,
+        start: "2030-01-10T10:00:00.000Z",
+        description: ref(eventFile),
+      },
+      status: "published",
+    });
+    await t.strapi.documents(ANNOUNCEMENT).create({
+      data: {
+        title: `IT expired ${serial}`,
+        audience: "all",
+        body: ref(expiredFile),
+        expiresAt: new Date(Date.now() - 60_000).toISOString(),
+      },
+      status: "published",
+    });
+    // guest holds no course, lesson, department or team grant; event it does.
+    for (const file of [lessonFile, courseFile, departmentFile, teamFile]) {
+      expect(await openers(file.name, ["member", "guest"]), file.name).toEqual(["member"]);
+    }
+    expect(await openers(eventFile.name, ["member", "guest"])).toEqual(["member", "guest"]);
+    // An expired announcement is gone for its readers, and so is its image.
+    expect(await openers(expiredFile.name, ["editor", "member"])).toEqual(["editor"]);
+  });
+
+  it("a linked file whose last link goes opens only through a readable text", async () => {
+    const file = await storeFile();
+    const doc = await document({
+      audience: "departments",
+      departments: [sales()],
+      ownerDepartment: sales(),
+      file: file.id,
+    });
+    await t.strapi.documents(ANNOUNCEMENT).create({
+      data: {
+        title: `IT sales ${++serial}`,
+        audience: "departments",
+        department: sales(),
+        body: ref(file),
+      },
+      status: "published",
+    });
+    await t.strapi.documents(DOCUMENT).delete({ documentId: doc.documentId });
+    expect(await allows("member", file.name)).toBe(false);
+  });
+
+  describe("the grants decide like the routes do", () => {
+    const PERMISSION = "plugin::users-permissions.permission";
+    /** Takes `action` from `role` while `fn` runs, then gives it back. */
+    const without = async (role: TestRole, actions: string[], fn: () => Promise<void>) => {
+      const roleRow = await t.strapi.db
+        .query("plugin::users-permissions.role")
+        .findOne({ where: { type: role } });
+      const permissions = t.strapi.db.query(PERMISSION);
+      const removed: string[] = [];
+      try {
+        for (const action of actions) {
+          const row = await permissions.findOne({ where: { action, role: roleRow?.id } });
+          if (!row) continue;
+          await permissions.delete({ where: { id: row.id } });
+          removed.push(action);
+        }
+        await fn();
+      } finally {
+        for (const action of removed) {
+          await permissions.create({ data: { action, role: roleRow?.id } });
+        }
+      }
+    };
+
+    it("a published row opens through any read action that shows it", async () => {
+      const cover = await storeFile();
+      await t.strapi.documents(COURSE).create({
+        data: {
+          title: `IT covered ${++serial}`,
+          slug: `it-covered-${serial}`,
+          coverImage: cover.id,
+        },
+        status: "published",
+      });
+      expect(await allows("member", cover.name)).toBe(true);
+      await without("member", ["api::course.course.findOne"], async () => {
+        expect(await allows("member", cover.name)).toBe(true);
+      });
+      await without(
+        "member",
+        ["api::course.course.find", "api::course.course.findOne"],
+        async () => {
+          expect(await allows("member", cover.name)).toBe(false);
+        },
+      );
+    });
+
+    it("a draft needs the authoring grant, a revision the history grant", async () => {
+      const draft = await storeFile();
+      const doc = await document({
+        audience: "departments",
+        departments: [engineering()],
+        ownerDepartment: engineering(),
+      });
+      await t.strapi.documents(DOCUMENT).update({
+        documentId: doc.documentId,
+        data: { file: draft.id },
+        status: "draft",
+      });
+      expect(await allows("department_head", draft.name)).toBe(true);
+      await without("department_head", ["api::document.document.editable"], async () => {
+        expect(await allows("department_head", draft.name)).toBe(false);
+      });
+
+      const old = await storeFile();
+      const page = await seedPage(t, {
+        space: space.documentId,
+        body: "current",
+        author: t.fixtures.users.member.documentId,
+      });
+      await t.strapi.db.query(REVISION).create({
+        data: { pageDocumentId: page.documentId, body: ref(old), kind: "after" },
+      });
+      expect(await allows("member", old.name)).toBe(true);
+      await without("member", ["api::wiki-page.wiki-page.revision"], async () => {
+        expect(await allows("member", old.name)).toBe(false);
+      });
+    });
+  });
+
   it.runIf(engine === "postgres")(
     "infra/diagnostics/upload-references.sql runs read-only and lists the references",
     async () => {
@@ -389,6 +549,115 @@ describe.each(testEngines())("upload access on %s", (engine) => {
         await version(),
       );
       expect(kept.status, kept.text).toBe(200);
+    });
+
+    /** Runs `fn` as a content-API request of `role` (the guard reads the caller from it). */
+    const asUser = <T>(role: TestRole, fn: () => Promise<T>): Promise<T> =>
+      (
+        t.strapi.requestContext as unknown as {
+          run(ctx: unknown, cb: () => Promise<T>): Promise<T>;
+        }
+      ).run(
+        {
+          state: {
+            auth: { strategy: { name: "users-permissions" } },
+            user: { id: t.fixtures.users[role].id, role: { type: role } },
+          },
+          get: () => "",
+        },
+        fn,
+      );
+
+    it("checks every write of a Markdown field, not only the wiki's", async () => {
+      const writes: Array<[string, string, () => Promise<unknown>]> = [
+        [
+          "announcement create",
+          "body",
+          () =>
+            t.strapi.documents(ANNOUNCEMENT).create({
+              data: { title: "IT planted", audience: "all", body: ref(forbidden) },
+              status: "draft",
+            }),
+        ],
+        [
+          "department description",
+          "description",
+          () =>
+            t.strapi.documents(DEPARTMENT).update({
+              documentId: engineering(),
+              data: { description: `Our team ${ref(forbidden)}` },
+            }),
+        ],
+        [
+          "event create",
+          "description",
+          () =>
+            t.strapi.documents(EVENT).create({
+              data: {
+                title: "IT planted",
+                start: "2030-01-10T10:00:00.000Z",
+                description: ref(forbidden),
+              },
+              status: "draft",
+            }),
+        ],
+      ];
+      for (const [name, field, write] of writes) {
+        await expect(asUser("department_head", write), name).rejects.toMatchObject({
+          name: "ValidationError",
+          details: { keys: [field], codes: { [field]: "uploadNotAllowed" } },
+        });
+      }
+      // The same write without a caller (the admin panel, the scheduler) is not checked.
+      await expect(writes[1]![2]()).resolves.toBeTruthy();
+    });
+
+    it("refuses a planted rendition with a custom format name", async () => {
+      const original = await storeFile();
+      const rendition = `extra_small_${original.name.replace(/\.png$/, ".webp")}`;
+      await t.strapi.db.query(FILE).update({
+        where: { id: original.id },
+        data: { formats: { extra_small: { url: `/uploads/${rendition}` } } },
+      });
+      await document({
+        audience: "departments",
+        departments: [sales()],
+        ownerDepartment: sales(),
+        file: original.id,
+      });
+      const planted = await wiki.createDraft("department_head", {
+        title: "IT rendition",
+        body: `![x](/uploads/${rendition})`,
+        space: space.documentId,
+      });
+      expect(refusal(planted)).toEqual({ body: "uploadNotAllowed" });
+      expect(await allows("department_head", rendition)).toBe(false);
+    });
+
+    it("refuses a restore that brings back a file the writer may not open", async () => {
+      const created = await wiki.createDraft("department_head", {
+        title: `IT restore ${++serial}`,
+        body: "first",
+        space: space.documentId,
+      });
+      expect(created.status, created.text).toBe(201);
+      const documentId = created.body.data.documentId;
+      const revision = (await t.strapi.db.query(REVISION).create({
+        data: { pageDocumentId: documentId, body: ref(forbidden), kind: "after", title: "old" },
+      })) as Row;
+      const page = (await t.strapi.db
+        .query(WIKI_PAGE)
+        .findOne({ where: { documentId, publishedAt: null } })) as Row;
+      await t.strapi.db
+        .query(REVISION)
+        .update({ where: { id: revision.id }, data: { page: page.id } });
+      const res = await wiki.restore(
+        "department_head",
+        documentId,
+        revision.id as number,
+        await storedRevision(t, WIKI_PAGE, documentId),
+      );
+      expect(refusal(res)).toEqual({ body: "uploadNotAllowed" });
     });
 
     it("lets moderators reference every file", async () => {

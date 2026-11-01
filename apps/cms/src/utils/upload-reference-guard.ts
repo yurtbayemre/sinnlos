@@ -101,7 +101,7 @@ export function createUploadReferenceGuard(strapi: UploadAccessHost): DocumentMi
       for (const field of touched) {
         for (const name of uploadReferenceNames(data[field])) {
           if (committed.get(field)!.has(name)) continue;
-          const file = await resolveUploadFile(strapi, name);
+          const file = await resolveUploadFile(strapi, name, trx);
           if (file && !(await mayOpenFile(strapi, caller, file, trx))) {
             refused.push(field);
             break;

@@ -66,7 +66,7 @@ import {
 import { CLASSIFIED_UID } from "./delete-audit";
 import { departmentScopedIds, identifiedCaller } from "./policy-factories";
 import { USER_UID } from "./sanitize-user-contact";
-import { FILE_UID, fileLinks, uploadedByOf } from "./upload-orphans";
+import { fileLinks, uploadedByOf } from "./upload-orphans";
 import { holdsGrant, loadRoleGrants, loadUserScope, visibleAnnouncementIds } from "./visible-ids";
 import { callerScope, wikiRowClass } from "./wiki-gate";
 import { WIKI_REVISION_UID } from "./wiki-revisions";
@@ -107,19 +107,42 @@ const DRAFT_AND_PUBLISH: ReadonlySet<string> = new Set([
   WIKI_PAGE_UID,
 ]);
 
-/** The grant a row of each type needs: the type's findOne. */
-const READ_GRANT: Readonly<Record<string, string>> = {
-  [ANNOUNCEMENT_UID]: `${ANNOUNCEMENT_UID}.findOne`,
-  [EVENT_UID]: `${EVENT_UID}.findOne`,
-  [DOCUMENT_UID]: `${DOCUMENT_UID}.findOne`,
-  [COURSE_UID]: `${COURSE_UID}.findOne`,
-  [LESSON_UID]: `${LESSON_UID}.findOne`,
-  [WIKI_PAGE_UID]: `${WIKI_PAGE_UID}.findOne`,
-  [DEPARTMENT_UID]: `${DEPARTMENT_UID}.findOne`,
-  [TEAM_UID]: `${TEAM_UID}.findOne`,
-  [CLASSIFIED_UID]: `${CLASSIFIED_UID}.findOne`,
-  [USER_UID]: `${USER_UID}.findOne`,
+const reads = (uid: string): string[] => [`${uid}.find`, `${uid}.findOne`];
+
+/**
+ * The actions that show a published row of each type: any one of them
+ * (the list, the single read, and for lessons the player the lesson page
+ * uses), each still with the type's audience below.
+ */
+const READ_ACTIONS: Readonly<Record<string, readonly string[]>> = {
+  [ANNOUNCEMENT_UID]: reads(ANNOUNCEMENT_UID),
+  [EVENT_UID]: reads(EVENT_UID),
+  [DOCUMENT_UID]: reads(DOCUMENT_UID),
+  [COURSE_UID]: reads(COURSE_UID),
+  [LESSON_UID]: [...reads(LESSON_UID), `${LESSON_UID}.player`],
+  [WIKI_PAGE_UID]: reads(WIKI_PAGE_UID),
+  [DEPARTMENT_UID]: reads(DEPARTMENT_UID),
+  [TEAM_UID]: reads(TEAM_UID),
+  [CLASSIFIED_UID]: reads(CLASSIFIED_UID),
+  [USER_UID]: reads(USER_UID),
 };
+
+/** The grant the writers' gate needs on a draft: the type's authoring form. */
+const DRAFT_GRANT: Readonly<Record<string, string>> = {
+  [ANNOUNCEMENT_UID]: `${ANNOUNCEMENT_UID}.editable`,
+  [EVENT_UID]: `${EVENT_UID}.editable`,
+  [DOCUMENT_UID]: `${DOCUMENT_UID}.editable`,
+  [WIKI_PAGE_UID]: `${WIKI_PAGE_UID}.editable`,
+};
+
+/** The grant a page's history needs (GET /api/wiki-pages/:id/revisions/:revisionId). */
+const HISTORY_GRANT = `${WIKI_PAGE_UID}.revision`;
+
+const ALL_GRANTS = [
+  ...Object.values(READ_ACTIONS).flat(),
+  ...Object.values(DRAFT_GRANT),
+  HISTORY_GRANT,
+];
 
 /** `/uploads/<name>`: one path segment, up to whitespace, quotes, brackets, `?` or `#`. */
 const UPLOAD_REFERENCE = /\/uploads\/([^\s/"'<>()[\]\\?#]+)/g;
@@ -185,30 +208,51 @@ function toFile(row: unknown): UploadFile | null {
   return { id: row.id, names: [...names], uploadedBy: uploadedByOf(row) };
 }
 
-const FILE_SELECT = ["id", "url", "formats", "provider_metadata"];
+/** A JSON column as the raw query returns it: parsed on Postgres, text on SQLite. */
+function parsed(value: unknown): unknown {
+  if (typeof value !== "string") return value;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
+}
 
 /**
- * The stored file `/uploads/<name>` names: its original URL, or one of its
- * renditions (`<format>_<original name>`, confirmed against the stored
- * `formats` URLs, never trusted from the prefix alone). null when no file
- * has that URL.
+ * The stored file `/uploads/<name>` names: the file whose `url`, or one of
+ * whose stored rendition URLs (`formats.*.url`, whatever the format is
+ * called), is exactly that. null when none is. The access decision and the
+ * write check both resolve through here, so a name means the same file on
+ * both sides. One raw read on `files` (the stored formats matched as text,
+ * then confirmed exactly), joined to `trx` when given.
  */
-export async function resolveUploadFile(strapi: UploadAccessHost, name: string): Promise<UploadFile | null> {
+export async function resolveUploadFile(
+  strapi: UploadAccessHost,
+  name: string,
+  trx?: unknown,
+): Promise<UploadFile | null> {
   if (name === "" || name.includes("/")) return null;
-  const files = strapi.db.query(FILE_UID);
-  const exact = toFile(
-    await files.findOne({ where: { url: `${UPLOADS_PREFIX}${name}` }, select: FILE_SELECT }),
-  );
-  if (exact) return exact;
-  const rendition = /^[A-Za-z0-9-]+_(.+)$/.exec(name);
-  if (!rendition) return null;
-  const original = toFile(
-    await files.findOne({
-      where: { url: `${UPLOADS_PREFIX}${rendition[1]}` },
-      select: FILE_SELECT,
-    }),
-  );
-  return original && original.names.includes(name) ? original : null;
+  const url = `${UPLOADS_PREFIX}${name}`;
+  const formatsText =
+    strapi.db.dialect?.client === "postgres" ? "formats::text like ?" : "formats like ?";
+  const query = strapi.db
+    .getConnection("files")
+    .select("id", "url", "formats", "provider_metadata")
+    .where("url", url)
+    .orWhereRaw(formatsText, [`%${JSON.stringify(url)}%`]);
+  const rows: unknown[] = await (trx ? query.transacting(trx) : query);
+  const files = (Array.isArray(rows) ? rows : [])
+    .filter(isRecord)
+    .map((row) =>
+      toFile({
+        ...row,
+        id: Number(row.id),
+        formats: parsed(row.formats),
+        provider_metadata: parsed(row.provider_metadata),
+      }),
+    )
+    .filter((file): file is UploadFile => file !== null && file.names.includes(name));
+  return files.find((file) => file.names[0] === name) ?? files[0] ?? null;
 }
 
 /** The viewer as the request's users-permissions user (role populated). */
@@ -234,7 +278,7 @@ function readerFor(strapi: UploadAccessHost, viewer: UploadViewer): Reader {
       grants ??= (async () => {
         const [scope, roles] = await Promise.all([
           loadUserScope(strapi, viewer.id),
-          loadRoleGrants(strapi, Object.values(READ_GRANT)),
+          loadRoleGrants(strapi, ALL_GRANTS),
         ]);
         return (action: string) => holdsGrant(scope, roles.holders(action));
       })();
@@ -282,11 +326,15 @@ async function policyAllows(reader: Reader, uid: string, rowId: number): Promise
   return ids.has(rowId);
 }
 
-/** May the viewer author this draft (the writers' gates)? Moderators are decided before. */
+/**
+ * May the viewer author this draft (the writers' gates, with their grant)?
+ * Moderators are decided before; courses and lessons are theirs only.
+ */
 async function draftAllows(reader: Reader, uid: string, documentId: string): Promise<boolean> {
   const { strapi, viewer } = reader;
+  const grant = DRAFT_GRANT[uid];
+  if (!grant || !(await reader.grants())(grant)) return false;
   if (uid === WIKI_PAGE_UID) return wikiPageAllows(reader, documentId);
-  if (uid !== ANNOUNCEMENT_UID && uid !== EVENT_UID && uid !== DOCUMENT_UID) return false;
   if (roleClassFor(viewer, uid) !== DEPARTMENT_AUTHOR_CLASS) return false;
   const [rows, department] = await Promise.all([
     loadDocumentRows(strapi, uid, documentId),
@@ -310,7 +358,7 @@ const ROW_SELECT: Readonly<Record<string, readonly string[]>> = {
 
 /** May the viewer read this one row, in this version? */
 async function rowAllows(reader: Reader, uid: string, rowId: number): Promise<boolean> {
-  if (uid !== WIKI_REVISION_UID && !(uid in READ_GRANT)) return false;
+  if (uid !== WIKI_REVISION_UID && !(uid in READ_ACTIONS)) return false;
   const select = ROW_SELECT[uid] ?? [
     "id",
     "documentId",
@@ -319,12 +367,17 @@ async function rowAllows(reader: Reader, uid: string, rowId: number): Promise<bo
   const row = await reader.strapi.db.query(uid).findOne({ where: { id: rowId }, select });
   if (!isRecord(row)) return false;
   if (uid === WIKI_REVISION_UID) {
-    return typeof row.pageDocumentId === "string" && wikiPageAllows(reader, row.pageDocumentId);
+    return (
+      typeof row.pageDocumentId === "string" &&
+      (await reader.grants())(HISTORY_GRANT) &&
+      wikiPageAllows(reader, row.pageDocumentId)
+    );
   }
   if (DRAFT_AND_PUBLISH.has(uid) && row.publishedAt == null) {
     return typeof row.documentId === "string" && draftAllows(reader, uid, row.documentId);
   }
-  if (!(await reader.grants())(READ_GRANT[uid]!)) return false;
+  const holds = await reader.grants();
+  if (!READ_ACTIONS[uid]!.some(holds)) return false;
   // The directory: blocked people are gone from it (utils/user-visibility.ts).
   if (uid === USER_UID) return row.blocked !== true;
   return policyAllows(reader, uid, rowId);
@@ -369,7 +422,7 @@ export async function mayOpenUpload(
   trx?: unknown,
 ): Promise<boolean> {
   if (hasRole(viewer, MODERATORS)) return true;
-  const file = await resolveUploadFile(strapi, name);
+  const file = await resolveUploadFile(strapi, name, trx);
   if (!file) return false;
   return mayOpenFile(strapi, viewer, file, trx);
 }

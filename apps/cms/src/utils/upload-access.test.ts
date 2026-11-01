@@ -42,13 +42,33 @@ describe("uploadReferenceNames", () => {
   });
 });
 
-/** A file table of rows, looked up by `where.url` like the entity query. */
+/**
+ * The `files` table behind strapi.db.getConnection, as SQLite's raw rows come
+ * back (JSON columns as text): `url = ?` OR the formats text LIKE `%…%`.
+ */
 function filesDb(rows: Array<Record<string, unknown>>) {
-  const findOne = vi.fn(
-    async ({ where }: { where: { url: string } }) =>
-      rows.find((row) => row.url === where.url) ?? null,
-  );
-  return { strapi: { db: { query: () => ({ findOne }) } }, findOne };
+  const findOne = vi.fn((url: string, pattern: string) => {
+    const needle = pattern.slice(1, -1);
+    return rows
+      .filter((row) => row.url === url || JSON.stringify(row.formats ?? null).includes(needle))
+      .map((row) => ({
+        ...row,
+        formats: row.formats === undefined ? null : JSON.stringify(row.formats),
+        provider_metadata: JSON.stringify(row.provider_metadata ?? null),
+      }));
+  });
+  const getConnection = vi.fn(() => {
+    let url = "";
+    let pattern = "";
+    const builder = {
+      select: () => builder,
+      where: (_column: string, value: string) => ((url = value), builder),
+      orWhereRaw: (_sql: string, [value]: string[]) => ((pattern = value), builder),
+      then: (resolve: (rows: unknown[]) => unknown) => resolve(findOne(url, pattern)),
+    };
+    return builder;
+  });
+  return { strapi: { db: { dialect: { client: "sqlite" }, getConnection } }, findOne };
 }
 
 const IMAGE = {
@@ -74,12 +94,24 @@ describe("resolveUploadFile", () => {
     expect(await resolveUploadFile(strapi, "large_team_a1b2c3.png")).toBeNull();
   });
 
-  it("reads formats stored as text and files without a stamp", async () => {
+  it("finds a rendition whatever its format is called (custom breakpoints)", async () => {
+    const { strapi } = filesDb([
+      {
+        id: 9,
+        url: "/uploads/secret_abc.png",
+        formats: { extra_small: { url: "/uploads/extra_small_secret_abc.webp" } },
+      },
+    ]);
+    expect((await resolveUploadFile(strapi, "extra_small_secret_abc.webp"))?.id).toBe(9);
+    expect(await resolveUploadFile(strapi, "extra_small_secret_abc.png")).toBeNull();
+  });
+
+  it("reads files without a stamp", async () => {
     const { strapi } = filesDb([
       {
         id: 3,
         url: "/uploads/p_1.png",
-        formats: JSON.stringify({ small: { url: "/uploads/small_p_1.png" } }),
+        formats: { small: { url: "/uploads/small_p_1.png" } },
       },
     ]);
     expect(await resolveUploadFile(strapi, "small_p_1.png")).toEqual({
@@ -92,6 +124,8 @@ describe("resolveUploadFile", () => {
   it("answers null for unknown names and nested paths without a lookup", async () => {
     const { strapi, findOne } = filesDb([IMAGE]);
     expect(await resolveUploadFile(strapi, "missing_000000.png")).toBeNull();
+    // LIKE's `_` matches any character: the stored name is confirmed exactly.
+    expect(await resolveUploadFile(strapi, "thumbnailXteam_a1b2c3.png")).toBeNull();
     findOne.mockClear();
     expect(await resolveUploadFile(strapi, "a/b.png")).toBeNull();
     expect(await resolveUploadFile(strapi, "")).toBeNull();
