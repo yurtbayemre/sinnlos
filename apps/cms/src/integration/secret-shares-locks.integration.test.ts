@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   ADMIN_ENV,
@@ -290,78 +290,167 @@ describe.each(testEngines())("secret shares under locks and failures on %s", (en
   });
 
   /**
-   * SQLite runs one transaction at a time on its one connection, so a request
-   * that waits there waits before its first statement, its authentication
-   * included: a write committed meanwhile is seen from the start, and the
-   * window "past the authentication, before the locks" of the Postgres cases
-   * below does not exist. What can be pinned deterministically: a reveal that
-   * waits for the connection while its share expires or its recipient is
-   * blocked gets nothing. The anonymisation and the bulk deletion need the
-   * same connection themselves, so they cannot run while a reveal waits.
+   * SQLite serializes database work on its one connection, not whole
+   * requests: an HTTP request that meets a held connection waits in its
+   * authentication already. So these cases queue an ALREADY VERIFIED caller
+   * (the assurance its request was authenticated with) directly at the
+   * service, behind a transaction that holds the connection; what the holder
+   * commits meanwhile is what the service's fresh checks under its own
+   * transaction must see. The holder writes the change itself, as the
+   * admin's block, a sign-out and a role change would; the anonymisation
+   * runs for real, queued first.
    */
-  describe.runIf(engine === "sqlite")("waiting for the one SQLite connection", () => {
+  describe.runIf(engine === "sqlite")("queued behind the one SQLite connection", () => {
+    interface Shares {
+      revealShare(strapi: unknown, caller: unknown, id: string): Promise<string>;
+      revokeShare(strapi: unknown, caller: unknown, id: string): Promise<unknown>;
+    }
+    interface Anonymise {
+      anonymiseUser(
+        strapi: unknown,
+        callerId: number,
+        callerTv: number,
+        id: number,
+        confirm: string,
+      ): Promise<unknown>;
+    }
+    type Probe = { raw(sql: string, b?: unknown[]): Promise<unknown>; commit(): Promise<unknown> };
+    const shares = () => t.requireBuilt<Shares>("src/utils/secret-shares");
     const pool = () =>
       (
         t.strapi.db as unknown as {
           connection: { client: { pool: { numPendingAcquires(): number } } };
         }
       ).connection.client.pool;
+    const tokenVersion = async (id: number) =>
+      Number(
+        (
+          (await t.strapi.db
+            .query(USER)
+            .findOne({ where: { id }, select: ["tokenVersion"] })) as Row
+        ).tokenVersion ?? 0,
+      );
+    /** The caller as its (password) request was verified: the stored token version now. */
+    const verified = async (userId: number) => ({
+      userId,
+      assurance: { am: "pw", mfa: false, tv: await tokenVersion(userId), restricted: false },
+    });
 
-    async function waiting<T>(
-      request: () => Promise<T>,
-      meanwhile: (probe: { raw(sql: string, b?: unknown[]): Promise<unknown> }) => Promise<unknown>,
+    /** Holds the connection, starts the requests in order, each queued, then the change, then lets go. */
+    async function queuedAt(
+      requests: (() => Promise<unknown>)[],
+      meanwhile: (probe: Probe) => Promise<unknown>,
     ) {
-      const knex = (
-        t.strapi.db as unknown as {
-          connection: {
-            transaction(): Promise<{
-              raw(sql: string, b?: unknown[]): Promise<unknown>;
-              commit(): Promise<unknown>;
-            }>;
-          };
-        }
-      ).connection;
+      const knex = (t.strapi.db as unknown as { connection: { transaction(): Promise<Probe> } })
+        .connection;
       const probe = await knex.transaction();
-      let pending: ReturnType<typeof settle<T>>;
+      const pending: Promise<{ ok: boolean; value?: unknown; error?: unknown }>[] = [];
       try {
-        pending = settle(request());
-        await expect
-          .poll(() => pool().numPendingAcquires(), { timeout: 10_000 })
-          .toBeGreaterThan(0);
+        for (const [i, request] of requests.entries()) {
+          pending.push(settle(request()) as never);
+          await expect
+            .poll(() => pool().numPendingAcquires(), { timeout: 10_000 })
+            .toBeGreaterThan(i);
+        }
         await meanwhile(probe);
       } finally {
         await probe.commit();
       }
-      const done = await pending!;
-      if (!done.ok) throw (done as { error: unknown }).error;
-      return (done as { value: T }).value;
+      return Promise.all(pending);
     }
+    const refusal = (outcome: { ok: boolean; error?: unknown }) => {
+      expect(outcome.ok).toBe(false);
+      const err = outcome.error as { status?: number; name?: string; details?: { code?: string } };
+      return { status: err.status, name: err.name, code: err.details?.code };
+    };
 
-    it("a reveal waiting while its share expires answers gone", async () => {
-      const { id, to, text } = await shared();
-      const res = await waiting(
-        () => reveal(to, id),
-        (probe) =>
-          probe.raw('UPDATE "secret_shares" SET "expires_at" = ? WHERE "document_id" = ?', [
-            new Date(Date.now() - 1000),
-            id,
-          ]),
+    it("expiry passing while the reveal waits: the clock is read after the wait", async () => {
+      vi.useFakeTimers({ toFake: ["Date"], shouldAdvanceTime: true });
+      try {
+        const { id, recipient } = await shared();
+        const caller = await verified(recipient.id);
+        const [outcome] = await queuedAt(
+          [() => shares().revealShare(t.strapi, caller, id)],
+          // The deadline and the envelope stay; only the clock passes them.
+          async () => vi.setSystemTime(Date.now() + 2 * 60 * 60 * 1000),
+        );
+        expect(refusal(outcome)).toMatchObject({ status: 410, code: "gone" });
+        expect(await state(id)).toBe("pending");
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("a reveal queued behind a block of its recipient loses", async () => {
+      const { id, recipient } = await shared();
+      const caller = await verified(recipient.id);
+      const [outcome] = await queuedAt(
+        [() => shares().revealShare(t.strapi, caller, id)],
+        (probe) => probe.raw('UPDATE "up_users" SET "blocked" = 1 WHERE "id" = ?', [recipient.id]),
       );
-      expect(res.status).toBe(410);
-      expect(code(res)).toBe("gone");
-      expect(res.text).not.toContain(text);
+      expect(refusal(outcome)).toMatchObject({ status: 401, code: "session_outdated" });
       expect(await state(id)).toBe("pending");
     });
 
-    it("a reveal waiting while its recipient is blocked gets nothing", async () => {
-      const { id, to, recipient, text } = await shared();
-      const res = await waiting(
-        () => reveal(to, id),
-        (probe) => probe.raw('UPDATE "up_users" SET "blocked" = 1 WHERE "id" = ?', [recipient.id]),
+    it("a reveal and a revoke queued behind a sign-out lose", async () => {
+      const a = await shared();
+      const reader = await verified(a.recipient.id);
+      const bump = (probe: Probe, id: number) =>
+        probe.raw(
+          'UPDATE "up_users" SET "token_version" = COALESCE("token_version", 0) + 1 WHERE "id" = ?',
+          [id],
+        );
+      const [opened] = await queuedAt(
+        [() => shares().revealShare(t.strapi, reader, a.id)],
+        (probe) => bump(probe, a.recipient.id),
       );
-      expect(res.status).toBe(401);
-      expect(res.text).not.toContain(text);
+      expect(refusal(opened)).toMatchObject({ status: 401, code: "session_outdated" });
+      const b = await shared();
+      const writer = await verified(b.sender.id);
+      const [revoked] = await queuedAt(
+        [() => shares().revokeShare(t.strapi, writer, b.id)],
+        (probe) => bump(probe, b.sender.id),
+      );
+      expect(refusal(revoked)).toMatchObject({ status: 401, code: "session_outdated" });
+      expect(await state(a.id)).toBe("pending");
+      expect(await state(b.id)).toBe("pending");
+    });
+
+    it("a member promoted to editor while the reveal waits meets the editor's second-factor rule", async () => {
+      const { id, recipient } = await shared();
+      const caller = await verified(recipient.id);
+      const editorRole = (await t.strapi.db
+        .query(ROLE)
+        .findOne({ where: { type: "editor" } })) as Row;
+      const [outcome] = await queuedAt(
+        [() => shares().revealShare(t.strapi, caller, id)],
+        (probe) =>
+          probe.raw('UPDATE "up_users_role_lnk" SET "role_id" = ? WHERE "user_id" = ?', [
+            editorRole.id,
+            recipient.id,
+          ]),
+      );
+      expect(refusal(outcome)).toMatchObject({ status: 403, code: "mfa_setup_required" });
       expect(await state(id)).toBe("pending");
+    });
+
+    it("a reveal queued behind the anonymisation of its sender finds nothing", async () => {
+      const { id, sender, recipient } = await shared();
+      await t.strapi.db.query(USER).update({ where: { id: sender.id }, data: { blocked: true } });
+      const admin = t.fixtures.users.admin_role;
+      const adminTv = await tokenVersion(admin.id);
+      const caller = await verified(recipient.id);
+      const anonymise = t.requireBuilt<Anonymise>("src/utils/anonymise");
+      const [anonymised, opened] = await queuedAt(
+        [
+          () => anonymise.anonymiseUser(t.strapi, admin.id, adminTv, sender.id, sender.username),
+          () => shares().revealShare(t.strapi, caller, id),
+        ],
+        async () => undefined,
+      );
+      expect(anonymised.ok).toBe(true);
+      expect(refusal(opened).name).toBe("NotFoundError");
+      expect(await state(id)).toBeUndefined();
     });
   });
 
@@ -443,49 +532,93 @@ describe.each(testEngines())("secret shares under locks and failures on %s", (en
       expect(await state(id)).toBe("pending");
     });
 
-    it("expiry passing while the reveal waits for the locks: gone, checked after them", async () => {
-      const { id, to, text } = await shared();
-      const res = await queued(
-        () => reveal(to, id),
-        () =>
-          t.strapi.db.query(UID).update({
-            where: { documentId: id },
-            data: { expiresAt: new Date(Date.now() - 1000) },
-          }),
-      );
-      expect(res.status).toBe(410);
-      expect(code(res)).toBe("gone");
-      expect(res.text).not.toContain(text);
-      expect(await state(id)).toBe("pending");
+    it("expiry passing while the reveal waits for the locks: the clock is read after them", async () => {
+      vi.useFakeTimers({ toFake: ["Date"], shouldAdvanceTime: true });
+      try {
+        const { id, to, text } = await shared();
+        const res = await queued(
+          () => reveal(to, id),
+          // The deadline and the envelope stay; only the clock passes them.
+          async () => vi.setSystemTime(Date.now() + 2 * 60 * 60 * 1000),
+        );
+        expect(res.status).toBe(410);
+        expect(code(res)).toBe("gone");
+        expect(res.text).not.toContain(text);
+        expect(await state(id)).toBe("pending");
+      } finally {
+        vi.useRealTimers();
+      }
     });
 
-    it("a forced deadlock rolls the reveal back with busy and no text", async () => {
+    it("a real lock cycle with a reveal: either side may be the victim, the text leaves only with a 200", async () => {
       const { id, to, recipient, text } = await shared();
+      const warn = vi.spyOn(t.strapi.log as unknown as { warn(m: string): void }, "warn");
       const probe = await holdTransaction(t);
-      let opened: ReturnType<typeof settle<ApiResponse<Body>>>;
+      let opened: ReturnType<typeof settle<ApiResponse<Body>>> | null = null;
+      let probeDone = false;
       try {
         // The share row first: the reveal takes the directory and both users,
-        // then waits for it.
+        // then waits for it; then a user row the reveal holds closes the cycle.
         await probe.raw(
           `SELECT 1 FROM ${qualified(t, "secret_shares")} WHERE document_id = ? FOR UPDATE`,
           [id],
         );
         opened = settle(reveal(to, id));
         await waitForLockWait(t);
-        // Then a user row the reveal holds: a cycle. The reveal waited first,
-        // so its deadlock check fires first and Postgres aborts it (40P01).
-        await probe.raw(`SELECT 1 FROM ${qualified(t, "up_users")} WHERE id = ? FOR UPDATE`, [
-          recipient.id,
-        ]);
+        const cycle = await settle(
+          probe.raw(`SELECT 1 FROM ${qualified(t, "up_users")} WHERE id = ? FOR UPDATE`, [
+            recipient.id,
+          ]),
+        );
+        if (cycle.ok) {
+          await probe.commit();
+          probeDone = true;
+          // The reveal was the victim: rolled back, busy, logged as 40P01.
+          const res = (await opened) as { ok: true; value: ApiResponse<Body> };
+          expect(res.value.status).toBe(503);
+          expect(code(res.value)).toBe("busy");
+          expect(res.value.text).not.toContain(text);
+          expect(warn.mock.calls.map(([line]) => String(line))).toContain(
+            "[secrets] reveal answered busy: 40P01",
+          );
+          expect(await state(id)).toBe("pending");
+        } else {
+          // The probe was the victim: Postgres says so with 40P01, the reveal goes on.
+          expect((cycle as { error: { code?: string } }).error.code).toBe("40P01");
+          await probe.rollback();
+          probeDone = true;
+          const res = (await opened) as { ok: true; value: ApiResponse<Body> };
+          expect(res.value.status).toBe(200);
+          expect(res.value.body.data?.text).toBe(text);
+          expect(await state(id)).toBe("retrieved");
+        }
       } finally {
-        await probe.commit();
+        if (!probeDone) await probe.rollback().catch(() => undefined);
+        if (opened) await opened;
+        warn.mockRestore();
       }
-      const got = await opened!;
-      expect(got.ok).toBe(true);
-      const res = (got as { value: ApiResponse<Body> }).value;
-      expect(res.status).toBe(503);
-      expect(code(res)).toBe("busy");
-      expect(res.text).not.toContain(text);
+    });
+
+    it("a deadlock error inside the reveal's transaction rolls back with busy and no text", async () => {
+      const { id, to, text } = await shared();
+      const warn = vi.spyOn(t.strapi.log as unknown as { warn(m: string): void }, "warn");
+      const off = duringNextEnd(async (trx) => {
+        await trx.raw(
+          "DO $$ BEGIN RAISE EXCEPTION 'forced deadlock' USING ERRCODE = '40P01'; END $$",
+        );
+      });
+      try {
+        const res = await reveal(to, id);
+        expect(res.status).toBe(503);
+        expect(code(res)).toBe("busy");
+        expect(res.text).not.toContain(text);
+        expect(warn.mock.calls.map(([line]) => String(line))).toContain(
+          "[secrets] reveal answered busy: 40P01",
+        );
+      } finally {
+        off();
+        warn.mockRestore();
+      }
       expect(await state(id)).toBe("pending");
       expect((await reveal(to, id)).body.data?.text).toBe(text);
     });
