@@ -56,6 +56,10 @@ const SCRIPT = readFileSync(new URL("./restore-db.sh", import.meta.url), "utf8")
   /\r\n/g,
   "\n",
 );
+const DEPLOY_ENV = readFileSync(new URL("./deploy-env.sh", import.meta.url), "utf8").replace(
+  /\r\n/g,
+  "\n",
+);
 const TOOLS = ["flock", "openssl", "git", "sha256sum", "stat", "mktemp", "awk", "sed", "readlink"];
 const MODE: ShellMode | null = shellMode(TOOLS, { linux: true });
 const SLOW = process.env.SINNLOS_SLOW_SHELL_TESTS === "1";
@@ -106,7 +110,10 @@ describe("restore-db.sh: the script itself", () => {
   });
 
   it("reads its state files as data, never as code", () => {
-    expect(SCRIPT).not.toMatch(/^\s*(source|\.)\s/m);
+    // The one sourced file is the deploy.env parser (infra/deploy-env.sh), which reads that file as data too.
+    expect(code.filter((l) => /^\s*(source|\.)\s/.test(l))).toEqual([
+      'source "${INFRA_DIR}/deploy-env.sh"',
+    ]);
     expect(SCRIPT).toContain('printf -v "${prefix}${key}" \'%s\' "${value}"');
   });
 });
@@ -193,6 +200,9 @@ function restoreSteps(steps: readonly Step[], mode: ShellMode): StepReport[] {
     SCRIPT.trimEnd(),
     "RESTORE_DB_EOF",
     'chmod 755 "$REPO/infra/restore-db.sh"',
+    "cat > \"$REPO/infra/deploy-env.sh\" <<'DEPLOY_ENV_SH_EOF'",
+    DEPLOY_ENV.trimEnd(),
+    "DEPLOY_ENV_SH_EOF",
     'for f in docker-compose.yml docker-compose.traefik.yml; do : > "$REPO/infra/$f"; done',
     "printf 'DATABASE_PASSWORD=pw\\nJWT_SECRET=old-secret\\nAUTH_SECRET=keep-me\\n' > \"$REPO/infra/.env\"",
     'G=(git -C "$REPO" -c user.name=restore-test -c user.email=restore-test@example.invalid -c commit.gpgsign=false -c init.defaultBranch=main -c core.hooksPath=/dev/null)',
@@ -1478,6 +1488,60 @@ describe.skipIf(!FAST)(
   },
 );
 
+describe.skipIf(!FAST)(
+  `restore-db.sh: infra/deploy.env names the compose project${FAST_TITLE}`,
+  () => {
+    let r: StepReport[] = [];
+    const writeEnv = (mode: string) =>
+      `printf 'COMPOSE_PROJECT=staging\\n' > "$REPO/infra/deploy.env"; chmod ${mode} "$REPO/infra/deploy.env"`;
+    beforeAll(() => {
+      r = restoreSteps(
+        [
+          /* 0 */ { before: writeEnv("600"), args: ["prepare", "good.dump"] },
+          /* 1 */ { args: ["status"] },
+          /* 2 */ { args: ["status"], env: { COMPOSE_PROJECT: "infra" } },
+          /* 3 */ { before: writeEnv("664"), args: ["cancel"] },
+          /* 4 */ {
+            before: 'STUB_LOCK_HELD=1; chmod 600 "$REPO/infra/deploy.env"',
+            args: ["cancel"],
+          },
+          /* 5 */ { before: "STUB_LOCK_HELD=", args: ["cancel"] },
+        ],
+        MODE as ShellMode,
+      );
+    }, 300_000);
+
+    it("takes the project of deploy.env for the containers, the state and the reservation", () => {
+      expect(r[0].status, r[0].stderr).toBe(0);
+      expect(r[0].calls).toContainEqual(
+        expect.stringContaining("docker ps -a --filter label=com.docker.compose.project=staging "),
+      );
+      expect(r[0].calls.find((c) => c.includes(" stop web cms"))).toMatch(
+        /^docker compose -p staging -f /,
+      );
+      // The project infra (the default) has no attempt and no reservation.
+      expect(r[0].state).toEqual({});
+      expect(r[0].reserved).toBe(false);
+      expect(r[1].stdout).toMatch(/^attempt \S+ of compose project staging \(checkout /);
+    });
+
+    it("refuses a caller's other project and an unsafe file before any action", () => {
+      expect(r[2].status).toBe(2);
+      expect(r[2].stderr).toContain("deploy.env: it is for compose project staging, not infra");
+      expect(r[3].status).toBe(2);
+      expect(r[3].stderr).toContain("writable by group or others (mode 664)");
+      for (const n of [2, 3]) expect(r[n].calls, `step ${n}`).toEqual([]);
+    });
+
+    it("holds the lock of the project of deploy.env, then cancels that project's attempt", () => {
+      expect(r[4].status).toBe(3);
+      expect(stopLine(r[4])).toContain("holds the lock of compose project staging (");
+      expect(stopLine(r[4])).toContain("/.git/sinnlos-deploy/staging.lock)");
+      expect(r[5].status, r[5].stderr).toBe(0);
+    });
+  },
+);
+
 /* ------------------------------------------------------------------------ */
 /* Slow: a real Postgres 16 in a throwaway compose project                   */
 /* ------------------------------------------------------------------------ */
@@ -1502,6 +1566,9 @@ function slowRun(): Map<string, string[]> {
     SCRIPT.trimEnd(),
     "RESTORE_DB_EOF",
     'chmod 755 "$REPO/infra/restore-db.sh"',
+    "cat > \"$REPO/infra/deploy-env.sh\" <<'DEPLOY_ENV_SH_EOF'",
+    DEPLOY_ENV.trimEnd(),
+    "DEPLOY_ENV_SH_EOF",
     SLOW_HARNESS,
   ].join("\n");
   const res = runBash(script, SLOW_MODE as ShellMode, { timeout: 900_000 });

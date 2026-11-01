@@ -31,9 +31,10 @@
 #      (the notification frame path). Otherwise that path goes unchecked
 #      and a WARNING line says so (deploy.sh repeats it and records it).
 # On exit, also after a failure: the "[live-smoke]" comments are deleted
-# (through the cms, as their author), and so are the comment notifications
-# this run caused (in the database: type comment, actor SMOKE_AUTHOR_EMAIL,
-# created since this run started), so no deploy leaves residue behind.
+# (through the cms, as their author). The notification the comment sends
+# SMOKE_EMAIL stays until the ordinary notification retention: nothing in it
+# tells it apart from a genuine comment notification of the same author, so
+# a cleanup by author and time also removed real ones (v0.34).
 #
 # Before that, a datetime-contract check (docs/OPERATIONS.md, "Datetime contract"): no column of
 # the app schema may still be `timestamp without time zone`, and the cms
@@ -106,11 +107,11 @@ fail() {
   exit 1
 }
 
-# psql in the db container; extra arguments go to psql (after -X -q -tA).
+# psql in the db container, the SQL on stdin.
 db_psql() {
   # $POSTGRES_USER / $POSTGRES_DB expand in the db container's sh.
   # shellcheck disable=SC2016
-  docker exec -i "${DB_CONTAINER}" sh -c 'psql -X -q -tA -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" "$@"' psql "$@"
+  docker exec -i "${DB_CONTAINER}" sh -c 'psql -X -q -tA -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"'
 }
 
 # --- 0. Datetime contract -----------------------------------------------------
@@ -315,40 +316,14 @@ WORKDIR="$(mktemp -d)"
 STREAM_LOG="${WORKDIR}/stream.log"
 STREAM_HEADERS="${WORKDIR}/stream.headers"
 COOKIES="${WORKDIR}/cookies.txt"
-RUN_STARTED=""
 # shellcheck disable=SC2329 # runs from the EXIT trap below
 cleanup() {
   if [[ -n "${STREAM_PID:-}" ]]; then kill "${STREAM_PID}" 2>/dev/null || true; fi
   # Best-effort, also on the failure paths: remove the probe comments this
-  # (and any earlier crashed) run left behind, then the comment
-  # notifications this run caused. Every deploy runs this script.
-  local comments notifications
+  # (and any earlier crashed) run left behind. Every deploy runs this script.
+  local comments
   comments="$(cms_probe cleanup 2>/dev/null)" || comments="?"
-  if [[ -n "${RUN_STARTED}" ]]; then
-    notifications="$(SMOKE_AUTHOR_EMAIL="${SMOKE_AUTHOR_EMAIL}" RUN_STARTED="${RUN_STARTED}" \
-      docker exec -i -e SMOKE_AUTHOR_EMAIL -e RUN_STARTED "${DB_CONTAINER}" \
-      sh -c 'psql -X -q -tA -v ON_ERROR_STOP=1 -v author="$SMOKE_AUTHOR_EMAIL" -v since="$RUN_STARTED" -U "$POSTGRES_USER" -d "$POSTGRES_DB"' \
-      2>/dev/null <<'SQL'
-WITH doomed AS (
-  SELECT n.id FROM notifications n
-    JOIN notifications_actor_lnk a ON a.notification_id = n.id
-    JOIN up_users u ON u.id = a.user_id
-   WHERE lower(u.email) = lower(:'author') AND n.type = 'comment'
-     AND n.link = '/announcements' AND n.created_at >= :'since'::timestamptz
-), actor_links AS (
-  DELETE FROM notifications_actor_lnk l USING doomed d WHERE l.notification_id = d.id RETURNING l.id
-), recipient_links AS (
-  DELETE FROM notifications_recipient_lnk l USING doomed d WHERE l.notification_id = d.id RETURNING l.id
-), removed AS (
-  DELETE FROM notifications n USING doomed d WHERE n.id = d.id RETURNING n.id
-)
-SELECT count(*) FROM removed;
-SQL
-    )" || notifications="?"
-  else
-    notifications="0"
-  fi
-  echo "live-smoke: cleanup removed ${comments} probe comment(s) and ${notifications} probe notification(s)"
+  echo "live-smoke: cleanup removed ${comments} probe comment(s)"
   rm -rf "${WORKDIR}"
 }
 trap cleanup EXIT
@@ -448,9 +423,6 @@ SUBSCRIBE_STATUS="$(curl -sS -o "${WORKDIR}/subscribe.json" -w '%{http_code}' --
 grep -q '"applied":true' "${WORKDIR}/subscribe.json" ||
   fail "subscribe: POST ${BASE_URL}/live/subscribe did not apply the channel set: $(head -c 200 "${WORKDIR}/subscribe.json")"
 
-# From here on the cleanup removes the comment notifications of this run.
-RUN_STARTED="$(db_psql -c 'SELECT clock_timestamp()' < /dev/null)" ||
-  fail "could not read the database clock (${DB_CONTAINER})"
 STREAM_OFFSET="$(wc -c < "${STREAM_LOG}")"
 cms_probe comment || fail "could not post the probe comment (see the line above)"
 echo "live-smoke: comment posted on announcement:${TARGET_DOC_ID}"
