@@ -516,7 +516,7 @@ describe.each(testEngines())("wiki revisions are closed on %s", (engine) => {
       // v0.34 the upload access check: 221.
       expect(lines).toEqual([
         "info [bootstrap] revoked 18 obsolete permission(s)",
-        "info [bootstrap] permission drift: none (report-only check of 222 managed actions)",
+        "info [bootstrap] permission drift: none (report-only check of 228 managed actions)",
       ]);
       expect(
         await t.strapi.db
