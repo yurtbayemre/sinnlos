@@ -18,7 +18,8 @@
 # STUB_UP_FAIL, STUB_ON_STOP (bash run when web and cms stop),
 # STUB_RM_AS_USER, STUB_KILL_AFTER_STARTED, STUB_KILL_AFTER_ARCHIVE and
 # STUB_STATE_WRITE_FAIL (below), STUB_PGDUMP_FAIL, STUB_CREATEDB_FAIL (dropdb
-# runs, createdb fails), STUB_RESTORE_FAIL, STUB_LOCK_HELD.
+# runs, createdb fails), STUB_RESTORE_FAIL, STUB_PURGE_FAIL (the secret-share
+# purge after the restore fails), STUB_LOCK_HELD.
 : "${T:?}" "${REPO:?}"
 
 # What compose hands the cms: an exported JWT_SECRET, else a compose file
@@ -116,6 +117,13 @@ stub_db() {
       in="$(cat)"
       case "${in}" in
         *pg_tables*) wc -l <"${T}/db/tables" | tr -d ' ' ;;
+        *secret_shares*)
+          echo "psql: secret-share purge" >>"${T}/calls"
+          if [[ -n "${STUB_PURGE_FAIL:-}" ]]; then
+            echo 'ERROR:  injected' >&2
+            return 1
+          fi
+          ;;
         *up_users*)
           r="$(awk '$1 == "up_users" { print $2 }' "${T}/db/tables")"
           if [[ -z "${r}" ]]; then

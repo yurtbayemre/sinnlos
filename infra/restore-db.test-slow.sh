@@ -177,4 +177,56 @@ run f.locked prepare v1.dump
 kill "${holder}" 2>/dev/null
 wait "${holder}" 2>/dev/null
 facts f
+
+# P. v0.35 secret shares in the dump: a pending one, a retrieved one, an
+# expired one whose envelope the janitor had not deleted yet, and their
+# notification next to another one.
+shares() { # <name>
+  q -c "SELECT document_id || ' ' || state || ' ' || coalesce(to_char(terminal_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.US'), '-') || ' ' || (envelope IS NULL) FROM secret_shares ORDER BY document_id" |
+    sed "s/^/@@$1.shares /"
+  echo "@@$1.notifications $(q -c "SELECT string_agg(type, ' ' ORDER BY id) FROM notifications")"
+}
+echo "@@before.noshares $(q -c "SELECT to_regclass('secret_shares') IS NULL")"
+q <<'SQL'
+CREATE TABLE notifications (id serial PRIMARY KEY, type varchar(255), link varchar(255));
+CREATE TABLE secret_shares (id serial PRIMARY KEY, document_id varchar(255), sender_id int,
+  recipient_id int, expires_at timestamptz, state varchar(255), terminal_at timestamptz,
+  envelope text, created_at timestamptz, updated_at timestamptz);
+INSERT INTO secret_shares (document_id, sender_id, recipient_id, expires_at, state, terminal_at, envelope, created_at, updated_at) VALUES
+  ('pend', 1, 2, now() + interval '1 hour', 'pending', NULL, 'v1.a.b', now(), now()),
+  ('done', 1, 2, now(), 'retrieved', '2026-10-01T00:00:00Z', NULL, now(), now()),
+  ('stale', 2, 1, now(), 'expired', '2026-10-02T00:00:00Z', 'v1.c.d', now(), now());
+INSERT INTO notifications (type, link) VALUES ('secretShared', '/secrets/pend'), ('comment', '/announcements');
+SQL
+docker exec "${P}-db-1" pg_dump -U sinnlos -d sinnlos --format=custom >"${T}/shares.dump"
+# A dump whose purge fails: a trigger refuses every update of a share.
+q <<'SQL'
+CREATE FUNCTION boom() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'injected'; END $$;
+CREATE TRIGGER boom BEFORE UPDATE ON secret_shares FOR EACH ROW EXECUTE FUNCTION boom();
+SQL
+docker exec "${P}-db-1" pg_dump -U sinnlos -d sinnlos --format=custom >"${T}/boom.dump"
+run p.prepare prepare shares.dump
+run p.apply apply
+shares p1
+run p.apply2 apply
+shares p2
+run p.rotate rotate-jwt
+run p.start start
+# The purged database dumped and restored again: the second purge changes nothing.
+docker exec "${P}-db-1" pg_dump -U sinnlos -d sinnlos --format=custom >"${T}/purged.dump"
+run p.prepare3 prepare purged.dump
+run p.apply3 apply
+shares p3
+run p.rotate3 rotate-jwt
+run p.start3 start
+run p.boom.prepare prepare boom.dump
+run p.boom.apply apply
+shares p4
+run p.boom.start start
+facts p4
+run p.back back
+run p.back.apply apply
+run p.back.rotate rotate-jwt
+run p.back.start start
+facts p5
 echo "@@done 1"

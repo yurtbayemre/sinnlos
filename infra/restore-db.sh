@@ -27,7 +27,10 @@ set +x # first: never trace this script (rotate-jwt handles a secret), also unde
 #                                        --exit-on-error --single-transaction of the
 #                                        staged dump, then the database must hold the
 #                                        dump's tables and at least one up_users row;
-#                                        may be run again after a failure
+#                                        then every restored secret share is closed
+#                                        (envelopes deleted, pending ones cancelled,
+#                                        their notifications deleted); may be run
+#                                        again after a failure
 #   infra/restore-db.sh rotate-jwt       after apply: a fresh JWT_SECRET (openssl rand
 #                                        -base64 48) on the one JWT_SECRET= line of
 #                                        infra/.env (mode 600, atomic rename), checked by
@@ -567,6 +570,30 @@ dump_tables() { # <file>
 # shellcheck disable=SC2016 # $POSTGRES_USER and $POSTGRES_DB expand in the db container
 db_query() { compose exec -T db sh -c 'psql -X -q -tA -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"'; }
 
+# v0.35 secret shares (docs/plan-v035-secret-sharing.md, section 5): a dump
+# holds the envelopes of shares that were pending when it was taken, also
+# of shares opened since; restored as they are, they could be opened again.
+# So every envelope goes, pending shares turn cancelled (terminal states and
+# their times stay, so a second run changes nothing) and every secretShared
+# notification goes, in one statement. A dump from before v0.35 has no
+# secret_shares table: nothing to do.
+purge_secret_shares() {
+  db_query <<'SQL'
+DO $$
+BEGIN
+  IF to_regclass('secret_shares') IS NULL THEN
+    RETURN;
+  END IF;
+  UPDATE secret_shares
+     SET state = 'cancelled', envelope = NULL, terminal_at = now(), updated_at = now()
+   WHERE state = 'pending';
+  UPDATE secret_shares SET envelope = NULL WHERE envelope IS NOT NULL;
+  DELETE FROM notifications WHERE type = 'secretShared';
+END
+$$;
+SQL
+}
+
 # 1 when the project's database exists, 0 when it does not (after a dropdb
 # whose createdb failed); fails when Postgres cannot be asked.
 db_exists() {
@@ -917,6 +944,9 @@ cmd_apply() {
   fi
   if ! [[ "${t}" =~ ${COUNT_RE} && "${u}" =~ ${COUNT_RE} ]] || [[ "${t}" != "${S_DUMP_TABLES}" ]] || ((u <= 0)); then
     stop "the database holds ${t:-?} tables (the dump ${S_DUMP_TABLES}) and ${u:-?} users; do not start the apps: infra/restore-db.sh back, or apply another dump"
+  fi
+  if ! purge_secret_shares; then
+    stop "closing the restored secret shares failed: the database may hold shares that can be opened again; do not start the apps: fix the cause and apply again, infra/restore-db.sh back, or apply another dump"
   fi
   S_APPLIED_AT="$(now)" S_RESTORED_TABLES="${t}" S_USERS="${u}"
   save_attempt
