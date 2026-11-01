@@ -448,12 +448,10 @@ describe.each(testEngines())("secret shares under locks and failures on %s", (en
       const res = await queued(
         () => reveal(to, id),
         () =>
-          t.strapi.db
-            .query(UID)
-            .update({
-              where: { documentId: id },
-              data: { expiresAt: new Date(Date.now() - 1000) },
-            }),
+          t.strapi.db.query(UID).update({
+            where: { documentId: id },
+            data: { expiresAt: new Date(Date.now() - 1000) },
+          }),
       );
       expect(res.status).toBe(410);
       expect(code(res)).toBe("gone");
