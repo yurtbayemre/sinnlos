@@ -13,7 +13,7 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
-import { FEATURE_NAMES, MODULE_NAMES } from "@sinnlos/domain";
+import { FEATURE_NAMES, MODULE_NAMES } from "../packages/domain/src/features";
 
 const read = (relative: string): string =>
   readFileSync(new URL(relative, import.meta.url), "utf8").replace(/\r\n/g, "\n");

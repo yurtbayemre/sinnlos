@@ -40,7 +40,9 @@ describe("secret page reads", () => {
     expect(strapiMock).toHaveBeenCalledWith("/api/secret-shares?sentPage=2");
     strapiMock.mockRejectedValueOnce(new StrapiError(500, "x", SENTINEL));
     await expect(loadSecretList(1)).resolves.toBeNull();
-    expect(warn.mock.calls.map((c) => c.join(" "))).toEqual(["[secrets] list failed: 500"]);
+    expect(warn.mock.calls.map((c: unknown[]) => c.join(" "))).toEqual([
+      "[secrets] list failed: 500",
+    ]);
   });
 
   it("answers 404 and a malformed id with the 404 page", async () => {
@@ -53,6 +55,8 @@ describe("secret page reads", () => {
   it("throws a fixed error when the detail cannot be read", async () => {
     strapiMock.mockRejectedValueOnce(new StrapiError(503, "x", SENTINEL));
     await expect(loadSecretDetail(ID)).rejects.toThrow("[secrets] the share could not be read");
-    expect(warn.mock.calls.map((c) => c.join(" "))).toEqual(["[secrets] detail failed: 503"]);
+    expect(warn.mock.calls.map((c: unknown[]) => c.join(" "))).toEqual([
+      "[secrets] detail failed: 503",
+    ]);
   });
 });
