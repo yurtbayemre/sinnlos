@@ -92,15 +92,22 @@ export function secretShareExpiresAt(now: Date, lifetime: SecretShareLifetime): 
   return new Date(now.getTime() + SECRET_SHARE_LIFETIME_MS[lifetime]);
 }
 
+/** An unpaired UTF-16 surrogate: a high one without a low one after it, or a low one alone. */
+const LONE_SURROGATE_RE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+
 /**
- * Whether `text` can be shared: a string that is not blank and at most
- * SECRET_TEXT_MAX_BYTES in UTF-8. Never trimmed or otherwise changed: a
- * password may start or end with a blank.
+ * Whether `text` can be shared: a string that is not blank, well-formed
+ * UTF-16 and at most SECRET_TEXT_MAX_BYTES in UTF-8. Never trimmed or
+ * otherwise changed: a password may start or end with a blank. An unpaired
+ * surrogate (JSON "\ud800") is refused, not normalised: UTF-8 encoding would
+ * store U+FFFD in its place, and the recipient would read another secret than
+ * the one that was sent.
  */
 export function isSecretText(value: unknown): value is string {
   return (
     typeof value === "string" &&
     value.trim() !== "" &&
+    !LONE_SURROGATE_RE.test(value) &&
     new TextEncoder().encode(value).length <= SECRET_TEXT_MAX_BYTES
   );
 }
@@ -111,12 +118,13 @@ export function isSecretText(value: unknown): value is string {
 /**
  * The refusal codes (`error.details.code` of Strapi's error body; the
  * message is fixed and never echoes the text). A share the caller may not
- * see, or that does not exist, is a plain 404 without a code.
+ * see, or that does not exist, is a plain 404 without a code. The status
+ * depends on the cause, not only on the code: SECRET_SHARE_REFUSALS.
  */
 export const SECRET_SHARE_ERROR_CODES = [
   /** The recipient is missing, oneself, or not an active staff member. */
   "recipient",
-  /** The text is missing, blank or longer than SECRET_TEXT_MAX_BYTES. */
+  /** The text is missing, blank, not well-formed or longer than SECRET_TEXT_MAX_BYTES. */
   "text",
   /** The lifetime is not one of SECRET_SHARE_LIFETIMES. */
   "lifetime",
@@ -125,30 +133,45 @@ export const SECRET_SHARE_ERROR_CODES = [
   /** The share ended: retrieved, revoked, expired or cancelled. */
   "gone",
   /**
-   * The share cannot be opened: the other party is not eligible right now,
-   * the envelope does not open (the share is now cancelled), or the module
-   * has no usable key.
+   * The share cannot be opened or created: the other party is not eligible
+   * right now, the envelope did not open (the share is now cancelled), or
+   * the module has no usable key.
    */
   "unavailable",
   /**
    * A lock, a deadlock or an unconfirmed COMMIT: nothing was confirmed and
-   * no text left. The share is either unchanged or already ended.
+   * no text left. The outcome is unknown, since a COMMIT can succeed with a
+   * lost acknowledgement: after a reveal or a revoke the share is unchanged
+   * or already ended; after a create no share exists, or a new pending share
+   * and its notification do. The web says so and points the sender to the
+   * sent list before sending again (no idempotency key).
    */
   "busy",
 ] as const;
 
 export type SecretShareErrorCode = (typeof SECRET_SHARE_ERROR_CODES)[number];
 
-/** The HTTP status the cms answers with each code. */
-export const SECRET_SHARE_ERROR_STATUS: Readonly<Record<SecretShareErrorCode, number>> = {
-  recipient: 400,
-  text: 400,
-  lifetime: 400,
-  quota: 429,
-  gone: 410,
-  unavailable: 410,
-  busy: 503,
-};
+/**
+ * Every refusal the cms answers with a code, by cause: its HTTP status and
+ * its code. `unavailable` has three causes with three statuses, so a client
+ * that reads the status alone still tells "try later" from "never again".
+ */
+export const SECRET_SHARE_REFUSALS = {
+  recipient: { status: 400, code: "recipient" },
+  text: { status: 400, code: "text" },
+  lifetime: { status: 400, code: "lifetime" },
+  quota: { status: 429, code: "quota" },
+  gone: { status: 410, code: "gone" },
+  /** The other party is not eligible now; the share stays pending and may open after an unblock. */
+  partyIneligible: { status: 409, code: "unavailable" },
+  /** The module has no usable key (configuration): no create, no reveal. */
+  noKey: { status: 503, code: "unavailable" },
+  /** The envelope did not open, and the share's cancellation committed. */
+  cancelled: { status: 410, code: "unavailable" },
+  busy: { status: 503, code: "busy" },
+} as const satisfies Readonly<Record<string, { status: number; code: SecretShareErrorCode }>>;
+
+export type SecretShareRefusal = keyof typeof SECRET_SHARE_REFUSALS;
 
 // ---------------------------------------------------------------------------
 // DTOs. Fixed shapes: the cms builds them field by field from its own

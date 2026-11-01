@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   SECRET_SHARE_CRYPTO,
   SECRET_SHARE_ERROR_CODES,
-  SECRET_SHARE_ERROR_STATUS,
+  SECRET_SHARE_REFUSALS,
   SECRET_SHARE_INDEXES,
   SECRET_SHARE_LIFETIMES,
   SECRET_SHARE_STATES,
@@ -39,8 +39,20 @@ describe("secret share contract", () => {
       "unavailable",
       "busy",
     ]);
-    expect(Object.keys(SECRET_SHARE_ERROR_STATUS).sort()).toEqual(
-      [...SECRET_SHARE_ERROR_CODES].sort(),
+    expect(SECRET_SHARE_REFUSALS).toEqual({
+      recipient: { status: 400, code: "recipient" },
+      text: { status: 400, code: "text" },
+      lifetime: { status: 400, code: "lifetime" },
+      quota: { status: 429, code: "quota" },
+      gone: { status: 410, code: "gone" },
+      partyIneligible: { status: 409, code: "unavailable" },
+      noKey: { status: 503, code: "unavailable" },
+      cancelled: { status: 410, code: "unavailable" },
+      busy: { status: 503, code: "busy" },
+    });
+    // Every code has a cause.
+    expect(new Set(Object.values(SECRET_SHARE_REFUSALS).map((r) => r.code))).toEqual(
+      new Set(SECRET_SHARE_ERROR_CODES),
     );
   });
 
@@ -127,6 +139,16 @@ describe("input rules", () => {
     expect(isSecretText("🔑".repeat(2048))).toBe(true);
     expect(isSecretText("🔑".repeat(2048) + "x")).toBe(false);
     expect(isSecretText(" pass word ")).toBe(true);
+  });
+
+  it("refuses unpaired surrogates instead of storing U+FFFD, and keeps valid pairs", () => {
+    expect(isSecretText("ab\ud800cd")).toBe(false);
+    expect(isSecretText("ab\ud800")).toBe(false);
+    expect(isSecretText("ab\udc00cd")).toBe(false);
+    expect(isSecretText("\udc00\ud800")).toBe(false);
+    expect(isSecretText(JSON.parse('"\\ud800"'))).toBe(false);
+    expect(isSecretText("key \ud83d\udd11 ok")).toBe(true);
+    expect(isSecretText("🔑")).toBe(true);
   });
 
   it("refuses a missing, blank or non-string text", () => {
