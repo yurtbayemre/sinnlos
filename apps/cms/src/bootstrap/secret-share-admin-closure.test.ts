@@ -40,14 +40,6 @@ describe("closeSecretSharesInAdmin", () => {
     await expect(preview("api::event.event", {})).resolves.toBe("/preview/api::event.event");
   });
 
-  it("wraps once, also when called twice", () => {
-    const { strapi, services, create } = host();
-    closeSecretSharesInAdmin(strapi);
-    closeSecretSharesInAdmin(strapi);
-    (services["permission-checker"].create as (p: { model: string }) => unknown)({ model: "x" });
-    expect(create).toHaveBeenCalledTimes(1);
-  });
-
   it("refuses to boot when a service is gone", () => {
     expect(() => closeSecretSharesInAdmin({ plugin: () => undefined })).toThrow(/\[secrets\]/);
     const { strapi, services } = host();

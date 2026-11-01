@@ -27,9 +27,7 @@ import { errors } from "@strapi/utils";
 
 import { SECRET_SHARE_UID } from "../utils/secret-shares";
 
-const WRAPPED = Symbol.for("sinnlos.secret-share.admin-closure");
-
-type Service = Record<string | symbol, unknown>;
+type Service = Record<string, unknown>;
 
 /** The slice of the Strapi instance this step touches. */
 export interface AdminClosureHost {
@@ -52,13 +50,11 @@ export function closeSecretSharesInAdmin(strapi: AdminClosureHost): void {
       "[secrets] the Content Manager's permission-checker or preview service is missing — refusing to boot with secret shares open in the admin panel",
     );
   }
-  if (checker[WRAPPED] && preview[WRAPPED]) return;
   const create = (checker.create as (params: { model?: unknown }) => unknown).bind(checker);
   checker.create = (params: { model?: unknown }) => {
     if (isSecretShare(params?.model)) refuse();
     return create(params);
   };
-  checker[WRAPPED] = true;
   const getPreviewUrl = (preview.getPreviewUrl as (uid: unknown, params: unknown) => unknown).bind(
     preview,
   );
@@ -66,5 +62,4 @@ export function closeSecretSharesInAdmin(strapi: AdminClosureHost): void {
     if (isSecretShare(uid)) refuse();
     return getPreviewUrl(uid, params);
   };
-  preview[WRAPPED] = true;
 }
