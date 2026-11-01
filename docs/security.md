@@ -41,6 +41,7 @@ behind most rules (its §5 conventions, kept in
   - [Module and feature switches](#module-and-feature-switches)
   - [Course reports](#course-reports)
 - [Upload hardening](#upload-hardening)
+  - [Who may open a file](#who-may-open-a-file)
 - [Frontend role gating](#frontend-role-gating)
 - [Accessibility](#accessibility)
 - [Tests that pin these rules](#tests-that-pin-these-rules)
@@ -135,6 +136,16 @@ refuses password sign-ins in the cms as well, not only in the web form.
   the Strapi admin raises the version as well and signs that user out
   everywhere. How the version works is under
   [Token versions](#token-versions).
+- **Sign-out** (v0.34): `POST /api/me/sign-out` raises the token version,
+  so signing out ends every intranet session of the account on every
+  device, and a pending set-password link. It does not end the identity
+  provider's session: Microsoft's end-session redirect runs as before, a
+  generic OIDC provider is not signed out. The web asks the cms first
+  (bounded to 5 seconds) and clears its cookie whatever the answer. When
+  the cms did not confirm, `/sign-in` says so (a short-lived notice cookie
+  that survives Microsoft's return). Auth.js's own `/api/auth/signout`
+  answers 404 (every spelling), and its base path is pinned to
+  `/api/auth`. A restricted session may sign out.
 - **Blocking** a user in the Strapi admin takes effect on their next request
   (Strapi refuses a blocked user's JWT), and they lose the uploaded files
   within 60 seconds (the web's `/uploads` proxy re-checks the JWT).
@@ -154,7 +165,8 @@ Single sign-on users get their second factor from their identity provider.
   users-permissions strategy): `am: idp` passes; a password token passes
   with `mfa: 1` or when the user needs no second factor. A required but not
   yet enrolled user gets a **restricted** session: only `GET /api/me`,
-  `POST /api/me/mfa/setup` and `/activate`; everything else answers 403
+  `POST /api/me/mfa/setup`, `/activate` and `POST /api/me/sign-out` (v0.34);
+  everything else answers 403
   `MfaSetupRequired`, and the web sends that session to `/mfa/setup`. An
   enrolled user's token without `mfa: 1`, a token from before v0.27 of a
   required user, or an unknown claim value answers 401. Role changes and
@@ -173,6 +185,13 @@ Single sign-on users get their second factor from their identity provider.
   refuses the 10-character codes issued before v0.30 (`xxxxx-xxxxx`). New
   codes come only with an enrolment: after an admin reset, or a disable
   and enable.
+- **Attempt budget** (v0.34). Activating and turning off the second factor
+  share one attempt budget per client IP (10 failures per minute) and per
+  account (10 failures per 15 minutes); past it the form answers "too many
+  attempts" without asking the cms. Only a wrong password or code counts,
+  and a success clears the account. It lives in the web
+  (`apps/web/src/lib/mfa-actions.ts`), which alone holds the JWT these cms
+  routes need.
 - **Resets.** An admin resets a user's second factor at `/manage/users`;
   a locked-out sole admin runs `infra/mfa-reset.sh <email>` on the host.
   Both clear the factor and raise the token version, so every session of
@@ -182,8 +201,12 @@ Single sign-on users get their second factor from their identity provider.
   backup.
 - **Limits.** API tokens (the `content-api-token` strategy) are outside
   this guarantee. The web's live stream and uploads re-check `GET /api/me`
-  at most every 60 seconds; a live stream that is already open ends at its
-  next rotation, 15 to 30 minutes later (accepted).
+  at most every 60 seconds. Since v0.34 an open live stream re-checks the
+  account at its heartbeats and ends within 95 seconds of a revocation
+  while the cms answers (the 60-second cache counted from when the probe
+  was sent, plus the 25-second heartbeat, plus the 10-second probe); while
+  the cms cannot answer, it stays open until its rotation, 15 to 30
+  minutes later (accepted).
 
 ### Microsoft Entra ID
 
@@ -452,8 +475,9 @@ per-user token version so that a password change can end the older ones:
   [Restoring a database dump](./OPERATIONS.md#restoring-a-database-dump)).
 - **Limits.** The web's `/uploads` proxy caches the cms's answer for up to
   60 seconds, so a revoked JWT can fetch file bytes for up to that minute;
-  an open live stream keeps its content-free pings until its next rotation
-  (at most 30 minutes, plus that minute). Each change logs
+  an open live stream ends at a heartbeat within 95 seconds while the cms
+  answers, and otherwise at its next rotation (at most 30 minutes, plus
+  that minute). Each change logs
   `[auth] password changed: user=<id> tokenVersion=<n>`. With
   `jwtManagement: 'refresh'` the plugin's own session manager would revoke
   sessions, and the extension steps aside; switching modes is a separate
@@ -902,6 +926,11 @@ the cms refuses to boot until then.
   Both judge a target by its published row when it has one, so a wiki
   space widened or a page moved only in an unpublished draft, or a
   published page whose space was never published, opens no threads.
+  Since v0.34 a wiki page is a target only through its published row,
+  like an announcement: a never-published or unpublished page has no
+  thread for anyone but `admin_role` and `editor`, read or write, and the
+  answer equals that of a documentId that never existed; the thread
+  returns with the next publish.
 - `training-visibility`: courses and lessons pinned to `status=published`;
   a lesson is visible only while its course is published (fail closed).
 - `lesson-progress-visibility`: only the caller's own completion receipts;
@@ -1022,12 +1051,14 @@ query and output handling, and the other three are global middlewares
   `/api/users*` and through every user relation. Each refusal is logged as
   `[sensitive-query-guard] 400 …`.
 - **`global::uploads-auth`**: the bytes under `/uploads/*` only for requests
-  carrying `INTERNAL_UPLOAD_TOKEN` (the web's session-gated proxy);
+  carrying `INTERNAL_UPLOAD_TOKEN` (the web's `/uploads` proxy);
   everything else gets 404, whatever the encoding of the path (`..`,
   `%2e%2e`, `%2f`, any case). Without the token configured it answers 404
   in production and is off in development. The web proxy also asks Strapi
   whether the session's JWT is still accepted, with a cache of up to 60
-  seconds, so a blocked account loses the files within a minute.
+  seconds, so a blocked account loses the files within a minute, and
+  since v0.34 whether this viewer may open this file
+  ([Who may open a file](#who-may-open-a-file)).
   It must stay a global middleware (`config/middlewares.ts`); the edge
   routes `/uploads` to the web, not to the cms.
 - **`global::auth-path-guard`**: any spelling of `/api/auth/*` other than
@@ -1082,6 +1113,11 @@ writers all pass them, and the cms refuses to boot when
   change a link is refused (`details.keys: ["revisions"]`, batch 16.1),
   and a clone gets no revisions (Strapi would copy the source's, moving
   them): only the lifecycle links revisions.
+- **Upload references** (`utils/upload-reference-guard.ts`, v0.34, after
+  the wiki checks): a content-API create or update by a non-moderator
+  that adds a new `/uploads/` reference to a Markdown field is refused
+  with 400 `uploadNotAllowed` unless the writer can open every file of
+  that name ([Who may open a file](#who-may-open-a-file)).
 - **Publish readiness** (`utils/publish-readiness.ts`): a publish of a
   scheduled type needs the fields the published validation requires, and
   a lesson's course and a wiki page's parent must be published; a publish
@@ -1132,7 +1168,7 @@ this is who sees and changes what, per type.
 | `team`            | Like `department`; admin edits description/avatar, a permitted lead or the head of its department edits description. Structure remains panel-only.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | `announcement`    | Visible to its audience only: `department`, `team` (member or lead) and `audienceRoles`, AND-combined over the criteria that are set; none set = everyone. Fails closed: `audience` = `departments` without a department or team, or `retargetRequired` (a targeted department or team was deleted), is admins' and editors' only and notifies nobody ([below](#announcement-and-event-targeting)). Gone for others from `expiresAt`.                                                                                                                                                                                                                                                                                                                                                                                                               |
 | `acknowledgement` | One per user, anchored to the announcement's `targetDocumentId` (stable across re-publishes), immutable once created (since v0.28 the core update and delete routes are gone; corrections in the Strapi admin). Deleted once the confirmed document is gone in every state, and on anonymisation; no age rule. Only the announcement's audience can acknowledge it, and only until it expires (admins and editors excepted); anyone else gets the same 400 as for a missing announcement. `POST /api/acknowledgements/report-index` (v0.31) answers, for at most 20 announcements or documents, the ids of the users who confirmed each: `admin_role` only (checked in the controller, not only by the grant), closed while `read-confirmations` is off, at most 2,000 receipts read per item (`meta.truncated` beyond).                            |
-| `comment`         | Anchored by `targetType` + `targetDocumentId` (no foreign key). Reads and creates are filtered to targets the caller may see; an unpublished announcement's thread answers like a missing target until it is published again. Delete by the author or a moderator. `parent`/`replies` are not followed below the moderators (batch 15.2).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `comment`         | Anchored by `targetType` + `targetDocumentId` (no foreign key). Reads and creates are filtered to targets the caller may see; an unpublished announcement's or (since v0.34) wiki page's thread answers like a missing target until it is published again. Delete by the author or a moderator. `parent`/`replies` are not followed below the moderators (batch 15.2).                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | `reaction`        | The same anchor and target visibility as comments. `create` toggles; with the boolean `reacted` it sets that end state instead (a repeated request changes nothing). Two simultaneous creates can both store a row; each keeps the oldest copy and deletes the others right after its insert, and removing deletes every copy. Delete takes the documentId or the numeric id.                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | `kudos`           | `from` is always the sender; `to` must be another user. Readable by the staff roles and `authenticated`; the celebrations feed by the staff roles only.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | `notification`    | Written by the cms itself (`utils/notify.ts`; the content API has no create or update), read by the recipient only (`admin_role` included since v0.28) and deleted by the recipient, except anchored rows (announcement, event, training reminder), which the API refuses to delete. Publishing an announcement or event notifies its targeted users whose role holds the type's read grant (read from the permissions table at runtime) and who are not blocked, after the publish is saved; admins and editors get strictly the targeted audience. Mark-read takes up to 200 ids and only ever changes the caller's own unread rows.                                                                                                                                                                                                              |
@@ -1426,6 +1462,15 @@ grant, with the pure rules in `apps/cms/src/utils/upload-guard.ts`,
 amendment 2). The admin panel's media library uses the separate admin
 routes: its uploads are bound only by `deniedTypes` (below).
 
+- **Temp files** (v0.34, every multipart request to the cms, not only
+  this route): every file the multipart parser writes to the temp
+  directory is removed when its request ends, refused, aborted, malformed
+  or oversized requests and any field name included
+  (`apps/cms/src/bootstrap/multipart-cleanup.ts` extends `strapi::body`).
+  At most 20 file parts per request; more answer 413 before any route.
+  Residual: a request's files stay on disk until it ends (up to 50 MB each,
+  and parallel requests add up); there is no request-size limit at the
+  edge.
 - **Create-only:** the core action's `?id=` replace/update path answers 403
   (it would let any uploader overwrite arbitrary existing media).
 - **Body allowlist:** the only accepted multipart text field is `fileInfo`.
@@ -1450,7 +1495,9 @@ routes: its uploads are bound only by `deniedTypes` (below).
   - a PDF by `%PDF-` at offset 0 **and no zip archive anywhere in the
     file**: the whole PDF is scanned in 64 KiB reads for an end record whose
     central directory stands where it says (also behind padding, which some
-    zip readers skip), so a PDF that is also a zip is refused;
+    zip readers skip), so a PDF that is also a zip is refused; since v0.34
+    the scan examines at most 64 end-record signatures, and a file with
+    more is refused;
   - DOCX, XLSX and PPTX by the **Office Open XML rule**: a zip in exactly
     one layout (no prefix, no gap, no trailing data, one end record at the
     end, every local header equal to its directory record, methods 0 and
@@ -1551,10 +1598,61 @@ The grant itself (`plugin::upload.content-api.upload`) goes to the staff
 roles only, never `guest` or `authenticated`, and there are deliberately no
 `find`/`findOne`/`destroy` grants on the upload content API (no browsing or
 deleting the media library from outside the admin panel). In production
-the uploaded bytes are served only through the web's session-gated
-`/uploads` proxy (`global::uploads-auth`, [Global guards](#global-guards)).
-In development without `INTERNAL_UPLOAD_TOKEN` the cms serves them
-directly.
+the uploaded bytes are served only through the web's `/uploads` proxy
+(`global::uploads-auth`, [Global guards](#global-guards)), which since
+v0.34 asks the cms who may open the file (below). In development without
+`INTERNAL_UPLOAD_TOKEN` the cms serves them directly.
+
+### Who may open a file
+
+v0.34 (audit finding B1). Until v0.33 every signed-in account, guests
+included, could fetch any file whose address it knew. Now a file opens
+only for whoever may read the content it belongs to, in that version
+(`apps/cms/src/utils/upload-access.ts`):
+
+- **Moderators** (`admin_role`, `editor`) open every file.
+- **A linked file** (a document's file, an ad's images, a course cover, a
+  department header image, a team or user avatar) opens only through a
+  linking row the viewer can read in that exact version: a published row
+  through one of the type's read grants (`find`, `findOne`, or
+  `lesson.player`) plus the type's visibility loader; a draft through the
+  existing authoring gate plus the `.editable` grant; a wiki revision
+  through its page's history gate plus `wiki-page.revision`; an avatar
+  only while its person is active in the directory. A published sibling
+  never opens a file that only its draft uses.
+- **An unlinked file** opens for its uploader (the stamp
+  `provider_metadata.uploadedBy`, the preview before saving), and an
+  admin-panel file (no stamp) also through a Markdown text the viewer may
+  read that names it: announcement and lesson bodies, event, course,
+  department and team descriptions, wiki pages and their revisions.
+  Inline references never widen a linked file, and an intranet upload
+  never opens through one (the uploads janitor removes unlinked intranet
+  uploads after 24 hours anyway).
+- **Everything else** is a 404, the same answer as for a file that does
+  not exist. A name means the original with that URL, otherwise the one
+  file that lists it as a stored rendition.
+- **The check:** `POST /api/auth/uploads/access` on the cms, authenticated
+  by the users-permissions strategy (so a blocked user, an old token
+  version or a restricted MFA session get nothing), granted to every role
+  and also requiring `x-internal-token` = `INTERNAL_UPLOAD_TOKEN`; under
+  `/api/auth/*`, which the edge sends to the web. The web caches each
+  answer for 60 seconds per user and file (dated from when it asked), and
+  serves files with `Cache-Control: private, no-cache`, so a copy in the
+  browser cache is revalidated through the check. Downloaded copies are
+  outside any revocation.
+- **Write check** (`apps/cms/src/utils/upload-reference-guard.ts`, a
+  Document Service guard): a content-API create or update by a
+  non-moderator that adds a new `/uploads/` reference to one of those
+  Markdown fields must come from someone who can open every file of that
+  name, else 400 `uploadNotAllowed`. So nobody pastes an address they
+  cannot open into a text others can read. The admin panel, moderators,
+  system writers and names that match no stored file are exempt.
+  Accepted: a writer who knows an exact name learns whether that file
+  exists and is out of their reach.
+- **Before the first deploy** an operator reviews the existing references
+  with `infra/diagnostics/upload-references.sql`
+  ([OPERATIONS.md](OPERATIONS.md#upload-references)): a reference written
+  before v0.34 was never checked.
 
 ## Frontend role gating
 

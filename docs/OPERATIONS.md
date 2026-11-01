@@ -538,7 +538,17 @@ not exist`;
   leaves the media or the secrets unbacked) is **partial**: it ends with
   `done <kind> partial (skipped: sinnlos-uploads sinnlos-env)`, prints a
   `WARNING` on stderr and refreshes neither file, so the monitor alerts;
-  it still exits 0 (the skipped quick-access copy does not count).
+  it still exits 0 (the skipped quick-access copy does not count);
+- runs **one at a time per backup root** (v0.34): the lock file
+  `.pg-backup.lock` in `SINNLOS_BACKUP_DIR` (mode 600, owned by the backup
+  root's owner; a root run hands it over). Never delete it. A run that finds
+  it held exits 1 without changing backups, `backup.log` or `last-success`;
+  when that was `deploy.sh`'s pre-deploy backup, the deploy stops before
+  touching a container: wait for the other run and rerun the deploy. A run
+  whose file names exist already (a run in the same second) is refused with
+  a `FAIL … names` line and removes nothing. If the lock seems stuck, stop
+  the process holding it (for example a leftover docker client) rather than
+  deleting the file.
 
 It reads its paths from the backup keyring env (`SINNLOS_BACKUP_DIR`,
 `SINNLOS_GNUPGHOME`, `SINNLOS_BACKUP_KEYID`); `SINNLOS_BACKUP_DIR` is
@@ -582,10 +592,11 @@ Take the database, uploads and `.env` artifacts of one run (the same
 ```bash
 # Owner-only files in a private directory: the dump and the .env copy hold
 # every secret, and a plain `>` would create them with your umask (often 0644).
+# Chained: if `restore` already exists, nothing is decrypted.
 umask 077
-mkdir -m 700 restore && cd restore
-gpg --decrypt ../sinnlos-db-<ts>.dump.gz.gpg | gunzip > sinnlos-db-<ts>.dump
-gpg --decrypt ../sinnlos-env-<ts>.env.gz.gpg | gunzip > infra.env
+mkdir -m 700 restore && cd restore &&
+  gpg --decrypt ../sinnlos-db-<ts>.dump.gz.gpg | gunzip > sinnlos-db-<ts>.dump &&
+  gpg --decrypt ../sinnlos-env-<ts>.env.gz.gpg | gunzip > infra.env
 ```
 
 Then copy the dump to the host, into the owner-only `infra/backups/` of
@@ -773,9 +784,9 @@ curl -s <URL>/healthz
 # every container looks healthy): expect an open stream emitting hb events
 # — or run infra/live-smoke.sh for the full comment→ping proof (it finds its
 # target with GETs, posts one "[live-smoke]" comment, expects the ping on an
-# uncompressed text/event-stream, and removes the comment and the
-# notification it caused; with an announcement author as SMOKE_EMAIL it
-# also expects the notification frame).
+# uncompressed text/event-stream, and removes the comment; the notification
+# it causes stays until the normal notification retention (v0.34); with an
+# announcement author as SMOKE_EMAIL it also expects the notification frame).
 curl -N -H 'Accept: text/event-stream' <URL>/live/stream --max-time 30
 # Expect (signed-in cookie required): "event: hello" then "event: hb" frames
 
@@ -962,6 +973,14 @@ curl -s <URL>/api/polls/<poll-id>/results \
 | `infra/deploy.sh` prints `WARNING: CI is …` (or stops, with `--require-green-ci`)                                                                                                                | GitHub has no successful CI run for the push to `main` at the checked-out commit yet: not pushed to main, still running, skipped or failed (since v0.30 only that run counts, not the commit's check runs)                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | `infra/deploy.sh` stops with `failed during '<step>'`                                                                                                                                            | An unexpected error; before `start` the running containers are untouched, from `start` on the rollback commands follow                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | `backup.log` has a `FAIL <kind> <step>` line, or `pg-backup: FAILED at …`                                                                                                                        | The backup stopped at that step (its plaintext is removed); a pre-deploy one also stops the deploy. Fix the cause (usually the db container is down or the key is missing) and re-run                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `pg-backup.sh` exits 1 at once, with no new line in `backup.log`                                                                                                                                 | Another run holds `.pg-backup.lock` in the backup root (v0.34). Wait for it; a deploy whose pre-deploy backup was busy stopped before touching a container: rerun it. Never delete the lock file; stop a leftover process that holds it                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `backup.log` has `FAIL <kind> names`                                                                                                                                                             | A file name of this run exists already (two runs in the same second). Nothing of the earlier run was touched; run again                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| web log: `[auth] sign-in refused (<code>)`                                                                                                                                                       | A refused sign-in (wrong credentials, or the cms could not answer). Since v0.34 one line per attempt, without a stack trace; expected                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| web log: `[auth] sign-out: the cms did not end the other sessions (<status or error>)`                                                                                                           | Sign-out cleared this device, but the cms did not confirm that the other sessions ended (v0.34); the person saw a note on `/sign-in`. Check the cms; a password change or an admin block ends every session for sure                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| web log: `[mfa] activate (or disable) too many wrong passwords or codes: user:<id> blocked for a while`                                                                                          | The shared attempt budget of turning the second factor on or off (v0.34): 10 failures per account in 15 minutes, 10 per client IP in a minute. It clears by itself; repeated lines for one account can mean a stolen session guessing the password                                                                                                                                                                                                                                                                                                                                                                                                              |
+| cms log: `[multipart-cleanup] could not remove a temp file: …` or `… did not close in time; removed once it does`                                                                                | An upload's temp file could not be removed at the end of its request (v0.34). Check the cms container's temp directory (`docker compose exec cms ls -la /tmp`; formidable files have 25-character names) and the disk                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| An upload answers 413 "At most 20 files per request"                                                                                                                                             | The file-part limit of multipart requests (v0.34); the web and the admin panel send fewer                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| A file link (`/uploads/…`) answers 404 for someone who sees its content, or admin media-library thumbnails stay empty                                                                            | Since v0.34 a file opens only for whoever may read the content it belongs to, in that version ([security.md](security.md#who-may-open-a-file)); an inline link to an intranet upload never opens it (re-upload the file in the admin panel and link that). Decisions are cached 60 s. Thumbnails need a parallel intranet session in the same browser, and show only what that account may open (`admin_role`, `editor`: everything)                                                                                                                                                                                                                            |
 
 ---
 
@@ -1005,6 +1024,9 @@ usb=()`), and HSTS (`max-age=31536000; includeSubDomains`), and they
   (`X-Frame-Options: SAMEORIGIN`, `Referrer-Policy: no-referrer`). Caddy
   sends HSTS only for a real host name over HTTPS and removes Strapi's on
   `localhost`. `infra/routing-parity.test.ts` keeps the two sets equal.
+  The web adds `X-Robots-Tag: noindex, nofollow` to its own responses
+  (`apps/web/next.config.mjs`, v0.34), and `robots.txt` disallows
+  everything: no search engine indexes the sign-in page.
 - **Compression.** Traefik compresses the web and cms responses (the Strapi
   admin bundle goes out as about 1.9 MB instead of 5.5 MB; Strapi does not
   compress itself), except `/live/*`, which has its own router without
@@ -1134,6 +1156,34 @@ nothing. For the real run replace `ROLLBACK` with `COMMIT`, run the listing
 again (the removed rows are gone, nothing else changed), start the cms
 (`"${COMPOSE[@]}" up -d --no-build web cms`) and check its log for errors:
 the cms never reads an untracked column, so it boots as before.
+
+## Upload references
+
+Since v0.34 a file under `/uploads` opens only for whoever may read the
+content it belongs to ([security.md, Who may open a file](security.md#who-may-open-a-file)).
+New `/uploads/` references in Markdown texts are checked when they are
+written; references written before v0.34 were not, so they are reviewed
+once before the first v0.34 deploy with the read-only inventory
+`infra/diagnostics/upload-references.sql`:
+
+```bash
+docker exec -i infra-db-1 sh -c 'psql -X -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"'   < infra/diagnostics/upload-references.sql
+```
+
+1. The owner decides every row of sections 1–3 (the file's header says
+   what each section means): approve that the text's readers may open an
+   admin-panel file, or remove the reference; accept that a reference to
+   an intranet upload opens nothing any more, or re-upload the file in the
+   admin panel and link that; remove or accept dead links.
+2. From that reviewed run until the new version is live, only `admin_role`
+   and `editor` write these texts. The deploy brief runs the inventory
+   again before the deploy; a row whose `updated_at` is newer than the
+   reviewed run stops the deploy until it is decided the same way.
+
+The output names files and content and the uploader's user id: internal
+operational data. Admin media-library thumbnails load from `/uploads` as
+well: they need a parallel intranet session in the same browser and show
+only what that account may open (`admin_role` and `editor`: everything).
 
 ## Datetime contract
 

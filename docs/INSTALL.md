@@ -20,7 +20,7 @@ Every command below runs on the host as the **deploy user**, the user that owns 
 ## 2. The code
 
 ```sh
-git clone --branch v0.33.4 https://github.com/yurtbayemre/sinnlos.git
+git clone --branch v0.34.0 https://github.com/yurtbayemre/sinnlos.git
 cd sinnlos
 ```
 
@@ -142,6 +142,8 @@ Use this when the panel is closed from outside (`ADMIN_ALLOW_CIDRS` empty) and y
 
 Nothing changes in `infra/.env`, and the panel stays closed from outside the whole time.
 
+**Thumbnails** in the media library load from `/uploads`, which only an intranet session opens: sign in to the intranet in the same browser. Since v0.34 they show only what that intranet account may open (`admin_role` and `editor`: everything).
+
 ## 9. Upgrades
 
 The supported path, every release's notes and rollback: [UPGRADE.md](UPGRADE.md). In short:
@@ -154,7 +156,7 @@ The supported path, every release's notes and rollback: [UPGRADE.md](UPGRADE.md)
 Optional live-smoke, the end-to-end check of live updates. It signs in as two accounts of yours, so invite two local accounts for it (section 6), and publish at least one announcement they can see. **Both must be outside `MFA_REQUIRED_ROLES`** (not admins or editors): the script cannot type a second-factor code.
 
 - **`SMOKE_EMAIL`** holds the live stream. Best the author of a published announcement (a department head, for example): the check then covers the notification as well; otherwise it says so in a warning.
-- **`SMOKE_AUTHOR_EMAIL`** posts one `[live-smoke]` comment on that announcement, and the script deletes it again. A member is enough.
+- **`SMOKE_AUTHOR_EMAIL`** posts one `[live-smoke]` comment on that announcement, and the script deletes it again. A member is enough. Each deploy leaves one comment notification from `SMOKE_AUTHOR_EMAIL` in the bell of `SMOKE_EMAIL`, cleared by the normal notification retention (v0.34).
 
 In `infra/deploy.env`:
 
