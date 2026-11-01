@@ -193,11 +193,18 @@ gh attestation verify oci://ghcr.io/yurtbayemre/sinnlos-cms:<version> --owner yu
 
 ## Restore
 
-On the machine with the private key, decrypt the artifacts:
+On the machine with the private key, decrypt the artifacts of one run (the same `<ts>` in their names) into a private directory. The dump and the `.env` copy hold every secret, and a plain `>` would create them with your umask (often 0644):
 
-- **Database:** `gpg --decrypt sinnlos-db-<ts>.dump.gz.gpg | gunzip > sinnlos.dump`. Copy the result to the host, into the checkout directory, or give `restore-db.sh` its full path.
-- **Uploads:** the uploads artifact is a tar of the `infra_cms_uploads` volume. Untar it into the volume while cms and web are stopped: `docker run --rm -i -v infra_cms_uploads:/uploads alpine tar xf - -C /uploads < uploads.tar`.
-- **Configuration:** the `.env` artifact holds the `infra/.env` of that day.
+```sh
+umask 077
+mkdir -m 700 restore && cd restore
+gpg --decrypt ../sinnlos-db-<ts>.dump.gz.gpg | gunzip > sinnlos.dump
+gpg --decrypt ../sinnlos-env-<ts>.env.gz.gpg | gunzip > infra.env
+```
+
+- **Database:** copy `sinnlos.dump` to the host, into the owner-only `infra/backups/` of the checkout, or give `restore-db.sh` its full path. Delete the copies after the restore.
+- **Uploads:** the uploads artifact is a tar of the `infra_cms_uploads` volume. Stream it into the volume while cms and web are stopped, so no plaintext copy lands on disk: `gpg --decrypt ../sinnlos-uploads-<ts>.tar.gz.gpg | gunzip | ssh <host> docker run --rm -i -v infra_cms_uploads:/uploads alpine tar xf - -C /uploads`.
+- **Configuration:** `infra.env` is the `infra/.env` of that day.
 
 Then restore step by step as [OPERATIONS.md, Restore](OPERATIONS.md#restore) describes. It closes the site first, closes it again after the configuration restore, repeats every anonymisation that is newer than the backup ([data-protection.md](data-protection.md), section 5), and opens the site only after the search cleanup.
 
