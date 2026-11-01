@@ -23,6 +23,9 @@ const nextConfig = {
   agentRules: false,
   // Don't advertise the framework in responses.
   poweredByHeader: false,
+  // v0.35: `next dev` logs every Server Action call with its arguments (on by
+  // default since Next 16.4), and createSecret's include the secret.
+  logging: { serverFunctions: false },
   // v0.34: an intranet is not for search engines. public/robots.txt says
   // Disallow: /, and every web response carries X-Robots-Tag, so a crawler
   // that reaches a URL anyway (a shared link to /sign-in) does not index

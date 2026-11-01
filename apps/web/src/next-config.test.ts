@@ -83,6 +83,11 @@ describe("next.config.mjs body limits (S8)", () => {
 });
 
 describe("next.config.mjs secret pages (v0.35)", () => {
+  it("never logs Server Action arguments (createSecret's hold the secret)", async () => {
+    const config = (await loadConfig()) as WebConfig & { logging?: { serverFunctions?: boolean } };
+    expect(config.logging?.serverFunctions).toBe(false);
+  });
+
   it("are never stored, below /secrets and on /secrets itself", async () => {
     const config = await loadConfig();
     expect(await config.headers?.()).toContainEqual({
