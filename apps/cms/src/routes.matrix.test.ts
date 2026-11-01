@@ -505,6 +505,10 @@ const GOLDEN: Record<string, PolicySpec[]> = {
   "api::team.team.delete": [{ name: "global::can-edit-team", config: { intent: "delete" } }],
   "api::team.team.editable": [{ name: "global::can-edit-team", config: { intent: "editable" } }],
 
+  // v0.34 (B1): the /uploads proxy's access question; the controller takes
+  // only the web server (internal secret) and decides for the caller.
+  "api::upload-access.upload-access.check": [],
+
   "api::wiki-page.wiki-page.find": wiki("page"),
   "api::wiki-page.wiki-page.findOne": wiki("page"),
   // Batch 16: the rebuilt row gate (moderator class, no bypass), the

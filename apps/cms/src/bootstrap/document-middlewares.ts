@@ -15,6 +15,7 @@ import {
 } from "../utils/poll-audience-guard";
 import { createPublishReadiness, type PublishReadinessHost } from "../utils/publish-readiness";
 import { createScheduleClear, type ScheduleClearHost } from "../utils/schedule";
+import { createUploadReferenceGuard } from "../utils/upload-reference-guard";
 import { createWikiChecks, type WikiChecksHost } from "../utils/wiki-checks";
 
 /**
@@ -41,6 +42,10 @@ import { createWikiChecks, type WikiChecksHost } from "../utils/wiki-checks";
  *      lock on every wiki-page and wiki-space mutation; parent loops
  *      refused (the edge diff), a space with pages neither deleted nor
  *      unpublished;
+ *   4b. upload-reference guard (v0.34, B1; utils/upload-reference-guard.ts):
+ *      a non-moderator write may add a `/uploads/` reference to a Markdown
+ *      field only for a file its writer may open, checked against the
+ *      committed state before the action;
  *   5. schedule-clear (§D rule 6);
  *   6. publish readiness (§G2);
  *   7. media claims (§E3, §E4; utils/media-claims.ts, lane 16A): a newly
@@ -73,6 +78,7 @@ export const DOCUMENT_MIDDLEWARE_SLOTS = [
   "poll-audience-guard",
   "department-audience-guard",
   "wiki-checks",
+  "upload-reference-guard",
   "schedule-clear",
   "publish-readiness",
   "media-claims",
@@ -114,6 +120,7 @@ export function documentMiddlewares(strapi: DocumentMiddlewaresHost): SlottedMid
     { slot: "poll-audience-guard", middleware: createPollAudienceGuard(strapi) },
     { slot: "department-audience-guard", middleware: createDepartmentAudienceGuard(strapi) },
     { slot: "wiki-checks", middleware: createWikiChecks(strapi as unknown as WikiChecksHost) },
+    { slot: "upload-reference-guard", middleware: createUploadReferenceGuard(strapi) },
     { slot: "schedule-clear", middleware: createScheduleClear(strapi) },
     { slot: "publish-readiness", middleware: createPublishReadiness(strapi) },
     { slot: "media-claims", middleware: createMediaClaims(strapi) },

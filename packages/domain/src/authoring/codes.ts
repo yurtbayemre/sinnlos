@@ -94,6 +94,11 @@ export const AUTHORING_FIELD_CODES = [
   "parentCycle",
   /** A value another entry already has where it must be unique (a wiki space's `name`). */
   "taken",
+  /**
+   * A Markdown text adds a reference to an uploaded file (`/uploads/<name>`)
+   * its writer may not open (v0.34; the cms's upload-reference guard).
+   */
+  "uploadNotAllowed",
   /** User administration (v0.23): one's own role or blocked state. */
   "selfChange",
   /** User administration: Entra's sync owns this field for this user. */

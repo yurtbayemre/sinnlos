@@ -74,6 +74,8 @@ describe("codes", () => {
         "fileTooLarge",
         "parentCycle",
         "taken",
+        // v0.34: a Markdown reference to a file the writer may not open.
+        "uploadNotAllowed",
         // User administration (v0.23).
         "selfChange",
         "entraManaged",

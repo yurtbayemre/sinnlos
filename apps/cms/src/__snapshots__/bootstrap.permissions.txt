@@ -150,6 +150,7 @@ admin_role|api::team.team.editable
 admin_role|api::team.team.find
 admin_role|api::team.team.findOne
 admin_role|api::team.team.update
+admin_role|api::upload-access.upload-access.check
 admin_role|api::user-management.user-management.anonymise
 admin_role|api::user-management.user-management.anonymisePreview
 admin_role|api::user-management.user-management.export
@@ -251,6 +252,7 @@ authenticated|api::reaction.reaction.findOne
 authenticated|api::search-log.search-log.create
 authenticated|api::team.team.find
 authenticated|api::team.team.findOne
+authenticated|api::upload-access.upload-access.check
 authenticated|api::wiki-page.wiki-page.find
 authenticated|api::wiki-page.wiki-page.findOne
 authenticated|api::wiki-space.wiki-space.find
@@ -369,6 +371,7 @@ department_head|api::team.team.editable
 department_head|api::team.team.find
 department_head|api::team.team.findOne
 department_head|api::team.team.update
+department_head|api::upload-access.upload-access.check
 department_head|api::wiki-page.wiki-page.create
 department_head|api::wiki-page.wiki-page.createDraft
 department_head|api::wiki-page.wiki-page.discardDraft
@@ -526,6 +529,7 @@ editor|api::reaction.reaction.findOne
 editor|api::search-log.search-log.create
 editor|api::team.team.find
 editor|api::team.team.findOne
+editor|api::upload-access.upload-access.check
 editor|api::wiki-page.wiki-page.authoringList
 editor|api::wiki-page.wiki-page.create
 editor|api::wiki-page.wiki-page.createDraft
@@ -581,6 +585,7 @@ guest|api::quick-link.quick-link.findOne
 guest|api::reaction.reaction.find
 guest|api::reaction.reaction.findOne
 guest|api::search-log.search-log.create
+guest|api::upload-access.upload-access.check
 guest|api::wiki-page.wiki-page.find
 guest|api::wiki-page.wiki-page.findOne
 guest|api::wiki-space.wiki-space.find
@@ -658,6 +663,7 @@ member|api::reaction.reaction.findOne
 member|api::search-log.search-log.create
 member|api::team.team.find
 member|api::team.team.findOne
+member|api::upload-access.upload-access.check
 member|api::wiki-page.wiki-page.discardDraft
 member|api::wiki-page.wiki-page.editable
 member|api::wiki-page.wiki-page.find
@@ -756,6 +762,7 @@ team_lead|api::team.team.editable
 team_lead|api::team.team.find
 team_lead|api::team.team.findOne
 team_lead|api::team.team.update
+team_lead|api::upload-access.upload-access.check
 team_lead|api::wiki-page.wiki-page.create
 team_lead|api::wiki-page.wiki-page.createDraft
 team_lead|api::wiki-page.wiki-page.discardDraft
