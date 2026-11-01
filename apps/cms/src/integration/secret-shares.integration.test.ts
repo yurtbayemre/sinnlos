@@ -751,11 +751,12 @@ describe.each(testEngines())("secret shares on %s", (engine) => {
     ).lifecycles;
     const failing = lifecycles.subscribe({
       models: [NOTIFICATION],
+      // The messages carry the text: the answers and logs must still not.
       beforeCreate: async () => {
-        throw new Error("injected failure");
+        throw new Error(`injected failure ${text}`);
       },
       afterDeleteMany: async () => {
-        throw new Error("injected failure");
+        throw new Error(`injected failure ${text}`);
       },
     });
     try {
@@ -782,11 +783,22 @@ describe.each(testEngines())("secret shares on %s", (engine) => {
     const documents = JSON.stringify(await search.loadSearchDocuments(t.strapi));
     expect(documents).not.toContain(text);
     expect(documents).not.toContain(id);
-    for (const kind of ["announcements", "wiki-pages", "documents", "events", "polls"]) {
-      const term = encodeURIComponent(text);
-      const res = await api(to, `/api/${kind}?filters[title][$containsi]=${term}`);
-      expect(res.text, kind).not.toContain(text);
-      expect(res.text, kind).not.toContain(id);
+    // The web's live-search reads (apps/web/src/lib/search-action.ts), each
+    // with its own filter, plus the people search; every one must succeed.
+    const q = encodeURIComponent(text);
+    const fallback = [
+      `/api/announcements?filters[$or][0][title][$containsi]=${q}&filters[$or][1][body][$containsi]=${q}`,
+      `/api/wiki-pages?filters[$or][0][title][$containsi]=${q}&filters[$or][1][body][$containsi]=${q}`,
+      `/api/documents?filters[$or][0][title][$containsi]=${q}&filters[$or][1][description][$containsi]=${q}`,
+      `/api/events?filters[title][$containsi]=${q}`,
+      `/api/polls?filters[question][$containsi]=${q}`,
+      `/api/users?filters[$or][0][displayName][$containsi]=${q}&filters[$or][1][jobTitle][$containsi]=${q}`,
+    ];
+    for (const path of fallback) {
+      const res = await api(to, path);
+      expect(res.status, `${path}: ${res.text.slice(0, 200)}`).toBe(200);
+      expect(res.text, path).not.toContain(text);
+      expect(res.text, path).not.toContain(id);
     }
   });
 
