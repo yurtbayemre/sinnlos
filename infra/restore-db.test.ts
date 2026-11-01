@@ -1488,53 +1488,59 @@ describe.skipIf(!FAST)(
   },
 );
 
-describe.skipIf(!FAST)(`restore-db.sh: infra/deploy.env names the compose project${FAST_TITLE}`, () => {
-  let r: StepReport[] = [];
-  const writeEnv = (mode: string) =>
-    `printf 'COMPOSE_PROJECT=staging\\n' > "$REPO/infra/deploy.env"; chmod ${mode} "$REPO/infra/deploy.env"`;
-  beforeAll(() => {
-    r = restoreSteps(
-      [
-        /* 0 */ { before: writeEnv("600"), args: ["prepare", "good.dump"] },
-        /* 1 */ { args: ["status"] },
-        /* 2 */ { args: ["status"], env: { COMPOSE_PROJECT: "infra" } },
-        /* 3 */ { before: writeEnv("664"), args: ["cancel"] },
-        /* 4 */ { before: 'STUB_LOCK_HELD=1; chmod 600 "$REPO/infra/deploy.env"', args: ["cancel"] },
-        /* 5 */ { before: "STUB_LOCK_HELD=", args: ["cancel"] },
-      ],
-      MODE as ShellMode,
-    );
-  }, 300_000);
+describe.skipIf(!FAST)(
+  `restore-db.sh: infra/deploy.env names the compose project${FAST_TITLE}`,
+  () => {
+    let r: StepReport[] = [];
+    const writeEnv = (mode: string) =>
+      `printf 'COMPOSE_PROJECT=staging\\n' > "$REPO/infra/deploy.env"; chmod ${mode} "$REPO/infra/deploy.env"`;
+    beforeAll(() => {
+      r = restoreSteps(
+        [
+          /* 0 */ { before: writeEnv("600"), args: ["prepare", "good.dump"] },
+          /* 1 */ { args: ["status"] },
+          /* 2 */ { args: ["status"], env: { COMPOSE_PROJECT: "infra" } },
+          /* 3 */ { before: writeEnv("664"), args: ["cancel"] },
+          /* 4 */ {
+            before: 'STUB_LOCK_HELD=1; chmod 600 "$REPO/infra/deploy.env"',
+            args: ["cancel"],
+          },
+          /* 5 */ { before: "STUB_LOCK_HELD=", args: ["cancel"] },
+        ],
+        MODE as ShellMode,
+      );
+    }, 300_000);
 
-  it("takes the project of deploy.env for the containers, the state and the reservation", () => {
-    expect(r[0].status, r[0].stderr).toBe(0);
-    expect(r[0].calls).toContainEqual(
-      expect.stringContaining("docker ps -a --filter label=com.docker.compose.project=staging "),
-    );
-    expect(r[0].calls.find((c) => c.includes(" stop web cms"))).toMatch(
-      /^docker compose -p staging -f /,
-    );
-    // The project infra (the default) has no attempt and no reservation.
-    expect(r[0].state).toEqual({});
-    expect(r[0].reserved).toBe(false);
-    expect(r[1].stdout).toMatch(/^attempt \S+ of compose project staging \(checkout /);
-  });
+    it("takes the project of deploy.env for the containers, the state and the reservation", () => {
+      expect(r[0].status, r[0].stderr).toBe(0);
+      expect(r[0].calls).toContainEqual(
+        expect.stringContaining("docker ps -a --filter label=com.docker.compose.project=staging "),
+      );
+      expect(r[0].calls.find((c) => c.includes(" stop web cms"))).toMatch(
+        /^docker compose -p staging -f /,
+      );
+      // The project infra (the default) has no attempt and no reservation.
+      expect(r[0].state).toEqual({});
+      expect(r[0].reserved).toBe(false);
+      expect(r[1].stdout).toMatch(/^attempt \S+ of compose project staging \(checkout /);
+    });
 
-  it("refuses a caller's other project and an unsafe file before any action", () => {
-    expect(r[2].status).toBe(2);
-    expect(r[2].stderr).toContain("deploy.env: it is for compose project staging, not infra");
-    expect(r[3].status).toBe(2);
-    expect(r[3].stderr).toContain("writable by group or others (mode 664)");
-    for (const n of [2, 3]) expect(r[n].calls, `step ${n}`).toEqual([]);
-  });
+    it("refuses a caller's other project and an unsafe file before any action", () => {
+      expect(r[2].status).toBe(2);
+      expect(r[2].stderr).toContain("deploy.env: it is for compose project staging, not infra");
+      expect(r[3].status).toBe(2);
+      expect(r[3].stderr).toContain("writable by group or others (mode 664)");
+      for (const n of [2, 3]) expect(r[n].calls, `step ${n}`).toEqual([]);
+    });
 
-  it("holds the lock of the project of deploy.env, then cancels that project's attempt", () => {
-    expect(r[4].status).toBe(3);
-    expect(stopLine(r[4])).toContain("holds the lock of compose project staging (");
-    expect(stopLine(r[4])).toContain("/.git/sinnlos-deploy/staging.lock)");
-    expect(r[5].status, r[5].stderr).toBe(0);
-  });
-});
+    it("holds the lock of the project of deploy.env, then cancels that project's attempt", () => {
+      expect(r[4].status).toBe(3);
+      expect(stopLine(r[4])).toContain("holds the lock of compose project staging (");
+      expect(stopLine(r[4])).toContain("/.git/sinnlos-deploy/staging.lock)");
+      expect(r[5].status, r[5].stderr).toBe(0);
+    });
+  },
+);
 
 /* ------------------------------------------------------------------------ */
 /* Slow: a real Postgres 16 in a throwaway compose project                   */
