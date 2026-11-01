@@ -145,11 +145,13 @@ const ALL_GRANTS = [
 ];
 
 /**
- * `/uploads/<name>`: one path segment, up to ASCII whitespace, a quote, a
- * bracket, `/`, `\`, `?` or `#`. The whitespace set is spelled out (no `\s`)
- * so that infra/diagnostics/upload-references.sql can match it exactly.
+ * `/uploads/<name>`: one path segment, up to whitespace (JavaScript's `\s`,
+ * spelled out so that infra/diagnostics/upload-references.sql can use the
+ * very same set; the Markdown renderer ends a link there too), a quote, a
+ * bracket, `/`, `\`, `?` or `#`.
  */
-const UPLOAD_REFERENCE = /\/uploads\/([^ \t\n\r\f\v/"'<>()[\]\\?#]+)/g;
+const UPLOAD_REFERENCE =
+  /\/uploads\/([^\t\n\v\f\r \u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff/"'<>()[\]\\?#]+)/g;
 
 /** Sentence punctuation that may follow a bare reference in prose. */
 const TRAILING_PUNCTUATION = /[.,;:!]+$/;
@@ -270,6 +272,31 @@ export async function resolveUploadFile(
     await read((query) => query.whereRaw(formatsText, [`%${JSON.stringify(url)}%`])),
   ).filter((file) => file.names.includes(name));
   return renditions.length === 1 ? renditions[0]! : null;
+}
+
+/**
+ * Every stored file that claims `/uploads/<name>`: its original, and every
+ * file listing it as a rendition. The write check needs them all: the name
+ * means the original today, but would mean a claimant once the original is
+ * gone (resolveUploadFile).
+ */
+export async function uploadClaimants(
+  strapi: UploadAccessHost,
+  name: string,
+  trx?: unknown,
+): Promise<UploadFile[]> {
+  if (name === "" || name.includes("/")) return [];
+  const url = `${UPLOADS_PREFIX}${name}`;
+  const formatsText =
+    strapi.db.dialect?.client === "postgres" ? "formats::text like ?" : "formats like ?";
+  const query = strapi.db
+    .getConnection("files")
+    .select(...FILE_COLUMNS)
+    .where("url", url)
+    .orWhereRaw(formatsText, [`%${JSON.stringify(url)}%`]);
+  return toFiles(await (trx ? query.transacting(trx) : query)).filter((file) =>
+    file.names.includes(name),
+  );
 }
 
 /** The viewer as the request's users-permissions user (role populated). */

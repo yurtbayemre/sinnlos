@@ -17,7 +17,10 @@
 --        `linked = true` (until then the link's audience decides, and
 --        readers outside it lose the image or link). Approve that audience
 --        or remove the reference (a reference planted to a file of another
---        audience would open it);
+--        audience would open it). A row with `means = false` names a
+--        rendition URL of this file that another file's original also has:
+--        the name means that original today and this file once it is gone,
+--        so decide it the same way;
 --      - section 2, every row (a reference to an intranet upload): it opens
 --        nothing from v0.34 on (only the linking row or the uploader does).
 --        Accept the loss, or re-upload the file in the admin panel;
@@ -130,13 +133,16 @@ WITH upload_names AS (
   SELECT DISTINCT h.host, h.row_id, h.document_id, h.status, h.field, h.label, h.updated_at,
          regexp_replace(m.name[1], '[.,;:!]+$', '') AS ref_name
     FROM upload_hosts h
-   CROSS JOIN LATERAL regexp_matches(coalesce(h.text, ''), '/uploads/([^ \t\n\r\f\v/"''<>()\[\]\x5c?#]+)', 'g')
+   CROSS JOIN LATERAL regexp_matches(coalesce(h.text, ''), '/uploads/([^\t\n\v\f\r \u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff/"''<>()\[\]\x5c?#]+)', 'g')
          AS m(name)
 ), upload_refs AS (
+  -- Every file that claims the name; `means`: the cms resolves it to this one.
   SELECT DISTINCT tok.host, tok.row_id, tok.document_id, tok.status, tok.field, tok.label,
-         tok.updated_at, n.file_id, n.file_name, n.uploaded_by
+         tok.updated_at, n.file_id, n.file_name, n.uploaded_by,
+         EXISTS (SELECT 1 FROM upload_resolved r
+                  WHERE r.ref_name = tok.ref_name AND r.file_id = n.file_id) AS means
     FROM upload_tokens tok
-    JOIN upload_resolved n ON n.ref_name = tok.ref_name
+    JOIN upload_names n ON n.ref_name = tok.ref_name
 ), upload_links AS (
   SELECT r.file_id,
          string_agg(DISTINCT r.related_type || ' ' || r.related_id::text, ', ') AS linked_by
@@ -152,23 +158,23 @@ WITH upload_names AS (
     FROM files f
    WHERE f.provider_metadata->>'uploadedBy' IS NULL
      AND NOT EXISTS (SELECT 1 FROM files_related_mph r WHERE r.file_id = f.id)
-     AND NOT EXISTS (SELECT 1 FROM upload_refs ref WHERE ref.file_id = f.id)
+     AND NOT EXISTS (SELECT 1 FROM upload_refs ref WHERE ref.file_id = f.id AND ref.means)
 )
 -- Sections 1-4, one row per reference or file.
 SELECT CASE WHEN ref.uploaded_by IS NULL THEN '1 inline_unstamped' ELSE '2 inline_stamped' END
          AS section,
        ref.host, ref.row_id, ref.document_id, ref.status, ref.field, ref.label, ref.updated_at,
-       ref.file_id, ref.file_name, ref.uploaded_by,
+       ref.file_id, ref.file_name, ref.uploaded_by, ref.means,
        l.file_id IS NOT NULL AS linked, l.linked_by
   FROM upload_refs ref
   LEFT JOIN upload_links l ON l.file_id = ref.file_id
 UNION ALL
 SELECT '3 unresolvable', u.host, u.row_id, u.document_id, u.status, u.field, u.label,
-       u.updated_at, NULL, u.ref_name, NULL, NULL, NULL
+       u.updated_at, NULL, u.ref_name, NULL, NULL, NULL, NULL
   FROM unresolvable u
 UNION ALL
 SELECT '4 unused_panel_files', NULL, NULL, NULL, NULL, NULL, NULL, NULL,
-       un.file_id, un.file_name, NULL, false, NULL
+       un.file_id, un.file_name, NULL, NULL, false, NULL
   FROM unused un
  ORDER BY section, file_id, host, row_id;
 
@@ -215,7 +221,7 @@ WITH upload_names AS (
 ), upload_tokens AS (
   SELECT DISTINCT t.host, t.row_id, regexp_replace(m.name[1], '[.,;:!]+$', '') AS ref_name
     FROM upload_texts t
-   CROSS JOIN LATERAL regexp_matches(coalesce(t.text, ''), '/uploads/([^ \t\n\r\f\v/"''<>()\[\]\x5c?#]+)', 'g')
+   CROSS JOIN LATERAL regexp_matches(coalesce(t.text, ''), '/uploads/([^\t\n\v\f\r \u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff/"''<>()\[\]\x5c?#]+)', 'g')
          AS m(name)
 ), upload_refs AS (
   SELECT DISTINCT tok.host, tok.row_id, n.file_id, n.uploaded_by

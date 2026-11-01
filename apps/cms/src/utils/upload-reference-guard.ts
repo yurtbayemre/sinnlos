@@ -10,7 +10,10 @@
  * non-moderator that ADDS such a reference (one the field's committed value
  * does not have yet) must name only files the writer may open already, by
  * the very same decision, against the committed state (this runs before the
- * action, inside the document lock's transaction). Otherwise the write is
+ * action, inside the document lock's transaction): every stored file that
+ * claims the name (uploadClaimants), not only the one it means today, since
+ * a rendition claimant takes the name over once the original is gone.
+ * Otherwise the write is
  * refused: 400 with `details.codes.<field> = "uploadNotAllowed"`
  * (@sinnlos/domain authoring/codes.ts), and nothing is written.
  *
@@ -34,7 +37,7 @@ import type { DocumentMiddleware } from "./poll-audience-guard";
 import {
   UPLOAD_HOST_FIELDS,
   mayOpenFile,
-  resolveUploadFile,
+  uploadClaimants,
   uploadReferenceNames,
   type UploadAccessHost,
   type UploadViewer,
@@ -97,15 +100,19 @@ export function createUploadReferenceGuard(strapi: UploadAccessHost): DocumentMi
 
     await strapi.db.transaction(async ({ trx }: { trx: unknown }) => {
       const committed = await committedNames(strapi, context.uid!, params.documentId, touched);
+      /** May the caller open every file the name could mean, today or once its original is gone? */
+      const opensAll = async (name: string) => {
+        for (const file of await uploadClaimants(strapi, name, trx)) {
+          if (!(await mayOpenFile(strapi, caller, file, trx))) return false;
+        }
+        return true;
+      };
       const refused: string[] = [];
       for (const field of touched) {
         for (const name of uploadReferenceNames(data[field])) {
-          if (committed.get(field)!.has(name)) continue;
-          const file = await resolveUploadFile(strapi, name, trx);
-          if (file && !(await mayOpenFile(strapi, caller, file, trx))) {
-            refused.push(field);
-            break;
-          }
+          if (committed.get(field)!.has(name) || (await opensAll(name))) continue;
+          refused.push(field);
+          break;
         }
       }
       if (refused.length > 0) {

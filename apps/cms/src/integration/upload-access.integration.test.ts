@@ -115,6 +115,13 @@ describe.each(testEngines())("upload access on %s", (engine) => {
 
   const ref = (file: StoredFile) => `![image](/uploads/${file.name})`;
 
+  /** The refusal codes of a 400. */
+  const refusal = (res: { status: number; body: unknown; text: string }) => {
+    expect(res.status, res.text).toBe(400);
+    return (res.body as { error?: { details?: { codes?: Record<string, string> } } }).error?.details
+      ?.codes;
+  };
+
   it("answers only the web server, and only a signed-in, unrestricted account", async () => {
     const file = await storeFile();
     expect((await access("member", file.name, null)).status).toBe(404);
@@ -370,25 +377,33 @@ describe.each(testEngines())("upload access on %s", (engine) => {
     }
   });
 
-  it("a reference followed by a non-ASCII space names no file (as the inventory reads it)", async () => {
+  it("a reference ends at a Unicode space, as the renderer links it", async () => {
     const file = await storeFile();
     await seedPage(t, { space: space.documentId, body: `/uploads/${file.name}\u00a0caption` });
-    expect(await allows("member", file.name)).toBe(false);
+    expect(await allows("member", file.name)).toBe(true);
   });
 
-  it("a name that is one file's original never counts as another file's rendition", async () => {
+  it("a name one file's original and another file's rendition share", async () => {
     const common = await storeFile();
-    await document({ audience: "all", file: common.id });
+    const commonDoc = await document({ audience: "all", file: common.id });
+    // Already in a readable text before the second file claims the name.
+    await seedPage(t, { space: space.documentId, body: ref(common) });
     const hidden = await storeFile({ formats: { small: { url: `/uploads/${common.name}` } } });
-    // The writer may open `common`, so the reference passes the write check...
+    // The name means the original: the text does not open the claimant...
+    expect(await allows("member", hidden.name)).toBe(false);
+    // ...and a new reference must be openable for every claimant.
     const res = await wiki.createDraft("department_head", {
       title: `IT common ${++serial}`,
       body: ref(common),
       space: space.documentId,
     });
-    expect(res.status, res.text).toBe(201);
-    // ...and it does not open the file that lists the same name as its rendition.
-    expect(await allows("department_head", hidden.name)).toBe(false);
+    expect(refusal(res)).toEqual({ body: "uploadNotAllowed" });
+    // Once the original is gone the name means the claimant, and the text
+    // written before opens it: the rollout inventory lists such rows
+    // (means = false) for review.
+    await t.strapi.documents(DOCUMENT).delete({ documentId: commonDoc.documentId });
+    await t.strapi.db.query(FILE).delete({ where: { id: common.id } });
+    expect(await allows("member", hidden.name)).toBe(true);
   });
 
   it("a linked file whose last link goes opens only through a readable text", async () => {
@@ -565,18 +580,28 @@ describe.each(testEngines())("upload access on %s", (engine) => {
             ["3 unresolvable", "gone_000000.png", "published"],
             ["3 unresolvable", "gone_000000.png", "draft"],
             ["3 unresolvable", "gone_000000.png", "history"],
-            ["3 unresolvable", `${spaced.name}\u00a0x`, "published"],
-            ["3 unresolvable", `${spaced.name}\u00a0x`, "draft"],
-            ["3 unresolvable", `${spaced.name}\u00a0x`, "history"],
+            ["1 inline_unstamped", spaced.name, "published"],
+            ["1 inline_unstamped", spaced.name, "draft"],
+            ["1 inline_unstamped", spaced.name, "history"],
+            ["1 inline_unstamped", shadow.name, "published"],
+            ["1 inline_unstamped", shadow.name, "draft"],
+            ["1 inline_unstamped", shadow.name, "history"],
           ].sort(),
         );
-        // Neither the spaced file nor the file whose rendition shares the
-        // panel file's name is referenced: both are unused, like the cms says.
+        // The claimant of the panel file's name is listed for review, but the
+        // name means the panel file: the claimant opens for nobody yet.
+        expect(
+          ofPage.filter((row) => row.file_name === shadow.name).map((row) => row.means),
+        ).toEqual([false, false, false]);
+        expect(
+          ofPage.filter((row) => row.file_name === panel.name).map((row) => row.means),
+        ).toEqual([true, true, true]);
         const unused = listing
           .filter((row) => row.section === "4 unused_panel_files")
           .map((row) => row.file_id);
-        expect(unused).toEqual(expect.arrayContaining([spaced.id, shadow.id]));
+        expect(unused).toContain(shadow.id);
         expect(unused).not.toContain(panel.id);
+        expect(unused).not.toContain(spaced.id);
         expect(Number(summary[0].inline_unstamped)).toBeGreaterThanOrEqual(2);
       } finally {
         await client.end();
@@ -598,12 +623,6 @@ describe.each(testEngines())("upload access on %s", (engine) => {
       allowed = await storeFile();
       await document({ audience: "all", file: allowed.id });
     });
-
-    const refusal = (res: { status: number; body: unknown; text: string }) => {
-      expect(res.status, res.text).toBe(400);
-      return (res.body as { error?: { details?: { codes?: Record<string, string> } } }).error
-        ?.details?.codes;
-    };
 
     it("refuses a non-moderator's new reference to a file they may not open", async () => {
       const planted = await wiki.createDraft("department_head", {

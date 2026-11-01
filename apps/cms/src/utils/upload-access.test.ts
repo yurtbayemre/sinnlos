@@ -1,7 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { fromWebServer } from "../api/upload-access/controllers/upload-access";
-import { mayOpenUpload, resolveUploadFile, uploadReferenceNames } from "./upload-access";
+import {
+  mayOpenUpload,
+  resolveUploadFile,
+  uploadClaimants,
+  uploadReferenceNames,
+} from "./upload-access";
 
 /**
  * The pure parts of the upload access decision (v0.34, B1): which names a
@@ -35,11 +40,9 @@ describe("uploadReferenceNames", () => {
     expect([...uploadReferenceNames("/uploads/a_1.pdf?download=1#page=2")]).toEqual(["a_1.pdf"]);
   });
 
-  it("ends a name at ASCII whitespace only, like the inventory query", () => {
-    expect([...uploadReferenceNames("/uploads/a_1.png\tb /uploads/c_2.png d")]).toEqual([
-      "a_1.png",
-      "c_2.png d",
-    ]);
+  it("ends a name at whitespace, Unicode spaces included, like the renderer and the inventory", () => {
+    const text = "/uploads/a_1.png	b /uploads/c_2.png d /uploads/e_3.png﻿f";
+    expect([...uploadReferenceNames(text)]).toEqual(["a_1.png", "c_2.png", "e_3.png"]);
   });
 
   it("finds nothing in other text or other values", () => {
@@ -62,10 +65,10 @@ function filesDb(rows: Array<Record<string, unknown>>) {
   /** A read: `url = ?` (the original) or the formats text LIKE `%…%`. */
   const findOne = vi.fn((url: string | null, pattern: string | null) =>
     rows
-      .filter((row) =>
-        url !== null
-          ? row.url === url
-          : JSON.stringify(row.formats ?? null).includes(pattern!.slice(1, -1)),
+      .filter(
+        (row) =>
+          (url !== null && row.url === url) ||
+          (pattern !== null && JSON.stringify(row.formats ?? null).includes(pattern.slice(1, -1))),
       )
       .map(raw),
   );
@@ -77,6 +80,7 @@ function filesDb(rows: Array<Record<string, unknown>>) {
       limit: () => builder,
       where: (_column: string, value: string) => ((url = value), builder),
       whereRaw: (_sql: string, [value]: string[]) => ((pattern = value), builder),
+      orWhereRaw: (_sql: string, [value]: string[]) => ((pattern = value), builder),
       then: (resolve: (rows: unknown[]) => unknown) => resolve(findOne(url, pattern)),
     };
     return builder;
@@ -128,6 +132,13 @@ describe("resolveUploadFile", () => {
     ]);
     expect((await resolveUploadFile(strapi, "common.png"))?.id).toBe(1);
     expect(await resolveUploadFile(strapi, "twice.png")).toBeNull();
+    // The write check asks about every claimant.
+    expect((await uploadClaimants(strapi, "common.png")).map((file) => file.id).sort()).toEqual([
+      1, 2,
+    ]);
+    expect((await uploadClaimants(strapi, "twice.png")).map((file) => file.id).sort()).toEqual([
+      3, 4,
+    ]);
   });
 
   it("reads files without a stamp", async () => {
