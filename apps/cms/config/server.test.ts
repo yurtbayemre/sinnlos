@@ -188,6 +188,7 @@ describe("config/server", () => {
     const { tasks } = serverConfig({ env: makeEnv() }).cron;
     expect(Object.entries(tasks).map(([name, { options }]) => ({ name, ...options }))).toEqual([
       { name: "scheduled-publisher", rule: "* * * * *", tz: "Europe/Berlin" },
+      { name: "secret-share-janitor", rule: "* * * * *", tz: "Europe/Berlin" },
       { name: "erasure-sweep", rule: "20 3 * * *", tz: "Europe/Berlin" },
       { name: "training-evidence-janitor", rule: "25 3 * * *", tz: "Europe/Berlin" },
       { name: "uploads-janitor", rule: "30 3 * * *", tz: "Europe/Berlin" },
@@ -230,6 +231,7 @@ describe("CRON_ENABLED through @strapi/core's cron provider", () => {
       expect(config.cron.enabled, JSON.stringify(store)).toBe(true);
       expect(await scheduledByProvider(config), JSON.stringify(store)).toEqual([
         "scheduled-publisher",
+        "secret-share-janitor",
         "erasure-sweep",
         "training-evidence-janitor",
         "uploads-janitor",
@@ -262,6 +264,7 @@ describe("CRON_ENABLED through @strapi/core's cron provider", () => {
     expect(await scheduledByProvider(on, metrics)).toEqual([
       "uploadWeekly",
       "scheduled-publisher",
+      "secret-share-janitor",
       "erasure-sweep",
       "training-evidence-janitor",
       "uploads-janitor",

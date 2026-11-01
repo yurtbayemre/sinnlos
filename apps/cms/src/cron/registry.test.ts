@@ -42,7 +42,7 @@ const spec = (fn: CronTaskSpec["fn"]): CronTaskSpec => ({
 });
 
 describe("cronRegistry", () => {
-  it("lists the thirteen tasks with their rules, all in the given zone", () => {
+  it("lists the fourteen tasks with their rules, all in the given zone", () => {
     const table = cronRegistry("Pacific/Auckland").map(({ name, rule, tz }) => ({
       name,
       rule,
@@ -50,6 +50,7 @@ describe("cronRegistry", () => {
     }));
     expect(table).toEqual([
       { name: "scheduled-publisher", rule: "* * * * *", tz: "Pacific/Auckland" },
+      { name: "secret-share-janitor", rule: "* * * * *", tz: "Pacific/Auckland" },
       { name: "erasure-sweep", rule: "20 3 * * *", tz: "Pacific/Auckland" },
       { name: "training-evidence-janitor", rule: "25 3 * * *", tz: "Pacific/Auckland" },
       { name: "uploads-janitor", rule: "30 3 * * *", tz: "Pacific/Auckland" },
@@ -65,6 +66,13 @@ describe("cronRegistry", () => {
     ]);
   });
 
+  it("keeps the secret-share janitor while the module is off: it is erasure (v0.35.0)", () => {
+    const names = cronRegistry("Europe/Berlin", { FEATURES_OFF: "secrets" }).map(
+      ({ name }) => name,
+    );
+    expect(names).toContain("secret-share-janitor");
+  });
+
   it("leaves the training reminders out while training is off (FEATURES_OFF, v0.28)", () => {
     const names = (env: Record<string, string>) =>
       cronRegistry("Europe/Berlin", env).map(({ name }) => name);
@@ -75,8 +83,9 @@ describe("cronRegistry", () => {
 
   it("runs the janitors in the 03:00 hour and every task but the scheduler once a day", () => {
     for (const { name, rule } of cronRegistry("Europe/Berlin")) {
-      if (name === "scheduled-publisher") {
-        // Decision 06 §D rule 12: every minute, exempt from the nightly order.
+      if (name === "scheduled-publisher" || name === "secret-share-janitor") {
+        // Decision 06 §D rule 12, and v0.35.0's erasure of ended secrets:
+        // every minute, exempt from the nightly order.
         expect(rule).toBe("* * * * *");
         continue;
       }
@@ -281,6 +290,7 @@ describe("buildCronTasks", () => {
     const tasks = buildCronTasks(cronRegistry("Europe/Berlin"));
     expect(Object.keys(tasks)).toEqual([
       "scheduled-publisher",
+      "secret-share-janitor",
       "erasure-sweep",
       "training-evidence-janitor",
       "uploads-janitor",

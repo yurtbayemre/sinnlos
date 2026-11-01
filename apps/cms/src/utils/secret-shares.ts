@@ -329,6 +329,43 @@ export async function deleteShareNotifications(
   }
 }
 
+/**
+ * Deletes the shares matching `where` in every state, with their
+ * notifications, in pages (anonymisation, the erasure sweep, the janitor's
+ * orphans). Joins an ambient transaction. Returns how many went.
+ */
+export async function deleteShares(strapi: SecretShareHost, where: Row): Promise<number> {
+  let deleted = 0;
+  for (;;) {
+    const page = rows(
+      await strapi.db.query(SECRET_SHARE_UID).findMany({
+        where,
+        select: ["id", "documentId", "recipientId"],
+        orderBy: [{ id: "asc" }],
+        limit: DELETE_PAGE,
+      }),
+    ).filter(
+      (row): row is Row & { id: number; documentId: string; recipientId: number } =>
+        typeof row.id === "number" &&
+        typeof row.documentId === "string" &&
+        isRowId(row.recipientId),
+    );
+    if (page.length === 0) return deleted;
+    await deleteShareNotifications(strapi, page);
+    await strapi.db
+      .query(SECRET_SHARE_UID)
+      .deleteMany({ where: { id: { $in: page.map((row) => row.id) } } });
+    deleted += page.length;
+  }
+}
+
+/** Every share a person sent or received (scalar ids: no relation sees them). */
+export const sharesOf = (userId: number): Row => ({
+  $or: [{ senderId: userId }, { recipientId: userId }],
+});
+
+const DELETE_PAGE = 500;
+
 // ---------------------------------------------------------------------------
 // People.
 
