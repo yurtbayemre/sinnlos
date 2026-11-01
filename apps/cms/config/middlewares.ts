@@ -20,6 +20,10 @@ export default ({ env }: { env: Env }) => {
 
   return [
     "strapi::logger",
+    // v0.35.0: `Cache-Control: private, no-store` on /api/secret-shares and
+    // below, errors included: outside strapi::errors, so the refusals it
+    // writes keep the header (src/middlewares/secret-shares-no-store.ts).
+    "global::secret-shares-no-store",
     "strapi::errors",
     // The Strapi admin panel and its APIs only for the client networks in
     // ADMIN_ALLOW_CIDRS (v0.26, M5; empty: loopback only). Early, so a

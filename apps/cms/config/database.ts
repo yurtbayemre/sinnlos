@@ -48,6 +48,15 @@ export default ({ env }: { env: Env }) => {
         filename: path.resolve(__dirname, "..", "..", env("DATABASE_FILENAME", ".tmp/data.db")),
       },
       useNullAsDefault: true,
+      // v0.35.0: a failed COMMIT can leave the single connection inside its
+      // transaction (better-sqlite3 keeps it open), and the next request's
+      // BEGIN or, worse, its writes would land in it. A free connection is
+      // never inside a transaction, so one that is gets disposed of at the
+      // next acquire and replaced (utils/secret-shares.ts, commit
+      // confirmation).
+      pool: {
+        validate: (connection: { inTransaction?: boolean }) => connection?.inTransaction !== true,
+      },
     },
   } as const;
 
