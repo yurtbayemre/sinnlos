@@ -48,20 +48,6 @@ test("secret-sharing", async ({ browser }) => {
   await signIn(sender, fixtures.users.member);
   await signIn(lead, fixtures.users.lead);
 
-  await test.step("Every /secrets answer is private, no-store: redirect, 404", async () => {
-    const anonymous = await browser.newContext();
-    const redirect = await anonymous.request.get("/secrets", { maxRedirects: 0 });
-    expect(redirect.status()).toBe(307);
-    expect(redirect.headers()["cache-control"]).toMatch(NO_STORE);
-    await anonymous.close();
-    // The not-found view (the status can be a streamed 200, see teams.spec.ts).
-    for (const path of ["/secrets/aaaaaaaaaaaaaaaaaaaaaaaa", "/secrets/not-an-id"]) {
-      const missing = await lead.goto(path);
-      expect(missing?.headers()["cache-control"], path).toMatch(NO_STORE);
-      await expect(lead.getByText("Page not found", { exact: true })).toBeVisible();
-    }
-  });
-
   let first = "";
   await test.step("Sent: the lead's bell links to it", async () => {
     first = await send(sender, secret(1));
@@ -102,10 +88,52 @@ test("secret-sharing", async ({ browser }) => {
     await expect(winner.getByTestId("secret-text")).toHaveText(secret(1));
   });
 
-  await test.step("Reload, RSC, back and forward show no text; the sender sees retrieved", async () => {
+  await test.step("After the reveal every /secrets answer is no-store and holds no text", async () => {
+    const holdsNoText = async (
+      what: string,
+      answer: { headers(): Record<string, string>; text(): Promise<string> } | null,
+    ) => {
+      expect(answer?.headers()["cache-control"], what).toMatch(NO_STORE);
+      expect(await answer?.text(), what).not.toContain(secret(1));
+    };
+    // The page's own RSC payload (Flight), what a router refresh fetches.
     const rsc = await winner.request.get(`/secrets/${first}`, { headers: { RSC: "1" } });
-    expect(rsc.headers()["cache-control"]).toMatch(NO_STORE);
-    expect(await rsc.text()).not.toContain(secret(1));
+    expect(rsc.status()).toBe(200);
+    expect(rsc.headers()["content-type"]).toContain("text/x-component");
+    await holdsNoText("RSC", rsc);
+    // The sign-in redirect of proxy.ts: only next.config.mjs's headers() rule
+    // makes it no-store (without the rule it has no Cache-Control at all).
+    const anonymous = await browser.newContext();
+    const redirect = await anonymous.request.get(`/secrets/${first}`, { maxRedirects: 0 });
+    expect(redirect.status()).toBe(307);
+    await holdsNoText("redirect", redirect);
+    await anonymous.close();
+    // The not-found view (the status can be a streamed 200, see teams.spec.ts).
+    const probe = await contextFor(browser, winner);
+    for (const path of ["/secrets/aaaaaaaaaaaaaaaaaaaaaaaa", "/secrets/not-an-id"]) {
+      const missing = await probe.goto(path);
+      await expect(probe.getByText("Page not found", { exact: true })).toBeVisible();
+      await holdsNoText(path, missing);
+    }
+    // The error view: the cms fails the read (its table renamed for a moment).
+    sql("ALTER TABLE secret_shares RENAME TO secret_shares_e2e_away");
+    try {
+      const failed = await probe.goto(`/secrets/${first}`);
+      await expect(probe.getByText("Something went wrong", { exact: true })).toBeVisible();
+      await holdsNoText("error", failed);
+    } finally {
+      sql("ALTER TABLE secret_shares_e2e_away RENAME TO secret_shares");
+    }
+    // A switched-off module (the marketplace in this run): proxy.ts's
+    // rewrite to the 404 page, the same answer /secrets gets with secrets
+    // off (proxy.test.ts), where the headers() rule applies as well.
+    const off = await probe.goto("/marketplace");
+    expect(off?.status()).toBe(404);
+    expect(off?.headers()["cache-control"]).toMatch(NO_STORE);
+    await probe.context().close();
+  });
+
+  await test.step("Reload, back and forward show no text; the sender sees retrieved", async () => {
     await winner.getByRole("link", { name: "All secrets" }).click();
     await expect(winner).toHaveURL("/secrets");
     await winner.goBack();
@@ -169,12 +197,15 @@ test("secret-sharing", async ({ browser }) => {
     const held = new Promise<void>((done) => (release = done));
     let sent = () => {};
     const posted = new Promise<void>((done) => (sent = done));
+    let delivered = () => {};
+    const fulfilled = new Promise<void>((done) => (delivered = done));
     await lead.route(`**/secrets/${id}`, async (route) => {
       if (route.request().method() !== "POST") return route.continue();
       const response = await route.fetch();
       sent();
       await held;
       await route.fulfill({ response });
+      delivered();
     });
     await lead.getByRole("button", { name: "Show and delete" }).click();
     await posted;
@@ -182,9 +213,8 @@ test("secret-sharing", async ({ browser }) => {
     // The destination has rendered before the answer is let through.
     await expect(lead).toHaveURL("/secrets");
     await expect(lead.getByRole("heading", { name: "Secrets", exact: true })).toBeVisible();
-    const finished = lead.waitForEvent("requestfinished", (r) => r.method() === "POST");
     release();
-    await finished;
+    await fulfilled;
     await expect(lead.getByRole("heading", { name: "Secrets", exact: true })).toBeVisible();
     expect(await lead.content()).not.toContain(secret(5));
     await lead.unroute(`**/secrets/${id}`);

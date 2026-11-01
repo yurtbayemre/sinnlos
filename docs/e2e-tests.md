@@ -90,8 +90,20 @@ one change made in the database, through the run's psql
 (`SINNLOS_E2E_PSQL`). A reveal answer held until the lead's next page has
 rendered never shows its text. A guest has no Secrets entry and gets the "not
 available" page. Further browser contexts of the lead reuse its stored session
-instead of signing in again. A secrets-off response cannot be produced here
-(the run switches only the marketplace off).
+instead of signing in again.
+
+Where each `Cache-Control` gate is proved (Next 16.4.3, production build).
+The page, its RSC payload, the not-found and the error view (the CMS read made
+to fail by renaming `secret_shares` for a moment through the run's psql) are
+checked in `secret-sharing` after the reveal, each without the sentinel in its
+body. Next already sends `private, no-cache, no-store` on these dynamic
+renders; the `next.config.mjs` rule on `/secrets/:path*` adds nothing there.
+The sign-in redirect of `proxy.ts` is the answer the rule exists for: a run
+without the rule showed it without any `Cache-Control`, so `headers()` does
+reach responses produced by the proxy. A switched-off module is the proxy's
+rewrite to the 404 page; the run checks it on the marketplace (switched off
+here) and finds it no-store. `/secrets` with secrets off takes the same
+rewrite (`proxy.test.ts`) under the same rule; it needs no stack of its own.
 
 The `secret-live` case runs only in its own stack with live events on in the
 CMS and the web (`WEB_INTERNAL_URL=http://web:3000`), started by
