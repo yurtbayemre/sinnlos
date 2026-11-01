@@ -500,6 +500,10 @@ export const CUSTOM_ACTION_GRANTS: Record<string, readonly MatrixRoleType[] | "*
   // controller counts a kind only while the role holds its find and
   // acknowledgement.find, else null (utils/open-acks.ts).
   "api::profile.profile.openAcks": "*",
+  // v0.34 (B1): may the caller open one uploaded file? Asked by the web's
+  // /uploads proxy only (internal secret); the answer follows the content
+  // the file belongs to (utils/upload-access.ts).
+  "api::upload-access.upload-access.check": "*",
   // v0.31: who confirmed which items of the admin's report page
   // (utils/ack-report-index.ts); the controller checks admin_role again.
   "api::acknowledgement.acknowledgement.reportIndex": [ADMIN],

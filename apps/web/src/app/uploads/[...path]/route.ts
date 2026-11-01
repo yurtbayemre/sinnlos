@@ -14,11 +14,18 @@
  * thumbnails) keeps working without a migration. Flip side, documented in
  * docs/architecture.md §7b P1.4: the Strapi admin media library loads its
  * thumbnails as plain <img> from this path, so an admin needs a parallel
- * intranet session in the same browser to see them.
+ * intranet session in the same browser to see them (since v0.34 only what
+ * that account may open; admin_role and editor open every file).
  *
- * No per-department visibility on file bytes (deliberate, see the
- * architecture record): any signed-in employee who knows a hash URL can
- * fetch the bytes. Before this route, ANYONE could.
+ * Per content (v0.34, audit finding B1): after the account check the cms
+ * decides whether this viewer may open this file, by the content it belongs
+ * to (lib/upload-decision.ts, apps/cms/src/utils/upload-access.ts): a
+ * department-only document's file only for that audience, a draft's file
+ * only for its authors, an admin-panel image through a text the viewer may
+ * read. Every other answer is a 404, like a file that does not exist, and
+ * it comes before the byte fetch, so Range and conditional requests are
+ * answered only after an allow. Until v0.34 every signed-in account could
+ * fetch any file whose URL it knew.
  *
  * Revocation (FX41): the session must also still hold a Strapi JWT that
  * Strapi accepts. A blocked or deleted account (or a rejected token) gets a
@@ -31,6 +38,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { getSession, getStrapiToken } from "@/lib/session";
 import { STRAPI_URL } from "@/lib/config";
 import { checkUploadAccess } from "@/lib/upload-block-cache";
+import { checkUploadDecision } from "@/lib/upload-decision";
 // Segment regex, header allowlists, identity encoding and the internal token
 // header live in lib/upload-proxy.ts (unit-tested there, S06).
 import {
@@ -68,6 +76,21 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ path
     return new NextResponse("Unauthorized", { status: 401 });
   }
   if (access === "unavailable") {
+    return new NextResponse("Service unavailable", { status: 503 });
+  }
+
+  // B1: the content this file belongs to decides, before any byte is fetched.
+  const decision = await checkUploadDecision({
+    userId: typeof session.user?.id === "number" ? session.user.id : undefined,
+    jwt,
+    name: path.join("/"),
+    strapiUrl: STRAPI_URL,
+    internalToken: process.env.INTERNAL_UPLOAD_TOKEN,
+  });
+  if (decision === "deny") {
+    return new NextResponse("Not found", { status: 404 });
+  }
+  if (decision === "unavailable") {
     return new NextResponse("Service unavailable", { status: 503 });
   }
 
