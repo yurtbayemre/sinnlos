@@ -480,6 +480,8 @@ const GOLDEN: Record<string, PolicySpec[]> = {
   "api::profile.profile.mfaSetup": [],
   "api::profile.profile.mfaActivate": [],
   "api::profile.profile.mfaDisable": [],
+  // v0.34: the sign-out (token version bump).
+  "api::profile.profile.signOut": [],
   // v0.31: the banner's open count; the controller checks the read grants.
   "api::profile.profile.openAcks": [],
 
@@ -504,6 +506,10 @@ const GOLDEN: Record<string, PolicySpec[]> = {
   "api::team.team.update": ["global::can-edit-team"],
   "api::team.team.delete": [{ name: "global::can-edit-team", config: { intent: "delete" } }],
   "api::team.team.editable": [{ name: "global::can-edit-team", config: { intent: "editable" } }],
+
+  // v0.34 (B1): the /uploads proxy's access question; the controller takes
+  // only the web server (internal secret) and decides for the caller.
+  "api::upload-access.upload-access.check": [],
 
   "api::wiki-page.wiki-page.find": wiki("page"),
   "api::wiki-page.wiki-page.findOne": wiki("page"),

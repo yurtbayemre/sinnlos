@@ -226,7 +226,7 @@ function refuse(intent: WikiGateIntent | null): false {
 }
 
 /** The caller's department id and readable spaces (non-moderators; read per request). */
-async function callerScope(
+export async function callerScope(
   strapi: WriteGateHost,
   caller: { id: number; role?: { type?: unknown } | null },
   moderator: boolean,

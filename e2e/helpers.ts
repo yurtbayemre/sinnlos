@@ -22,6 +22,8 @@ type Fixtures = {
   };
   poll: { question: string; documentId: string };
   quickLink: { label: string; documentId: string };
+  /** v0.34: the file names of two documents (uploads.spec.ts). */
+  files: { companyWide: string; otherDepartment: string };
   privacy: { announcement: { title: string; documentId: string }; comment: string };
   teams: { editable: Team; readonly: Team };
   training: TrainingFixture;

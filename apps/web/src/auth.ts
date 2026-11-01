@@ -55,6 +55,7 @@ import { ENTRA, LOCAL_ENABLED, OIDC } from "@/lib/auth-config";
 import { createAuthCallbacks, ENTRA_PROVIDER_ID, OIDC_PROVIDER_ID } from "@/lib/auth/callbacks";
 import { oidcFetch } from "@/lib/auth/oidc-fetch";
 import { authorizeCredentials } from "@/lib/auth/credentials";
+import { logAuthError } from "@/lib/auth/log-error";
 import { clientIpFrom, loginRateLimiter } from "@/lib/login-rate-limit";
 
 const IS_BUILD = process.env.NEXT_PHASE === "phase-production-build";
@@ -205,6 +206,10 @@ export const callbacks = createAuthCallbacks({
 // change to the session (FX40; the jwt callback's update branch decides).
 export const { handlers, auth, signIn, signOut, unstable_update } = NextAuth({
   trustHost: true,
+  // v0.34: pinned to the route (app/api/auth/[...nextauth]). Auth.js would
+  // otherwise take a path in AUTH_URL as its base, and auth-handlers.ts
+  // closes Auth.js's own sign-out at /api/auth/signout only.
+  basePath: "/api/auth",
   // Upper bound only: 7 days = the local Strapi JWT's expiresIn
   // (apps/cms/config/plugins.ts; Entra sign-ins get ENTRA_SESSION_TTL, at
   // most 7d). The session actually ends when the embedded Strapi JWT
@@ -219,4 +224,7 @@ export const { handlers, auth, signIn, signOut, unstable_update } = NextAuth({
   pages: { signIn: "/sign-in", error: "/sign-in" },
   providers,
   callbacks,
+  // v0.34: a refused sign-in is one short line, not a stack trace each
+  // (lib/auth/log-error.ts); every other error is logged as before.
+  logger: { error: (error) => logAuthError(error) },
 });

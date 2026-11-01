@@ -58,6 +58,7 @@
   "auth": {
     "signIn": "Anmelden",
     "signOut": "Abmelden",
+    "signOutHint": "Meldet Sie auf allen Ihren Geräten vom Intranet ab",
     "signInWithMicrosoft": "Mit Microsoft anmelden",
     "signInDescBoth": "Melden Sie sich mit Ihrem Microsoft-Konto oder E-Mail und Passwort an",
     "signInDescMicrosoft": "Melden Sie sich mit Ihrem Microsoft-Firmenkonto an",
@@ -81,6 +82,7 @@
     "mfaPrompt": "Ihr Konto ist mit Zwei-Faktor-Anmeldung geschützt. Geben Sie Ihren Code ein, um die Anmeldung abzuschließen.",
     "forgotPassword": "Passwort vergessen?",
     "passwordSet": "Ihr Passwort ist gesetzt. Bitte melden Sie sich an.",
+    "signedOutUnconfirmed": "Sie sind auf diesem Gerät abgemeldet. Wir konnten nicht bestätigen, dass Ihre Sitzungen auf anderen Geräten beendet sind; melden Sie sich an und wieder ab, oder ändern Sie Ihr Passwort.",
     "forgotTitle": "Passwort zurücksetzen",
     "forgotDesc": "Geben Sie die E-Mail-Adresse Ihres Kontos ein. Wir schicken Ihnen einen Link, mit dem Sie ein neues Passwort setzen.",
     "forgotSubmit": "Link senden",
@@ -715,6 +717,7 @@
     "error_notEnabled": "Die Zwei-Faktor-Anmeldung ist für Ihr Konto nicht eingeschaltet.",
     "error_requiredByRole": "Ihre Rolle verlangt die Zwei-Faktor-Anmeldung, daher lässt sie sich nicht ausschalten. Wenn Sie Ihr Gerät verloren haben, kann eine Administration sie zurücksetzen.",
     "error_unavailable": "Die Zwei-Faktor-Anmeldung ist gerade nicht verfügbar. Bitte wenden Sie sich an eine Administration.",
+    "error_rateLimited": "Zu viele falsche Passwörter oder Codes. Bitte warten Sie einige Minuten und versuchen Sie es dann erneut.",
     "error_failed": "Das hat nicht geklappt. Bitte versuchen Sie es erneut."
   }
 }

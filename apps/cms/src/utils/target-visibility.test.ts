@@ -21,6 +21,8 @@ import {
  *  - an announcement without a published row is no target at all, for
  *    every caller on writes (owner answer 2026-09-29 (b): the answer of a
  *    missing target),
+ *  - a wiki page without a published row is no target either, for every
+ *    caller but admin_role / editor (v0.34, B2),
  *  - wiki page without a space fails closed,
  *  - anonymous callers only see untargeted announcements / public spaces.
  */
@@ -51,11 +53,20 @@ const SPACES = [
   { id: 2, visibility: "department", department: { id: ENG } },
 ];
 
+const PUBLISHED_AT = "2026-01-01";
 const PAGES = [
-  { id: 100, documentId: "pageP", space: { id: 1 } },
-  { id: 101, documentId: "pageQ", space: { id: 2 } },
-  { id: 102, documentId: "pageO", space: null },
+  { id: 100, documentId: "pageP", publishedAt: PUBLISHED_AT, space: { id: 1 } },
+  { id: 101, documentId: "pageQ", publishedAt: PUBLISHED_AT, space: { id: 2 } },
+  { id: 102, documentId: "pageO", publishedAt: PUBLISHED_AT, space: null },
+  // pageR: never published, its draft in the public space (B2).
+  { id: 103, documentId: "pageR", publishedAt: null, space: { id: 1 } },
 ];
+
+/** The `publishedAt: { $notNull: true }` filter of a page query, when there is one. */
+const publishedFilter =
+  (where: { publishedAt?: unknown } | undefined) =>
+  (page: { publishedAt: string | null }): boolean =>
+    !where?.publishedAt || page.publishedAt != null;
 
 function stubStrapi() {
   return {
@@ -66,11 +77,11 @@ function stubStrapi() {
           if (uid === "plugin::users-permissions.user")
             return USERS.find((u) => u.id === where.id) ?? null;
           if (uid === "api::wiki-page.wiki-page") {
-            const matches = PAGES.filter((p) => p.documentId === where.documentId);
-            // publishedAt-filtered lookup first — the fixture rows carry no
-            // publishedAt, so treat the filtered probe as a miss.
-            if (where.publishedAt) return null;
-            return matches[0] ?? null;
+            return (
+              PAGES.filter((p) => p.documentId === where.documentId).filter(
+                publishedFilter(where),
+              )[0] ?? null
+            );
           }
           return null;
         },
@@ -84,7 +95,9 @@ function stubStrapi() {
           if (uid === "api::wiki-space.wiki-space") return SPACES;
           if (uid === "api::wiki-page.wiki-page") {
             const ids = (oneParamList(where?.space?.id?.$in) ?? []) as number[];
-            return PAGES.filter((p) => p.space && ids.includes(p.space.id));
+            return PAGES.filter((p) => p.space && ids.includes(p.space.id)).filter(
+              publishedFilter(where),
+            );
           }
           return [];
         },
@@ -102,6 +115,7 @@ describe("visibleTargetAnchors", () => {
     const anchors = await visibleTargetAnchors(stubStrapi(), engMember);
     // docC is a draft only: no target (owner answer 2026-09-29 (b)).
     expect(anchors.announcement.sort()).toEqual(["docA", "docB", "docD"]);
+    // pageR is a draft only: no target (B2).
     expect(anchors["wiki-page"].sort()).toEqual(["pageP", "pageQ"]);
   });
 
@@ -175,6 +189,20 @@ describe("isTargetVisible", () => {
     );
   });
 
+  it("refuses a never-published wiki page to everyone but admin_role and editor (v0.34, B2)", async () => {
+    for (const user of [engMember, designMember, null]) {
+      await expect(
+        isTargetVisible(stubStrapi(), "wiki-page", "pageR", user),
+        String(user?.role.type ?? "anonymous"),
+      ).resolves.toBe(false);
+    }
+    for (const moderator of [admin, { id: 98, role: { type: "editor" } }]) {
+      await expect(isTargetVisible(stubStrapi(), "wiki-page", "pageR", moderator)).resolves.toBe(
+        true,
+      );
+    }
+  });
+
   it("fails closed for a wiki page without a space", async () => {
     await expect(isTargetVisible(stubStrapi(), "wiki-page", "pageO", engMember)).resolves.toBe(
       false,
@@ -205,12 +233,13 @@ describe("isTargetVisible", () => {
 
 /**
  * PL04: the list (visibleTargetAnchors) and the single-anchor check
- * (isTargetVisible) judge a wiki page by the same row, its published row
- * when it has one. A page's draft and published rows link the draft and
- * published rows of their spaces, and those can differ until a publish: a
- * space widened in a draft, a page moved into another space in a draft.
+ * (isTargetVisible) judge a wiki page by the same row, its published row;
+ * a page without one is no target (v0.34, B2). A page's draft and
+ * published rows link the draft and published rows of their spaces, and
+ * those can differ until a publish: a space widened in a draft, a page
+ * moved into another space in a draft.
  */
-describe("wiki pages: the list and the single check agree (published row first)", () => {
+describe("wiki pages: the list and the single check agree (published row only)", () => {
   const ENG_DEPT = 10;
   const SALES_DEPT = 11;
   const PUBLISHED = "2026-09-01T00:00:00.000Z";
@@ -288,10 +317,11 @@ describe("wiki pages: the list and the single check agree (published row first)"
     ["sales", { id: 2, role: { type: "member" } }],
     ["anonymous", null],
   ];
+  // page-draft-only is in no list (B2): a public space, but no published row.
   const EXPECTED: Record<string, string[]> = {
-    eng: ["page-draft-only", "page-eng", "page-moved-in", "page-moved-out", "page-open"],
-    sales: ["page-draft-only", "page-moved-out", "page-open", "page-widened"],
-    anonymous: ["page-draft-only", "page-moved-out", "page-open"],
+    eng: ["page-eng", "page-moved-in", "page-moved-out", "page-open"],
+    sales: ["page-moved-out", "page-open", "page-widened"],
+    anonymous: ["page-moved-out", "page-open"],
   };
 
   it.each(CALLERS)(
@@ -315,19 +345,14 @@ describe("wiki pages: the list and the single check agree (published row first)"
     },
   );
 
-  it("reads the pages without populating anything", async () => {
+  it("reads the published pages in one query, without populating anything", async () => {
     const strapi = stub();
     await visibleTargetAnchors(strapi, { id: 1, role: { type: "member" } });
     const pageCalls = strapi.calls.filter((call) => call.uid === "api::wiki-page.wiki-page");
-    // Each list goes as one parameter (oneParamIn, #175); decoded for the comparison.
+    // The list goes as one parameter (oneParamIn, #175); decoded for the comparison.
     expect(pageCalls.map((call) => decodeOneParam(call.params))).toEqual([
-      { where: { space: { id: { $in: [1, 2, 3, 4, 6] } } }, select: ["documentId", "publishedAt"] },
       {
-        where: {
-          // Only a draft of these sits in a visible space.
-          documentId: { $in: ["page-widened", "page-draft-only", "page-no-space"] },
-          publishedAt: { $notNull: true },
-        },
+        where: { space: { id: { $in: [1, 2, 3, 4, 6] } }, publishedAt: { $notNull: true } },
         select: ["documentId"],
       },
     ]);
@@ -335,8 +360,9 @@ describe("wiki pages: the list and the single check agree (published row first)"
 });
 
 describe("wiki page anchors: past the old bind limit (#175)", () => {
-  it("looks 40,000 draft-only pages up with one list and keeps them all", async () => {
+  it("reads 40,000 published pages with one query and keeps them all", async () => {
     const count = 40_000;
+    const spaces = [{ id: 1, visibility: "public" }];
     const documentIds = Array.from(
       { length: count },
       (_, index) => `p${String(index).padStart(23, "0")}`,
@@ -347,26 +373,26 @@ describe("wiki page anchors: past the old bind limit (#175)", () => {
         connection: oneParamConnection,
         query: (uid: string) => ({
           findOne: async () => null,
-          findMany: async (params: { where?: { documentId?: unknown } }) => {
-            if (uid === "api::wiki-space.wiki-space") return [{ id: 1, visibility: "public" }];
+          findMany: async (params: unknown) => {
+            if (uid === "api::wiki-space.wiki-space") return spaces;
             if (uid !== "api::wiki-page.wiki-page") return [];
             pageQueries.push(decodeOneParam(params));
-            // Every page has only a draft in the visible space, and none is
-            // published elsewhere.
-            return params.where?.documentId
-              ? []
-              : documentIds.map((documentId) => ({ documentId, publishedAt: null }));
+            return documentIds.map((documentId) => ({ documentId }));
           },
         }),
       },
     };
     const anchors = await visibleTargetAnchors(strapi as never, null);
     expect(anchors["wiki-page"]).toHaveLength(count);
-    expect(pageQueries).toHaveLength(2);
-    expect(pageQueries[1]).toEqual({
-      where: { documentId: { $in: documentIds }, publishedAt: { $notNull: true } },
-      select: ["documentId"],
-    });
+    expect(pageQueries).toEqual([
+      {
+        where: {
+          space: { id: { $in: spaces.map((space) => space.id) } },
+          publishedAt: { $notNull: true },
+        },
+        select: ["documentId"],
+      },
+    ]);
   });
 });
 

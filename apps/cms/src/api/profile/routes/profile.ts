@@ -38,5 +38,12 @@ export default {
       handler: "api::profile.profile.mfaDisable",
       config: { policies: [] },
     },
+    // v0.34: sign-out ends every session of the account (A-02).
+    {
+      method: "POST",
+      path: "/me/sign-out",
+      handler: "api::profile.profile.signOut",
+      config: { policies: [] },
+    },
   ],
 };

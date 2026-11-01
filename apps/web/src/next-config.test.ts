@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -20,6 +21,7 @@ const WEB_DIR = resolve(__dirname, "..");
 const requireFromWeb = createRequire(resolve(WEB_DIR, "package.json"));
 
 interface WebConfig {
+  headers?: () => Promise<{ source: string; headers: { key: string; value: string }[] }[]>;
   experimental?: {
     serverActions?: { bodySizeLimit?: string };
     proxyClientMaxBodySize?: string;
@@ -76,6 +78,18 @@ describe("next.config.mjs body limits (S8)", () => {
     expect(defaultConfig.experimental.proxyClientMaxBodySize).toBe(10 * 1024 * 1024);
     expect(sizeOf(config.experimental?.proxyClientMaxBodySize)).toBeGreaterThan(
       defaultConfig.experimental.proxyClientMaxBodySize,
+    );
+  });
+});
+
+describe("next.config.mjs robots (v0.34)", () => {
+  it("marks every web response noindex, and robots.txt disallows everything", async () => {
+    const config = await loadConfig();
+    expect(await config.headers?.()).toEqual([
+      { source: "/:path*", headers: [{ key: "X-Robots-Tag", value: "noindex, nofollow" }] },
+    ]);
+    expect(readFileSync(resolve(WEB_DIR, "public/robots.txt"), "utf8")).toBe(
+      "User-agent: *\nDisallow: /\n",
     );
   });
 });

@@ -86,8 +86,9 @@ set +x # first: never trace this script (rotate-jwt handles a secret), also unde
 # of the project holds the lock (nothing changed).
 #
 # Parameters (environment; the defaults are the owner's production host):
-#   COMPOSE_PROJECT        infra (as infra/deploy.sh; a staging project has its own
-#                          containers, state, reservation and lock)
+#   COMPOSE_PROJECT        infra (as infra/deploy.sh, also from infra/deploy.env; a
+#                          staging project has its own containers, state, reservation
+#                          and lock)
 #   RESTORE_COMPOSE_FILES  the compose files, ':'-separated (relative to the
 #                          checkout or absolute), when the project's containers do
 #                          not tell; unset: the ordered config_files label of its web
@@ -185,6 +186,12 @@ KNOWN_COMPOSE=(docker-compose.yml docker-compose.traefik.yml)
 # still started with one are recreated with the supported files first (or an
 # attempt that started with one finishes from the old checkout).
 RETIRED_COMPOSE=(docker-compose.cms-legacy-tz.yml docker-compose.web-legacy-tz.yml)
+# Host settings from infra/deploy.env, like deploy.sh: its COMPOSE_PROJECT
+# names the project (the caller's still wins; a file of another project is
+# refused with exit 2 before anything changes).
+# shellcheck disable=SC1091 # the library next to this script, checked on its own
+source "${INFRA_DIR}/deploy-env.sh"
+load_deploy_env "${INFRA_DIR}/deploy.env" "${CHECKOUT}"
 
 PROJECT="${COMPOSE_PROJECT:-infra}"
 if ! [[ "${PROJECT}" =~ ^[a-z0-9][a-z0-9_-]*$ ]]; then

@@ -9,7 +9,7 @@
  * The form actions answer machine codes (AC02); the form translates them
  * through lib/auth/form-messages.ts. No Strapi message reaches the UI.
  */
-import { headers } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { redirect, unstable_rethrow } from "next/navigation";
 import type { Route } from "next";
 import { CredentialsSignin } from "next-auth";
@@ -21,8 +21,15 @@ import {
   MFA_REQUIRED_SIGN_IN_CODE,
 } from "@/lib/auth-errors";
 import { credentialsTooLong } from "@/lib/auth/credentials";
+import {
+  revokeAllSessions,
+  SIGN_OUT_NOTICE_COOKIE,
+  SIGN_OUT_NOTICE_PATH,
+  signOutNoticeCookie,
+} from "@/lib/auth/sign-out-notice";
+import { STRAPI_URL } from "@/lib/config";
 import { clientIpFrom, loginRateLimiter } from "@/lib/login-rate-limit";
-import { getSession } from "@/lib/session";
+import { getSession, getStrapiToken } from "@/lib/session";
 import { safeInternalPath } from "@/lib/utils";
 
 export async function signInWithMicrosoft(formData: FormData) {
@@ -111,6 +118,10 @@ export async function signInWithCredentials(
  *
  *  1. Read the session BEFORE clearing it to learn which provider the
  *     user signed in with.
+ *  1b. v0.34 (A-02): end every intranet session of the account on the cms
+ *     (lib/auth/sign-out-notice.ts), while the cookie still holds the JWT.
+ *     Bounded, and the steps below run whatever it answers; an unconfirmed
+ *     revocation leaves the /sign-in notice cookie.
  *  2. Clear the local Auth.js session cookie (signOut with redirect:false
  *     returns a URL but does NOT throw the NEXT_REDIRECT sentinel, which
  *     lets us chain a second redirect below).
@@ -138,6 +149,10 @@ export async function signInWithCredentials(
 export async function signOutAction() {
   const session = await getSession();
   const provider = session?.provider;
+  const jwt = session ? await getStrapiToken() : null;
+  // No session: nothing to end. A session without a Strapi JWT cannot be
+  // ended on the cms: unconfirmed.
+  const revoked = jwt ? await revokeAllSessions({ strapiUrl: STRAPI_URL, jwt }) : session === null;
 
   await signOut({ redirect: false });
 
@@ -152,6 +167,10 @@ export async function signOutAction() {
     (host && !host.startsWith("localhost") && !host.startsWith("127.") ? "https" : "http");
   const appUrl = process.env.AUTH_URL ?? (host ? `${proto}://${host}` : "http://localhost:3000");
   const postLogoutRedirect = `${appUrl.replace(/\/$/, "")}/sign-in`;
+
+  const jar = await cookies();
+  if (revoked) jar.delete({ name: SIGN_OUT_NOTICE_COOKIE, path: SIGN_OUT_NOTICE_PATH });
+  else jar.set(SIGN_OUT_NOTICE_COOKIE, "1", signOutNoticeCookie(appUrl.startsWith("https:")));
 
   // Federated logout only applies to Microsoft sessions — local users
   // would otherwise get bounced to a Microsoft logout page.

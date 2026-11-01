@@ -42,7 +42,7 @@ type TrainingConfig = { level?: TrainingLevel } | undefined;
 
 const LESSON_UID = "api::lesson.lesson";
 
-async function lessonsOfPublishedCourses({
+export async function lessonsOfPublishedCourses({
   strapi,
   user,
 }: VisibleIdsInput<TrainingConfig>): Promise<number[]> {

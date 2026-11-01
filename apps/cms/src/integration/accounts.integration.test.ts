@@ -165,6 +165,15 @@ describe.each(testEngines())("accounts (v0.27) on %s", (engine) => {
     }
   });
 
+  it("a restricted session may sign out, which ends it on the server (v0.34)", async () => {
+    const user = t.fixtures.users.editor;
+    const jwt = (await signIn(user.username, user.password)).body.jwt!;
+    expect((await me(jwt)).body.data?.mfa.restricted).toBe(true);
+    const out = await t.api(bearer(jwt), "/api/me/sign-out", { method: "POST" });
+    expect(out.status, out.text).toBe(204);
+    expect((await me(jwt)).status).toBe(401);
+  });
+
   it("enrollment: the password, a code, ten recovery codes; then sign-in asks for a code", async () => {
     const user = t.fixtures.users.editor;
     const first = (await signIn(user.username, user.password)).body.jwt!;
@@ -563,6 +572,41 @@ describe.each(testEngines())("accounts (v0.27) on %s", (engine) => {
       headers: { "x-internal-token": TOKEN },
     })) as Answer;
     expect(errorCode(refused)).toBe("token_invalid");
+  });
+
+  it("sign-out (v0.34) ends every session of the account and its pending reset link", async () => {
+    const user = t.fixtures.users.member;
+    const laptop = (await signIn(user.username, user.password)).body.jwt!;
+    const phone = (await signIn(user.username, user.password)).body.jwt!;
+    mails.length = 0;
+    const forgot = await t.api(null, "/api/auth/password/forgot", {
+      json: { email: user.email, locale: "en" },
+      headers: { "x-internal-token": TOKEN },
+    });
+    expect(forgot.status, forgot.text).toBe(202);
+    for (let i = 0; i < 60 && mails.length === 0; i++) await new Promise((r) => setTimeout(r, 50));
+    const token = /set-password#(\S+)/.exec(mails[0]?.text ?? "")?.[1] ?? "";
+    expect(token).not.toBe("");
+
+    const out = await t.api(bearer(laptop), "/api/me/sign-out", { method: "POST" });
+    expect(out.status, out.text).toBe(204);
+    // The copied cookie's JWT and the other device's are refused alike.
+    expect((await t.api(bearer(laptop), "/api/announcements")).status).toBe(401);
+    expect((await me(phone)).status).toBe(401);
+    // A second sign-out with the revoked JWT is not possible.
+    expect((await t.api(bearer(laptop), "/api/me/sign-out", { method: "POST" })).status).toBe(401);
+    const link = (await t.api(null, "/api/auth/password/set", {
+      json: { token, password: "Member-Password-2027" },
+      headers: { "x-internal-token": TOKEN },
+    })) as Answer;
+    expect(errorCode(link)).toBe("token_invalid");
+    expect(await t.api(null, "/api/me/sign-out", { method: "POST" })).toMatchObject({
+      status: 403,
+    });
+    // Signing in again works as before.
+    const again = await signIn(user.username, user.password);
+    expect(again.status, again.text).toBe(200);
+    expect((await me(again.body.jwt!)).status).toBe(200);
   });
 
   it("the baseline on Document Service writes; an old short password still signs in", async () => {

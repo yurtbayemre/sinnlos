@@ -9,8 +9,8 @@
  *   2. the target announcement is found with GETs only;
  *   3. the stream is fetched with --compressed and must come back as
  *      text/event-stream without a Content-Encoding;
- *   4. the notification cleanup removes only this run's comment
- *      notifications of the smoke author;
+ *   4. the cleanup removes the probe comments only, never notifications
+ *      (v0.34: nothing tells the probe's apart from genuine ones);
  *   5. an identity-provider-only web (ENTRA_ENABLED=1 or OIDC_ENABLED=1
  *      without AUTH_LOCAL_ENABLED=1)
  *      ends after the datetime check with a SKIPPED note and exit 0 (run in
@@ -147,17 +147,16 @@ describe("live-smoke.sh: what it touches", () => {
     );
   });
 
-  it("removes only this run's comment notifications of the smoke author", () => {
-    const sql = SCRIPT.slice(
-      SCRIPT.indexOf("WITH doomed AS ("),
-      SCRIPT.indexOf("SELECT count(*) FROM removed;"),
+  it("cleans up the probe comments only, never notifications (v0.34)", () => {
+    const cleanup = SCRIPT.slice(
+      SCRIPT.indexOf("cleanup() {"),
+      SCRIPT.indexOf("trap cleanup EXIT"),
     );
-    expect(sql).toContain("lower(u.email) = lower(:'author') AND n.type = 'comment'");
-    expect(sql).toContain("n.link = '/announcements' AND n.created_at >= :'since'::timestamptz");
-    // The run's start is read right before the comment, from the database's clock.
-    const started = SCRIPT.indexOf("RUN_STARTED=\"$(db_psql -c 'SELECT clock_timestamp()'");
-    expect(started).toBeGreaterThan(-1);
-    expect(started).toBeLessThan(SCRIPT.indexOf("cms_probe comment ||"));
+    expect(cleanup).toContain('comments="$(cms_probe cleanup 2>/dev/null)" || comments="?"');
+    expect(cleanup).toContain('echo "live-smoke: cleanup removed ${comments} probe comment(s)"');
+    // No SQL anywhere deletes notifications (a cleanup by author and time removed genuine ones).
+    expect(SCRIPT).not.toMatch(/DELETE FROM notifications/i);
+    expect(SCRIPT).not.toContain("RUN_STARTED");
   });
 });
 

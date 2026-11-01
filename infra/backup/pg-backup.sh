@@ -44,6 +44,13 @@
 # and leaves last-success alone, so the monitor alerts; a nightly run still
 # exits 0, a pre-deploy run exits 1 (deploy.sh then stops before it changes
 # anything: an upgrade needs the secrets and the media backed up as well).
+#
+# One run at a time per backup root (v0.34): the lock file .pg-backup.lock in
+# SINNLOS_BACKUP_DIR (kept, never deleted). A run that finds it held exits 1
+# before it writes anything, no log line included (a pre-deploy run: deploy.sh
+# stops before it changes anything; rerun the deploy). A file name of this run
+# that exists already (a run in the same second before it) is refused the same
+# way, before the run owns it: nothing of the earlier run is removed.
 set -Eeuo pipefail
 umask 077
 
@@ -100,6 +107,23 @@ LAST_SUCCESS="$OFFSITE/last-success$TAG"
 if [[ ! -d "$BK" ]]; then
   echo "pg-backup: the backup root $BK does not exist (it holds the GPG keyring and .backup-keyid)" >&2
   exit 1
+fi
+# The lock (see the header), held on fd 9 until the run ends.
+LOCK="$BK/.pg-backup.lock"
+if [[ -L "$LOCK" ]]; then
+  echo "pg-backup: $LOCK is a symlink; this run wrote nothing" >&2
+  exit 1
+fi
+exec 9>> "$LOCK"
+if ! flock -n 9; then
+  echo "pg-backup: another backup run holds $LOCK; this run wrote nothing (run it again once that one is done)" >&2
+  exit 1
+fi
+# Owner-only, and a root run (deploy.sh) hands it to the backup root's owner,
+# also one an interrupted root run left behind: the owner's cron must open it.
+chmod 600 "$LOCK"
+if ((EUID == 0)) && ! chown --reference="$BK" "$LOCK"; then
+  echo "pg-backup: WARNING: $LOCK keeps its owner; the backup root's owner (cron) cannot open it" >&2
 fi
 for d in "$BK/offsite" "$OFFSITE"; do
   if [[ ! -d "$d" ]]; then
@@ -209,7 +233,8 @@ finalize() {  # <file(uncompressed)> <stem> <ext> <label>
   # skips gpg's warning about the keyring's owner.
   local -a gpg_opts=(--homedir "$GNUPGHOME" --batch --yes --trust-model always --no-random-seed-file)
   if ((EUID == 0)); then gpg_opts+=(--no-permission-warning); fi
-  gpg "${gpg_opts[@]}" --encrypt --recipient "$KEYID" --output "$PARTIAL" "$f.gz"
+  # 9>&-: an agent gpg may start must not inherit (and keep) the run's lock.
+  gpg "${gpg_opts[@]}" --encrypt --recipient "$KEYID" --output "$PARTIAL" "$f.gz" 9>&-
   [[ -s "$PARTIAL" ]] || { echo "pg-backup: gpg wrote nothing for $label" >&2; return 1; }
   chmod 600 "$PARTIAL"
   own_like_offsite "$PARTIAL"
@@ -231,6 +256,18 @@ finalize() {  # <file(uncompressed)> <stem> <ext> <label>
     done
   done
 }
+
+# Every name this run may write, checked before the EXIT trap owns it
+# (dangling symlinks included): one that exists stops the run.
+STEP="names"
+for plain in "$BK/sinnlos-db-$TS$TAG.dump" "$BK/sinnlos-uploads-$TS$TAG.tar" "$BK/sinnlos-env-$TS$TAG.env"; do
+  for path in "$plain" "$plain.gz" "$OFFSITE/.${plain##*/}.gz.gpg.partial" "$OFFSITE/${plain##*/}.gz.gpg"; do
+    if [[ -e "$path" || -L "$path" ]]; then
+      echo "pg-backup: $path exists already (a run in the same second?); this run wrote no artifact" >&2
+      exit 1
+    fi
+  done
+done
 
 STEP="keyid"
 KEYID="$(cat "$KEYID_FILE")"
@@ -335,8 +372,7 @@ if [[ -f "$LOG" ]]; then
 fi
 STEP="done"
 # A partial pre-deploy backup fails the run (deploy.sh then stops before it
-# changes anything); the artifacts it did write stay (no lock serialises
-# backup runs, so removing them could hit another run's set; restore-drill.sh
+# changes anything); the artifacts it did write stay (restore-drill.sh
 # --all names the incomplete set, docs/INSTALL.md §4).
 if [[ -n "${PARTIAL_PREDEPLOY:-}" ]]; then
   STEP="partial-predeploy"

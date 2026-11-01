@@ -20,7 +20,11 @@ import { uploadBlockCache } from "@/lib/upload-block-cache";
  *      exp of its Strapi JWT, never Auth.js's sliding `expires`); the
  *      client's abort ends it without one;
  *   4. the hello and the 25 s heartbeat carry the cms leg's freshness
- *      (`emitFresh`, LF05), and a recovering cms leg is announced at once.
+ *      (`emitFresh`, LF05), and a recovering cms leg is announced at once;
+ *   5. (v0.34, N1) an open stream re-checks its JWT at the heartbeats: a
+ *      refused one ends it with `bye expired` within the 60 s check cache
+ *      plus a heartbeat; a cms that cannot say leaves it open until the
+ *      rotation; an answer that arrives after the stream ended does nothing.
  *
  * `@/lib/session` is mocked (the real module pulls in next-auth), as are
  * `@/lib/config` and global fetch (the cms's /api/me); the JWT check's
@@ -38,7 +42,7 @@ vi.mock("@/lib/config", () => ({ STRAPI_URL: "http://cms.test" }));
 
 /** What the cms answers the JWT check (GET /api/me) with. */
 const cms = vi.hoisted(() => ({
-  me: (): Response => Response.json({ data: { id: 1, blocked: false } }),
+  me: (): Response | Promise<Response> => Response.json({ data: { id: 1, blocked: false } }),
 }));
 const fetchMock = vi.fn(async (url: string) => {
   if (url === "http://cms.test/api/me") return cms.me();
@@ -291,5 +295,64 @@ describe("GET /live/stream", () => {
     await vi.advanceTimersByTimeAsync(20_000);
     getLiveBus().publish([{ kind: "keepalive" }]);
     expect(await stream.read()).toBe("");
+  });
+
+  it("ends an open stream with bye expired once the cms refuses its JWT (N1)", async () => {
+    const stream = await open();
+    await stream.read();
+    // Signed out elsewhere (the token version moved on): the cms answers 401.
+    cms.me = () => new Response("", { status: 401 });
+    // The admission's answer is cached for 60 s: the beats at 25 s and 50 s reuse it.
+    await vi.advanceTimersByTimeAsync(50_000);
+    expect(stream.done).toBe(false);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    // The beat at 75 s asks again and ends the stream: within 60 s + one heartbeat.
+    await vi.advanceTimersByTimeAsync(25_000);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect((await stream.read()).endsWith('event: bye\ndata: {"reason":"expired"}\n\n')).toBe(true);
+    expect(stream.done).toBe(true);
+    expect(getLiveBus().connectionCount()).toBe(0);
+  });
+
+  it("keeps an open stream while the cms cannot say, until the rotation (N1)", async () => {
+    const stream = await open();
+    await stream.read();
+    cms.me = () => new Response("", { status: 503 });
+    await vi.advanceTimersByTimeAsync(15 * 60_000 - 1);
+    expect(stream.done).toBe(false);
+    expect(fetchMock.mock.calls.length).toBeGreaterThan(10);
+    await vi.advanceTimersByTimeAsync(1);
+    expect((await stream.read()).endsWith('event: bye\ndata: {"reason":"rotate"}\n\n')).toBe(true);
+  });
+
+  it("ignores a refusal that arrives after the stream ended (N1)", async () => {
+    const abort = new AbortController();
+    const stream = await open(abort);
+    await stream.read();
+    let answer: (res: Response) => void = () => undefined;
+    cms.me = () =>
+      new Promise<Response>((resolve) => {
+        answer = resolve;
+      });
+    await vi.advanceTimersByTimeAsync(75_000);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    await stream.read();
+    abort.abort();
+    expect(await stream.read()).toBe("");
+    expect(stream.done).toBe(true);
+    answer(new Response("", { status: 401 }));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(await stream.read()).toBe("");
+    expect(getLiveBus().connectionCount()).toBe(0);
+  });
+
+  it("asks once per heartbeat at most, never while a check is still out (N1)", async () => {
+    const stream = await open();
+    await stream.read();
+    cms.me = () => new Promise<Response>(() => undefined);
+    await vi.advanceTimersByTimeAsync(5 * 25_000);
+    // The admission, then one check from 75 s on that never answers.
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(stream.done).toBe(false);
   });
 });

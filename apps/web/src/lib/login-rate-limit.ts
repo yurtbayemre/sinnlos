@@ -381,6 +381,7 @@ const g = globalThis as typeof globalThis & {
   __sinnlosLoginRateLimiter?: LoginRateLimiter;
   __sinnlosPasswordLinkRateLimiter?: LoginRateLimiter;
   __sinnlosSetPasswordRateLimiter?: LoginRateLimiter;
+  __sinnlosMfaRateLimiter?: LoginRateLimiter;
 };
 export const loginRateLimiter = (g.__sinnlosLoginRateLimiter ??= createLoginRateLimiter());
 
@@ -402,3 +403,15 @@ export const passwordLinkRateLimiter = (g.__sinnlosPasswordLinkRateLimiter ??=
  */
 export const setPasswordRateLimiter = (g.__sinnlosSetPasswordRateLimiter ??=
   createLoginRateLimiter());
+
+/**
+ * v0.34 (A-01): the password and code checks of /mfa/setup and of turning
+ * the second factor off (lib/mfa-actions.ts), per client IP and per
+ * account ("user:<id>" of the session). ONE budget for both actions: both
+ * check the account's password, so a guess on either counts against the
+ * same account. Its own instance: guesses through a session's MFA forms
+ * never lock that person's sign-in, and the reverse. The cms routes need
+ * the session's Strapi JWT, which only this server holds, so these actions
+ * are the only way to them. Pinned on globalThis like the others.
+ */
+export const mfaRateLimiter = (g.__sinnlosMfaRateLimiter ??= createLoginRateLimiter());

@@ -93,6 +93,8 @@ describe("Topbar's last button at phone width", () => {
     const button = lastButton(html);
     expect(button.attrs).toContain('type="submit"');
     expect(button.label).toBe(en.auth.signOut);
+    // v0.34: sign-out ends the account's sessions on every device.
+    expect(button.attrs).toContain(`title="${en.auth.signOutHint}"`);
     expect(button.svgClass).toEqual(expect.arrayContaining(["lucide-log-out", "sm:hidden"]));
     expect(button.svgAttrs).toContain('aria-hidden="true"');
     // not-sr-only resets white-space to normal: nowrap keeps the sm-up label

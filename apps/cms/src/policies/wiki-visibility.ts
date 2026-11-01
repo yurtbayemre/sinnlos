@@ -58,7 +58,7 @@ const levelOf = (config: WikiConfig): WikiLevel => {
   return level === "space" || level === "page" ? level : "revision";
 };
 
-async function visibleWikiIds({
+export async function visibleWikiIds({
   strapi,
   user,
   config,

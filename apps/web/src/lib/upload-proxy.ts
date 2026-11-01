@@ -110,10 +110,13 @@ export function downstreamResponseHeaders(upstream: Headers): Headers {
     const value = upstream.get(name);
     if (value) headers.set(name, value);
   }
-  // Files are content-hashed (immutable), but ACCESS is per-person now —
-  // `private` keeps shared caches (and the edge) from serving bytes to the
-  // next, possibly session-less, client.
-  headers.set("cache-control", "private, max-age=3600");
+  // Files are content-hashed (immutable), but ACCESS is per person and per
+  // content (v0.34, B1): `private` keeps shared caches (and the edge) from
+  // serving bytes to the next client, `no-cache` makes the browser ask
+  // again every time, so a file whose content was unpublished or retargeted,
+  // or another account signed in to the same browser, goes through the gate
+  // instead of a warm copy (a 304 still saves the bytes).
+  headers.set("cache-control", "private, no-cache");
   // The browser keeps the declared type; anything not shown in place is a
   // sandboxed download.
   headers.set("x-content-type-options", "nosniff");

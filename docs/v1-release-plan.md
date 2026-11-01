@@ -160,6 +160,7 @@ The owner rule still applies: **no bloat**. Every item below has the smallest sc
   - Team leads see their whole department's training reports.
 - [x] **Remove the pre-v0.25 upgrade machinery from the main path** (decision 5). `DATETIME_LEGACY_*` and the old migration runbooks move to the archive.
 - [x] **Final rehearsal** on the final schema and authentication: fresh install, upgrade from v0.25.x and restore (including re-applied anonymisations). Done 2026-10-24 on a fresh host (Caddy) and on staging (Traefik).
+- [ ] **v0.34.0 security hardening** (owner request 2026-11-01): the findings of the security review of v0.33.4. Sign-out ends every session, the second-factor forms have an attempt budget, a file opens only for readers of its content, multipart temp files are removed, unpublished wiki pages have no comments, one backup at a time. Before rc.1.
 - [ ] **v1.0.0-rc.1:** all package versions at 1.0.0-rc.1, the immutable images validated, then at least one week on the owner's instance with backup, cron-status and restore evidence.
 - [ ] **v1.0.0:** after the lawyer review (S5 and the GHCR publication), all package versions at 1.0.0.
 

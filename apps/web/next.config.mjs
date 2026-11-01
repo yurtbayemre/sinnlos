@@ -23,6 +23,13 @@ const nextConfig = {
   agentRules: false,
   // Don't advertise the framework in responses.
   poweredByHeader: false,
+  // v0.34: an intranet is not for search engines. public/robots.txt says
+  // Disallow: /, and every web response carries X-Robots-Tag, so a crawler
+  // that reaches a URL anyway (a shared link to /sign-in) does not index
+  // it. The cms's responses (/api, /admin) do not pass through Next.
+  async headers() {
+    return [{ source: "/:path*", headers: [{ key: "X-Robots-Tag", value: "noindex, nofollow" }] }];
+  },
   // NOTE: no `images` config — nothing renders through next/image. Avatars
   // and document links use plain <img>/<a> (radix Avatar's <img>), which
   // bypass the image optimizer, so `images.remotePatterns` had no effect.

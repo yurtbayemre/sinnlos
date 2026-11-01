@@ -1104,3 +1104,42 @@ describe("Strapi's auth throttle (FX11)", () => {
     }
   });
 });
+
+describe("Auth.js's own sign-out stays closed (v0.34, A-02)", () => {
+  const base = "https://intranet.example.test";
+
+  it("answers 404 at /api/auth/signout, and a path in AUTH_URL opens no other spelling", async () => {
+    // Without the pinned basePath, Auth.js would take /api/auth/custom from
+    // AUTH_URL and sign out at /api/auth/custom/signout, past the 404 of
+    // auth-handlers.ts: the cookie cleared, the account's sessions not.
+    const mod = await load({ AUTH_URL: `${base}/api/auth/custom` });
+    const { GET, POST } = await import("@/auth-handlers");
+    const { jar } = await signInLocal(mod, base);
+    const sessionCookie = jar.names().find((name) => name.endsWith("authjs.session-token"));
+    expect(sessionCookie).toBeDefined();
+    const csrfRes = await GET(
+      new NextRequest(`${base}/api/auth/csrf`, { headers: { cookie: jar.header() } }),
+    );
+    jar.absorb(csrfRes);
+    const { csrfToken } = (await csrfRes.json()) as { csrfToken: string };
+    const post = (path: string) =>
+      POST(
+        new NextRequest(`${base}${path}`, {
+          method: "POST",
+          headers: { "content-type": "application/x-www-form-urlencoded", cookie: jar.header() },
+          body: new URLSearchParams({ csrfToken, callbackUrl: `${base}/sign-in` }),
+        }),
+      );
+
+    expect((await post("/api/auth/signout")).status).toBe(404);
+    const custom = await post("/api/auth/custom/signout");
+    expect(
+      custom.headers.getSetCookie().some((line) => line.startsWith(`${sessionCookie}=;`)),
+    ).toBe(false);
+    jar.absorb(custom);
+    const session = (await (await getSessionJson(mod, base, jar.header())).json()) as {
+      user?: { id?: unknown };
+    } | null;
+    expect(session?.user?.id).toBe(7);
+  });
+});

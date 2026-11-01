@@ -1,5 +1,6 @@
 import assert, { AssertionError } from "node:assert/strict";
-import { existsSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { randomBytes } from "node:crypto";
 import { createRequire } from "node:module";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
@@ -13,7 +14,8 @@ import { setTimeout as delay } from "node:timers/promises";
  * course?: Row | null, quiz?: unknown}} Row
  * @typedef {{
  * documents(uid: string): {create(params: {data: Record<string, unknown>, status?: "published"}): Promise<Row>},
- * db: {query(uid: string): {count(): Promise<number>, findOne(params: Record<string, unknown>): Promise<Row | null>},
+ * db: {query(uid: string): {count(params?: Record<string, unknown>): Promise<number>, findOne(params: Record<string, unknown>): Promise<Row | null>,
+ * create(params: {data: Record<string, unknown>}): Promise<Row>},
  * connection?: {client?: {pool?: {numUsed(): number, numPendingAcquires(): number}}}},
  * plugin(name: string): {service(name: string): {add(data: Record<string, unknown>): Promise<Row>}},
  * log: {level: string}, cron: {stop(): void}, load(): Promise<unknown>, destroy(): Promise<void>,
@@ -34,6 +36,8 @@ const announcementUid = "api::announcement.announcement";
 const commentUid = "api::comment.comment";
 const pollUid = "api::poll.poll";
 const quickLinkUid = "api::quick-link.quick-link";
+const documentUid = "api::document.document";
+const fileUid = "plugin::upload.file";
 let phase = "environment check";
 /** @type {Cms | undefined} */
 let strapi;
@@ -140,6 +144,9 @@ async function start() {
       label: "E2E Travel expenses and reimbursement portal for all locations",
       documentId: "",
     },
+    // v0.34 (uploads.spec.ts): a document file for everyone and one for a
+    // department without users; the names get a random part at the start.
+    files: { companyWide: "", otherDepartment: "" },
     privacy: {
       announcement: { title: "E2E Privacy Announcement", documentId: "" },
       comment: "E2E leaver comment",
@@ -345,6 +352,42 @@ async function start() {
     status: "published",
   });
   fixtures.quickLink.documentId = quickLink.documentId;
+  // v0.34: two document files as the admin panel stores them (bytes under
+  // public/uploads, an unstamped row), one company-wide, one for a
+  // department nobody of the fixtures belongs to.
+  const otherDepartment = await cms.documents(departmentUid).create({
+    data: { name: "E2E Other Department", slug: "e2e-other-department" },
+  });
+  const uploadsDir = join(appDir, "public", "uploads");
+  mkdirSync(uploadsDir, { recursive: true });
+  /** @param {string} stem @param {Record<string, unknown>} targeting */
+  const documentWithFile = async (stem, targeting) => {
+    const hash = `${stem}_${randomBytes(5).toString("hex")}`;
+    const bytes = Buffer.from(`%PDF-1.4\n% ${stem}\n%%EOF\n`);
+    writeFileSync(join(uploadsDir, `${hash}.pdf`), bytes, { flag: "wx" });
+    const file = await cms.db.query(fileUid).create({
+      data: {
+        name: `${stem}.pdf`,
+        hash,
+        ext: ".pdf",
+        mime: "application/pdf",
+        size: bytes.length / 1000,
+        url: `/uploads/${hash}.pdf`,
+        provider: "local",
+      },
+    });
+    await cms.documents(documentUid).create({
+      data: { title: `E2E ${stem}`, file: file.id, ...targeting },
+      status: "published",
+    });
+    return `${hash}.pdf`;
+  };
+  fixtures.files.companyWide = await documentWithFile("company_report", { audience: "all" });
+  fixtures.files.otherDepartment = await documentWithFile("other_department_report", {
+    audience: "departments",
+    departments: [otherDepartment.documentId],
+    ownerDepartment: otherDepartment.documentId,
+  });
   await cms.documents(commentUid).create({
     data: {
       body: fixtures.privacy.comment,
@@ -355,7 +398,12 @@ async function start() {
   });
 
   phase = "fixture relationship assertions";
-  assert.equal(await cms.db.query(departmentUid).count(), 1, "Expected one department");
+  assert.equal(await cms.db.query(departmentUid).count(), 2, "Expected two departments");
+  assert.equal(
+    await cms.db.query(documentUid).count({ where: { publishedAt: { $notNull: true } } }),
+    2,
+    "Expected two published documents",
+  );
   assert.equal(await cms.db.query(userUid).count(), 8, "Expected eight local users");
   assert.equal(await cms.db.query(teamUid).count(), 2, "Expected two teams");
   for (const [key, fixture] of Object.entries(fixtures.users)) {
@@ -483,7 +531,7 @@ async function start() {
     });
   });
   console.log(
-    "[e2e-cms] Ready: normal bootstrap and fixture assertions passed (1 department, 8 users, 2 teams, 3 published quiz courses and lessons, 1 commented announcement, 1 poll, 1 quick link).",
+    "[e2e-cms] Ready: normal bootstrap and fixture assertions passed (2 departments, 8 users, 2 teams, 3 published quiz courses and lessons, 1 commented announcement, 1 poll, 1 quick link, 2 documents with files).",
   );
 }
 

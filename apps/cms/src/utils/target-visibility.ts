@@ -30,11 +30,15 @@
  *     publish (the anchor is the documentId, #11). findCommentTarget still
  *     resolves a draft (utils/comment-target.ts); this check is what
  *     refuses it;
- *   - a wiki page is judged by the row `findCommentTarget` would resolve,
- *     its PUBLISHED row when it has one, else its draft: that row's space
- *     decides (a page's draft and published rows link the draft and
+ *   - a wiki page likewise counts only through its PUBLISHED row, whose
+ *     space decides (a page's draft and published rows link the draft and
  *     published rows of their spaces, whose visibility can differ until a
- *     publish). The owner decision covers announcements only.
+ *     publish). A never-published or unpublished page is no target for
+ *     anyone but admin_role and editor, whose bypass keeps reads AND writes
+ *     on it (v0.34, B2: until then the draft decided when there was no
+ *     published row, and the web's comment Server Actions, which take
+ *     {type, documentId} from the browser, served and accepted the thread
+ *     of an unpublished page to anyone who could read its space).
  *
  * Fail-closed rules: unknown targetType → invisible; wiki page without a
  * space → invisible; missing rows → invisible.
@@ -153,54 +157,25 @@ export interface VisibleTargetAnchors {
 /**
  * The anchors of the wiki pages visible through the spaces `spaceIds`
  * (row ids of every visible space row, draft or published), by the rule
- * isTargetVisible applies to one page: the published row decides when
- * there is one, else the draft.
- *
- *   1. The rows of pages in a visible space (draft and published alike): a
- *      page with its PUBLISHED row among them is visible.
- *   2. A page with only its draft among them is visible unless it has a
- *      published row elsewhere (in a space the caller cannot see): one
- *      lookup for those documentIds.
- *
- * Neither query populates anything; each binds its list as ONE parameter
- * (oneParamIn, #175), so neither has a bind limit to fail at.
+ * isTargetVisible applies to one page: its PUBLISHED row lies in a visible
+ * space. One query, nothing populated, the list bound as ONE parameter
+ * (oneParamIn, #175), so it has no bind limit to fail at.
  */
 async function visibleWikiPageAnchors(strapi: PolicyStrapi, spaceIds: number[]): Promise<string[]> {
   if (spaceIds.length === 0) return [];
-  const rows = listOf<{ documentId?: string | null; publishedAt?: string | null }>(
+  const rows = listOf<{ documentId?: string | null }>(
     await strapi.db.query(WIKI_PAGE_UID).findMany({
-      where: { space: { id: { $in: oneParamIn(strapi, spaceIds, "int") } } },
-      select: ["documentId", "publishedAt"],
+      where: {
+        space: { id: { $in: oneParamIn(strapi, spaceIds, "int") } },
+        publishedAt: { $notNull: true },
+      },
+      select: ["documentId"],
     }),
   );
-  const published = new Set<string>();
-  for (const row of rows) {
-    if (row.publishedAt && typeof row.documentId === "string") published.add(row.documentId);
-  }
-  const draftOnly = new Set<string>();
-  for (const row of rows) {
-    if (typeof row.documentId === "string" && !published.has(row.documentId)) {
-      draftOnly.add(row.documentId);
-    }
-  }
-  if (draftOnly.size > 0) {
-    const elsewhere = listOf<{ documentId?: string | null }>(
-      await strapi.db.query(WIKI_PAGE_UID).findMany({
-        where: {
-          documentId: { $in: oneParamIn(strapi, [...draftOnly], "text") },
-          publishedAt: { $notNull: true },
-        },
-        select: ["documentId"],
-      }),
-    );
-    for (const row of elsewhere) {
-      if (typeof row.documentId === "string") draftOnly.delete(row.documentId);
-    }
-  }
   return [
     ...new Set(
-      [...published, ...draftOnly]
-        .map((documentId) => targetAnchor(documentId))
+      rows
+        .map((row) => targetAnchor(row.documentId))
         .filter((anchor): anchor is string => anchor != null),
     ),
   ];
@@ -241,7 +216,7 @@ export async function visibleTargetAnchors(
  * An announcement needs its published row first, for every caller: one
  * without is refused like a missing target, admin_role and editor
  * included (see the header). Everything else bypasses for them without a
- * lookup.
+ * lookup; a wiki page needs its published row for everyone else.
  */
 export async function isTargetVisible(
   strapi: PolicyStrapi,
@@ -267,18 +242,13 @@ export async function isTargetVisible(
 
   if (targetType === "wiki-page") {
     type PageRow = { space?: { id?: number } | null } | null;
+    // Only the published row counts (v0.34, B2): no published row, no target.
     const page = (await strapi.db.query(WIKI_PAGE_UID).findOne({
       where: { documentId: targetDocumentId, publishedAt: { $notNull: true } },
       populate: { space: { select: ["id"] } },
     })) as PageRow;
-    const anyPage =
-      page ??
-      ((await strapi.db.query(WIKI_PAGE_UID).findOne({
-        where: { documentId: targetDocumentId },
-        populate: { space: { select: ["id"] } },
-      })) as PageRow);
     // A page without a space has no visibility owner — fail closed.
-    const spaceId = anyPage?.space?.id;
+    const spaceId = page?.space?.id;
     if (spaceId == null) return false;
     const spaceIds = await visibleWikiSpaceIds(strapi, raw);
     return spaceIds.includes(spaceId);

@@ -58,11 +58,11 @@ import {
  * (`{ id: { $eq: -1 } }` — `id` is a plain attribute here too) makes the
  * query match nothing.
  *
- * Unpublished announcements (owner answer 2026-09-29 (b)): a thread whose
- * announcement has no published row is read like the thread of a
- * documentId that never existed: nothing, on the fast and the full path
- * alike (utils/target-visibility.ts), and it comes back with the next
- * publish. Wiki pages keep their draft fallback.
+ * Unpublished announcements (owner answer 2026-09-29 (b)) and, since
+ * v0.34 (B2), unpublished wiki pages: a thread whose target has no
+ * published row is read like the thread of a documentId that never
+ * existed: nothing, on the fast and the full path alike
+ * (utils/target-visibility.ts), and it comes back with the next publish.
  *
  * admin_role / editor moderate everything (bypass, query untouched; they
  * also read the rows of a missing target this way). A caller without a

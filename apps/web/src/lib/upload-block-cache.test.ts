@@ -248,4 +248,31 @@ describe("checkUploadAccess", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(cache.size).toBe(0);
   });
+
+  it("dates an answer by when its probe was sent, not when it arrived (v0.34)", async () => {
+    let now = 1_000_000;
+    const cache = new BlockStatusCache(BLOCK_STATUS_TTL_MS, BLOCK_STATUS_MAX_ENTRIES, () => now);
+    let release: (response: Response) => void = () => undefined;
+    const fetchMock = vi.fn<(input: string, init: RequestInit) => Promise<Response>>(
+      () => new Promise<Response>((resolve) => (release = resolve)),
+    );
+    const check = () =>
+      checkUploadAccess({
+        userId: 7,
+        jwt: "jwt",
+        strapiUrl: "http://cms.test",
+        fetchImpl: fetchMock,
+        cache,
+      });
+    // A probe sent just before a sign-out elsewhere answers "active" 10 s later.
+    const first = check();
+    now += 10_000;
+    release(me());
+    expect(await first).toBe("active");
+    // Its 60 s count from the probe's start: 50 s after the answer it is gone.
+    now += BLOCK_STATUS_TTL_MS - 10_000 - 1;
+    expect(cache.get(7, tokenTag("jwt"))).toBe("active");
+    now += 1;
+    expect(cache.get(7, tokenTag("jwt"))).toBeUndefined();
+  });
 });

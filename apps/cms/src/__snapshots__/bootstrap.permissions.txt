@@ -127,6 +127,7 @@ admin_role|api::profile.profile.mfaActivate
 admin_role|api::profile.profile.mfaDisable
 admin_role|api::profile.profile.mfaSetup
 admin_role|api::profile.profile.openAcks
+admin_role|api::profile.profile.signOut
 admin_role|api::profile.profile.updateMe
 admin_role|api::quick-link.quick-link.authoringList
 admin_role|api::quick-link.quick-link.create
@@ -150,6 +151,7 @@ admin_role|api::team.team.editable
 admin_role|api::team.team.find
 admin_role|api::team.team.findOne
 admin_role|api::team.team.update
+admin_role|api::upload-access.upload-access.check
 admin_role|api::user-management.user-management.anonymise
 admin_role|api::user-management.user-management.anonymisePreview
 admin_role|api::user-management.user-management.export
@@ -242,6 +244,7 @@ authenticated|api::profile.profile.mfaActivate
 authenticated|api::profile.profile.mfaDisable
 authenticated|api::profile.profile.mfaSetup
 authenticated|api::profile.profile.openAcks
+authenticated|api::profile.profile.signOut
 authenticated|api::profile.profile.updateMe
 authenticated|api::quick-link.quick-link.find
 authenticated|api::quick-link.quick-link.findOne
@@ -251,6 +254,7 @@ authenticated|api::reaction.reaction.findOne
 authenticated|api::search-log.search-log.create
 authenticated|api::team.team.find
 authenticated|api::team.team.findOne
+authenticated|api::upload-access.upload-access.check
 authenticated|api::wiki-page.wiki-page.find
 authenticated|api::wiki-page.wiki-page.findOne
 authenticated|api::wiki-space.wiki-space.find
@@ -357,6 +361,7 @@ department_head|api::profile.profile.mfaActivate
 department_head|api::profile.profile.mfaDisable
 department_head|api::profile.profile.mfaSetup
 department_head|api::profile.profile.openAcks
+department_head|api::profile.profile.signOut
 department_head|api::profile.profile.updateMe
 department_head|api::quick-link.quick-link.find
 department_head|api::quick-link.quick-link.findOne
@@ -369,6 +374,7 @@ department_head|api::team.team.editable
 department_head|api::team.team.find
 department_head|api::team.team.findOne
 department_head|api::team.team.update
+department_head|api::upload-access.upload-access.check
 department_head|api::wiki-page.wiki-page.create
 department_head|api::wiki-page.wiki-page.createDraft
 department_head|api::wiki-page.wiki-page.discardDraft
@@ -508,6 +514,7 @@ editor|api::profile.profile.mfaActivate
 editor|api::profile.profile.mfaDisable
 editor|api::profile.profile.mfaSetup
 editor|api::profile.profile.openAcks
+editor|api::profile.profile.signOut
 editor|api::profile.profile.updateMe
 editor|api::quick-link.quick-link.authoringList
 editor|api::quick-link.quick-link.create
@@ -526,6 +533,7 @@ editor|api::reaction.reaction.findOne
 editor|api::search-log.search-log.create
 editor|api::team.team.find
 editor|api::team.team.findOne
+editor|api::upload-access.upload-access.check
 editor|api::wiki-page.wiki-page.authoringList
 editor|api::wiki-page.wiki-page.create
 editor|api::wiki-page.wiki-page.createDraft
@@ -575,12 +583,14 @@ guest|api::profile.profile.mfaActivate
 guest|api::profile.profile.mfaDisable
 guest|api::profile.profile.mfaSetup
 guest|api::profile.profile.openAcks
+guest|api::profile.profile.signOut
 guest|api::profile.profile.updateMe
 guest|api::quick-link.quick-link.find
 guest|api::quick-link.quick-link.findOne
 guest|api::reaction.reaction.find
 guest|api::reaction.reaction.findOne
 guest|api::search-log.search-log.create
+guest|api::upload-access.upload-access.check
 guest|api::wiki-page.wiki-page.find
 guest|api::wiki-page.wiki-page.findOne
 guest|api::wiki-space.wiki-space.find
@@ -648,6 +658,7 @@ member|api::profile.profile.mfaActivate
 member|api::profile.profile.mfaDisable
 member|api::profile.profile.mfaSetup
 member|api::profile.profile.openAcks
+member|api::profile.profile.signOut
 member|api::profile.profile.updateMe
 member|api::quick-link.quick-link.find
 member|api::quick-link.quick-link.findOne
@@ -658,6 +669,7 @@ member|api::reaction.reaction.findOne
 member|api::search-log.search-log.create
 member|api::team.team.find
 member|api::team.team.findOne
+member|api::upload-access.upload-access.check
 member|api::wiki-page.wiki-page.discardDraft
 member|api::wiki-page.wiki-page.editable
 member|api::wiki-page.wiki-page.find
@@ -744,6 +756,7 @@ team_lead|api::profile.profile.mfaActivate
 team_lead|api::profile.profile.mfaDisable
 team_lead|api::profile.profile.mfaSetup
 team_lead|api::profile.profile.openAcks
+team_lead|api::profile.profile.signOut
 team_lead|api::profile.profile.updateMe
 team_lead|api::quick-link.quick-link.find
 team_lead|api::quick-link.quick-link.findOne
@@ -756,6 +769,7 @@ team_lead|api::team.team.editable
 team_lead|api::team.team.find
 team_lead|api::team.team.findOne
 team_lead|api::team.team.update
+team_lead|api::upload-access.upload-access.check
 team_lead|api::wiki-page.wiki-page.create
 team_lead|api::wiki-page.wiki-page.createDraft
 team_lead|api::wiki-page.wiki-page.discardDraft

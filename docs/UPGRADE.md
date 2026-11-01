@@ -22,6 +22,7 @@ What changed for the operator between v0.25 and this release. The release notes 
 7. **Accounts and e-mail** (v0.27): self-registration is gone; invitations and password links need `SMTP_*` and `DIGEST_FROM`. New passwords need 12 characters.
 8. **Data protection** (v0.28): nothing to set. New nightly jobs from 03:20 to 03:56; optional `FEATURES_OFF`, `TRAINING_EVIDENCE_RETENTION_YEARS` and `SEARCH_LOG_RETENTION_DAYS`.
 9. **This release** (v0.29): nothing to set. `DATETIME_LEGACY_ZONE` and `DATETIME_LEGACY_UTC_UNTIL` are no longer read; delete them from `infra/.env`. Optional: the branding keys ([INSTALL.md](INSTALL.md)), `SITE_ALLOW_CIDRS` and `infra/ops-check.sh` ([OPERATIONS.md](OPERATIONS.md#monitoring)).
+10. **Upload references** (v0.34): before the first v0.34 deploy, review the existing `/uploads/` links in texts once with `infra/diagnostics/upload-references.sql` ([OPERATIONS.md](OPERATIONS.md#upload-references)); from v0.34 a file opens only for readers of its content.
 
 ## Update procedure (production-safe)
 
@@ -162,6 +163,23 @@ format`: a scanner posted to a page with a made-up Server Action id,
 ## Release notes
 
 Newest first. Older releases: [archive/deployment-history.md](archive/deployment-history.md).
+
+**Upgrading to v0.34.0 (security hardening).** No required env, no edge change, no schema change. The findings of the security review of v0.33.4.
+
+- **Before the deploy: review the upload references.** Run `infra/diagnostics/upload-references.sql` and decide every row of its sections 1–3. From that run until v0.34.0 is live, only `admin_role` and `editor` write announcements, events, wiki pages, lessons, courses and department or team descriptions ([OPERATIONS.md, Upload references](OPERATIONS.md#upload-references)).
+- **Files follow their content.** A file under `/uploads` opens only for whoever may read the content it belongs to, in that version: a document's file for the document's audience (no longer for guests and other departments who know its address), a draft's file for its authors, avatars for everyone who sees the directory, an admin-panel image through a text the reader may read. Everything else answers 404 ([security.md](security.md#who-may-open-a-file)).
+  - A file attached to content keeps that content's audience wherever it is linked from. An inline link to an intranet upload no longer opens it: re-upload the file in the admin panel and link that.
+  - Saving a text that adds a link to a file the writer cannot open answers `uploadNotAllowed` (admins and editors excepted).
+  - Files are served `private, no-cache`; a change of access reaches the files within 60 seconds. Admin media-library thumbnails show only what the parallel intranet session may open.
+- **Sign-out ends every session** of the account on every device, and a pending set-password link (it raises the token version). When the cms cannot confirm it, the device is signed out anyway and `/sign-in` says so. Microsoft's end-session redirect stays; a generic OIDC provider is not signed out. `/api/auth/signout` answers 404 (bookmarks and scripts: use the sign-out button). The Auth.js base path is pinned to `/api/auth`, so `AUTH_URL` must not carry another path.
+- **Second factor:** turning it on or off has an attempt budget, 10 wrong passwords or codes per account in 15 minutes and 10 per client IP in a minute.
+- **Open live streams** end within about 95 seconds after the account is blocked or signed out, while the cms answers.
+- **Uploads:** every multipart temp file is removed when its request ends; a request with more than 20 file parts answers 413; a PDF with more than 64 zip end-record signatures is refused.
+- **Comments:** an unpublished or never-published wiki page has no comments or reactions for anyone but `admin_role` and `editor`; they come back with the next publish.
+- **Search engines:** `robots.txt` disallows everything and web responses carry `X-Robots-Tag: noindex, nofollow`. A refused sign-in logs one short line, `[auth] sign-in refused (<code>)`, instead of a stack trace.
+- **Host scripts:** `infra/restore-db.sh` reads `COMPOSE_PROJECT` from `infra/deploy.env` and refuses a file of another project. `infra/backup/pg-backup.sh` runs one at a time per backup root (the lock file `.pg-backup.lock`, never delete it; a concurrent run exits 1, so rerun a deploy whose pre-deploy backup was busy) and refuses file names of an earlier run. live-smoke no longer deletes notifications; its probe notification stays until the normal retention. INSTALL decrypts restore artifacts into a new private directory. Hosts with `backup-run` (the owner's) are unchanged.
+- **Permissions:** two new actions for every role, `api::profile.profile.signOut` and `api::upload-access.upload-access.check`. The first boot logs `granted 14`; the drift check then counts 222 managed actions.
+- **Rollback** to v0.33.4 is a plain retag of both images (`aa85a981c325`). It brings back v0.33.4's behaviour, the closed findings included; sign-outs done under v0.34 stay done. The two new routes do not exist there; the next forward boot grants their permission rows again if a boot removed them. A retag does not revert the host scripts, and their v0.34 versions work with v0.33.4.
 
 **Upgrading to v0.33.4.** No required env, no edge change, no schema change.
 

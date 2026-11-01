@@ -20,7 +20,7 @@ Every command below runs on the host as the **deploy user**, the user that owns 
 ## 2. The code
 
 ```sh
-git clone --branch v0.33.4 https://github.com/yurtbayemre/sinnlos.git
+git clone --branch v0.34.0 https://github.com/yurtbayemre/sinnlos.git
 cd sinnlos
 ```
 
@@ -142,6 +142,8 @@ Use this when the panel is closed from outside (`ADMIN_ALLOW_CIDRS` empty) and y
 
 Nothing changes in `infra/.env`, and the panel stays closed from outside the whole time.
 
+**Thumbnails** in the media library load from `/uploads`, which only an intranet session opens: sign in to the intranet in the same browser. Since v0.34 they show only what that intranet account may open (`admin_role` and `editor`: everything).
+
 ## 9. Upgrades
 
 The supported path, every release's notes and rollback: [UPGRADE.md](UPGRADE.md). In short:
@@ -154,7 +156,7 @@ The supported path, every release's notes and rollback: [UPGRADE.md](UPGRADE.md)
 Optional live-smoke, the end-to-end check of live updates. It signs in as two accounts of yours, so invite two local accounts for it (section 6), and publish at least one announcement they can see. **Both must be outside `MFA_REQUIRED_ROLES`** (not admins or editors): the script cannot type a second-factor code.
 
 - **`SMOKE_EMAIL`** holds the live stream. Best the author of a published announcement (a department head, for example): the check then covers the notification as well; otherwise it says so in a warning.
-- **`SMOKE_AUTHOR_EMAIL`** posts one `[live-smoke]` comment on that announcement, and the script deletes it again. A member is enough.
+- **`SMOKE_AUTHOR_EMAIL`** posts one `[live-smoke]` comment on that announcement, and the script deletes it again. A member is enough. Each deploy leaves one comment notification from `SMOKE_AUTHOR_EMAIL` in the bell of `SMOKE_EMAIL`, cleared by the normal notification retention (v0.34).
 
 In `infra/deploy.env`:
 
@@ -193,11 +195,18 @@ gh attestation verify oci://ghcr.io/yurtbayemre/sinnlos-cms:<version> --owner yu
 
 ## Restore
 
-On the machine with the private key, decrypt the artifacts:
+On the machine with the private key, decrypt the artifacts of one run (the same `<ts>` in their names) into a new private directory. The dump and the `.env` copy hold every secret, and a plain `>` would create them with your umask (often 0644). `mkdir` refuses a `restore` that exists already, and then nothing is decrypted: pick another name.
 
-- **Database:** `gpg --decrypt sinnlos-db-<ts>.dump.gz.gpg | gunzip > sinnlos.dump`. Copy the result to the host, into the checkout directory, or give `restore-db.sh` its full path.
-- **Uploads:** the uploads artifact is a tar of the `infra_cms_uploads` volume. Untar it into the volume while cms and web are stopped: `docker run --rm -i -v infra_cms_uploads:/uploads alpine tar xf - -C /uploads < uploads.tar`.
-- **Configuration:** the `.env` artifact holds the `infra/.env` of that day.
+```sh
+umask 077
+mkdir -m 700 restore && cd restore &&
+  gpg --decrypt ../sinnlos-db-<ts>.dump.gz.gpg | gunzip > sinnlos.dump &&
+  gpg --decrypt ../sinnlos-env-<ts>.env.gz.gpg | gunzip > infra.env
+```
+
+- **Database:** copy `sinnlos.dump` to the host, into the owner-only `infra/backups/` of the checkout, or give `restore-db.sh` its full path. Delete the copies after the restore.
+- **Uploads:** the uploads artifact is a tar of the `infra_cms_uploads` volume. Stream it into the volume while cms and web are stopped, so no plaintext copy lands on disk: `gpg --decrypt ../sinnlos-uploads-<ts>.tar.gz.gpg | gunzip | ssh <host> docker run --rm -i -v infra_cms_uploads:/uploads alpine tar xf - -C /uploads`.
+- **Configuration:** `infra.env` is the `infra/.env` of that day.
 
 Then restore step by step as [OPERATIONS.md, Restore](OPERATIONS.md#restore) describes. It closes the site first, closes it again after the configuration restore, repeats every anonymisation that is newer than the backup ([data-protection.md](data-protection.md), section 5), and opens the site only after the search cleanup.
 
