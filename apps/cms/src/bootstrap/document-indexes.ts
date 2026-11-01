@@ -157,7 +157,11 @@ export function documentIndexSpecs(strapi: DocumentIndexHost): IndexSpec[] {
   const shares = metaOf(strapi, SECRET_SHARE_UID);
   for (const { attributes, unique } of SECRET_SHARE_INDEXES) {
     const columns = attributes.map((attribute) =>
-      columnOf(shares, attribute, attribute.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`)),
+      columnOf(
+        shares,
+        attribute,
+        attribute.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`),
+      ),
     );
     specs.push({
       name: `${shares.tableName}_${columns.join("_")}_${unique ? "uq" : "idx"}`,
