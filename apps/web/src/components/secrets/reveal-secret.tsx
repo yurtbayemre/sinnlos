@@ -8,16 +8,8 @@ import { Button } from "@/components/ui/button";
 import { actionFailure, type ActionFailure } from "@/lib/action-result";
 import { revealSecret } from "@/lib/secret-actions";
 import type { SecretCode } from "@/lib/secret-share-errors";
+import { documentHasAnalytics } from "@/components/secrets/clean-document";
 import { SecretError } from "@/components/secrets/secret-error";
-
-/**
- * Whether this document ever loaded the Plausible script: a tab opened
- * while the module secrets was off keeps it across client navigation after
- * the operator switched secrets on (the root layout renders it no more).
- */
-function documentHasAnalytics(): boolean {
-  return "plausible" in window || document.querySelector("script[data-domain]") !== null;
-}
 
 /**
  * The state of "Show and delete" (v0.35, plan §3.10). The text exists only

@@ -17,6 +17,7 @@ import { Button } from "@/components/ui/button";
 import { startCmsAction } from "@/lib/action-result";
 import { createSecret, findSecretRecipients } from "@/lib/secret-actions";
 import type { SecretCode } from "@/lib/secret-share-errors";
+import { useCleanDocument } from "@/components/secrets/clean-document";
 import { SecretError } from "@/components/secrets/secret-error";
 
 /** How long the picker waits after the last keystroke before it asks the cms. */
@@ -30,7 +31,9 @@ const LIFETIME_KEY = { "1h": "lifetime1h", "24h": "lifetime24h" } as const;
  * spell check: a password must not reach a dictionary service) and the
  * lifetime. A sent secret clears the form and opens the share's page. A
  * `busy` answer keeps the form and points to the sent list: the share may
- * exist (SecretError).
+ * exist (SecretError). Nothing can be typed until the document is known to
+ * be free of analytics (useCleanDocument; a tab that loaded Plausible
+ * reloads first).
  */
 export function NewSecretForm() {
   const t = useTranslations("secrets");
@@ -43,6 +46,7 @@ export function NewSecretForm() {
   const [lifetime, setLifetime] = useState<SecretShareLifetime>(DEFAULT_SECRET_SHARE_LIFETIME);
   const [error, setError] = useState<SecretCode | null>(null);
   const [isPending, startTransition] = useTransition();
+  const clean = useCleanDocument();
   const searchId = useId();
   const textId = useId();
   // The latest search wins: an older answer that arrives late is dropped.
@@ -87,7 +91,7 @@ export function NewSecretForm() {
 
   return (
     <form onSubmit={submit} className="max-w-2xl space-y-6">
-      <fieldset disabled={isPending} className="min-w-0 space-y-6">
+      <fieldset disabled={isPending || !clean} className="min-w-0 space-y-6">
         <div>
           <label htmlFor={searchId} className="mb-1 block text-sm font-medium">
             {t("to")}
@@ -191,7 +195,7 @@ export function NewSecretForm() {
 
       {error && <SecretError code={error} action="create" />}
 
-      <Button type="submit" disabled={!recipient || !isSecretText(text) || isPending}>
+      <Button type="submit" disabled={!recipient || !isSecretText(text) || isPending || !clean}>
         <Send className="h-4 w-4" aria-hidden="true" />
         {isPending ? t("sending") : t("send")}
       </Button>
