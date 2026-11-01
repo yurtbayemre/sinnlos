@@ -40,7 +40,8 @@
  * CRC-32. Every read goes through `RandomAccessFile`: the head, the tail
  * window, the directory, every local header and descriptor, and the one
  * entry. Never the whole file (the PDF polyglot scan, hasZipEndRecord,
- * reads a PDF from start to end in 64 KiB reads).
+ * reads a PDF from start to end in 64 KiB reads and examines at most 64
+ * end-record signatures: a file with more is refused, v0.34 C3).
  *
  * Every refusal throws ZipRefusal; the caller turns any error into a
  * refusal of the upload (an unexpected exception is a refusal too).
@@ -67,6 +68,13 @@ export const ZIP_LIMITS = {
   endSearchBytes: 64 * 1024 + 22,
   maxEntries: 5000,
   maxDirectoryBytes: 1024 * 1024,
+  /**
+   * End-record signatures the polyglot scan examines (each costs up to three
+   * more reads). PDF data holds one by chance about once per 4 GiB; a file
+   * packed with them made one upload cost thousands of reads (audit
+   * 2026-10-31, C3), so one past this many refuses the file.
+   */
+  maxEndSignatures: 64,
 } as const;
 
 const SIG_LOCAL = 0x04034b50;
@@ -179,10 +187,13 @@ const END_SIGNATURE = Uint8Array.of(0x50, 0x4b, 0x05, 0x06);
  * look for the directory: its size before the record (an archive with data
  * before it), or at the offset it names. Its entry count is not trusted
  * (JSZip reads the directory whatever the count says; Codex round 3). A
- * random signature in compressed PDF data does not meet that.
+ * random signature in compressed PDF data does not meet that. More than
+ * ZIP_LIMITS.maxEndSignatures signatures refuse the file (ZipRefusal): the
+ * scan never answers for a file it did not examine whole.
  */
 export async function hasZipEndRecord(file: RandomAccessFile): Promise<boolean> {
   if (file.size < END_RECORD_BYTES) return false;
+  let examined = 0;
   for (let start = 0; start < file.size; start += SCAN_CHUNK_BYTES) {
     const length = Math.min(SCAN_CHUNK_BYTES + END_RECORD_BYTES - 1, file.size - start);
     const bytes = await readExactly(file, start, length);
@@ -190,6 +201,10 @@ export async function hasZipEndRecord(file: RandomAccessFile): Promise<boolean> 
     let at = view.indexOf(END_SIGNATURE);
     while (at >= 0 && at < SCAN_CHUNK_BYTES) {
       if (at + END_RECORD_BYTES <= bytes.length) {
+        examined += 1;
+        if (examined > ZIP_LIMITS.maxEndSignatures) {
+          throw new ZipRefusal("too many end-record signatures");
+        }
         const position = start + at;
         if (await hasZip64Locator(file, position)) return true;
         const directorySize = u32(bytes, at + 12);

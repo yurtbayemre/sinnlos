@@ -298,6 +298,17 @@ describe("sniffUpload", () => {
     });
   });
 
+  it("refuses a PDF packed with end-record signatures as fileType (v0.34, C3)", async () => {
+    const record = Buffer.alloc(22);
+    record.writeUInt32LE(0x06054b50, 0);
+    const probe = Buffer.concat([Buffer.from("%PDF-1.7\n"), ...Array(4096).fill(record)]);
+    expect(await sniff(probe, "document")).toEqual({
+      ok: false,
+      code: "fileType",
+      reason: "too many end-record signatures",
+    });
+  });
+
   it("answers an unreadable file with fileType, never an exception", async () => {
     const broken: RandomAccessFile = {
       size: 100,
