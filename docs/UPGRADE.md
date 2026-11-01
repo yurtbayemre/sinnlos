@@ -156,6 +156,11 @@ was set to 1.` / ``(Use `node --trace-warnings ...` …)``. Strapi's
   Node 24 then waits 1 ms instead and the task runs on time. Harmless;
   first seen in the v0.17.0 watch (2026-10-19), possible on every
   release with Node 24;
+- since v0.35 the cms logs `[admin-permissions] removed 1 Content Manager
+permission(s) on hidden types: api::secret-share.secret-share` at every
+  boot: Strapi's reset of the super admin grants read on every type again,
+  and the boot takes it back for the secret shares. Expected; anything
+  else in that line is not;
 - the web may log `The Server Reference ID did not match the expected
 format`: a scanner posted to a page with a made-up Server Action id,
   and Next refused it before any code ran. Harmless; first seen
@@ -171,7 +176,7 @@ Newest first. Older releases: [archive/deployment-history.md](archive/deployment
 - **On after the upgrade**, like every module. To wait for the works council's agreement, add `secrets` to `FEATURES_OFF` in `infra/.env` before the deploy and remove it after the agreement. This note informs; the software does not enforce the consent.
 - **Analytics:** while `secrets` is on, no page loads the Plausible script, also when `PLAUSIBLE_SCRIPT_URL` and `PLAUSIBLE_DOMAIN` are set (the web logs one line at start). To keep Plausible, switch `secrets` off.
 - **Key:** derived from `ENCRYPTION_KEY`; nothing new to set. With a key shorter than 32 characters the cms logs one error line at boot and the module refuses to send or open; the rest of the intranet runs. Never rotate `ENCRYPTION_KEY` to purge shares ([OPERATIONS.md](OPERATIONS.md#secret-shares-v035)).
-- **At the first boot:** the table `secret_shares` with its indexes, the notification type `secretShared` (not in the e-mail digest), six new permission actions for the five staff roles (the drift check then counts 228 managed actions) and one more cron job, `secret-share-janitor`, every minute, also with the module off.
+- **At the first boot:** the table `secret_shares` with its indexes, the notification type `secretShared` (not in the e-mail digest), six new permission actions for the five staff roles and one more cron job, `secret-share-janitor`, every minute, also with the module off. The cms logs `[bootstrap] granted 30 permission(s) across intranet roles` and `[bootstrap] permission drift: none (report-only check of 228 managed actions)`, and no "revoked" line.
 - **Restore:** `infra/restore-db.sh apply` closes every restored share before the site reopens: their texts are deleted, pending ones cancelled, their notifications deleted ([OPERATIONS.md](OPERATIONS.md#restoring-a-database-dump)).
 - **Rollback** to v0.34.0, in this order:
   1. remove `secrets` from `FEATURES_OFF` if it is there (v0.34 refuses the unknown name at the cms boot, the web start and in `infra/deploy.sh`);
