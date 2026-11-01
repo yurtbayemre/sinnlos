@@ -1,7 +1,8 @@
-import { SECRET_SHARE_RETENTION_MS } from "@sinnlos/domain";
+import { SECRET_SHARE_RETENTION_MS, STAFF_ROLES } from "@sinnlos/domain";
 
 import {
   SECRET_SHARE_UID,
+  confirmed,
   deleteShares,
   endShare,
   isEligible,
@@ -14,8 +15,8 @@ import { reportRunFailure } from "./run-context";
  * whatever FEATURES_OFF says: it is erasure.
  *
  *   1. pending past its expiry -> `expired`;
- *   2. pending with a party that is not eligible (blocked, or no staff role
- *      any more) -> `cancelled`;
+ *   2. pending with a party that exists but is not eligible (blocked, or no
+ *      staff role any more) -> `cancelled`;
  *      both through the conditional end of utils/secret-shares.ts (envelope
  *      NULL, terminalAt, the notification deleted), one share per
  *      transaction with its row locked and the rule re-checked on a fresh
@@ -25,33 +26,115 @@ import { reportRunFailure } from "./run-context";
  *      notifications;
  *   4. ended shares whose terminalAt is older than SECRET_SHARE_RETENTION_MS
  *      (7 days), deleted.
- * Each step takes at most BATCH rows per run; the next minute continues.
- * A failing share is reported to the run and skipped. One summary line
- * when anything changed.
+ * Each step selects at most BATCH candidate ids in SQL (steps 2 and 3 with
+ * NOT EXISTS against the users, so nothing is walked in memory) and changes
+ * at most those; the next minute continues. Every transaction runs through
+ * the commit confirmation of utils/secret-shares.ts (`confirmed`): only a
+ * confirmed COMMIT counts, and an unconfirmed one is reported to the run,
+ * so the recorded outcome is `failed`. One summary line when anything
+ * changed.
  */
 
 /** Rows per step and run. */
 export const BATCH = 200;
 
-/** Rows per read. */
-const PAGE = 500;
-
-const USER_UID = "plugin::users-permissions.user";
-
 type Row = Record<string, unknown>;
 
 /** The slice of the Strapi instance the janitor uses. */
 export type SecretShareJanitorStrapi = SecretShareHost & {
+  db: {
+    connection: { raw(sql: string, bindings: readonly unknown[]): Promise<unknown> };
+  };
   log: { info(message: string): void };
 };
+
+const USER_UID = "plugin::users-permissions.user";
+const ROLE_UID = "plugin::users-permissions.role";
 
 const isRecord = (value: unknown): value is Row =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 const rows = (value: unknown): Row[] => (Array.isArray(value) ? value.filter(isRecord) : []);
+/** Rows of a knex raw() result: an array (SQLite) or `{ rows }` (pg). */
+const rawRows = (result: unknown): Row[] =>
+  Array.isArray(result) ? rows(result) : rows((result as { rows?: unknown } | null)?.rows);
+
+/** Quoted, schema-qualified (Postgres) names of the tables the candidate queries read. */
+function names(strapi: SecretShareJanitorStrapi) {
+  const quote = (name: string) => `"${name.replace(/"/g, '""')}"`;
+  const schema =
+    strapi.db.dialect.client === "postgres" ? strapi.db.getSchemaName() || "public" : null;
+  const table = (name: string) => (schema ? `${quote(schema)}.${quote(name)}` : quote(name));
+  const shares = strapi.db.metadata.get(SECRET_SHARE_UID);
+  const users = strapi.db.metadata.get(USER_UID);
+  // The relation's link table (users-permissions: up_users_role_lnk).
+  const link = (
+    users.attributes.role as
+      | {
+          joinTable?: {
+            name?: string;
+            joinColumn?: { name?: string };
+            inverseJoinColumn?: { name?: string };
+          };
+        }
+      | undefined
+  )?.joinTable;
+  if (!link?.name || !link.joinColumn?.name || !link.inverseJoinColumn?.name) {
+    throw new Error("[secret-share-janitor] the users' role link table is unknown");
+  }
+  const col = (meta: typeof shares, attribute: string, fallback: string) =>
+    quote(meta.attributes[attribute]?.columnName ?? fallback);
+  return {
+    shares: table(shares.tableName),
+    id: col(shares, "id", "id"),
+    state: col(shares, "state", "state"),
+    sender: col(shares, "senderId", "sender_id"),
+    recipient: col(shares, "recipientId", "recipient_id"),
+    users: table(users.tableName),
+    userId: col(users, "id", "id"),
+    blocked: col(users, "blocked", "blocked"),
+    link: table(link.name),
+    linkUser: quote(link.joinColumn.name),
+    linkRole: quote(link.inverseJoinColumn.name),
+    roles: table(strapi.db.metadata.get(ROLE_UID).tableName),
+    roleId: quote("id"),
+    roleType: quote("type"),
+  };
+}
+
+/** At most BATCH ids of pending shares with a party that exists and is not eligible. */
+async function ineligibleIds(strapi: SecretShareJanitorStrapi): Promise<number[]> {
+  const n = names(strapi);
+  const staff = STAFF_ROLES.map(() => "?").join(", ");
+  const exists = (party: string) =>
+    `EXISTS (SELECT 1 FROM ${n.users} u WHERE u.${n.userId} = s.${party})`;
+  const eligible = (party: string) =>
+    `EXISTS (SELECT 1 FROM ${n.users} u JOIN ${n.link} l ON l.${n.linkUser} = u.${n.userId} ` +
+    `JOIN ${n.roles} r ON r.${n.roleId} = l.${n.linkRole} WHERE u.${n.userId} = s.${party} ` +
+    `AND (u.${n.blocked} IS NULL OR u.${n.blocked} = ?) AND r.${n.roleType} IN (${staff}))`;
+  const result = await strapi.db.connection.raw(
+    `SELECT s.${n.id} AS id FROM ${n.shares} s WHERE s.${n.state} = 'pending' AND (` +
+      `(${exists(n.sender)} AND NOT ${eligible(n.sender)}) OR ` +
+      `(${exists(n.recipient)} AND NOT ${eligible(n.recipient)})) ORDER BY s.${n.id} LIMIT ?`,
+    [false, ...STAFF_ROLES, false, ...STAFF_ROLES, BATCH],
+  );
+  return rawRows(result).map((row) => Number(row.id));
+}
+
+/** At most BATCH ids of shares, in any state, whose sender or recipient no longer exists. */
+async function orphanIds(strapi: SecretShareJanitorStrapi): Promise<number[]> {
+  const n = names(strapi);
+  const missing = (party: string) =>
+    `NOT EXISTS (SELECT 1 FROM ${n.users} u WHERE u.${n.userId} = s.${party})`;
+  const result = await strapi.db.connection.raw(
+    `SELECT s.${n.id} AS id FROM ${n.shares} s WHERE ${missing(n.sender)} OR ${missing(n.recipient)} ` +
+      `ORDER BY s.${n.id} LIMIT ?`,
+    [BATCH],
+  );
+  return rawRows(result).map((row) => Number(row.id));
+}
 
 /** The people of `ids` with their role, by id. */
 async function people(strapi: SecretShareHost, ids: unknown[]): Promise<Map<unknown, Row>> {
-  if (ids.length === 0) return new Map();
   const found = rows(
     await strapi.db.query(USER_UID).findMany({
       where: { id: { $in: [...new Set(ids)] } },
@@ -62,72 +145,7 @@ async function people(strapi: SecretShareHost, ids: unknown[]): Promise<Map<unkn
   return new Map(found.map((row) => [row.id, row]));
 }
 
-interface DistinctQuery {
-  distinct(column: string): Promise<Row[]>;
-}
-
-/** The sender and recipient ids of every share that name no existing account. */
-async function missingPeople(strapi: SecretShareHost): Promise<number[]> {
-  const meta = strapi.db.metadata.get(SECRET_SHARE_UID);
-  const ids = new Set<number>();
-  for (const [attribute, fallback] of [
-    ["senderId", "sender_id"],
-    ["recipientId", "recipient_id"],
-  ]) {
-    const column = meta.attributes[attribute]?.columnName ?? fallback;
-    const table = strapi.db.getConnection(meta.tableName) as unknown as DistinctQuery;
-    for (const row of await table.distinct(column)) {
-      const id = Number(row[column]);
-      if (Number.isInteger(id)) ids.add(id);
-    }
-  }
-  const all = [...ids];
-  const missing: number[] = [];
-  for (let start = 0; start < all.length; start += PAGE) {
-    const slice = all.slice(start, start + PAGE);
-    const found = await people(strapi, slice);
-    missing.push(...slice.filter((id) => !found.has(id)));
-  }
-  return missing;
-}
-
-/**
- * Ends one pending share if `due` still holds on a fresh read under the
- * share's lock. True when it ended.
- */
-async function endIfDue(
-  strapi: SecretShareHost,
-  id: number,
-  to: "expired" | "cancelled",
-  due: (share: Row, now: Date) => Promise<boolean>,
-): Promise<boolean> {
-  return strapi.db.transaction(async ({ trx }) => {
-    if (strapi.db.dialect.client === "postgres") {
-      const meta = strapi.db.metadata.get(SECRET_SHARE_UID);
-      const quote = (name: string) => `"${name.replace(/"/g, '""')}"`;
-      const schema = strapi.db.getSchemaName() || "public";
-      await trx.raw(
-        `SELECT 1 FROM ${quote(schema)}.${quote(meta.tableName)} WHERE ${quote(meta.attributes.id?.columnName ?? "id")} = ? FOR UPDATE`,
-        [id],
-      );
-    }
-    const share = await strapi.db.query(SECRET_SHARE_UID).findOne({
-      where: { id, state: "pending" },
-      select: ["id", "documentId", "senderId", "recipientId", "expiresAt"],
-    });
-    const now = new Date();
-    if (!isRecord(share) || !(await due(share, now))) return false;
-    await endShare(
-      strapi,
-      trx,
-      share as { id: number; documentId: string; recipientId: number },
-      to,
-      now,
-    );
-    return true;
-  });
-}
-
+/** Ends each share whose `due` still holds under its lock; counts the confirmed ends. */
 async function endEach(
   strapi: SecretShareHost,
   ids: number[],
@@ -137,12 +155,54 @@ async function endEach(
   let ended = 0;
   for (const id of ids) {
     try {
-      if (await endIfDue(strapi, id, to, due)) ended += 1;
+      const done = await confirmed(strapi, `janitor ${to}`, async (trx) => {
+        if (strapi.db.dialect.client === "postgres") {
+          const meta = strapi.db.metadata.get(SECRET_SHARE_UID);
+          const quote = (name: string) => `"${name.replace(/"/g, '""')}"`;
+          const schema = strapi.db.getSchemaName() || "public";
+          await trx.raw(
+            `SELECT 1 FROM ${quote(schema)}.${quote(meta.tableName)} WHERE ${quote(meta.attributes.id?.columnName ?? "id")} = ? FOR UPDATE`,
+            [id],
+          );
+        }
+        const share = await strapi.db.query(SECRET_SHARE_UID).findOne({
+          where: { id, state: "pending" },
+          select: ["id", "documentId", "senderId", "recipientId", "expiresAt"],
+        });
+        const now = new Date();
+        if (!isRecord(share) || !(await due(share, now))) return false;
+        await endShare(
+          strapi,
+          trx,
+          share as { id: number; documentId: string; recipientId: number },
+          to,
+          now,
+        );
+        return true;
+      });
+      if (done) ended += 1;
     } catch (err) {
       reportRunFailure(err, `share ${id} not ${to}`);
     }
   }
   return ended;
+}
+
+/** Deletes the shares of `ids` with their notifications; 0 unless the COMMIT is confirmed. */
+async function deleteConfirmed(
+  strapi: SecretShareHost,
+  ids: number[],
+  what: string,
+): Promise<number> {
+  if (ids.length === 0) return 0;
+  try {
+    return await confirmed(strapi, `janitor ${what}`, () =>
+      deleteShares(strapi, { id: { $in: ids } }),
+    );
+  } catch (err) {
+    reportRunFailure(err, `${ids.length} share(s) ${what} not deleted`);
+    return 0;
+  }
 }
 
 const isPast = (value: unknown, now: Date) => {
@@ -155,87 +215,44 @@ export async function runSecretShareJanitor(
 ): Promise<{ expired: number; cancelled: number; orphaned: number; removed: number }> {
   const shares = strapi.db.query(SECRET_SHARE_UID);
   const now = new Date();
+  const ids = async (where: Row) =>
+    rows(
+      await shares.findMany({ where, select: ["id"], orderBy: [{ id: "asc" }], limit: BATCH }),
+    ).map((row) => row.id as number);
 
   // 1. Expired.
-  const expiredIds = rows(
-    await shares.findMany({
-      where: { state: "pending", expiresAt: { $lte: now } },
-      select: ["id"],
-      orderBy: [{ id: "asc" }],
-      limit: BATCH,
-    }),
-  ).map((row) => row.id as number);
-  const expired = await endEach(strapi, expiredIds, "expired", async (share, at) =>
-    isPast(share.expiresAt, at),
+  const expired = await endEach(
+    strapi,
+    await ids({ state: "pending", expiresAt: { $lte: now } }),
+    "expired",
+    async (share, at) => isPast(share.expiresAt, at),
   );
 
-  // 2. A party not eligible any more (existing, but blocked or without a
-  // staff role). Pending shares are few (the pending caps), read in pages.
-  const ineligible: number[] = [];
-  for (let afterId = 0; ineligible.length < BATCH;) {
-    const page = rows(
-      await shares.findMany({
-        where: { state: "pending", id: { $gt: afterId } },
-        select: ["id", "senderId", "recipientId"],
-        orderBy: [{ id: "asc" }],
-        limit: PAGE,
-      }),
-    );
-    if (page.length === 0) break;
-    const known = await people(
-      strapi,
-      page.flatMap((share) => [share.senderId, share.recipientId]),
-    );
-    for (const share of page) {
-      const parties = [share.senderId, share.recipientId];
-      if (parties.some((id) => known.has(id) && !isEligible(known.get(id)))) {
-        ineligible.push(share.id as number);
-      }
-    }
-    afterId = page[page.length - 1].id as number;
-  }
-  const cancelled = await endEach(strapi, ineligible, "cancelled", async (share) => {
-    const fresh = await people(strapi, [share.senderId, share.recipientId]);
-    return [share.senderId, share.recipientId].some(
-      (id) => fresh.has(id) && !isEligible(fresh.get(id)),
-    );
-  });
+  // 2. A party that exists but is not eligible any more, re-checked fresh.
+  const cancelled = await endEach(
+    strapi,
+    await ineligibleIds(strapi),
+    "cancelled",
+    async (share) => {
+      const fresh = await people(strapi, [share.senderId, share.recipientId]);
+      return [share.senderId, share.recipientId].some(
+        (id) => fresh.has(id) && !isEligible(fresh.get(id)),
+      );
+    },
+  );
 
-  // 3. A party that no longer exists: every state. The distinct ids are at
-  // most the staff; the shares of the missing ones are read by index.
-  const missing = await missingPeople(strapi);
-  const orphanIds =
-    missing.length === 0
-      ? []
-      : rows(
-          await shares.findMany({
-            where: { $or: [{ senderId: { $in: missing } }, { recipientId: { $in: missing } }] },
-            select: ["id"],
-            orderBy: [{ id: "asc" }],
-            limit: BATCH,
-          }),
-        ).map((row) => row.id as number);
-  const orphaned =
-    orphanIds.length === 0
-      ? 0
-      : await strapi.db.transaction(() => deleteShares(strapi, { id: { $in: orphanIds } }));
+  // 3. A party that no longer exists: every state.
+  const orphaned = await deleteConfirmed(strapi, await orphanIds(strapi), "of removed accounts");
 
   // 4. Ended past the retention.
-  const removedIds = rows(
-    await shares.findMany({
-      where: {
-        state: { $ne: "pending" },
-        terminalAt: { $lt: new Date(now.getTime() - SECRET_SHARE_RETENTION_MS) },
-      },
-      select: ["id"],
-      orderBy: [{ id: "asc" }],
-      limit: BATCH,
+  const removed = await deleteConfirmed(
+    strapi,
+    await ids({
+      state: { $ne: "pending" },
+      terminalAt: { $lt: new Date(now.getTime() - SECRET_SHARE_RETENTION_MS) },
     }),
-  ).map((row) => row.id as number);
-  const removed =
-    removedIds.length === 0
-      ? 0
-      : await strapi.db.transaction(() => deleteShares(strapi, { id: { $in: removedIds } }));
+    "past retention",
+  );
 
   if (expired + cancelled + orphaned + removed > 0) {
     strapi.log.info(
