@@ -289,7 +289,9 @@ async function lockShareRow(strapi: SecretShareHost, trx: KnexTrx, id: number): 
  * Ends a pending share: `pending -> to`, envelope NULL, terminalAt now, as
  * one conditional knex update in `trx` that must change exactly one row
  * (Strapi's single-row update selects first and updates by id), then its
- * notification goes, with a ping after the commit.
+ * notification goes, with a ping after the commit. Only a reveal's burn
+ * (`retrieved`) also requires the envelope (the frozen predicate of plan
+ * §3.4); the janitor ends a malformed pending row without one too.
  */
 export async function endShare(
   strapi: SecretShareHost,
@@ -299,11 +301,17 @@ export async function endShare(
   now: Date,
 ): Promise<void> {
   const t = shareTable(strapi);
-  const changed = await strapi.db
+  let query = strapi.db
     .getConnection(t.table)
     .transacting(trx)
-    .where({ [t.id]: share.id, [t.state]: "pending" })
-    .update({ [t.state]: to, [t.envelope]: null, [t.terminalAt]: now, [t.updatedAt]: now });
+    .where({ [t.id]: share.id, [t.state]: "pending" });
+  if (to === "retrieved") query = query.whereNotNull(t.envelope);
+  const changed = await query.update({
+    [t.state]: to,
+    [t.envelope]: null,
+    [t.terminalAt]: now,
+    [t.updatedAt]: now,
+  });
   if (changed !== 1) throw new Error(`the share changed under the lock (${changed} rows)`);
   await deleteShareNotifications(strapi, [share]);
 }
@@ -494,9 +502,12 @@ export function parseCreate(
   body: unknown,
   callerId: number,
 ): { recipient: number; text: string; lifetime: "1h" | "24h" } {
-  const data = isRecord(body) && isRecord(body.data) ? body.data : isRecord(body) ? body : {};
-  const keys = Object.keys(data);
-  if (keys.some((key) => !["recipient", "text", "lifetime"].includes(key))) {
+  // Strapi's `{ data }` envelope alone, or the fields alone: nothing beside them.
+  const wrapped = isRecord(body) && "data" in body;
+  if (wrapped && Object.keys(body).length !== 1) throw new errors.ValidationError("Invalid key");
+  const data = wrapped ? body.data : body;
+  if (!isRecord(data)) throw new errors.ValidationError("Invalid body");
+  if (Object.keys(data).some((key) => !["recipient", "text", "lifetime"].includes(key))) {
     throw new errors.ValidationError("Invalid key");
   }
   if (!isRowId(data.recipient) || data.recipient === callerId) refuseShare("recipient");
@@ -680,6 +691,17 @@ function summaryOf(share: Share, counterpart: Row | undefined, now: number): Sec
     terminalAt: share.terminalAt === null ? null : new Date(share.terminalAt).toISOString(),
     available: share.state === "pending" && share.expiresAt > now && isEligible(counterpart),
   };
+}
+
+/**
+ * The input check of every write before it touches anything: no query key
+ * at all, and (reveal, revoke) no body but an empty one.
+ */
+export function assertNoWriteInput(query: unknown, body?: unknown): void {
+  onlyKeys(query, []);
+  if (body !== undefined && body !== null && !(isRecord(body) && Object.keys(body).length === 0)) {
+    throw new errors.ValidationError("Invalid body");
+  }
 }
 
 /** Refuses every query key but `allowed` (no populate, fields, filters, sort, …). */
