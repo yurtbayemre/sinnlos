@@ -272,7 +272,7 @@ export const NOT_INCLUDED = [
   {
     category: "Inhalte von Geheimnissen / secret contents",
     reason:
-      "Only the recipient can open a secret, once; the intranet keeps no readable copy for anyone else. Opened, revoked and expired secrets no longer exist. A secret still pending is handled by the operator on request, never exported as text.",
+      "Only the recipient can open a secret, once; the intranet keeps no readable copy for anyone else. The stored text is deleted when the secret is opened or revoked; after its expiry it can no longer be opened, and it is deleted at the next successful cleanup. Backups follow their own retention. A secret still pending is handled by the operator on request, never exported as text.",
   },
   {
     category: "Sicherungen / backups",

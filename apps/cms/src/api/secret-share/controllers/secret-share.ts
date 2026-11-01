@@ -3,6 +3,7 @@ import { STAFF_ROLES, hasRole } from "@sinnlos/domain";
 import type { RequestAssurance } from "../../../extensions/users-permissions/strapi-server";
 import { answerRefusals } from "../../../utils/refusal";
 import {
+  assertNoWriteInput,
   createShare,
   listShares,
   parseCreate,
@@ -58,6 +59,7 @@ export default {
     const caller = staffOf(ctx);
     if (!caller) return;
     await answerRefusals(ctx, async () => {
+      assertNoWriteInput(ctx.query);
       const input = parseCreate(ctx.request.body, caller.userId);
       // Synchronously, before the first await (plan §3.4).
       if (!reserveCreate(caller.userId)) refuseShare("quota");
@@ -82,6 +84,7 @@ export default {
     const caller = staffOf(ctx);
     if (!caller) return;
     await answerRefusals(ctx, async () => {
+      assertNoWriteInput(ctx.query, ctx.request.body);
       ctx.send({ data: { text: await revealShare(host(), caller, ctx.params.id) } });
     });
   },
@@ -90,6 +93,7 @@ export default {
     const caller = staffOf(ctx);
     if (!caller) return;
     await answerRefusals(ctx, async () => {
+      assertNoWriteInput(ctx.query, ctx.request.body);
       ctx.send({ data: await revokeShare(host(), caller, ctx.params.id) });
     });
   },

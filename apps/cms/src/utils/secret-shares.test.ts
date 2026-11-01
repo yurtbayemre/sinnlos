@@ -6,7 +6,9 @@ import { Refusal } from "./refusal";
 import {
   LIMITER_MAX_SENDERS,
   __resetCreateLimiterForTest,
+  assertNoWriteInput,
   confirmed,
+  endShare,
   isEligible,
   parseCreate,
   refuseShare,
@@ -76,6 +78,83 @@ describe("parseCreate", () => {
   it("refuses unknown keys (no populate, fields or extra data)", () => {
     expect(() => parseCreate({ ...ok, populate: "*" }, 7)).toThrow(errors.ValidationError);
     expect(() => parseCreate({ data: { ...ok, senderId: 1 } }, 7)).toThrow(errors.ValidationError);
+    // Nothing beside Strapi's envelope, and no body that is not an object.
+    expect(() => parseCreate({ data: ok, populate: "*" }, 7)).toThrow(errors.ValidationError);
+    for (const body of [undefined, null, "x", [ok], { data: [ok] }]) {
+      expect(() => parseCreate(body, 7), JSON.stringify(body)).toThrow(errors.ValidationError);
+    }
+  });
+});
+
+describe("assertNoWriteInput", () => {
+  it("refuses any query key, and any body but an empty one", () => {
+    expect(() => assertNoWriteInput({}, {})).not.toThrow();
+    expect(() => assertNoWriteInput(undefined, undefined)).not.toThrow();
+    expect(() => assertNoWriteInput({ populate: "*" }, {})).toThrow(errors.ValidationError);
+    for (const body of [{ id: 1 }, "x", [], { data: {} }]) {
+      expect(() => assertNoWriteInput({}, body), JSON.stringify(body)).toThrow(
+        errors.ValidationError,
+      );
+    }
+    // create's query alone (its body is parseCreate's).
+    expect(() => assertNoWriteInput({ status: "draft" })).toThrow(errors.ValidationError);
+  });
+});
+
+describe("endShare", () => {
+  function builder(changed: number) {
+    const calls: string[] = [];
+    const chain = {
+      transacting: () => chain,
+      where: () => chain,
+      whereNull: () => chain,
+      whereNotNull: (column: string) => {
+        calls.push(`whereNotNull ${column}`);
+        return chain;
+      },
+      update: async () => changed,
+    };
+    const strapi = {
+      db: {
+        getConnection: () => chain,
+        metadata: { get: () => ({ tableName: "secret_shares", attributes: {} }) },
+        query: () => ({ deleteMany: vi.fn() }),
+        inTransaction: () => false,
+        transaction: async (callback: (scope: { trx: object }) => Promise<unknown>) =>
+          callback({ trx: { executionPromise: Promise.resolve() } }),
+      },
+      log: { warn: vi.fn() },
+    } as unknown as SecretShareHost;
+    return { strapi, calls };
+  }
+  const share = { id: 1, documentId: "a1b2c3d4e5f6g7h8i9j0k1l2", recipientId: 2 };
+
+  it("burns a reveal only with the envelope present (the frozen predicate)", async () => {
+    const { strapi, calls } = builder(1);
+    await endShare(strapi, {}, share, "retrieved", new Date());
+    expect(calls).toEqual(["whereNotNull envelope"]);
+  });
+
+  it("lets the janitor end a malformed pending row without an envelope", async () => {
+    const { strapi, calls } = builder(1);
+    await endShare(strapi, {}, share, "expired", new Date());
+    expect(calls).toEqual([]);
+  });
+
+  it("throws on a zero-row burn, so the reveal rolls back and no text leaves", async () => {
+    const { strapi } = builder(0);
+    await expect(endShare(strapi, {}, share, "retrieved", new Date())).rejects.toThrow(
+      /changed under the lock/,
+    );
+    const answer = await confirmed(strapi, "reveal", async (trx) => {
+      await endShare(strapi, trx, share, "retrieved", new Date());
+      return "plaintext";
+    }).catch((err: unknown) => err);
+    expect(answer).toBeInstanceOf(Refusal);
+    expect((answer as Refusal).status).toBe(503);
+    expect(String(vi.mocked(strapi.log.warn).mock.calls[0][0])).toBe(
+      "[secrets] reveal answered busy: Error",
+    );
   });
 });
 

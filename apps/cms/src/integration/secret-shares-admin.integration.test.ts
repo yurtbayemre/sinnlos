@@ -1,3 +1,6 @@
+import { createRequire } from "node:module";
+import { dirname, join } from "node:path";
+import { errors } from "@strapi/utils";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { ADMIN_ENV, adminRequest, adminToken, createUser, signIn } from "./admin-api.test.helper";
@@ -9,17 +12,23 @@ import { createTestStrapi, testEngines, type Row, type TestStrapi } from "./harn
  *   - after the boot no admin role holds any Content Manager grant on the
  *     type, read included, super admins too;
  *   - after a DELIBERATE re-grant of every Content Manager action on the
- *     type to the super admin role, every route family still refuses it:
- *     list, detail, create, update, delete, bulk actions, relations,
- *     history, the i18n fill-from-locale route, the review-workflow entries
- *     and the preview. The share and its envelope are unchanged and no
- *     answer carries them.
+ *     type to the super admin role, every route family still refuses it,
+ *     and each refusal is proved to come from the closure (a counter on the
+ *     wrapped factory): list, detail, create, update, delete, bulk delete,
+ *     clone, relations, the i18n fill-from-locale route and the preview over
+ *     HTTP;
+ *     history and the review-workflow entries (enterprise features, not
+ *     mounted here) through their installed controllers. The share and its envelope are unchanged and
+ *     no answer carries them.
  */
 
 const UID = "api::secret-share.secret-share";
 const ADMIN_PERMISSION = "admin::permission";
 const CM = "plugin::content-manager.explorer";
 const ACTIONS = ["read", "create", "update", "delete", "publish"].map((a) => `${CM}.${a}`);
+
+/** An installed controller module: its actions (CommonJS, no default export). */
+type Controller = Record<string, (ctx: unknown) => Promise<unknown>>;
 
 interface PermissionService {
   createMany(permissions: Record<string, unknown>[]): Promise<unknown>;
@@ -83,50 +92,102 @@ describe.each(testEngines())("secret shares in the admin panel on %s", (engine) 
     expect(await t.strapi.db.query(ADMIN_PERMISSION).count({ where: { subject: UID } })).toBe(
       ACTIONS.length,
     );
+    // Count every call of the wrapped factory and the wrapped preview for the
+    // share's uid: each family must reach the closure, not stop before it.
+    const contentManager = t.strapi.plugin("content-manager");
+    const checker = contentManager.service("permission-checker") as {
+      create(params: { model?: unknown }): unknown;
+    };
+    const preview = contentManager.service("preview") as {
+      getPreviewUrl(uid: unknown, params: unknown): unknown;
+    };
+    let reached = 0;
+    const create = checker.create.bind(checker);
+    checker.create = (params) => {
+      if (params?.model === UID) reached += 1;
+      return create(params);
+    };
+    const getPreviewUrl = preview.getPreviewUrl.bind(preview);
+    preview.getPreviewUrl = (uid, params) => {
+      if (uid === UID) reached += 1;
+      return getPreviewUrl(uid, params);
+    };
     const base = `/content-manager/collection-types/${UID}`;
-    const routes: [string, string, unknown?][] = [
-      ["GET", base],
-      ["GET", `${base}/${id}`],
-      ["POST", base, { senderId: 1, recipientId: 2, state: "pending" }],
-      ["PUT", `${base}/${id}`, { state: "pending" }],
-      ["DELETE", `${base}/${id}`],
-      ["POST", `${base}/actions/bulkDelete`, { documentIds: [id] }],
-      ["GET", `${base}/actions/countManyEntriesDraftRelations?documentIds[0]=${id}`],
-      ["GET", `${base}/${id}/actions/countDraftRelations`],
-      ["POST", `${base}/clone/${id}`, {}],
-      ["GET", `/content-manager/relations/${UID}/${id}/senderId`],
-      ["GET", `/content-manager/history-versions?contentType=${UID}&documentId=${id}`],
+    const families: [string, string, string, unknown?][] = [
+      ["list", "GET", base],
+      ["detail", "GET", `${base}/${id}`],
+      ["create", "POST", base, { senderId: 1, recipientId: 2, state: "pending" }],
+      ["update", "PUT", `${base}/${id}`, { state: "revoked" }],
+      ["delete", "DELETE", `${base}/${id}`],
+      ["bulk delete", "POST", `${base}/actions/bulkDelete`, { documentIds: [id] }],
+      ["clone", "POST", `${base}/clone/${id}`, {}],
+      // The type's only relations are Strapi's createdBy/updatedBy.
+      ["relations", "GET", `/content-manager/relations/${UID}/${id}/createdBy`],
       [
+        "i18n fill-from-locale",
         "GET",
-        `/i18n/content-manager/get-fill-from-locale/${UID}?documentId=${id}&sourceLocale=en&targetLocale=de`,
+        `/i18n/content-manager/get-fill-from-locale/${UID}?documentId=${id}&sourceLocale=en&targetLocale=de&collectionType=collection-types`,
       ],
-      [
-        "PUT",
-        `/review-workflows/content-manager/collection-types/${UID}/${id}/stage`,
-        { data: { id: 1 } },
-      ],
-      ["GET", `/review-workflows/content-manager/collection-types/${UID}/${id}/stages`],
-      ["GET", `/content-manager/preview/url/${UID}?documentId=${id}`],
+      ["preview", "GET", `/content-manager/preview/url/${UID}?documentId=${id}`],
     ];
-    for (const [method, path, json] of routes) {
+    for (const [family, method, path, json] of families) {
+      const before = reached;
       const res = await call(path, { method, json });
-      expect(res.status, `${method} ${path}: ${res.text.slice(0, 200)}`).toBeGreaterThanOrEqual(
-        400,
+      expect(res.status, `${family}: ${res.text.slice(0, 200)}`).toBe(403);
+      expect((res.body as { error?: { name?: string } }).error?.name, family).toBe(
+        "ForbiddenError",
       );
-      expect(res.text, path).not.toContain(envelope);
-      expect(res.text, path).not.toContain("ADMIN-SENTINEL-TEXT");
-      expect(res.text, path).not.toContain('"recipientId"');
+      expect(reached, `${family} reached the closure`).toBeGreaterThan(before);
+      expect(res.text, family).not.toContain(envelope);
+      expect(res.text, family).not.toContain("ADMIN-SENTINEL-TEXT");
     }
-    // The re-grant passes the panel's own policies: the 403 is the closure's
-    // ForbiddenError, not a "Policy Failed" of a missing grant.
-    for (const path of [
-      base,
-      `${base}/${id}`,
-      `/content-manager/preview/url/${UID}?documentId=${id}`,
-    ]) {
-      const res = await call(path);
-      expect(res.status, path).toBe(403);
-      expect((res.body as { error?: { name?: string } }).error?.name, path).toBe("ForbiddenError");
+
+    // History and review workflows are enterprise features: their HTTP
+    // routes are not mounted here (404). Their installed controllers are
+    // called directly instead, as a licensed instance would route them.
+    expect(
+      (await call(`/content-manager/history-versions?contentType=${UID}&documentId=${id}`)).status,
+    ).toBe(404);
+    expect(
+      (await call(`/review-workflows/content-manager/collection-types/${UID}/${id}/stages`)).status,
+    ).toBe(404);
+    const strapiRequire = createRequire(
+      createRequire(__filename).resolve("@strapi/strapi/package.json"),
+    );
+    const server = (pkg: string, file: string) =>
+      createRequire(__filename)(
+        join(dirname(strapiRequire.resolve(`${pkg}/package.json`)), "dist", "server", file),
+      );
+    const history = (
+      server("@strapi/content-manager", "history/controllers/history-version.js") as {
+        createHistoryVersionController(p: { strapi: unknown }): {
+          findMany(ctx: unknown): Promise<unknown>;
+        };
+      }
+    ).createHistoryVersionController({ strapi: t.strapi });
+    const stages = server("@strapi/review-workflows", "controllers/stages.js") as Controller;
+    const assignees = server("@strapi/review-workflows", "controllers/assignees.js") as Controller;
+    const ctx = () => ({
+      params: { model_uid: UID, id },
+      query: { contentType: UID, documentId: id },
+      request: { query: {}, body: { data: { id: 1 } } },
+      state: { userAbility: {} },
+      throw: (status: number) => {
+        throw new Error(`ctx.throw ${status}`);
+      },
+      forbidden: () => {
+        throw new Error("ctx.forbidden");
+      },
+    });
+    for (const [family, run] of [
+      ["history", () => history.findMany(ctx())],
+      ["workflow stage update", () => stages.updateEntity(ctx())],
+      ["workflow stages", () => stages.listAvailableStages(ctx())],
+      ["workflow assignee", () => assignees.updateEntity(ctx())],
+    ] as const) {
+      const before = reached;
+      await expect(run(), family).rejects.toBeInstanceOf(errors.ForbiddenError);
+      expect(reached, `${family} reached the closure`).toBeGreaterThan(before);
     }
     const row = (await t.strapi.db.query(UID).findOne({ where: { documentId: id } })) as Row;
     expect(row.state).toBe("pending");

@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   SECRET_CREATES_PER_DAY,
+  SECRET_PENDING_PER_RECIPIENT,
   SECRET_PENDING_PER_SENDER,
   SECRET_SHARE_RETENTION_MS,
 } from "@sinnlos/domain";
@@ -43,6 +44,12 @@ type Body = {
   };
   error?: { status?: number; name?: string; details?: { code?: string } };
 };
+
+interface Subscriber {
+  models: string[];
+  beforeCreate?: (event: unknown) => Promise<void>;
+  afterDeleteMany?: (event: unknown) => Promise<void>;
+}
 
 interface Janitor {
   runSecretShareJanitor(strapi: unknown): Promise<Record<string, number>>;
@@ -643,6 +650,84 @@ describe.each(testEngines())("secret shares on %s", (engine) => {
     });
   });
 
+  describe("the input contract of writes and the bounds", () => {
+    it("refuses query keys and extra body keys on every write before any change", async () => {
+      const { id, from, to, sender, recipient } = await shared();
+      const refused = [
+        api(to, `/api/secret-shares/${id}/reveal?populate=*`, { method: "POST" }),
+        api(to, `/api/secret-shares/${id}/reveal`, { json: { populate: "*" } }),
+        api(to, `/api/secret-shares/${id}/reveal?fields[0]=envelope`, { json: {} }),
+        api(from, `/api/secret-shares/${id}/revoke?status=draft`, { method: "POST" }),
+        api(from, `/api/secret-shares/${id}/revoke`, { json: { data: {} } }),
+      ];
+      for (const res of await Promise.all(refused)) expect(res.status, res.text).toBe(400);
+      expect((await stored(id))?.state).toBe("pending");
+      const valid = { recipient: recipient.id, text: "x", lifetime: "1h" };
+      const creates: [string, unknown][] = [
+        ["/api/secret-shares?populate=*", valid],
+        ["/api/secret-shares", { data: valid, populate: "*" }],
+        ["/api/secret-shares", { data: valid, meta: {} }],
+      ];
+      for (const [path, json] of creates) {
+        expect((await api(from, path, { json })).status, path).toBe(400);
+      }
+      expect(await t.strapi.db.query(UID).count({ where: { senderId: sender.id } })).toBe(1);
+      expect((await reveal(to, id)).status).toBe(200);
+    });
+
+    it("caps the recipient's pending shares under concurrent creates", async () => {
+      const recipient = await createUser(t, "member");
+      for (let i = 0; i < SECRET_PENDING_PER_RECIPIENT - 1; i++) {
+        const sender = await createUser(t, "member");
+        expect((await create(await as(sender), recipient.id, `r${i}`)).status).toBe(201);
+      }
+      const senders = await Promise.all(Array.from({ length: 5 }, () => createUser(t, "member")));
+      const callers = await Promise.all(senders.map((sender) => as(sender)));
+      const answers = await Promise.all(
+        callers.map((caller) => create(caller, recipient.id, "last")),
+      );
+      expect(answers.filter((res) => res.status === 201)).toHaveLength(1);
+      for (const res of answers.filter((r) => r.status !== 201)) expect(code(res)).toBe("quota");
+      expect(
+        await t.strapi.db
+          .query(UID)
+          .count({ where: { recipientId: recipient.id, state: "pending" } }),
+      ).toBe(SECRET_PENDING_PER_RECIPIENT);
+    });
+
+    it("the janitor changes at most BATCH shares per step and run", async () => {
+      const BATCH = t.requireBuilt<{ BATCH: number }>("src/cron/secret-share-janitor").BATCH;
+      const over = BATCH + 10;
+      const sender = await createUser(t, "member");
+      const other = await createUser(t, "member");
+      const blocked = await createUser(t, "member");
+      await t.strapi.db.query(USER).update({ where: { id: blocked.id }, data: { blocked: true } });
+      const row = async (data: Record<string, unknown>) =>
+        (await t.strapi.db.query(UID).create({ data: { state: "pending", ...data } })).id;
+      const soon = new Date(Date.now() + 3_600_000);
+      const ids = { expired: [] as number[], cancelled: [] as number[], orphaned: [] as number[] };
+      for (let i = 0; i < over; i++) {
+        ids.expired.push(
+          await row({ senderId: sender.id, recipientId: other.id, expiresAt: new Date(1000) }),
+        );
+        ids.cancelled.push(
+          await row({ senderId: sender.id, recipientId: blocked.id, expiresAt: soon }),
+        );
+        ids.orphaned.push(
+          await row({ senderId: sender.id, recipientId: 2_000_000_000, expiresAt: soon }),
+        );
+      }
+      const first = await janitor.runSecretShareJanitor(t.strapi);
+      expect(first).toMatchObject({ expired: BATCH, cancelled: BATCH, orphaned: BATCH });
+      for (let run = 0; run < 3; run++) await janitor.runSecretShareJanitor(t.strapi);
+      const left = (list: number[], where: Record<string, unknown>) =>
+        t.strapi.db.query(UID).count({ where: { id: { $in: list }, ...where } });
+      expect(await left(ids.expired, { state: "pending" })).toBe(0);
+      expect(await left(ids.cancelled, { state: "pending" })).toBe(0);
+      expect(await left(ids.orphaned, {})).toBe(0);
+    });
+  });
+
   it("the sentinel text is nowhere after create and reveal: no table, no log line, no notification", async () => {
     const text = sentinel();
     const { id, to, from, recipient } = await shared(text);
@@ -658,9 +743,51 @@ describe.each(testEngines())("secret shares on %s", (engine) => {
       body: `{"text": "${text}`,
     });
     expect((await everyTable()).includes(text)).toBe(false);
+    // Injected server failures while the text is in the handler: inside the
+    // create (the notification write) and inside the reveal (the end of the
+    // share). Both roll back and answer busy; neither body nor log has it.
+    const lifecycles = (
+      t.strapi.db as unknown as { lifecycles: { subscribe(s: Subscriber): () => void } }
+    ).lifecycles;
+    const failing = lifecycles.subscribe({
+      models: [NOTIFICATION],
+      beforeCreate: async () => {
+        throw new Error("injected failure");
+      },
+      afterDeleteMany: async () => {
+        throw new Error("injected failure");
+      },
+    });
+    try {
+      const created = await create(from, recipient.id, `${text}-second`);
+      expect(created.status).toBe(503);
+      expect(created.text).not.toContain(text);
+      const failed = await reveal(to, id);
+      expect(failed.status).toBe(503);
+      expect(failed.text).not.toContain(text);
+    } finally {
+      failing();
+    }
+    expect((await stored(id))?.state).toBe("pending");
+    expect((await everyTable()).includes(text)).toBe(false);
     expect((await reveal(to, id)).body.data?.text).toBe(text);
     expect((await everyTable()).includes(text)).toBe(false);
     expect(logged.filter((line) => line.includes(text))).toEqual([]);
+    // Search: the share and its notification are no search source, for
+    // Meilisearch's documents and the web's fallback (the content-API reads
+    // of the indexed kinds) alike.
+    const search = t.requireBuilt<{ loadSearchDocuments(s: unknown): Promise<unknown[]> }>(
+      "src/search/meili-index",
+    );
+    const documents = JSON.stringify(await search.loadSearchDocuments(t.strapi));
+    expect(documents).not.toContain(text);
+    expect(documents).not.toContain(id);
+    for (const kind of ["announcements", "wiki-pages", "documents", "events", "polls"]) {
+      const term = encodeURIComponent(text);
+      const res = await api(to, `/api/${kind}?filters[title][$containsi]=${term}`);
+      expect(res.text, kind).not.toContain(text);
+      expect(res.text, kind).not.toContain(id);
+    }
   });
 
   it("the fixture roles are all here (sanity)", () => {

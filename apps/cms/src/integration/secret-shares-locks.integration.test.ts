@@ -150,13 +150,17 @@ describe.each(testEngines())("secret shares under locks and failures on %s", (en
     });
   }
 
-  it("an MFA-pending session gets none of the routes", async () => {
+  it("an MFA-pending session gets none of the six routes", async () => {
+    const { id } = await shared();
     const editor = t.fixtures.users.editor;
     const jwt = await signIn(t, editor);
     for (const [method, path] of [
       ["GET", "/api/secret-shares"],
       ["POST", "/api/secret-shares"],
       ["GET", "/api/secret-shares/recipients"],
+      ["GET", `/api/secret-shares/${id}`],
+      ["POST", `/api/secret-shares/${id}/reveal`],
+      ["POST", `/api/secret-shares/${id}/revoke`],
     ]) {
       const res = await api({ jwt }, path, { method, json: method === "POST" ? {} : undefined });
       expect(res.status, path).toBe(403);
@@ -224,6 +228,51 @@ describe.each(testEngines())("secret shares under locks and failures on %s", (en
     expect(code(await reveal(to, id))).toBe("gone");
   });
 
+  it("the janitor counts and records only a confirmed COMMIT", async () => {
+    const { id } = await shared();
+    await t.strapi.db
+      .query(UID)
+      .update({ where: { documentId: id }, data: { expiresAt: new Date(Date.now() - 1000) } });
+    const registry = t.requireBuilt<{
+      cronRegistry(tz: string): { name: string }[];
+      guardedTask(spec: unknown): (context: { strapi: unknown }) => Promise<void>;
+    }>("src/cron/registry");
+    const spec = registry.cronRegistry("UTC").find((task) => task.name === "secret-share-janitor");
+    const task = registry.guardedTask(spec);
+    const outcome = async () =>
+      (
+        (await (
+          t.strapi as unknown as {
+            store(p: object): { get(p: object): Promise<{ lastOutcome?: string } | null> };
+          }
+        )
+          .store({ type: "plugin", name: "sinnlos", key: "cron:secret-share-janitor" })
+          .get({})) ?? {}
+      ).lastOutcome;
+    const off = duringNextEnd(async (trx) => {
+      await trx.raw(
+        engine === "sqlite"
+          ? 'INSERT INTO "it_deferred_child" ("parent") VALUES (424242)'
+          : `INSERT INTO ${qualified(t, "it_deferred_child")} ("parent") VALUES (424242)`,
+      );
+    });
+    try {
+      await task({ strapi: t.strapi });
+    } finally {
+      off();
+    }
+    expect(await state(id)).toBe("pending");
+    expect(
+      await t.strapi.db
+        .query(NOTIFICATION)
+        .count({ where: { type: "secretShared", link: `/secrets/${id}` } }),
+    ).toBe(1);
+    expect(await outcome()).toBe("failed");
+    await task({ strapi: t.strapi });
+    expect(await state(id)).toBe("expired");
+    expect(await outcome()).toBe("ok");
+  });
+
   it("a sender revokes although the recipient is blocked", async () => {
     const { id, from, recipient } = await shared();
     await t.strapi.db.query(USER).update({ where: { id: recipient.id }, data: { blocked: true } });
@@ -238,6 +287,82 @@ describe.each(testEngines())("secret shares under locks and failures on %s", (en
     const idp = await shared();
     const idpJwt = await jwtService().issue({ id: idp.recipient.id, am: "idp" });
     expect((await reveal({ jwt: idpJwt }, idp.id)).body.data?.text).toBe(idp.text);
+  });
+
+  /**
+   * SQLite runs one transaction at a time on its one connection, so a request
+   * that waits there waits before its first statement, its authentication
+   * included: a write committed meanwhile is seen from the start, and the
+   * window "past the authentication, before the locks" of the Postgres cases
+   * below does not exist. What can be pinned deterministically: a reveal that
+   * waits for the connection while its share expires or its recipient is
+   * blocked gets nothing. The anonymisation and the bulk deletion need the
+   * same connection themselves, so they cannot run while a reveal waits.
+   */
+  describe.runIf(engine === "sqlite")("waiting for the one SQLite connection", () => {
+    const pool = () =>
+      (
+        t.strapi.db as unknown as {
+          connection: { client: { pool: { numPendingAcquires(): number } } };
+        }
+      ).connection.client.pool;
+
+    async function waiting<T>(
+      request: () => Promise<T>,
+      meanwhile: (probe: { raw(sql: string, b?: unknown[]): Promise<unknown> }) => Promise<unknown>,
+    ) {
+      const knex = (
+        t.strapi.db as unknown as {
+          connection: {
+            transaction(): Promise<{
+              raw(sql: string, b?: unknown[]): Promise<unknown>;
+              commit(): Promise<unknown>;
+            }>;
+          };
+        }
+      ).connection;
+      const probe = await knex.transaction();
+      let pending: ReturnType<typeof settle<T>>;
+      try {
+        pending = settle(request());
+        await expect
+          .poll(() => pool().numPendingAcquires(), { timeout: 10_000 })
+          .toBeGreaterThan(0);
+        await meanwhile(probe);
+      } finally {
+        await probe.commit();
+      }
+      const done = await pending!;
+      if (!done.ok) throw (done as { error: unknown }).error;
+      return (done as { value: T }).value;
+    }
+
+    it("a reveal waiting while its share expires answers gone", async () => {
+      const { id, to, text } = await shared();
+      const res = await waiting(
+        () => reveal(to, id),
+        (probe) =>
+          probe.raw('UPDATE "secret_shares" SET "expires_at" = ? WHERE "document_id" = ?', [
+            new Date(Date.now() - 1000),
+            id,
+          ]),
+      );
+      expect(res.status).toBe(410);
+      expect(code(res)).toBe("gone");
+      expect(res.text).not.toContain(text);
+      expect(await state(id)).toBe("pending");
+    });
+
+    it("a reveal waiting while its recipient is blocked gets nothing", async () => {
+      const { id, to, recipient, text } = await shared();
+      const res = await waiting(
+        () => reveal(to, id),
+        (probe) => probe.raw('UPDATE "up_users" SET "blocked" = 1 WHERE "id" = ?', [recipient.id]),
+      );
+      expect(res.status).toBe(401);
+      expect(res.text).not.toContain(text);
+      expect(await state(id)).toBe("pending");
+    });
   });
 
   describe.runIf(engine === "postgres")("queued behind the directory lock", () => {
@@ -318,6 +443,53 @@ describe.each(testEngines())("secret shares under locks and failures on %s", (en
       expect(await state(id)).toBe("pending");
     });
 
+    it("expiry passing while the reveal waits for the locks: gone, checked after them", async () => {
+      const { id, to, text } = await shared();
+      const res = await queued(
+        () => reveal(to, id),
+        () =>
+          t.strapi.db.query(UID).update({
+            where: { documentId: id },
+            data: { expiresAt: new Date(Date.now() - 1000) },
+          }),
+      );
+      expect(res.status).toBe(410);
+      expect(code(res)).toBe("gone");
+      expect(res.text).not.toContain(text);
+      expect(await state(id)).toBe("pending");
+    });
+
+    it("a forced deadlock rolls the reveal back with busy and no text", async () => {
+      const { id, to, recipient, text } = await shared();
+      const probe = await holdTransaction(t);
+      let opened: ReturnType<typeof settle<ApiResponse<Body>>>;
+      try {
+        // The share row first: the reveal takes the directory and both users,
+        // then waits for it.
+        await probe.raw(
+          `SELECT 1 FROM ${qualified(t, "secret_shares")} WHERE document_id = ? FOR UPDATE`,
+          [id],
+        );
+        opened = settle(reveal(to, id));
+        await waitForLockWait(t);
+        // Then a user row the reveal holds: a cycle. The reveal waited first,
+        // so its deadlock check fires first and Postgres aborts it (40P01).
+        await probe.raw(`SELECT 1 FROM ${qualified(t, "up_users")} WHERE id = ? FOR UPDATE`, [
+          recipient.id,
+        ]);
+      } finally {
+        await probe.commit();
+      }
+      const got = await opened!;
+      expect(got.ok).toBe(true);
+      const res = (got as { value: ApiResponse<Body> }).value;
+      expect(res.status).toBe(503);
+      expect(code(res)).toBe("busy");
+      expect(res.text).not.toContain(text);
+      expect(await state(id)).toBe("pending");
+      expect((await reveal(to, id)).body.data?.text).toBe(text);
+    });
+
     it("a reveal queued behind an anonymisation of the sender loses", async () => {
       const { id, to, sender, text } = await shared();
       await t.strapi.db.query(USER).update({ where: { id: sender.id }, data: { blocked: true } });
@@ -351,6 +523,9 @@ describe.each(testEngines())("secret shares under locks and failures on %s", (en
       expect(await state(id)).toBeUndefined();
     });
 
+    // The order in which Strapi's bulk deletion locks the two users is its
+    // own, so this race cannot force the deadlock; the case above forces one
+    // and pins the busy rollback.
     it("a Content Manager bulk deletion of both users racing a reveal: the text leaves only with a 200", async () => {
       const { id, to, sender, recipient, text } = await shared();
       const token = await adminToken(t);
