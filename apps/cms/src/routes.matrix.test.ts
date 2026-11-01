@@ -480,6 +480,8 @@ const GOLDEN: Record<string, PolicySpec[]> = {
   "api::profile.profile.mfaSetup": [],
   "api::profile.profile.mfaActivate": [],
   "api::profile.profile.mfaDisable": [],
+  // v0.34: the sign-out (token version bump).
+  "api::profile.profile.signOut": [],
   // v0.31: the banner's open count; the controller checks the read grants.
   "api::profile.profile.openAcks": [],
 

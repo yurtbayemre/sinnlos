@@ -316,6 +316,7 @@ Custom actions and plugin routes (`✓` = granted, `—` = not granted):
 | `api::profile.profile.mfaSetup`                    | `POST /api/me/mfa/setup`                        | ✓            | ✓        | ✓                 | ✓           | ✓        | ✓       | ✓               |
 | `api::profile.profile.mfaActivate`                 | `POST /api/me/mfa/activate`                     | ✓            | ✓        | ✓                 | ✓           | ✓        | ✓       | ✓               |
 | `api::profile.profile.mfaDisable`                  | `POST /api/me/mfa/disable`                      | ✓            | ✓        | ✓                 | ✓           | ✓        | ✓       | ✓               |
+| `api::profile.profile.signOut`                     | `POST /api/me/sign-out`                         | ✓            | ✓        | ✓                 | ✓           | ✓        | ✓       | ✓               |
 | `api::profile.profile.openAcks`                    | `GET /api/me/open-acks`                         | ✓            | ✓        | ✓                 | ✓           | ✓        | ✓       | ✓               |
 | `api::acknowledgement.acknowledgement.reportIndex` | `POST /api/acknowledgements/report-index`       | ✓            | —        | —                 | —           | —        | —       | —               |
 | `plugin::users-permissions.role.find`              | `GET /api/users-permissions/roles`              | ✓            | —        | —                 | —           | —        | —       | —               |
