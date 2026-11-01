@@ -43,6 +43,16 @@
  * or a revoked or second-factor-restricted session would get its stream
  * exactly while the cms is down. The client counts it as an instant close
  * and polls meanwhile.
+ *
+ * An OPEN stream re-checks the same way (v0.34, N1): every heartbeat asks
+ * the cached check again, and a refused JWT ends the stream with
+ * `bye expired` (the session is over: the client reconnects only on its
+ * next visibility regain, into the 401). While the cms is reachable a
+ * revocation (a sign-out elsewhere, a block, a password change) thus ends
+ * an open stream within the check's 60 s cache plus one heartbeat (25 s)
+ * plus the check's own wait (at most 10 s). A cms that cannot say
+ * (`unavailable`) leaves the stream open, as before, until it answers or
+ * the rotation below ends it.
  */
 import { STRAPI_URL } from "@/lib/config";
 import { getSession, getStrapiToken } from "@/lib/session";
@@ -59,10 +69,9 @@ const HEARTBEAT_MS = 25_000;
 /**
  * Hard stream rotation. Second GC path for half-open connections the
  * enqueue error can't detect, AND the upper bound on how long an open
- * stream outlives its session's revocation: a revoked JWT (password change,
- * block, deleted account) is only refused when a stream opens, and every
- * reconnect re-runs the session and JWT check, so an open stream ends at
- * the latest with its rotation (plus the check's 60 s cache). A demoted
+ * stream outlives its session's revocation while the cms cannot say: the
+ * heartbeats' re-check (v0.34) ends it sooner whenever the cms answers, and
+ * every reconnect re-runs the session and JWT check. A demoted
  * user's role is read per refetch, not here. So the stream lifetime is a
  * security parameter, not a tuning knob. Randomized so post-deploy herds
  * don't re-rotate in lockstep.
@@ -99,6 +108,7 @@ export async function GET(req: Request) {
   let lifetimeTimer: NodeJS.Timeout | null = null;
   let lowWatermarkStrikes = 0;
   let closed = false;
+  let checking = false;
 
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
@@ -168,6 +178,21 @@ export async function GET(req: Request) {
         } else {
           lowWatermarkStrikes = 0;
         }
+        // N1 (v0.34): the JWT is still accepted (see the header). One check
+        // at a time; cleanup() ignores an answer that arrives after the
+        // stream ended.
+        if (closed || checking) return;
+        checking = true;
+        void checkUploadAccess({ userId, jwt, strapiUrl: STRAPI_URL })
+          .then(
+            (status) => {
+              if (status === "blocked") cleanup("expired");
+            },
+            () => undefined,
+          )
+          .finally(() => {
+            checking = false;
+          });
       }, HEARTBEAT_MS);
       heartbeat.unref?.();
 

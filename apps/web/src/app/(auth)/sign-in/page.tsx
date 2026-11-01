@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import type { Route } from "next";
 import { getTranslations } from "next-intl/server";
@@ -9,6 +10,7 @@ import { SiteFooter } from "@/components/layout/site-footer";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { LocalSignInForm } from "@/components/auth/local-sign-in-form";
 import { LOCAL_ENABLED, MICROSOFT_ENABLED, OIDC } from "@/lib/auth-config";
+import { signOutNoticeShown } from "@/lib/auth/sign-out-notice";
 import { signInWithMicrosoft, signInWithOidc } from "@/lib/auth-actions";
 import { signInErrorKey } from "@/lib/entra-exchange";
 import { brand, DEFAULT_SITE_NAME } from "@/lib/site-config";
@@ -46,6 +48,9 @@ export default async function SignInPage({
     // safeInternalPath guarantees an internal path — cast for typedRoutes.
     redirect(from as Route);
   }
+  // v0.34 (A-02): the sign-out could not confirm that the account's other
+  // sessions ended (lib/auth/sign-out-notice.ts); the cookie expires on its own.
+  const signOutUnconfirmed = signOutNoticeShown(await cookies());
   const t = await getTranslations("auth");
   const tCommon = await getTranslations("common");
   const { name, logoUrl } = brand(process.env);
@@ -84,6 +89,11 @@ export default async function SignInPage({
           {expired && (
             <p role="status" className="text-center text-sm text-destructive">
               {t("sessionExpired")}
+            </p>
+          )}
+          {signOutUnconfirmed && (
+            <p role="status" className="text-center text-sm text-destructive">
+              {t("signedOutUnconfirmed")}
             </p>
           )}
           {passwordSet && (

@@ -936,13 +936,15 @@ export function registerUserWriteGuard(strapi: UserWriteGuardHost): void {
 
 /**
  * The routes a restricted session (a required second factor not enrolled
- * yet) may call: its own profile (which says so) and the enrollment.
+ * yet) may call: its own profile (which says so), the enrollment and (v0.34)
+ * the sign-out, which ends it on the server as well.
  * Matched on the resolved route: `<METHOD> <handler>`.
  */
 export const RESTRICTED_ROUTES: ReadonlySet<string> = new Set([
   "GET api::profile.profile.me",
   "POST api::profile.profile.mfaSetup",
   "POST api::profile.profile.mfaActivate",
+  "POST api::profile.profile.signOut",
 ]);
 
 /**

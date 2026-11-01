@@ -7,8 +7,12 @@ import {
   IDENTIFIER_WINDOW_MS,
   IP_MAX_FAILURES,
   IP_WINDOW_MS,
+  loginRateLimiter,
   maskIdentifier,
   MAX_TRACKED_KEYS,
+  mfaRateLimiter,
+  passwordLinkRateLimiter,
+  setPasswordRateLimiter,
   rateLimitKeyForIp,
   type LoginAttemptOutcome,
   type LoginAttemptTicket,
@@ -417,5 +421,18 @@ describe("maskIdentifier", () => {
   it("handles short and domain-less identifiers", () => {
     expect(maskIdentifier("a@x.de")).toBe("a***@x.de");
     expect(maskIdentifier("bob")).toBe("bo***");
+  });
+});
+
+describe("the process-wide instances", () => {
+  it("v0.34: the MFA budget is its own globalThis singleton, apart from sign-in and links", () => {
+    const g = globalThis as { __sinnlosMfaRateLimiter?: LoginRateLimiter };
+    expect(g.__sinnlosMfaRateLimiter).toBe(mfaRateLimiter);
+    const others = [loginRateLimiter, passwordLinkRateLimiter, setPasswordRateLimiter];
+    expect(new Set([mfaRateLimiter, ...others]).size).toBe(4);
+    const ticket = mfaRateLimiter.tryAcquire("192.0.2.77", "user:77");
+    expect(ticket).not.toBe("blocked");
+    expect(loginRateLimiter.isBlocked("192.0.2.77", "user:77")).toBe(false);
+    if (ticket !== "blocked") mfaRateLimiter.settle(ticket, "neutral");
   });
 });

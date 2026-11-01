@@ -7,10 +7,18 @@
  * token version), which goes into this tab's session like after a password
  * change (lib/auth/keep-session.ts). Machine codes only; the forms translate
  * them (mfa.error_<code>).
+ *
+ * v0.34 (A-01): both check the account's password, so both draw on one
+ * attempt budget (mfaRateLimiter, lib/login-rate-limit.ts: per client IP
+ * and per account, failures only). Without it a copied session could guess
+ * its owner's password here without the sign-in's limit.
  */
+import { headers } from "next/headers";
 import { refresh } from "next/cache";
 import { runCmsAction } from "@/lib/action-result";
 import { keepSessionSignedIn } from "@/lib/auth/keep-session";
+import { clientIpFrom, mfaRateLimiter, type LoginAttemptOutcome } from "@/lib/login-rate-limit";
+import { getSession } from "@/lib/session";
 import { strapi } from "@/lib/strapi";
 
 export type MfaErrorCode =
@@ -21,6 +29,7 @@ export type MfaErrorCode =
   | "notEnabled"
   | "requiredByRole"
   | "unavailable"
+  | "rateLimited"
   | "failed";
 
 /** The cms's details.code → the form's code. */
@@ -41,6 +50,41 @@ const mapError = (cms: { details: Readonly<Record<string, unknown>> | null }) =>
 
 const field = (formData: FormData, name: string) => String(formData.get(name) ?? "").slice(0, 512);
 
+/** A wrong password or code: the failures the budget counts. */
+const GUESS_CODES: ReadonlySet<MfaErrorCode | undefined> = new Set([
+  "passwordInvalid",
+  "mfaInvalid",
+]);
+
+/**
+ * Runs one activate/disable attempt inside the shared budget: refused
+ * (`rateLimited`, no cms call) while the IP or the account is blocked,
+ * else the attempt holds a place until it settles: a wrong password or
+ * code stays counted, a success clears the account's bucket, anything else
+ * (an outage, a throw, a redirect) gives the place back.
+ */
+async function withAttemptBudget<S extends { error?: MfaErrorCode }>(
+  label: string,
+  attempt: () => Promise<S>,
+): Promise<S | { error: "rateLimited" }> {
+  const session = await getSession();
+  const id = session?.user && "id" in session.user ? session.user.id : undefined;
+  const account = `user:${typeof id === "number" ? id : "none"}`;
+  const ticket = mfaRateLimiter.tryAcquire(clientIpFrom(await headers()), account);
+  if (ticket === "blocked") return { error: "rateLimited" };
+  let outcome: LoginAttemptOutcome = "neutral";
+  try {
+    const state = await attempt();
+    if (state.error === undefined) outcome = "success";
+    else if (GUESS_CODES.has(state.error)) outcome = "failure";
+    return state;
+  } finally {
+    if (mfaRateLimiter.settle(ticket, outcome)) {
+      console.warn(`${label} too many wrong passwords or codes: ${account} blocked for a while`);
+    }
+  }
+}
+
 export type MfaActivateState = { recoveryCodes?: string[]; error?: MfaErrorCode };
 
 /** Turns the second factor on with the setup page's sealed enrollment. */
@@ -48,6 +92,10 @@ export async function activateMfa(
   _prev: MfaActivateState,
   formData: FormData,
 ): Promise<MfaActivateState> {
+  return withAttemptBudget("[mfa] activate", () => activate(formData));
+}
+
+async function activate(formData: FormData): Promise<MfaActivateState> {
   const result = await runCmsAction<
     MfaErrorCode,
     { data?: { jwt?: unknown; recoveryCodes?: unknown } },
@@ -83,6 +131,10 @@ export async function disableMfa(
   _prev: MfaDisableState,
   formData: FormData,
 ): Promise<MfaDisableState> {
+  return withAttemptBudget("[mfa] disable", () => disable(formData));
+}
+
+async function disable(formData: FormData): Promise<MfaDisableState> {
   const result = await runCmsAction<MfaErrorCode, { data?: { jwt?: unknown } }>(
     () =>
       strapi("/api/me/mfa/disable", {

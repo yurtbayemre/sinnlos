@@ -83,7 +83,7 @@ export async function Topbar() {
                 <PhoneIconLabel icon={FlaskConical} label={tAuth("demoMode")} />
               </Button>
             ) : (
-              <SignOutButton label={tAuth("signOut")} />
+              <SignOutButton label={tAuth("signOut")} hint={tAuth("signOutHint")} />
             )}
           </>
         ) : null}
@@ -92,10 +92,11 @@ export async function Topbar() {
   );
 }
 
-function SignOutButton({ label }: { label: string }) {
+/** v0.34 (A-02): the hint says that sign-out ends every intranet session of the account. */
+function SignOutButton({ label, hint }: { label: string; hint: string }) {
   return (
     <SignOutForm>
-      <Button variant="ghost" size="sm" type="submit" className={PHONE_ICON_BUTTON}>
+      <Button variant="ghost" size="sm" type="submit" title={hint} className={PHONE_ICON_BUTTON}>
         <PhoneIconLabel icon={LogOut} label={label} />
       </Button>
     </SignOutForm>

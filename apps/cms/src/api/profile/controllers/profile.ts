@@ -37,7 +37,10 @@
  */
 import { GUEST, hasRole, type RoleType as IntranetRoleType } from "../../../bootstrap/roles";
 import { ENTRA_MANAGED_PROFILE_FIELDS } from "../../../entra/profile";
-import type { RequestAssurance } from "../../../extensions/users-permissions/strapi-server";
+import {
+  bumpTokenVersion,
+  type RequestAssurance,
+} from "../../../extensions/users-permissions/strapi-server";
 import { idpOf } from "../../../idp/exchange-core";
 import { mfaActivate, mfaDisable, mfaSetup } from "../../../utils/mfa";
 import { openAckCounts } from "../../../utils/open-acks";
@@ -327,6 +330,20 @@ export default {
     const user = ctx.state.user;
     if (!user) return ctx.unauthorized();
     return ctx.send({ data: await openAckCounts(strapi as never, user) });
+  },
+
+  // v0.34 (A-02): the web's sign-out. Clearing the browser's cookie alone
+  // left a copied session valid for up to 7 days; raising the token version
+  // revokes every JWT issued before it, the same revocation as a password
+  // change (FX40): every intranet session of the account ends, on every
+  // device, and with them a pending set-password link (it carries the
+  // version, utils/password-link.ts). Open to a restricted session too
+  // (RESTRICTED_ROUTES).
+  async signOut(ctx: ProfileContext) {
+    const user = ctx.state.user;
+    if (!user) return ctx.unauthorized();
+    await bumpTokenVersion(strapi as never, user.id);
+    ctx.status = 204;
   },
 
   // v0.27: the caller's own second factor (utils/mfa.ts). The answers carry

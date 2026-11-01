@@ -494,6 +494,8 @@ export const CUSTOM_ACTION_GRANTS: Record<string, readonly MatrixRoleType[] | "*
   "api::profile.profile.mfaSetup": "*",
   "api::profile.profile.mfaActivate": "*",
   "api::profile.profile.mfaDisable": "*",
+  // v0.34: sign-out ends every session of the account (A-02).
+  "api::profile.profile.signOut": "*",
   // v0.31: the dashboard banner's open confirmations. Every role; the
   // controller counts a kind only while the role holds its find and
   // acknowledgement.find, else null (utils/open-acks.ts).

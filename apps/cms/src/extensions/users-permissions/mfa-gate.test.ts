@@ -78,11 +78,12 @@ describe("decorateStrategy", () => {
     expect(request.state.assurance).toEqual({ am: null, mfa: false, tv: 0, restricted: false });
   });
 
-  it("names exactly the profile and enrollment routes as open to a restricted session", () => {
+  it("names exactly the profile, enrollment and sign-out routes as open to a restricted session", () => {
     expect([...RESTRICTED_ROUTES].sort()).toEqual([
       "GET api::profile.profile.me",
       "POST api::profile.profile.mfaActivate",
       "POST api::profile.profile.mfaSetup",
+      "POST api::profile.profile.signOut",
     ]);
   });
 });
