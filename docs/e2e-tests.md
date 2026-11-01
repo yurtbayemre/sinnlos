@@ -76,18 +76,32 @@ the final content and pass the quiz with the new answer. The course and lesson
 are created by browser actions; no authoring target is pre-seeded.
 
 The `secret-sharing` case in `e2e/secrets.spec.ts` (v0.35) has the member send
-secrets to the team lead through `/secrets/new`. The lead's bell links to the
-secret (after a page load: live events stay off). The secret's page holds
-no text before "Show and delete" (also in its HTML, sent with
-`Cache-Control: no-store`); one session gets the text once, a second session
-of the lead loses, and reload, back and forward show no text. A replayed reveal
-Server Action with a foreign `Origin` is refused while the same call from the
-site's origin works. A share revoked or expired while the lead's page is open
-cannot be opened; the expiry is the one change made in the database, through
-the run's psql (`SINNLOS_E2E_PSQL`). A reveal answer held until the lead has
-navigated away never shows its text. A guest has no Secrets entry and gets the
-"not available" page. Further browser contexts of the lead reuse its stored
-session instead of signing in again.
+secrets to the team lead through `/secrets/new`. Every `/secrets` answer it
+can produce carries `Cache-Control` with `private` and `no-store`: the
+sign-in redirect, the not-found page for an unknown and a malformed id, the
+page and its RSC payload. The lead's bell links to the secret (after a page
+load: live events are off in this run). The secret's page holds no text before
+"Show and delete"; two sessions of the lead click at the same time and exactly
+one gets the text, the other the refusal. Reload, the RSC payload, back and
+forward show no text. A replayed reveal Server Action with a foreign `Origin`
+is refused while the same call from the site's origin works. A share revoked
+or expired while the lead's page is open cannot be opened; the expiry is the
+one change made in the database, through the run's psql
+(`SINNLOS_E2E_PSQL`). A reveal answer held until the lead's next page has
+rendered never shows its text. A guest has no Secrets entry and gets the "not
+available" page. Further browser contexts of the lead reuse its stored session
+instead of signing in again. A secrets-off response cannot be produced here
+(the run switches only the marketplace off).
+
+The `secret-live` case runs only in its own stack with live events on in the
+CMS and the web (`WEB_INTERNAL_URL=http://web:3000`), started by
+`pnpm --filter @sinnlos/e2e test:live` (`run.mjs --live --grep secret-live`);
+the ordinary run skips it. The lead's open page records its stream's events; a
+secret sent meanwhile arrives as a ping, and the bell changes without a page
+load, long before its 120-second poll. With live events on, a page that is
+still streaming holds a hidden copy of a Suspense fragment (`<div hidden
+id="S:1">` under `body`) for about a second, so a text locator can briefly
+match twice; that is why the ordinary run keeps live events off.
 
 The two Teams cases live in `e2e/teams.spec.ts`. All six cases reuse
 fixture reading and visible-form login from `e2e/helpers.ts`, including the
@@ -106,6 +120,7 @@ pnpm test:e2e --grep training-exam-completion
 pnpm test:e2e --grep training-confirm-completion
 pnpm test:e2e --grep training-authoring
 pnpm test:e2e --grep secret-sharing
+pnpm --filter @sinnlos/e2e test:live   # secret-live, live events on
 ```
 
 `check:setup` is a runtime smoke check, not a browser E2E pass. An empty

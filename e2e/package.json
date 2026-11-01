@@ -9,6 +9,7 @@
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "check:setup": "node run.mjs --check",
+    "test:live": "node run.mjs --live --grep secret-live",
     "test:runner": "node --test run.test.mjs"
   },
   "devDependencies": {
