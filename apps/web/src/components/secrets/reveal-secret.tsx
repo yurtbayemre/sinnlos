@@ -11,20 +11,28 @@ import type { SecretCode } from "@/lib/secret-share-errors";
 import { SecretError } from "@/components/secrets/secret-error";
 
 /**
- * "Show and delete" (v0.35, plan §3.10). The text exists only in this
- * component's state, filled by the click's own Server Action result: no
- * refresh(), no server props, no form state. It goes on `pagehide` (also
- * into the back/forward cache) and on unmount, and a result that arrives
- * after either is dropped: every click, pagehide and unmount moves
- * `generation` on, and a result applies only to the generation it started
- * in.
+ * Whether this document ever loaded the Plausible script: a tab opened
+ * while the module secrets was off keeps it across client navigation after
+ * the operator switched secrets on (the root layout renders it no more).
  */
-export function RevealSecret({ id }: { id: string }) {
-  const t = useTranslations("secrets");
+function documentHasAnalytics(): boolean {
+  return "plausible" in window || document.querySelector("script[data-domain]") !== null;
+}
+
+/**
+ * The state of "Show and delete" (v0.35, plan §3.10). The text exists only
+ * here, filled by the click's own Server Action result: no refresh(), no
+ * server props, no form state. It goes on `pagehide` (also into the
+ * back/forward cache) and on unmount, and a result that arrives after
+ * either is dropped: every click, pagehide and unmount moves `generation`
+ * on, and a result applies only to the generation it started in. In a
+ * document that loaded Plausible the click reloads the page instead: the
+ * fresh document has no analytics, and the click there reveals.
+ */
+export function useRevealSecret(id: string) {
   const [text, setText] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [failure, setFailure] = useState<ActionFailure<SecretCode> | null>(null);
-  const [copied, setCopied] = useState(false);
   const generation = useRef(0);
 
   useEffect(() => {
@@ -41,6 +49,10 @@ export function RevealSecret({ id }: { id: string }) {
   }, []);
 
   const reveal = async () => {
+    if (documentHasAnalytics()) {
+      window.location.reload();
+      return;
+    }
     const mine = ++generation.current;
     setPending(true);
     setFailure(null);
@@ -57,6 +69,14 @@ export function RevealSecret({ id }: { id: string }) {
     if (result.ok && result.data) setText(result.data.text);
     else if (!result.ok) setFailure(result);
   };
+
+  return { text, pending, failure, reveal };
+}
+
+export function RevealSecret({ id }: { id: string }) {
+  const t = useTranslations("secrets");
+  const { text, pending, failure, reveal } = useRevealSecret(id);
+  const [copied, setCopied] = useState(false);
 
   const copy = async () => {
     if (text === null) return;
