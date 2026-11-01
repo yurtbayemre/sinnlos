@@ -16,8 +16,9 @@
  * is the one profile read such a session may still make.
  *
  * One page shows many images, so the answer is remembered per session
- * token for BLOCK_STATUS_TTL_MS (60 s): a block reaches the files within a
- * minute. What is kept is the status only (`active` | `blocked`), never a
+ * token for BLOCK_STATUS_TTL_MS (60 s), counted from when the probe was
+ * SENT (v0.34): a block reaches the files within a minute, also when the
+ * answer of a probe sent just before it arrives late. What is kept is the status only (`active` | `blocked`), never a
  * Strapi response, in a plain Map in this process:
  *   - keyed by the user id AND a hash of the JWT it was checked with: every
  *     session of a user (laptop and phone, a fresh sign-in after an
@@ -75,11 +76,16 @@ export class BlockStatusCache {
     return entry.status;
   }
 
-  set(userId: number, tag: string, status: AccountStatus): void {
+  /** The cache's clock: checkUploadAccess dates an answer by when its probe started. */
+  stamp(): number {
+    return this.now();
+  }
+
+  set(userId: number, tag: string, status: AccountStatus, checkedAt: number = this.now()): void {
     const key = entryKey(userId, tag);
     // Re-inserting moves the token to the end: the first key is the oldest write.
     this.entries.delete(key);
-    this.entries.set(key, { status, expiresAt: this.now() + this.ttlMs });
+    this.entries.set(key, { status, expiresAt: checkedAt + this.ttlMs });
     while (this.entries.size > this.maxEntries) {
       const oldest = this.entries.keys().next();
       if (oldest.done) break;
@@ -176,9 +182,10 @@ export async function checkUploadAccess({
   const key = entryKey(userId, tag);
   const running = inflight.get(key);
   if (running) return running;
+  const startedAt = cache.stamp();
   const check = probeAccountStatus(strapiUrl, jwt, fetchImpl)
     .then((status) => {
-      if (status !== "unavailable") cache.set(userId, tag, status);
+      if (status !== "unavailable") cache.set(userId, tag, status, startedAt);
       return status;
     })
     .finally(() => inflight.delete(key));

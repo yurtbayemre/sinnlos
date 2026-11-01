@@ -49,8 +49,9 @@
  * `bye expired` (the session is over: the client reconnects only on its
  * next visibility regain, into the 401). While the cms is reachable a
  * revocation (a sign-out elsewhere, a block, a password change) thus ends
- * an open stream within the check's 60 s cache plus one heartbeat (25 s)
- * plus the check's own wait (at most 10 s). A cms that cannot say
+ * an open stream within the check's 60 s cache (counted from when its
+ * probe was sent) plus one heartbeat (25 s) plus the check's own wait (at
+ * most 10 s): 95 s. A cms that cannot say
  * (`unavailable`) leaves the stream open, as before, until it answers or
  * the rotation below ends it.
  */

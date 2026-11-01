@@ -206,6 +206,10 @@ export const callbacks = createAuthCallbacks({
 // change to the session (FX40; the jwt callback's update branch decides).
 export const { handlers, auth, signIn, signOut, unstable_update } = NextAuth({
   trustHost: true,
+  // v0.34: pinned to the route (app/api/auth/[...nextauth]). Auth.js would
+  // otherwise take a path in AUTH_URL as its base, and auth-handlers.ts
+  // closes Auth.js's own sign-out at /api/auth/signout only.
+  basePath: "/api/auth",
   // Upper bound only: 7 days = the local Strapi JWT's expiresIn
   // (apps/cms/config/plugins.ts; Entra sign-ins get ENTRA_SESSION_TTL, at
   // most 7d). The session actually ends when the embedded Strapi JWT
