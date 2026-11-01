@@ -1,11 +1,16 @@
 # Secret sharing (v0.35.0): design and plan
 
-Status: planned, not built yet (2026-11-01).
+Status: owner decisions confirmed 2026-11-01; built in v0.35.0. The few places where the build differs from the text below:
+
+- **Statuses by cause:** a refusal's HTTP status follows its cause (`SECRET_SHARE_REFUSALS` in `packages/domain/src/secret-share.ts`): `unavailable` is 409 while the other party is not eligible, 503 without a usable key and 410 after a committed cancellation; `busy` is 503 (§3.9).
+- **Plausible, also in an existing tab:** besides the root layout's rule (§3.10), the new-secret form and the reveal check the document itself. A tab opened while the module was off keeps an executed Plausible script across client navigation, so a document that ever loaded it reloads before a text can be typed or shown (`apps/web/src/components/secrets/clean-document.ts`).
+- **Live events in e2e:** the live-events case runs in its own stack (`run.mjs --live`, `pnpm --filter @sinnlos/e2e test:live`); the ordinary run keeps live events off.
+- **SQLite after a failed COMMIT:** the pool's `validate` (`apps/cms/config/database.ts`) refuses a connection still in a transaction, so a connection a failed COMMIT left open is disposed of instead of reused (§3.4).
 
 - **Owner request (2026-11-01):** a module that shares secrets, links and passwords, like an internal one-time secret, from user to user. External recipients maybe later; they may be too insecure for now.
 - **When:** built as v0.35.0, before v1.0.0-rc.1.
 - **Review:** Codex researched the design, then reviewed this plan in five rounds until it approved it (15, 11, 3 and 2 findings, all adopted below).
-- **Open:** the owner decisions in section 10, each with its recommended default.
+- **Owner decisions:** all nine of section 10 confirmed at their defaults (2026-11-01).
 
 ## 1. What it is, and what it promises
 

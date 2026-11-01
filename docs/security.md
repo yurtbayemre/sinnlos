@@ -40,6 +40,7 @@ behind most rules (its §5 conventions, kept in
   - [Blocked and anonymised people](#blocked-and-anonymised-people)
   - [Module and feature switches](#module-and-feature-switches)
   - [Course reports](#course-reports)
+  - [Secret sharing](#secret-sharing)
 - [Upload hardening](#upload-hardening)
   - [Who may open a file](#who-may-open-a-file)
 - [Frontend role gating](#frontend-role-gating)
@@ -1417,7 +1418,8 @@ grant check).
 - **Modules:** `events` (event, event-rsvp), `training` (course, lesson,
   lesson-progress), `marketplace` (classified), `kudos` (kudos except
   `/celebrations`), `celebrations`, `polls` (poll, poll-vote),
-  `duty-plans`, `kpis`.
+  `duty-plans`, `kpis`, `secrets` (secret-share; its janitor, the
+  export and the anonymisation keep running).
 - **Features:** `read-confirmations` (ack create; the admin read bypass
   ends; authoring refuses `requiresAck: true`), `training-reports` (both
   report routes; the admin read bypass on lesson-progress ends),
@@ -1427,7 +1429,8 @@ grant check).
   (export, anonymisation, training evidence) and the retention jobs are
   never switched.
 - The Strapi admin panel is not covered: technical admins still see every
-  type.
+  type except the secret shares, which the panel never shows ([Secret
+  sharing](#secret-sharing)).
 
 ### Course reports
 
@@ -1451,6 +1454,150 @@ whatever the grants say (`apps/cms/src/api/course/controllers/course.ts`).
   (`FEATURES_OFF`) turn both routes off.
 - It is no access to the full training history. Receipts outside these
   courses and people are not part of the report.
+
+### Secret sharing
+
+v0.35 (module `secrets`; design and review:
+[plan-v035-secret-sharing.md](./plan-v035-secret-sharing.md)). One staff
+member sends one short text (a password, a link, an access code; at most
+8 KiB of UTF-8) to one other staff member, who opens it once with "Show and
+delete". A share can be opened for 1 hour (the default) or 24 hours.
+
+**The promise.**
+
+- Only the named recipient opens a share, once, while both people are
+  active staff: the account exists in the intranet, is not blocked and has a
+  staff role (`admin_role`, `editor`, `department_head`, `team_lead`,
+  `member`). Guests and the `authenticated` fallback neither send nor
+  receive. This is checked at create, in the lists and at the open, against
+  the stored account; the identity provider is not asked.
+- Nobody else reads the text through the intranet: no admin view, no
+  export of the text. An Art. 15 export (also by an `admin_role` for
+  another person) lists a person's shares as metadata only: counterpart,
+  times, state.
+- The text is stored encrypted. Its envelope is deleted when the share is
+  opened (`retrieved`) or revoked. After its expiry it can no longer be
+  opened, and the janitor (every minute, also with the module off) deletes
+  it at its next successful run. The metadata goes 7 days after the share
+  ended. The sender sees the state, never the text.
+
+**What it does not promise.**
+
+- The operator is trusted. Whoever runs the server (database, `.env` with
+  `ENCRYPTION_KEY`, backups, the running cms) can read shares that are
+  still pending. A backup taken meanwhile keeps the envelope, together with
+  the key in the `.env` backup, for its lifetime; old row versions and the
+  WAL are no certified erase. Secret sharing is for everyday credentials
+  between colleagues, not for confidential reports about the company.
+- "Retrieved" means an authorised open attempt of the recipient consumed
+  the share. It confirms neither delivery nor that a human read it. A
+  response lost on the way, or a lost acknowledgement of the COMMIT, loses
+  the text (it is delivered at most once).
+- After opening, the recipient can copy, photograph or forward the text.
+  A stolen signed-in session of the recipient can open a share, like any
+  other content.
+- A person blocked or without a staff role keeps their pending shares
+  until the janitor's next successful run cancels them; undone before that,
+  they stay pending (shown as "currently unavailable" meanwhile). There is
+  no hook in each block or role write.
+- The notification ("X sent you a secret", never the text) is an ordinary
+  notification: technical admins see it in the panel.
+
+**Read once, at most once.** Create, reveal and revoke each run in one
+transaction under three locks in a fixed order: the directory lock, both
+user rows in ascending id, then the share row. Under the locks the caller is
+read again (exists, not blocked, staff role, the request's token version,
+the second-factor decision on the fresh row); create and reveal also
+re-read the other party. The reveal checks the expiry before it decrypts,
+then ends the share with one conditional update
+(`pending` → `retrieved`, envelope NULL, `terminal_at` set) that must
+change exactly one row, and deletes its notification in the same
+transaction. The text leaves only after the COMMIT is confirmed (the knex
+transaction's own promise, awaited after the outermost transaction
+returned). Any failure or doubt answers `busy` without text and never sets
+the share back to `pending`. A `busy` create may have created the share:
+the web tells the sender to check the sent list before sending again.
+
+The refusals carry `error.details.code` and a status by cause
+(`SECRET_SHARE_REFUSALS` in `@sinnlos/domain`): 400 `recipient`, `text`,
+`lifetime`; 429 `quota`; 410 `gone`; `unavailable` as 409 while the
+other party is not eligible (the share stays pending), 503 without a usable
+key, 410 after a committed cancellation (the envelope did not open); 503
+`busy`. A share the caller may not see is a plain 404. Limits: 10 creates
+per minute per sender (in the process), 20 pending shares per sender and
+per recipient, 100 creates per sender in 24 hours.
+
+**Crypto** (`SECRET_SHARE_CRYPTO` in `@sinnlos/domain`, frozen):
+
+- key: HKDF-SHA256 over the raw UTF-8 bytes of `ENCRYPTION_KEY` (never
+  decoded), salt `sinnlos`, info `sinnlos/secret-share/v1`, 32 bytes;
+- cipher: AES-256-GCM, a fresh random 12-byte nonce per share, 16-byte tag;
+- envelope: `v1.<base64url nonce>.<base64url ciphertext‖tag>`;
+- additional data: `v1|<documentId>|<senderId>|<recipientId>|<expiresAt>`
+  (ISO 8601 UTC with milliseconds), so an envelope moved to another row,
+  pair of people or expiry does not open.
+
+With the module on and a key shorter than 32 characters, the cms logs one
+error line at boot and the module answers `unavailable` (503); the rest of
+the intranet runs. After a key change a pending share turns `cancelled` at
+its reveal attempt, never `retrieved`. Never rotate `ENCRYPTION_KEY` to
+purge shares (it also encrypts the second-factor secrets): use the rollback
+SQL ([OPERATIONS.md, Secret shares](./OPERATIONS.md#secret-shares-v035)).
+
+**The admin panel is closed.** The type is hidden from the Content Manager
+and the Content-Type Builder. Every boot removes every Content Manager
+permission on it from every admin role: Strapi's reset of the super admin
+grants read again at each boot, so the line
+`[admin-permissions] removed 1 Content Manager permission(s) on hidden types:
+api::secret-share.secret-share` is expected on every boot. Beyond the
+grants, the Content Manager's permission checker throws "forbidden" for the
+type whatever a role is granted later (list, detail, bulk, relations,
+history, the i18n fill-from-locale route, review workflows), and preview
+refuses it by its UID. The Content Manager's schema endpoints still
+describe the type to admins, never its rows.
+
+**Routes.** Six custom routes (`/api/secret-shares`, the README tables),
+granted to the five staff roles and revoked for guest, `authenticated`
+and `public`; none is in the restricted-session (second factor pending)
+allowlist. They take fixed inputs only: an unknown query or body key is a
+400 before any state change, and no `populate`, `fields`, `filters` or
+`sort` is accepted. Every answer, errors included, carries
+`Cache-Control: private, no-store`. The text never appears in a log line,
+an audit event, a notification, the search index or an export.
+
+**The web.**
+
+- The text travels only in the reveal Server Action's result into the
+  reveal component's state: no `refresh()`, no server props, no form state.
+  It is cleared on `pagehide` and on unmount, and a result that arrives
+  after either is dropped. Reload, the RSC payload and back/forward never
+  show it. Next refuses a Server Action from another origin.
+- `/secrets` and below are sent `Cache-Control: private, no-store`
+  (`next.config.mjs`, which also reaches the proxy's sign-in redirect).
+- The secret actions log only a status and a fixed code, never an upstream
+  body; `next.config.mjs` turns off Next's logging of Server Action
+  arguments (`logging.serverFunctions`).
+- While the module is on, no page renders the Plausible script. A tab
+  opened while the module was off keeps an already loaded script across
+  client navigation, so the new-secret form disables its fields and the
+  reveal reloads the page first in a document that ever loaded Plausible
+  (`components/secrets/clean-document.ts`).
+- The text field has no autocomplete and no spell check; a revealed link
+  is plain text, not clickable.
+
+**Restore and rollback.** `infra/restore-db.sh apply` closes every restored
+share in the cms's schema before the site reopens (envelopes deleted,
+pending ones cancelled, their notifications deleted), so a share opened
+after the backup cannot be opened again. The rollback to v0.34 ends with
+`infra/diagnostics/secret-shares-rollback.sql`
+([UPGRADE.md](./UPGRADE.md#release-notes)).
+
+**External recipients are deferred.** They would need a public page and an
+unauthenticated claim route on both edges, a bearer link with the key in
+the URL fragment, defences against mail and chat link scanners that open
+links, and they would let the company's domain serve text to anyone. That
+is its own release and review (plan, section 9); v0.35 has no dormant code
+for it.
 
 ## Upload hardening
 
