@@ -56,7 +56,9 @@ export default ({ env }: { env: Env }) => {
       // Cap multipart bodies at the same 50 MB as the upload plugin's
       // sizeLimit (config/plugins.ts) — formidable's default would accept
       // 200 MB and only fail later in the provider. Both limits must be
-      // kept in sync.
+      // kept in sync. register() extends this factory: every multipart
+      // temp file is removed when its request ends, at most 20 file parts
+      // per request (v0.34, C1; src/bootstrap/multipart-cleanup.ts).
       name: "strapi::body",
       config: {
         formidable: { maxFileSize: 50 * 1024 * 1024 },

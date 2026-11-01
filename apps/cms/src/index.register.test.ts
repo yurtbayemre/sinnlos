@@ -1,6 +1,7 @@
 import { errors } from "@strapi/utils";
 import { describe, expect, it, vi } from "vitest";
 import { documentMiddlewares } from "./bootstrap/document-middlewares";
+import { withTempFileCleanup } from "./bootstrap/multipart-cleanup";
 import { registerRestrictedRelationGuard } from "./bootstrap/restricted-relation-guard";
 import { registerUserContactSanitizer } from "./bootstrap/user-contact-sanitizer";
 import lifecycle from "./index";
@@ -84,8 +85,12 @@ const authWith = (...scopes: string[]) => ({
  */
 function datetimeHost() {
   const hooks = new Map<string, Array<(context: unknown) => Promise<void>>>();
+  // The middleware registry register() extends strapi::body in (v0.34, C1).
+  const middlewares = { extend: vi.fn() };
   return {
     hooks,
+    middlewares,
+    get: (name: string) => (name === "middlewares" ? middlewares : undefined),
     // No API routers: nothing for the FEATURES_OFF decoration to walk.
     apis: {},
     log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
@@ -540,6 +545,13 @@ describe("relation side-channel guard registration (FX05)", () => {
     expect(() => registerRestrictedRelationGuard({ ...strapi, auth: {} })).toThrow(
       /populate grant check/,
     );
+  });
+
+  it("register() extends strapi::body with the multipart cleanup (v0.34, C1)", async () => {
+    const { strapi } = host("member");
+    await lifecycle.register({ strapi });
+    expect(strapi.middlewares.extend).toHaveBeenCalledTimes(1);
+    expect(strapi.middlewares.extend).toHaveBeenCalledWith("strapi::body", withTempFileCleanup);
   });
 
   it("register() installs the guard next to the contact sanitizer", async () => {
