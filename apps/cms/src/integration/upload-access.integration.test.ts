@@ -40,6 +40,7 @@ const LESSON = "api::lesson.lesson";
 const DEPARTMENT = "api::department.department";
 const TEAM = "api::team.team";
 const EVENT = "api::event.event";
+const CLASSIFIED = "api::classified.classified";
 
 interface StoredFile {
   id: number;
@@ -339,6 +340,57 @@ describe.each(testEngines())("upload access on %s", (engine) => {
     expect(await openers(expiredFile.name, ["editor", "member"])).toEqual(["editor"]);
   });
 
+  it("ads, department headers and team avatars open through their own read grants", async () => {
+    const [adImage, header, teamAvatar] = await Promise.all([
+      storeFile(),
+      storeFile(),
+      storeFile(),
+    ]);
+    await t.strapi.documents(CLASSIFIED).create({
+      data: {
+        title: `IT ad ${++serial}`,
+        description: "Red bike",
+        category: "sale",
+        expiresAt: "2030-01-01",
+        author: t.fixtures.users.member.documentId,
+        images: [adImage.id],
+      },
+    });
+    await t.strapi.documents(DEPARTMENT).update({
+      documentId: sales(),
+      data: { headerImage: header.id },
+    });
+    await t.strapi.documents(TEAM).update({
+      documentId: t.fixtures.teams.platform.documentId as string,
+      data: { avatar: teamAvatar.id },
+    });
+    // guest holds no classified, department or team grant.
+    for (const file of [adImage, header, teamAvatar]) {
+      expect(await openers(file.name, ["member", "guest"]), file.name).toEqual(["member"]);
+    }
+  });
+
+  it("a reference followed by a non-ASCII space names no file (as the inventory reads it)", async () => {
+    const file = await storeFile();
+    await seedPage(t, { space: space.documentId, body: `/uploads/${file.name}\u00a0caption` });
+    expect(await allows("member", file.name)).toBe(false);
+  });
+
+  it("a name that is one file's original never counts as another file's rendition", async () => {
+    const common = await storeFile();
+    await document({ audience: "all", file: common.id });
+    const hidden = await storeFile({ formats: { small: { url: `/uploads/${common.name}` } } });
+    // The writer may open `common`, so the reference passes the write check...
+    const res = await wiki.createDraft("department_head", {
+      title: `IT common ${++serial}`,
+      body: ref(common),
+      space: space.documentId,
+    });
+    expect(res.status, res.text).toBe(201);
+    // ...and it does not open the file that lists the same name as its rendition.
+    expect(await allows("department_head", hidden.name)).toBe(false);
+  });
+
   it("a linked file whose last link goes opens only through a readable text", async () => {
     const file = await storeFile();
     const doc = await document({
@@ -407,6 +459,30 @@ describe.each(testEngines())("upload access on %s", (engine) => {
       );
     });
 
+    it("a lesson's text opens through the player alone", async () => {
+      const image = await storeFile();
+      const course = await t.strapi.documents(COURSE).create({
+        data: { title: `IT played ${++serial}`, slug: `it-played-${serial}` },
+        status: "published",
+      });
+      await t.strapi.documents(LESSON).create({
+        data: {
+          title: `IT player ${serial}`,
+          body: ref(image),
+          order: 0,
+          course: course.documentId,
+        },
+        status: "published",
+      });
+      const reads = ["api::lesson.lesson.find", "api::lesson.lesson.findOne"];
+      await without("member", reads, async () => {
+        expect(await allows("member", image.name)).toBe(true);
+      });
+      await without("member", [...reads, "api::lesson.lesson.player"], async () => {
+        expect(await allows("member", image.name)).toBe(false);
+      });
+    });
+
     it("a draft needs the authoring grant, a revision the history grant", async () => {
       const draft = await storeFile();
       const doc = await document({
@@ -452,9 +528,11 @@ describe.each(testEngines())("upload access on %s", (engine) => {
       }>("pg");
       const panel = await storeFile();
       const stamped = await storeFile({ stampedBy: t.fixtures.users.member.id });
+      const spaced = await storeFile();
+      const shadow = await storeFile({ formats: { small: { url: `/uploads/${panel.name}` } } });
       const page = await seedPage(t, {
         space: space.documentId,
-        body: `${ref(panel)} ${ref(stamped)} /uploads/gone_000000.png.`,
+        body: `${ref(panel)} ${ref(stamped)} /uploads/gone_000000.png. /uploads/${spaced.name}\u00a0x`,
       });
       const client = new Client({ connectionString: PG_URL });
       await client.connect();
@@ -487,8 +565,18 @@ describe.each(testEngines())("upload access on %s", (engine) => {
             ["3 unresolvable", "gone_000000.png", "published"],
             ["3 unresolvable", "gone_000000.png", "draft"],
             ["3 unresolvable", "gone_000000.png", "history"],
+            ["3 unresolvable", `${spaced.name}\u00a0x`, "published"],
+            ["3 unresolvable", `${spaced.name}\u00a0x`, "draft"],
+            ["3 unresolvable", `${spaced.name}\u00a0x`, "history"],
           ].sort(),
         );
+        // Neither the spaced file nor the file whose rendition shares the
+        // panel file's name is referenced: both are unused, like the cms says.
+        const unused = listing
+          .filter((row) => row.section === "4 unused_panel_files")
+          .map((row) => row.file_id);
+        expect(unused).toEqual(expect.arrayContaining([spaced.id, shadow.id]));
+        expect(unused).not.toContain(panel.id);
         expect(Number(summary[0].inline_unstamped)).toBeGreaterThanOrEqual(2);
       } finally {
         await client.end();

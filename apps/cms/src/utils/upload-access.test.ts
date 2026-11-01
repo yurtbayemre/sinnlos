@@ -35,6 +35,13 @@ describe("uploadReferenceNames", () => {
     expect([...uploadReferenceNames("/uploads/a_1.pdf?download=1#page=2")]).toEqual(["a_1.pdf"]);
   });
 
+  it("ends a name at ASCII whitespace only, like the inventory query", () => {
+    expect([...uploadReferenceNames("/uploads/a_1.png\tb /uploads/c_2.png d")]).toEqual([
+      "a_1.png",
+      "c_2.png d",
+    ]);
+  });
+
   it("finds nothing in other text or other values", () => {
     expect(uploadReferenceNames("no files here /upload/x.png").size).toBe(0);
     expect(uploadReferenceNames(null).size).toBe(0);
@@ -47,23 +54,29 @@ describe("uploadReferenceNames", () => {
  * back (JSON columns as text): `url = ?` OR the formats text LIKE `%…%`.
  */
 function filesDb(rows: Array<Record<string, unknown>>) {
-  const findOne = vi.fn((url: string, pattern: string) => {
-    const needle = pattern.slice(1, -1);
-    return rows
-      .filter((row) => row.url === url || JSON.stringify(row.formats ?? null).includes(needle))
-      .map((row) => ({
-        ...row,
-        formats: row.formats === undefined ? null : JSON.stringify(row.formats),
-        provider_metadata: JSON.stringify(row.provider_metadata ?? null),
-      }));
+  const raw = (row: Record<string, unknown>) => ({
+    ...row,
+    formats: row.formats === undefined ? null : JSON.stringify(row.formats),
+    provider_metadata: JSON.stringify(row.provider_metadata ?? null),
   });
+  /** A read: `url = ?` (the original) or the formats text LIKE `%…%`. */
+  const findOne = vi.fn((url: string | null, pattern: string | null) =>
+    rows
+      .filter((row) =>
+        url !== null
+          ? row.url === url
+          : JSON.stringify(row.formats ?? null).includes(pattern!.slice(1, -1)),
+      )
+      .map(raw),
+  );
   const getConnection = vi.fn(() => {
-    let url = "";
-    let pattern = "";
+    let url: string | null = null;
+    let pattern: string | null = null;
     const builder = {
       select: () => builder,
+      limit: () => builder,
       where: (_column: string, value: string) => ((url = value), builder),
-      orWhereRaw: (_sql: string, [value]: string[]) => ((pattern = value), builder),
+      whereRaw: (_sql: string, [value]: string[]) => ((pattern = value), builder),
       then: (resolve: (rows: unknown[]) => unknown) => resolve(findOne(url, pattern)),
     };
     return builder;
@@ -104,6 +117,17 @@ describe("resolveUploadFile", () => {
     ]);
     expect((await resolveUploadFile(strapi, "extra_small_secret_abc.webp"))?.id).toBe(9);
     expect(await resolveUploadFile(strapi, "extra_small_secret_abc.png")).toBeNull();
+  });
+
+  it("an original wins over another file's rendition; two claims of one rendition resolve to none", async () => {
+    const { strapi } = filesDb([
+      { id: 1, url: "/uploads/common.png", formats: null },
+      { id: 2, url: "/uploads/b_1.png", formats: { small: { url: "/uploads/common.png" } } },
+      { id: 3, url: "/uploads/c_1.png", formats: { small: { url: "/uploads/twice.png" } } },
+      { id: 4, url: "/uploads/d_1.png", formats: { small: { url: "/uploads/twice.png" } } },
+    ]);
+    expect((await resolveUploadFile(strapi, "common.png"))?.id).toBe(1);
+    expect(await resolveUploadFile(strapi, "twice.png")).toBeNull();
   });
 
   it("reads files without a stamp", async () => {

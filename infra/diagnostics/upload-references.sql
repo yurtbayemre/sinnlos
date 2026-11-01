@@ -10,22 +10,23 @@
 -- New references are checked when they are written; what was written before
 -- v0.34 was not, so the rollout reviews it:
 --
---   a. Run this before the deploy and review it with the owner:
---      - section 1, every row: a reference to an admin-panel file. With
---        `linked = false` it opens the file for the text's readers from
---        v0.34 on: confirm that they may see it (a reference planted to a
---        file of another audience would open it), else remove it. With
---        `linked = true` it opens nothing while a row links the file (the
---        link's audience decides); readers outside that audience lose the
---        image or link: accept that, or re-upload the file for the text;
---      - section 2, every row: a reference to an intranet upload. It opens
---        nothing from v0.34 on (only the linking row or the uploader does):
---        accept the loss, or re-upload the file in the admin panel;
---      - section 3 lists dead references (no stored file): informational.
---   b. Between that review and the deploy, either nobody but admin_role and
---      editor writes these texts, or the deploy brief runs this again in PRE
---      and every row whose `updated_at` is newer than the review is reviewed
---      the same way before the go.
+--   a. Run this before the deploy and decide each row with the owner:
+--      - section 1, every row (a reference to an admin-panel file): its
+--        text's readers may open the file from v0.34 on, at once when
+--        `linked = false`, and once the last linking row goes when
+--        `linked = true` (until then the link's audience decides, and
+--        readers outside it lose the image or link). Approve that audience
+--        or remove the reference (a reference planted to a file of another
+--        audience would open it);
+--      - section 2, every row (a reference to an intranet upload): it opens
+--        nothing from v0.34 on (only the linking row or the uploader does).
+--        Accept the loss, or re-upload the file in the admin panel;
+--      - section 3, every row (a reference to no stored file): remove it or
+--        accept it as a dead link.
+--   b. From that reviewed run until the new version is live, only admin_role
+--      and editor write these texts (a freeze for everyone else). The deploy
+--      brief runs this again in PRE: a row whose `updated_at` is newer than
+--      the reviewed run stops the deploy until it is decided the same way.
 --
 --   1. inline_unstamped: references in a Markdown text (announcement body,
 --      event description, wiki page body, wiki revision body, lesson body,
@@ -39,10 +40,11 @@
 --      library's thumbnails);
 --   5. summary: the counts.
 --
--- A reference is `/uploads/<name>` up to whitespace, a quote, a bracket,
--- `/`, `?` or `#`, without trailing sentence punctuation, matched exactly
--- against the stored original and rendition URLs: the cms reads it the same
--- way (uploadReferenceNames, resolveUploadFile).
+-- A reference is `/uploads/<name>` up to ASCII whitespace, a quote, a
+-- bracket, `/`, `\`, `?` or `#`, without trailing sentence punctuation,
+-- matched exactly against the stored original and rendition URLs: the cms
+-- reads it the same way (uploadReferenceNames, resolveUploadFile; an
+-- original wins over another file's rendition of the same name).
 --
 --   docker exec -i infra-db-1 sh -c 'psql -X -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"' \
 --     < infra/diagnostics/upload-references.sql
@@ -60,17 +62,33 @@ WITH upload_names AS (
   SELECT f.id AS file_id,
          f.name AS file_name,
          substring(f.url FROM '^/uploads/(.*)$') AS ref_name,
-         f.provider_metadata->>'uploadedBy' AS uploaded_by
+         f.provider_metadata->>'uploadedBy' AS uploaded_by,
+         'original' AS kind
     FROM files f
    WHERE f.url LIKE '/uploads/%'
   UNION
   SELECT f.id,
          f.name,
          substring(fmt.value->>'url' FROM '^/uploads/(.*)$'),
-         f.provider_metadata->>'uploadedBy'
+         f.provider_metadata->>'uploadedBy',
+         'rendition'
     FROM files f
    CROSS JOIN LATERAL jsonb_each(coalesce(f.formats::jsonb, '{}'::jsonb)) AS fmt
    WHERE fmt.value->>'url' LIKE '/uploads/%'
+), upload_resolved AS (
+  -- The file a name means (resolveUploadFile): the original with that URL,
+  -- else the one file listing it as a rendition (two such files: none).
+  SELECT ref_name, file_id, file_name, uploaded_by
+    FROM upload_names
+   WHERE kind = 'original'
+  UNION ALL
+  SELECT n.ref_name, min(n.file_id), min(n.file_name), min(n.uploaded_by)
+    FROM upload_names n
+   WHERE n.kind = 'rendition'
+     AND NOT EXISTS (SELECT 1 FROM upload_names o
+                      WHERE o.kind = 'original' AND o.ref_name = n.ref_name)
+   GROUP BY n.ref_name
+  HAVING count(DISTINCT n.file_id) = 1
 ), upload_hosts AS (
   SELECT 'announcement' AS host, a.id AS row_id, a.document_id,
          CASE WHEN a.published_at IS NULL THEN 'draft' ELSE 'published' END AS status,
@@ -112,13 +130,13 @@ WITH upload_names AS (
   SELECT DISTINCT h.host, h.row_id, h.document_id, h.status, h.field, h.label, h.updated_at,
          regexp_replace(m.name[1], '[.,;:!]+$', '') AS ref_name
     FROM upload_hosts h
-   CROSS JOIN LATERAL regexp_matches(coalesce(h.text, ''), '/uploads/([^\s/"''<>()\[\]\x5c?#]+)', 'g')
+   CROSS JOIN LATERAL regexp_matches(coalesce(h.text, ''), '/uploads/([^ \t\n\r\f\v/"''<>()\[\]\x5c?#]+)', 'g')
          AS m(name)
 ), upload_refs AS (
   SELECT DISTINCT tok.host, tok.row_id, tok.document_id, tok.status, tok.field, tok.label,
          tok.updated_at, n.file_id, n.file_name, n.uploaded_by
     FROM upload_tokens tok
-    JOIN upload_names n ON n.ref_name = tok.ref_name
+    JOIN upload_resolved n ON n.ref_name = tok.ref_name
 ), upload_links AS (
   SELECT r.file_id,
          string_agg(DISTINCT r.related_type || ' ' || r.related_id::text, ', ') AS linked_by
@@ -128,7 +146,7 @@ WITH upload_names AS (
   SELECT tok.*
     FROM upload_tokens tok
    WHERE tok.ref_name <> ''
-     AND NOT EXISTS (SELECT 1 FROM upload_names n WHERE n.ref_name = tok.ref_name)
+     AND NOT EXISTS (SELECT 1 FROM upload_resolved n WHERE n.ref_name = tok.ref_name)
 ), unused AS (
   SELECT f.id AS file_id, f.name AS file_name
     FROM files f
@@ -156,17 +174,35 @@ SELECT '4 unused_panel_files', NULL, NULL, NULL, NULL, NULL, NULL, NULL,
 
 WITH upload_names AS (
   SELECT f.id AS file_id,
+         f.name AS file_name,
          substring(f.url FROM '^/uploads/(.*)$') AS ref_name,
-         f.provider_metadata->>'uploadedBy' AS uploaded_by
+         f.provider_metadata->>'uploadedBy' AS uploaded_by,
+         'original' AS kind
     FROM files f
    WHERE f.url LIKE '/uploads/%'
   UNION
   SELECT f.id,
+         f.name,
          substring(fmt.value->>'url' FROM '^/uploads/(.*)$'),
-         f.provider_metadata->>'uploadedBy'
+         f.provider_metadata->>'uploadedBy',
+         'rendition'
     FROM files f
    CROSS JOIN LATERAL jsonb_each(coalesce(f.formats::jsonb, '{}'::jsonb)) AS fmt
    WHERE fmt.value->>'url' LIKE '/uploads/%'
+), upload_resolved AS (
+  -- The file a name means (resolveUploadFile): the original with that URL,
+  -- else the one file listing it as a rendition (two such files: none).
+  SELECT ref_name, file_id, file_name, uploaded_by
+    FROM upload_names
+   WHERE kind = 'original'
+  UNION ALL
+  SELECT n.ref_name, min(n.file_id), min(n.file_name), min(n.uploaded_by)
+    FROM upload_names n
+   WHERE n.kind = 'rendition'
+     AND NOT EXISTS (SELECT 1 FROM upload_names o
+                      WHERE o.kind = 'original' AND o.ref_name = n.ref_name)
+   GROUP BY n.ref_name
+  HAVING count(DISTINCT n.file_id) = 1
 ), upload_texts AS (
   SELECT 'announcement' AS host, id AS row_id, body AS text FROM announcements
   UNION ALL SELECT 'event', id, description FROM events
@@ -179,12 +215,12 @@ WITH upload_names AS (
 ), upload_tokens AS (
   SELECT DISTINCT t.host, t.row_id, regexp_replace(m.name[1], '[.,;:!]+$', '') AS ref_name
     FROM upload_texts t
-   CROSS JOIN LATERAL regexp_matches(coalesce(t.text, ''), '/uploads/([^\s/"''<>()\[\]\x5c?#]+)', 'g')
+   CROSS JOIN LATERAL regexp_matches(coalesce(t.text, ''), '/uploads/([^ \t\n\r\f\v/"''<>()\[\]\x5c?#]+)', 'g')
          AS m(name)
 ), upload_refs AS (
   SELECT DISTINCT tok.host, tok.row_id, n.file_id, n.uploaded_by
     FROM upload_tokens tok
-    JOIN upload_names n ON n.ref_name = tok.ref_name
+    JOIN upload_resolved n ON n.ref_name = tok.ref_name
 )
 -- 5. The counts (a reference counts once per text row and file).
 SELECT 'summary' AS section,
@@ -196,7 +232,7 @@ SELECT 'summary' AS section,
        (SELECT count(*) FROM upload_refs WHERE uploaded_by IS NOT NULL) AS inline_stamped,
        (SELECT count(*) FROM upload_tokens tok
          WHERE tok.ref_name <> ''
-           AND NOT EXISTS (SELECT 1 FROM upload_names n WHERE n.ref_name = tok.ref_name))
+           AND NOT EXISTS (SELECT 1 FROM upload_resolved n WHERE n.ref_name = tok.ref_name))
          AS unresolvable,
        (SELECT count(*) FROM files f
          WHERE f.provider_metadata->>'uploadedBy' IS NULL

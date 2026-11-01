@@ -144,8 +144,12 @@ const ALL_GRANTS = [
   HISTORY_GRANT,
 ];
 
-/** `/uploads/<name>`: one path segment, up to whitespace, quotes, brackets, `?` or `#`. */
-const UPLOAD_REFERENCE = /\/uploads\/([^\s/"'<>()[\]\\?#]+)/g;
+/**
+ * `/uploads/<name>`: one path segment, up to ASCII whitespace, a quote, a
+ * bracket, `/`, `\`, `?` or `#`. The whitespace set is spelled out (no `\s`)
+ * so that infra/diagnostics/upload-references.sql can match it exactly.
+ */
+const UPLOAD_REFERENCE = /\/uploads\/([^ \t\n\r\f\v/"'<>()[\]\\?#]+)/g;
 
 /** Sentence punctuation that may follow a bare reference in prose. */
 const TRAILING_PUNCTUATION = /[.,;:!]+$/;
@@ -218,30 +222,11 @@ function parsed(value: unknown): unknown {
   }
 }
 
-/**
- * The stored file `/uploads/<name>` names: the file whose `url`, or one of
- * whose stored rendition URLs (`formats.*.url`, whatever the format is
- * called), is exactly that. null when none is. The access decision and the
- * write check both resolve through here, so a name means the same file on
- * both sides. One raw read on `files` (the stored formats matched as text,
- * then confirmed exactly), joined to `trx` when given.
- */
-export async function resolveUploadFile(
-  strapi: UploadAccessHost,
-  name: string,
-  trx?: unknown,
-): Promise<UploadFile | null> {
-  if (name === "" || name.includes("/")) return null;
-  const url = `${UPLOADS_PREFIX}${name}`;
-  const formatsText =
-    strapi.db.dialect?.client === "postgres" ? "formats::text like ?" : "formats like ?";
-  const query = strapi.db
-    .getConnection("files")
-    .select("id", "url", "formats", "provider_metadata")
-    .where("url", url)
-    .orWhereRaw(formatsText, [`%${JSON.stringify(url)}%`]);
-  const rows: unknown[] = await (trx ? query.transacting(trx) : query);
-  const files = (Array.isArray(rows) ? rows : [])
+const FILE_COLUMNS = ["id", "url", "formats", "provider_metadata"];
+
+/** Raw `files` rows (JSON columns as text on SQLite) → UploadFile. */
+function toFiles(rows: unknown): UploadFile[] {
+  return (Array.isArray(rows) ? rows : [])
     .filter(isRecord)
     .map((row) =>
       toFile({
@@ -251,8 +236,40 @@ export async function resolveUploadFile(
         provider_metadata: parsed(row.provider_metadata),
       }),
     )
-    .filter((file): file is UploadFile => file !== null && file.names.includes(name));
-  return files.find((file) => file.names[0] === name) ?? files[0] ?? null;
+    .filter((file): file is UploadFile => file !== null);
+}
+
+/**
+ * The stored file `/uploads/<name>` names: the file whose `url` is exactly
+ * that (the bytes on disk are its own), else the one file that lists it as
+ * a stored rendition URL (`formats.*.url`, whatever the format is called).
+ * null when none does, or when two files claim the same rendition URL. The
+ * access decision, the inline references (inlineHosts counts a reference
+ * only when it resolves to the file in question) and the write check all
+ * resolve through here, so a name means one file everywhere. Raw reads on
+ * `files` (the rendition URLs matched as text, then confirmed exactly),
+ * joined to `trx` when given; the rendition scan runs only when no
+ * original has the name.
+ */
+export async function resolveUploadFile(
+  strapi: UploadAccessHost,
+  name: string,
+  trx?: unknown,
+): Promise<UploadFile | null> {
+  if (name === "" || name.includes("/")) return null;
+  const url = `${UPLOADS_PREFIX}${name}`;
+  const read = (build: (query: UploadAccessHost) => UploadAccessHost) => {
+    const query = build(strapi.db.getConnection("files").select(...FILE_COLUMNS));
+    return trx ? query.transacting(trx) : query;
+  };
+  const [original] = toFiles(await read((query) => query.where("url", url).limit(1)));
+  if (original) return original;
+  const formatsText =
+    strapi.db.dialect?.client === "postgres" ? "formats::text like ?" : "formats like ?";
+  const renditions = toFiles(
+    await read((query) => query.whereRaw(formatsText, [`%${JSON.stringify(url)}%`])),
+  ).filter((file) => file.names.includes(name));
+  return renditions.length === 1 ? renditions[0]! : null;
 }
 
 /** The viewer as the request's users-permissions user (role populated). */
@@ -383,12 +400,23 @@ async function rowAllows(reader: Reader, uid: string, rowId: number): Promise<bo
   return policyAllows(reader, uid, rowId);
 }
 
-/** The rows whose Markdown fields name one of `names`, per host type. */
+/**
+ * The rows whose Markdown fields reference `file`: by one of its names, and
+ * only where that name resolves to this very file (resolveUploadFile), as
+ * the write check judged it.
+ */
 async function inlineHosts(
   strapi: UploadAccessHost,
-  names: readonly string[],
+  file: UploadFile,
+  trx: unknown,
 ): Promise<Array<{ uid: string; id: number }>> {
+  const resolved = new Map<string, boolean>();
+  for (const name of file.names) {
+    resolved.set(name, (await resolveUploadFile(strapi, name, trx))?.id === file.id);
+  }
+  const names = file.names.filter((name) => resolved.get(name));
   const hosts: Array<{ uid: string; id: number }> = [];
+  if (names.length === 0) return hosts;
   for (const [uid, fields] of Object.entries(UPLOAD_HOST_FIELDS)) {
     // LIKE narrows (its `_` matches any character); uploadReferenceNames decides.
     const rows: unknown[] = await strapi.db.query(uid).findMany({
@@ -444,7 +472,7 @@ export async function mayOpenFile(
     return false;
   }
   if (file.uploadedBy !== null) return file.uploadedBy === viewer.id;
-  for (const host of await inlineHosts(strapi, file.names)) {
+  for (const host of await inlineHosts(strapi, file, trx)) {
     if (await rowAllows(reader, host.uid, host.id)) return true;
   }
   return false;
