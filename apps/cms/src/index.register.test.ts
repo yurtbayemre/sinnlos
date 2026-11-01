@@ -100,6 +100,17 @@ function datetimeHost() {
       getSchemaConnection: () => ({ hasTable: async () => false, hasColumn: async () => false }),
     },
     documents: { use: vi.fn() },
+    // v0.35.0: the Content Manager services the secret-share closure wraps.
+    plugin: (name: string) =>
+      name === "content-manager"
+        ? {
+            service: (service: string) =>
+              ({
+                "permission-checker": { create: vi.fn() },
+                preview: { getPreviewUrl: vi.fn() },
+              })[service],
+          }
+        : undefined,
     // users-permissions' verify (strategies/users-permissions.js): the
     // request's ability decides; no auth or no ability, no grant.
     auth: {

@@ -16,6 +16,7 @@ import {
 import { removeHiddenTypeWritePermissions } from "./bootstrap/hidden-type-permissions";
 import { registerMultipartCleanup } from "./bootstrap/multipart-cleanup";
 import { registerRestrictedRelationGuard } from "./bootstrap/restricted-relation-guard";
+import { closeSecretSharesInAdmin } from "./bootstrap/secret-share-admin-closure";
 import { ensureRoles, syncRolePermissions } from "./bootstrap/sync-permissions";
 import { registerUserContactSanitizer } from "./bootstrap/user-contact-sanitizer";
 import {
@@ -34,7 +35,7 @@ import { seedAdminUser } from "./utils/admin-seed";
 import { backfillDepartmentAudience } from "./utils/department-audience-backfill";
 import { ensureDraftTwins } from "./utils/draft-twins";
 import { enforceSecretGuard } from "./utils/env-guard";
-import { decorateSwitchedRoutes, switchesStatusLine } from "./utils/module-switches";
+import { decorateSwitchedRoutes, isOff, switchesStatusLine } from "./utils/module-switches";
 import { parseMeiliConfig, searchStatusLine } from "./search/meili-index";
 import { registerLiveEventSubscriber } from "./utils/live-events";
 import { registerMediaTombstoneGuard } from "./utils/media-tombstone-guard";
@@ -42,6 +43,7 @@ import { assertNoOrgDrafts } from "./utils/org-dp-guard";
 import { backfillPollAudience } from "./utils/poll-audience-backfill";
 import { backfillRevisions } from "./utils/revision-backfill";
 import { assertNoRevisionDrafts } from "./utils/revision-dp-guard";
+import { configureShareKey } from "./utils/secret-crypto";
 import { assertUpgradeFloor } from "./utils/upgrade-floor";
 import { backfillTargetingFlags } from "./utils/targeting-flags-backfill";
 import { trainingEvidenceRetentionYears } from "./utils/training-evidence";
@@ -149,6 +151,10 @@ export default {
     registerMultipartCleanup(strapi);
     registerUserContactSanitizer(strapi);
     registerRestrictedRelationGuard(strapi);
+    // v0.35.0: every Content Manager route and the preview refuse secret
+    // shares, whatever a role is granted in the panel; throws (no boot)
+    // without the services to wrap (bootstrap/secret-share-admin-closure.ts).
+    closeSecretSharesInAdmin(strapi);
     // Every Document Service middleware, in its slot order
     // (bootstrap/document-middlewares.ts, decision 06 §K), among them:
     //  - decision 02, fail closed: every write of a poll sets
@@ -195,6 +201,14 @@ export default {
     // v0.27: the second factor seals its secrets with this service; refuse
     // to start without it rather than at the first enrollment.
     sealService(strapi);
+    // v0.35.0: the secret-share key, derived from ENCRYPTION_KEY; a short
+    // key logs one error line (module on) and leaves the module
+    // `unavailable`, the rest boots (utils/secret-crypto.ts).
+    configureShareKey(
+      strapi.config.get("admin.secrets.encryptionKey"),
+      !isOff("secrets"),
+      strapi.log,
+    );
     // v0.27: the per-request second-factor gate is in place (exactly one
     // decorated strategy in this boot), or no start; logs `[mfa] gate installed`.
     assertMfaGate(strapi.log);

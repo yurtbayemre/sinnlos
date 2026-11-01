@@ -1,7 +1,7 @@
 /**
  * A refusal with its own HTTP status and `details.code` (v0.27 account and
  * second-factor routes). Strapi's error middleware maps an ApplicationError
- * to 400 whatever it says, so the routes that can answer 401/403/409/503
+ * to 400 whatever it says, so the routes that can answer 401/403/409/410/429/503
  * run their work through answerRefusals(), which writes Strapi's error
  * envelope with the refusal's own status.
  */
@@ -12,6 +12,8 @@ const NAMES: Record<number, string> = {
   401: "UnauthorizedError",
   403: "ForbiddenError",
   409: "ConflictError",
+  410: "GoneError",
+  429: "RateLimitError",
   503: "ServiceUnavailableError",
 };
 

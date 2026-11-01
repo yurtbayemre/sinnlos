@@ -737,6 +737,7 @@ describe("schema.json enums = web unions and constants", () => {
         "kudos",
         "trainingDue",
         "trainingExpired",
+        "secretShared",
       ]),
       "api::notification.notification",
       "type",

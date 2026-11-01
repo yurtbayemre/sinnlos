@@ -170,6 +170,9 @@ const OTHER_RAW_WRITERS: Readonly<Record<string, string>> = {
     "the anonymised user row, and the person's reactions, poll votes, RSVPs, kudos addressed to them, notifications and read confirmations (deleted), other people's notifications naming them (rewritten after the commit, page by page under their row locks), classifieds through the Document Service; the rest under the directory and row locks",
   "utils/training-evidence.ts":
     "lesson progress rows: the snapshot of a receipt without one (snapshot IS NULL re-checked in the write), and the receipts past their retention",
+  // v0.35.0.
+  "utils/secret-shares.ts":
+    "secret shares (create, the envelope, the conditional end of a pending share) and their notifications, in one confirmed transaction under the directory, user row and share row locks",
 };
 
 const SRC = __dirname;

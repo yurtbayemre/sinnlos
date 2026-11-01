@@ -38,7 +38,12 @@ vi.mock("./utils/env-guard", () => ({ enforceSecretGuard: step("enforceSecretGua
 vi.mock("./utils/module-switches", () => ({
   switchesStatusLine: () => "[switches] everything on",
   decorateSwitchedRoutes: syncStep("decorateSwitchedRoutes"),
+  isOff: () => false,
 }));
+vi.mock("./bootstrap/secret-share-admin-closure", () => ({
+  closeSecretSharesInAdmin: syncStep("closeSecretSharesInAdmin"),
+}));
+vi.mock("./utils/secret-crypto", () => ({ configureShareKey: syncStep("configureShareKey") }));
 vi.mock("./bootstrap/multipart-cleanup", () => ({
   registerMultipartCleanup: syncStep("registerMultipartCleanup"),
 }));
@@ -125,6 +130,8 @@ describe("src/index.ts lifecycle order (B01)", () => {
       "registerMultipartCleanup",
       "registerUserContactSanitizer",
       "registerRestrictedRelationGuard",
+      // v0.35.0: secret shares never open in the admin panel.
+      "closeSecretSharesInAdmin",
       "registerDocumentMiddlewares",
     ]);
   });
@@ -139,6 +146,8 @@ describe("src/index.ts lifecycle order (B01)", () => {
       "syncRolePermissions",
       "removeHiddenTypeWritePermissions",
       "syncAdvancedSettings",
+      // v0.35.0: the secret-share key (never fails the boot).
+      "configureShareKey",
       "ensureEntraIdentityIndex",
       "syncAuthProviders",
       "reportEntraStatus",

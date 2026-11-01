@@ -19,6 +19,7 @@ import {
 const REVISION = "api::wiki-revision.wiki-revision";
 const PAGE = "api::wiki-page.wiki-page";
 const VERSION = "api::content-version.content-version";
+const SHARE = "api::secret-share.secret-share";
 const HIDDEN = { pluginOptions: { "content-manager": { visible: false } } };
 
 interface Row {
@@ -27,18 +28,32 @@ interface Row {
   subject: string;
 }
 
-function host(rows: Row[], options: { deleteByIds?: undefined } = {}) {
+function host(
+  rows: Row[],
+  options: { deleteByIds?: undefined } = {},
+  extra: HiddenTypePermissionsHost["contentTypes"] = {},
+) {
   const deleted: number[][] = [];
-  const findMany = vi.fn(async (params: Record<string, unknown>) => {
-    const where = params.where as { subject: { $in: string[] }; action: { $in: string[] } };
-    return rows
-      .filter((row) => where.subject.$in.includes(row.subject))
-      .filter((row) => where.action.$in.includes(row.action))
-      .map(({ id, subject }) => ({ id, subject }));
-  });
+  type Where = {
+    $or?: Where[];
+    subject?: { $in: string[] };
+    action?: { $in?: string[]; $startsWith?: string };
+  };
+  const matches = (row: Row, where: Where): boolean =>
+    where.$or
+      ? where.$or.some((part) => matches(row, part))
+      : where.subject!.$in.includes(row.subject) &&
+        (where.action!.$in
+          ? where.action!.$in.includes(row.action)
+          : row.action.startsWith(where.action!.$startsWith!));
+  const findMany = vi.fn(async (params: Record<string, unknown>) =>
+    rows
+      .filter((row) => matches(row, params.where as Where))
+      .map(({ id, subject }) => ({ id, subject })),
+  );
   const info = vi.fn();
   const strapi: HiddenTypePermissionsHost = {
-    contentTypes: { [REVISION]: HIDDEN, [VERSION]: HIDDEN, [PAGE]: {} },
+    contentTypes: { [REVISION]: HIDDEN, [VERSION]: HIDDEN, [PAGE]: {}, ...extra },
     db: {
       query: (uid: string) => {
         expect(uid).toBe(ADMIN_PERMISSION_UID);
@@ -82,7 +97,7 @@ describe("hiddenContentTypeUids", () => {
     ).toEqual([VERSION, REVISION]);
   });
 
-  it("covers exactly the cms schemas that hide themselves: wiki-revision and content-version", () => {
+  it("covers exactly the cms schemas that hide themselves: wiki-revision, content-version, secret-share", () => {
     const apiDir = join(__dirname, "..", "api");
     const contentTypes: HiddenTypePermissionsHost["contentTypes"] = {};
     for (const api of readdirSync(apiDir)) {
@@ -97,7 +112,7 @@ describe("hiddenContentTypeUids", () => {
         contentTypes[`api::${api}.${name}`] = JSON.parse(readFileSync(file, "utf8"));
       }
     }
-    expect(hiddenContentTypeUids(contentTypes)).toEqual([VERSION, REVISION]);
+    expect(hiddenContentTypeUids(contentTypes)).toEqual([VERSION, SHARE, REVISION]);
   });
 });
 
@@ -117,7 +132,24 @@ describe("removeHiddenTypeWritePermissions", () => {
     await removeHiddenTypeWritePermissions(strapi);
     expect(deleted).toEqual([[1, 3, 4, 5, 7]]);
     expect(info).toHaveBeenCalledWith(
-      `[admin-permissions] removed 5 Content Manager write permission(s) on hidden types: ${VERSION}, ${REVISION}`,
+      `[admin-permissions] removed 5 Content Manager permission(s) on hidden types: ${VERSION}, ${REVISION}`,
+    );
+  });
+
+  it("removes every Content Manager action on a secret share, read included (v0.35.0)", async () => {
+    const rows = [
+      row(1, "read", SHARE),
+      row(2, "create", SHARE),
+      row(3, "update", SHARE),
+      { id: 4, action: "plugin::content-manager.explorer.publish", subject: SHARE },
+      { id: 5, action: "plugin::upload.read", subject: SHARE },
+      row(6, "read", REVISION),
+    ];
+    const { strapi, deleted, info } = host(rows, {}, { [SHARE]: HIDDEN });
+    await removeHiddenTypeWritePermissions(strapi);
+    expect(deleted).toEqual([[1, 2, 3, 4]]);
+    expect(info).toHaveBeenCalledWith(
+      `[admin-permissions] removed 4 Content Manager permission(s) on hidden types: ${SHARE}`,
     );
   });
 

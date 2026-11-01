@@ -356,6 +356,12 @@ Custom actions and plugin routes (`✓` = granted, `—` = not granted):
 | `api::user-management.user-management.export` | `GET /api/user-management/:id/export` | ✓ | — | — | — | — | — | — |
 | `api::user-management.user-management.anonymisePreview` | `GET /api/user-management/:id/anonymise` | ✓ | — | — | — | — | — | — |
 | `api::user-management.user-management.anonymise` | `POST /api/user-management/:id/anonymise` | ✓ | — | — | — | — | — | — |
+| `api::secret-share.secret-share.create` | `POST /api/secret-shares` | ✓ | ✓ | ✓ | ✓ | ✓ | — | — |
+| `api::secret-share.secret-share.list` | `GET /api/secret-shares` | ✓ | ✓ | ✓ | ✓ | ✓ | — | — |
+| `api::secret-share.secret-share.findOne` | `GET /api/secret-shares/:id` | ✓ | ✓ | ✓ | ✓ | ✓ | — | — |
+| `api::secret-share.secret-share.reveal` | `POST /api/secret-shares/:id/reveal` | ✓ | ✓ | ✓ | ✓ | ✓ | — | — |
+| `api::secret-share.secret-share.revoke` | `POST /api/secret-shares/:id/revoke` | ✓ | ✓ | ✓ | ✓ | ✓ | — | — |
+| `api::secret-share.secret-share.recipients` | `GET /api/secret-shares/recipients` | ✓ | ✓ | ✓ | ✓ | ✓ | — | — |
 <!-- custom-action-grants:end -->
 
 The anonymous `public` role holds none of these, and the cms revokes the

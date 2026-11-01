@@ -1,0 +1,28 @@
+{
+  "kind": "collectionType",
+  "collectionName": "secret_shares",
+  "info": {
+    "singularName": "secret-share",
+    "pluralName": "secret-shares",
+    "displayName": "Secret Share",
+    "description": "One short text from one employee to one colleague, opened once (v0.35.0, docs/plan-v035-secret-sharing.md). Only the encrypted envelope is stored; it is deleted when the share ends. Written and read by utils/secret-shares.ts and the janitor only; hidden from the admin panel, every Content Manager route refuses the type (bootstrap/secret-share-admin-closure.ts)."
+  },
+  "options": { "draftAndPublish": false },
+  "pluginOptions": {
+    "content-manager": { "visible": false },
+    "content-type-builder": { "visible": false }
+  },
+  "attributes": {
+    "senderId": { "type": "integer", "required": true },
+    "recipientId": { "type": "integer", "required": true },
+    "expiresAt": { "type": "datetime", "required": true },
+    "state": {
+      "type": "enumeration",
+      "enum": ["pending", "retrieved", "revoked", "expired", "cancelled"],
+      "required": true,
+      "default": "pending"
+    },
+    "terminalAt": { "type": "datetime" },
+    "envelope": { "type": "text", "private": true }
+  }
+}

@@ -176,7 +176,8 @@ export type SecretShareRefusal = keyof typeof SECRET_SHARE_REFUSALS;
 // ---------------------------------------------------------------------------
 // DTOs. Fixed shapes: the cms builds them field by field from its own
 // queries and returns nothing else (no populate, fields, filters or sort).
-// Instants are ISO 8601 UTC strings; `id` is the share's documentId.
+// Every answer is Strapi's `{ data: <DTO> }`. Instants are ISO 8601 UTC
+// strings; `id` is the share's documentId.
 
 /** POST /api/secret-shares. */
 export interface SecretShareCreateInput {

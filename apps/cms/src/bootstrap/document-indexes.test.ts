@@ -28,6 +28,7 @@ const TABLES: Record<string, string> = {
   "api::comment.comment": "comments",
   "api::reaction.reaction": "reactions",
   "api::acknowledgement.acknowledgement": "acknowledgements",
+  "api::secret-share.secret-share": "secret_shares",
 };
 
 /** The polymorphic anchor indexes (v0.31, #171). */
@@ -99,6 +100,47 @@ describe("documentIndexSpecs", () => {
     for (const anchor of ANCHORS) {
       expect(specs.find((spec) => spec.name === anchor.name)).toEqual(anchor);
     }
+  });
+
+  it("names the secret share indexes (v0.35.0), the document id unique", () => {
+    const specs = documentIndexSpecs(host("sqlite").strapi).filter(
+      (spec) => spec.table === "secret_shares",
+    );
+    expect(specs).toEqual([
+      {
+        name: "secret_shares_document_id_uq",
+        table: "secret_shares",
+        columns: ["document_id"],
+        unique: true,
+      },
+      {
+        name: "secret_shares_recipient_id_state_idx",
+        table: "secret_shares",
+        columns: ["recipient_id", "state"],
+        unique: false,
+      },
+      {
+        name: "secret_shares_sender_id_created_at_idx",
+        table: "secret_shares",
+        columns: ["sender_id", "created_at"],
+        unique: false,
+      },
+      {
+        name: "secret_shares_state_expires_at_idx",
+        table: "secret_shares",
+        columns: ["state", "expires_at"],
+        unique: false,
+      },
+      {
+        name: "secret_shares_terminal_at_idx",
+        table: "secret_shares",
+        columns: ["terminal_at"],
+        unique: false,
+      },
+    ]);
+    expect(indexSql("postgres", "public", specs[0])).toBe(
+      'CREATE UNIQUE INDEX IF NOT EXISTS "secret_shares_document_id_uq" ON "public"."secret_shares" ("document_id")',
+    );
   });
 
   it("refuses when the wiki revision model is not loaded", () => {
