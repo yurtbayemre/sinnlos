@@ -23,7 +23,15 @@
  *   6. a missing offsite dir is created level by level, and a root run
  *      (deploy.sh) gives the levels it creates the backup root's owner,
  *      never root's (B10-T4; root is faked: EUID in the script reads
- *      STUB_EUID, and chown is a stub that records its calls).
+ *      STUB_EUID, and chown is a stub that records its calls);
+ *   7. one run at a time per backup root (v0.34): the kept lock file
+ *      .pg-backup.lock (a root run gives it the backup root's owner); a
+ *      second run while one holds it exits 1 and writes nothing, no log
+ *      line included; a file name of the run that exists already (a run in
+ *      the same second, a dangling symlink) stops it before it owns the
+ *      name, so nothing of the earlier run is removed. Git Bash has no
+ *      flock: there a stub always grants the lock, and the test of a held
+ *      lock runs only where flock is real (Linux, or the shell runner).
  *
  * Every file operation happens inside bash (a temp dir it creates), so no
  * Windows path crosses into the MSYS or WSL side (as in
@@ -33,6 +41,7 @@
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
+import { runBash as runShell, shellMode, type ShellMode } from "../shell-runner.test.helper";
 
 const DEPLOY_ENV = readFileSync(new URL("../deploy-env.sh", import.meta.url), "utf8").replace(
   /\r\n/g,
@@ -262,6 +271,10 @@ interface RunOptions {
    * $T/co/infra/backup/pg-backup.sh.
    */
   deployEnv?: string;
+  /** A second run (with this environment on top) started while the first is in gpg. */
+  whileGpg?: Record<string, string>;
+  /** Run the harness through the shell runner (a real flock), not the local bash. */
+  mode?: ShellMode;
 }
 
 interface RunReport {
@@ -287,6 +300,10 @@ interface RunReport {
   docker: string[];
   /** docker subcommands and gpg inputs (file names), in the order they ran. */
   order: string[];
+  /** The second run of `whileGpg`: its exit status and stderr. */
+  second: { status: number; stderr: string } | null;
+  /** Mode of the lock file ("" when there is none). */
+  lockMode: string;
 }
 
 /**
@@ -316,7 +333,7 @@ function backupRun(options: RunOptions = {}): RunReport {
     `STUB_UPLOADS=${options.uploads === false ? "" : "1"}`,
     `STUB_GPG_FAIL=${options.gpgFails ? "1" : ""}`,
     `STUB_TAR_FAIL=${options.tarFails ? "1" : ""}`,
-    `STUB_GPG_SLEEP=${options.killDuringGpg ? "2" : ""}`,
+    `STUB_GPG_SLEEP=${options.killDuringGpg || options.whileGpg ? "2" : ""}`,
     'STUB_MARK="$T/gpg-started"',
     "export STUB_UPLOADS STUB_GPG_FAIL STUB_TAR_FAIL STUB_GPG_SLEEP STUB_MARK",
     "docker() {",
@@ -349,6 +366,8 @@ function backupRun(options: RunOptions = {}): RunReport {
     'chown() { printf "chown %s\n" "${*//$BK/BK}" >> "$T/chown.log"; }',
     "export -f docker gpg chown",
     "export T BK",
+    // Git Bash has no flock: a stub that always grants the lock (see 7. above).
+    "command -v flock > /dev/null || { flock() { return 0; }; export -f flock; }",
     "printf -v NOW '%(%s)T' -1",
     "mk() {",
     "  local ts; printf -v ts '%(%Y%m%d-%H%M%S)T' \"$((NOW - $2 * 86400))\"",
@@ -375,17 +394,27 @@ function backupRun(options: RunOptions = {}): RunReport {
     exports,
     options.root ? "export STUB_EUID=0" : "",
     "rc=0",
-    options.killDuringGpg
+    options.whileGpg
       ? [
           'bash "$S" 2> "$T/stderr" &',
           "pid=$!",
           'for _ in $(seq 1 100); do [[ -e "$STUB_MARK" ]] && break; sleep 0.1; done',
-          'kill -TERM "$pid"',
+          `(env ${Object.entries(options.whileGpg)
+            .map(([key, value]) => `${key}="${value}"`)
+            .join(" ")} bash "$S" > /dev/null 2> "$T/stderr2"); echo "SECOND $?"`,
           'wait "$pid" || rc=$?',
         ].join("\n")
-      : 'bash "$S" 2> "$T/stderr" || rc=$?',
+      : options.killDuringGpg
+        ? [
+            'bash "$S" 2> "$T/stderr" &',
+            "pid=$!",
+            'for _ in $(seq 1 100); do [[ -e "$STUB_MARK" ]] && break; sleep 0.1; done',
+            'kill -TERM "$pid"',
+            'wait "$pid" || rc=$?',
+          ].join("\n")
+        : 'bash "$S" 2> "$T/stderr" || rc=$?',
     'echo "STATUS $rc"',
-    'for f in "$BK"/* "$BK"/.[!.]*; do [[ -e "$f" ]] && echo "ROOT ${f##*/}"; done',
+    'for f in "$BK"/* "$BK"/.[!.]*; do [[ -e "$f" || -L "$f" ]] && echo "ROOT ${f##*/}"; done',
     '(cd "$OFFSITE" 2> /dev/null && stat -c "OFFSITE %n %a" -- * .[!.]* 2> /dev/null) || true',
     'if [[ -f "$OFFSITE/backup.log" ]]; then sed "s/^/LOG /" "$OFFSITE/backup.log"; fi',
     'if [[ -f "$OFFSITE/last-success" ]]; then echo "LAST $(cat "$OFFSITE/last-success")"; fi',
@@ -397,9 +426,11 @@ function backupRun(options: RunOptions = {}): RunReport {
     'if [[ -f "$T/docker.log" ]]; then sed "s/^/DOCKER /" "$T/docker.log"; fi',
     'if [[ -f "$T/order.log" ]]; then sed "s/^/ORDER /" "$T/order.log"; fi',
     'for d in offsite offsite/sinnlos; do if [[ -d "$BK/$d" ]]; then echo "DIR $d $(stat -c %a "$BK/$d")"; fi; done',
+    'if [[ -f "$T/stderr2" ]]; then sed "s/^/STDERR2 /" "$T/stderr2"; fi',
+    'if [[ -e "$BK/.pg-backup.lock" ]]; then echo "LOCKMODE $(stat -c %a "$BK/.pg-backup.lock")"; fi',
     "",
   ].join("\n");
-  const res = runBash(script);
+  const res = options.mode ? runShell(script, options.mode) : runBash(script);
   expect(res.stderr).toBe("");
   const lines = res.stdout.split("\n");
   const pick = (prefix: string) =>
@@ -420,6 +451,10 @@ function backupRun(options: RunOptions = {}): RunReport {
     dirs: Object.fromEntries(pick("DIR").map((l) => l.split(" "))),
     docker: pick("DOCKER"),
     order: pick("ORDER"),
+    second: pick("SECOND").length
+      ? { status: Number(pick("SECOND")[0]), stderr: pick("STDERR2").join("\n") }
+      : null,
+    lockMode: pick("LOCKMODE")[0] ?? "",
   };
 }
 
@@ -568,6 +603,7 @@ describe.skipIf(!HAS_BASH)("pg-backup.sh runs (docker and gpg stubbed)", BASH_BU
     expect(fresh.status, fresh.stderr).toBe(0);
     const reBk = (c: string) => c.startsWith("chown --reference=BK ");
     expect(fresh.chowns.filter(reBk)).toEqual([
+      "chown --reference=BK BK/.pg-backup.lock",
       "chown --reference=BK BK/offsite",
       "chown --reference=BK BK/offsite/sinnlos",
     ]);
@@ -579,8 +615,8 @@ describe.skipIf(!HAS_BASH)("pg-backup.sh runs (docker and gpg stubbed)", BASH_BU
     if (POSIX_MODES) expect(fresh.dirs).toEqual({ offsite: "700", "offsite/sinnlos": "700" });
     expect(Object.keys(fresh.dirs)).toEqual(["offsite", "offsite/sinnlos"]);
 
-    // Dirs that exist keep their owner.
-    const existing = backupRun({ root: true });
+    // Dirs and a lock that exist keep their owner.
+    const existing = backupRun({ root: true, setup: ': > "$BK/.pg-backup.lock"' });
     expect(existing.status, existing.stderr).toBe(0);
     expect(existing.chowns.filter(reBk)).toEqual([]);
 
@@ -740,4 +776,80 @@ describe.skipIf(!HAS_BASH)("pg-backup.sh runs (docker and gpg stubbed)", BASH_BU
     expect(run.log).toEqual(["FAIL nightly sinnlos-db (exit 143)"]);
     expect(run.lastSuccess).toBe("");
   });
+
+  it("keeps its lock file in the backup root, owner-only (v0.34)", () => {
+    const run = backupRun();
+    expect(run.status, run.stderr).toBe(0);
+    expect(run.root).toContain(".pg-backup.lock");
+    if (POSIX_MODES) expect(run.lockMode).toBe("600");
+  });
+
+  it("refuses a name of this run that exists already, removing nothing (v0.34)", () => {
+    // An earlier run's artifact for every second around this run.
+    const earlier = backupRun({
+      setup: eachSecond('echo earlier > "$OFFSITE/sinnlos-db-$ts.dump.gz.gpg"'),
+    });
+    expect(earlier.status).toBe(1);
+    expect(earlier.stderr).toContain(".dump.gz.gpg exists already (a run in the same second?)");
+    expect(earlier.offsite.filter((n) => n.endsWith(".gz.gpg"))).toHaveLength(66);
+    expect(earlier.log).toEqual(["FAIL nightly names (exit 1)"]);
+    expect(earlier.docker).toEqual([]);
+    expect(earlier.gpgCalls).toEqual([]);
+  });
 });
+
+/** `line` once for every second from 5 before the harness's NOW to 60 after it ($ts). */
+const eachSecond = (line: string) =>
+  `for i in $(seq -5 60); do printf -v ts '%(%Y%m%d-%H%M%S)T' "$((NOW + i))"; ${line}; done`;
+
+const LOCK_MODE: ShellMode | null = shellMode(["flock"], { linux: false });
+
+describe.skipIf(!LOCK_MODE)(
+  "pg-backup.sh: one run at a time (a real flock and symlinks)",
+  BASH_BUDGET,
+  () => {
+    it("refuses a symlinked lock file and a dangling symlink in place of a name (v0.34)", () => {
+      const mode = LOCK_MODE as ShellMode;
+      const link = backupRun({ mode, setup: 'ln -s "$T/elsewhere" "$BK/.pg-backup.lock"' });
+      expect(link.status).toBe(1);
+      expect(link.stderr).toContain(".pg-backup.lock is a symlink; this run wrote nothing");
+      expect(link.log).toEqual([]);
+      expect(link.gpgCalls).toEqual([]);
+
+      const dangling = backupRun({
+        mode,
+        setup: eachSecond('ln -s "$T/gone" "$BK/sinnlos-uploads-$ts.tar"'),
+      });
+      expect(dangling.status).toBe(1);
+      expect(dangling.stderr).toContain(".tar exists already");
+      expect(dangling.root.filter((n) => n.startsWith("sinnlos-uploads-"))).toHaveLength(66);
+      expect(dangling.offsite.filter((n) => n.endsWith(".gz.gpg"))).toEqual([]);
+      expect(dangling.docker).toEqual([]);
+    });
+
+    it("a second run of either kind while one runs exits 1 and writes nothing (v0.34)", () => {
+      for (const kind of ["predeploy", "nightly"]) {
+        const run = backupRun({
+          mode: LOCK_MODE as ShellMode,
+          whileGpg: { SINNLOS_BACKUP_KIND: kind },
+        });
+        expect(run.second, kind).not.toBeNull();
+        expect(run.second?.status, kind).toBe(1);
+        expect(run.second?.stderr, kind).toContain(
+          ".pg-backup.lock; this run wrote nothing (run it again once that one is done)",
+        );
+        // The first run is untouched by it: its three artifacts, its log, its success.
+        expect(run.status, run.stderr).toBe(0);
+        expect(run.offsite.filter((n) => n.endsWith(".gz.gpg"))).toHaveLength(3);
+        expect(run.offsite.filter((n) => n.includes("-predeploy"))).toEqual([]);
+        expect(run.log.map((l) => l.split(" ").slice(0, 2).join(" "))).toEqual([
+          "ok sinnlos-db",
+          "ok sinnlos-uploads",
+          "ok sinnlos-env",
+          "done nightly",
+        ]);
+        expect(run.lastPredeploy).toBe("");
+      }
+    });
+  },
+);
