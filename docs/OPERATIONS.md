@@ -319,11 +319,13 @@ an older dump lacks). A dump from before v0.25 is refused ([If the cms refuses t
 text of every share that was pending when it was taken, also of
 shares opened or revoked since; restored as they are, they could be opened
 a second time. So `apply`, after its checks and before it passes, closes
-them in one statement: every envelope is deleted, pending shares turn
+them in one transaction, in the cms's schema (`DATABASE_SCHEMA` as Compose
+hands it to the cms; unset: `public`; the `up_users` check reads the same
+schema): every envelope is deleted, pending shares turn
 `cancelled` (with their end time), shares that had ended keep their state
 and times, and every `secretShared` notification is deleted. A second run
-changes nothing, and a dump from before v0.35 (no `secret_shares` table)
-is left as it is. When the purge fails, `apply` stops and does not pass,
+changes nothing, and a dump from before v0.35 (no `secret_shares` table in
+that schema) is left as it is. When the purge fails, `apply` stops and does not pass,
 so `rotate-jwt` and `start` refuse: the restored database may still hold
 shares that can be opened; fix the cause and `apply` again, or `back`.
 Senders see their restored pending shares as cancelled and send again.
@@ -1334,8 +1336,9 @@ short text to one colleague, opened once
   deleted), shares whose sender or recipient no longer exists are deleted in
   every state, and ended shares are deleted 7 days after their end. It is
   one more job in `infra/ops-check.sh`'s expected set. With
-  `CRON_ENABLED=false` an expired share still cannot be opened, but its
-  encrypted text stays in the database until cron runs again.
+  `CRON_ENABLED=false`, or while the job fails, an expired share still
+  cannot be opened, but its encrypted text stays in the database until the
+  job's next successful run.
 - **A restore** closes every restored share before the site reopens
   ([Restoring a database dump](#restoring-a-database-dump), "Secret shares in a restore").
 - **Never rotate `ENCRYPTION_KEY` to purge shares.** It also encrypts the
