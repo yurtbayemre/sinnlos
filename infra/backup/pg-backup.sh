@@ -108,21 +108,22 @@ if [[ ! -d "$BK" ]]; then
   echo "pg-backup: the backup root $BK does not exist (it holds the GPG keyring and .backup-keyid)" >&2
   exit 1
 fi
-# The lock (see the header), held on fd 9 until the run ends. One that root
-# creates gets the backup root's owner, so the owner's cron can open it.
+# The lock (see the header), held on fd 9 until the run ends.
 LOCK="$BK/.pg-backup.lock"
 if [[ -L "$LOCK" ]]; then
   echo "pg-backup: $LOCK is a symlink; this run wrote nothing" >&2
   exit 1
 fi
-if [[ ! -e "$LOCK" ]]; then
-  : >> "$LOCK"
-  if ((EUID == 0)); then chown --reference="$BK" "$LOCK" 2>/dev/null || true; fi
-fi
 exec 9>> "$LOCK"
 if ! flock -n 9; then
   echo "pg-backup: another backup run holds $LOCK; this run wrote nothing (run it again once that one is done)" >&2
   exit 1
+fi
+# Owner-only, and a root run (deploy.sh) hands it to the backup root's owner,
+# also one an interrupted root run left behind: the owner's cron must open it.
+chmod 600 "$LOCK"
+if ((EUID == 0)) && ! chown --reference="$BK" "$LOCK"; then
+  echo "pg-backup: WARNING: $LOCK keeps its owner; the backup root's owner (cron) cannot open it" >&2
 fi
 for d in "$BK/offsite" "$OFFSITE"; do
   if [[ ! -d "$d" ]]; then

@@ -193,13 +193,13 @@ gh attestation verify oci://ghcr.io/yurtbayemre/sinnlos-cms:<version> --owner yu
 
 ## Restore
 
-On the machine with the private key, decrypt the artifacts of one run (the same `<ts>` in their names) into a private directory. The dump and the `.env` copy hold every secret, and a plain `>` would create them with your umask (often 0644):
+On the machine with the private key, decrypt the artifacts of one run (the same `<ts>` in their names) into a new private directory. The dump and the `.env` copy hold every secret, and a plain `>` would create them with your umask (often 0644). `mkdir` refuses a `restore` that exists already, and then nothing is decrypted: pick another name.
 
 ```sh
 umask 077
-mkdir -m 700 restore && cd restore
-gpg --decrypt ../sinnlos-db-<ts>.dump.gz.gpg | gunzip > sinnlos.dump
-gpg --decrypt ../sinnlos-env-<ts>.env.gz.gpg | gunzip > infra.env
+mkdir -m 700 restore && cd restore &&
+  gpg --decrypt ../sinnlos-db-<ts>.dump.gz.gpg | gunzip > sinnlos.dump &&
+  gpg --decrypt ../sinnlos-env-<ts>.env.gz.gpg | gunzip > infra.env
 ```
 
 - **Database:** copy `sinnlos.dump` to the host, into the owner-only `infra/backups/` of the checkout, or give `restore-db.sh` its full path. Delete the copies after the restore.

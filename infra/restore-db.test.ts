@@ -1566,6 +1566,9 @@ function slowRun(): Map<string, string[]> {
     SCRIPT.trimEnd(),
     "RESTORE_DB_EOF",
     'chmod 755 "$REPO/infra/restore-db.sh"',
+    "cat > \"$REPO/infra/deploy-env.sh\" <<'DEPLOY_ENV_SH_EOF'",
+    DEPLOY_ENV.trimEnd(),
+    "DEPLOY_ENV_SH_EOF",
     SLOW_HARNESS,
   ].join("\n");
   const res = runBash(script, SLOW_MODE as ShellMode, { timeout: 900_000 });

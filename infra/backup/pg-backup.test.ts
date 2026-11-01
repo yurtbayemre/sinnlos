@@ -31,7 +31,9 @@
  *      the same second, a dangling symlink) stops it before it owns the
  *      name, so nothing of the earlier run is removed. Git Bash has no
  *      flock: there a stub always grants the lock, and the test of a held
- *      lock runs only where flock is real (Linux, or the shell runner).
+ *      lock runs only where flock is real (Linux, or the shell runner); the
+ *      lock a root run leaves (or repairs) for the cron user, with a real
+ *      chown and uid switch, only in the shell runner (root there).
  *
  * Every file operation happens inside bash (a temp dir it creates), so no
  * Windows path crosses into the MSYS or WSL side (as in
@@ -275,6 +277,16 @@ interface RunOptions {
   whileGpg?: Record<string, string>;
   /** Run the harness through the shell runner (a real flock), not the local bash. */
   mode?: ShellMode;
+  /** The run's timestamp (TS) instead of the clock: two runs of one second. */
+  fixedTs?: string;
+  /** A second run (this environment on top) after the first has ended. */
+  again?: Record<string, string>;
+  /**
+   * Root runs first with the real chown, the backup root owned by uid 1000,
+   * then uid 1000 (the owner's cron) runs: needs real root and setpriv (the
+   * shell runner).
+   */
+  cronAfterRoot?: boolean;
 }
 
 interface RunReport {
@@ -304,6 +316,11 @@ interface RunReport {
   second: { status: number; stderr: string } | null;
   /** Mode of the lock file ("" when there is none). */
   lockMode: string;
+  /** Owner uid of the lock file ("" when there is none). */
+  lockOwner: string;
+  /** md5 and name of every file in the backup root and offsite dir, after the first run and at the end. */
+  sumsFirst: string[];
+  sumsEnd: string[];
 }
 
 /**
@@ -318,6 +335,18 @@ function backupRun(options: RunOptions = {}): RunReport {
     SINNLOS_LOCAL_ENV_BACKUP: "$BK/quick/.env",
     ...options.env,
   };
+  const scriptText =
+    options.fixedTs === undefined
+      ? SCRIPT
+      : SCRIPT.replace("printf -v TS '%(%Y%m%d-%H%M%S)T' -1", `TS=${options.fixedTs}`);
+  const sums = (tag: string) =>
+    `(cd "$BK" 2> /dev/null && find . -type f ! -path './.gnupg/*' ! -path './checkout/*' ! -path './quick/*' -exec md5sum {} + 2> /dev/null | sort -k 2 | sed "s/^/${tag} /") || true`;
+  const second = (env: Record<string, string>, asCron: boolean) =>
+    `(env ${Object.entries(env)
+      .map(([key, value]) => `${key}="${value}"`)
+      .join(
+        " ",
+      )} ${asCron ? "setpriv --reuid=1000 --regid=1000 --clear-groups " : ""}bash "$S" > /dev/null 2> "$T/stderr2"); echo "SECOND $?"`;
   const exports = Object.entries(env)
     .map(([key, value]) => `export ${key}="${value}"`)
     .join("\n");
@@ -387,12 +416,13 @@ function backupRun(options: RunOptions = {}): RunReport {
         ].join("\n"),
     "cat > \"$S\" <<'PG_BACKUP_SH_EOF'",
     (options.root
-      ? SCRIPT.replace(/\(\(EUID == 0\)\)/g, "((${STUB_EUID:-$EUID} == 0))")
-      : SCRIPT
+      ? scriptText.replace(/\(\(EUID == 0\)\)/g, "((${STUB_EUID:-$EUID} == 0))")
+      : scriptText
     ).trimEnd(),
     "PG_BACKUP_SH_EOF",
     exports,
     options.root ? "export STUB_EUID=0" : "",
+    options.cronAfterRoot ? 'unset -f chown; chown 1000:1000 "$BK"' : "",
     "rc=0",
     options.whileGpg
       ? [
@@ -413,6 +443,15 @@ function backupRun(options: RunOptions = {}): RunReport {
             'wait "$pid" || rc=$?',
           ].join("\n")
         : 'bash "$S" 2> "$T/stderr" || rc=$?',
+    options.again || options.cronAfterRoot ? sums("SUMFIRST") : "",
+    options.again ? second(options.again, false) : "",
+    options.cronAfterRoot
+      ? [
+          // A new second (the cron run gets its own names); what the stubs write stays writable for uid 1000.
+          'sleep 1.1; chmod 755 "$T"; for f in docker.log order.log gpg.log; do touch "$T/$f"; chmod 666 "$T/$f"; done',
+          second({}, true),
+        ].join("\n")
+      : "",
     'echo "STATUS $rc"',
     'for f in "$BK"/* "$BK"/.[!.]*; do [[ -e "$f" || -L "$f" ]] && echo "ROOT ${f##*/}"; done',
     '(cd "$OFFSITE" 2> /dev/null && stat -c "OFFSITE %n %a" -- * .[!.]* 2> /dev/null) || true',
@@ -427,7 +466,8 @@ function backupRun(options: RunOptions = {}): RunReport {
     'if [[ -f "$T/order.log" ]]; then sed "s/^/ORDER /" "$T/order.log"; fi',
     'for d in offsite offsite/sinnlos; do if [[ -d "$BK/$d" ]]; then echo "DIR $d $(stat -c %a "$BK/$d")"; fi; done',
     'if [[ -f "$T/stderr2" ]]; then sed "s/^/STDERR2 /" "$T/stderr2"; fi',
-    'if [[ -e "$BK/.pg-backup.lock" ]]; then echo "LOCKMODE $(stat -c %a "$BK/.pg-backup.lock")"; fi',
+    'if [[ -e "$BK/.pg-backup.lock" ]]; then echo "LOCKMODE $(stat -c %a "$BK/.pg-backup.lock")"; echo "LOCKOWNER $(stat -c %u "$BK/.pg-backup.lock")"; fi',
+    sums("SUMEND"),
     "",
   ].join("\n");
   const res = options.mode ? runShell(script, options.mode) : runBash(script);
@@ -455,6 +495,9 @@ function backupRun(options: RunOptions = {}): RunReport {
       ? { status: Number(pick("SECOND")[0]), stderr: pick("STDERR2").join("\n") }
       : null,
     lockMode: pick("LOCKMODE")[0] ?? "",
+    lockOwner: pick("LOCKOWNER")[0] ?? "",
+    sumsFirst: pick("SUMFIRST"),
+    sumsEnd: pick("SUMEND"),
   };
 }
 
@@ -618,7 +661,7 @@ describe.skipIf(!HAS_BASH)("pg-backup.sh runs (docker and gpg stubbed)", BASH_BU
     // Dirs and a lock that exist keep their owner.
     const existing = backupRun({ root: true, setup: ': > "$BK/.pg-backup.lock"' });
     expect(existing.status, existing.stderr).toBe(0);
-    expect(existing.chowns.filter(reBk)).toEqual([]);
+    expect(existing.chowns.filter(reBk)).toEqual(["chown --reference=BK BK/.pg-backup.lock"]);
 
     // The owner's own run creates them without any chown.
     const owner = backupRun({ setup: 'rm -rf "$BK/offsite"' });
@@ -784,23 +827,48 @@ describe.skipIf(!HAS_BASH)("pg-backup.sh runs (docker and gpg stubbed)", BASH_BU
     if (POSIX_MODES) expect(run.lockMode).toBe("600");
   });
 
-  it("refuses a name of this run that exists already, removing nothing (v0.34)", () => {
-    // An earlier run's artifact for every second around this run.
-    const earlier = backupRun({
-      setup: eachSecond('echo earlier > "$OFFSITE/sinnlos-db-$ts.dump.gz.gpg"'),
-    });
-    expect(earlier.status).toBe(1);
-    expect(earlier.stderr).toContain(".dump.gz.gpg exists already (a run in the same second?)");
-    expect(earlier.offsite.filter((n) => n.endsWith(".gz.gpg"))).toHaveLength(66);
-    expect(earlier.log).toEqual(["FAIL nightly names (exit 1)"]);
-    expect(earlier.docker).toEqual([]);
-    expect(earlier.gpgCalls).toEqual([]);
+  it("a second run in the same second refuses and leaves the first run's files as they are (v0.34)", () => {
+    for (const kind of ["nightly", "predeploy"]) {
+      const run = backupRun({ fixedTs: TS, again: { SINNLOS_BACKUP_KIND: kind } });
+      expect(run.status, run.stderr).toBe(0);
+      // The same kind collides; the other kind has other names and runs.
+      if (kind === "nightly") {
+        expect(run.second?.status).toBe(1);
+        expect(run.second?.stderr).toContain(`/sinnlos-db-${TS}.dump.gz.gpg exists already`);
+        expect(run.log.at(-1)).toBe("FAIL nightly names (exit 1)");
+        // Every file of the first run is still there, byte for byte (backup.log: one more line).
+        const unchanged = (l: string) => !l.endsWith("backup.log");
+        expect(run.sumsEnd.filter(unchanged)).toEqual(run.sumsFirst.filter(unchanged));
+        expect(run.sumsFirst.filter((l) => l.endsWith(".gz.gpg"))).toHaveLength(3);
+      } else {
+        expect(run.second?.status, run.second?.stderr).toBe(0);
+      }
+    }
+  });
+
+  it("refuses a .gz or .partial name of this second, removing nothing (v0.34)", () => {
+    for (const name of [
+      `$BK/sinnlos-db-${TS}.dump.gz`,
+      `$OFFSITE/.sinnlos-env-${TS}.env.gz.gpg.partial`,
+      `$OFFSITE/sinnlos-uploads-${TS}.tar.gz.gpg`,
+    ]) {
+      const run = backupRun({ fixedTs: TS, setup: `echo earlier > "${name}"` });
+      expect(run.status, name).toBe(1);
+      expect(run.stderr, name).toContain(" exists already (a run in the same second?)");
+      expect(run.log, name).toEqual(["FAIL nightly names (exit 1)"]);
+      expect(run.docker, name).toEqual([]);
+      expect(run.gpgCalls, name).toEqual([]);
+      const base = name.slice(name.lastIndexOf("/") + 1);
+      expect(
+        run.sumsEnd.filter((l) => l.endsWith(`/${base}`)),
+        name,
+      ).toHaveLength(1);
+    }
   });
 });
 
-/** `line` once for every second from 5 before the harness's NOW to 60 after it ($ts). */
-const eachSecond = (line: string) =>
-  `for i in $(seq -5 60); do printf -v ts '%(%Y%m%d-%H%M%S)T' "$((NOW + i))"; ${line}; done`;
+/** The fixed timestamp of the same-second runs. */
+const TS = "20261101-030000";
 
 const LOCK_MODE: ShellMode | null = shellMode(["flock"], { linux: false });
 
@@ -818,14 +886,41 @@ describe.skipIf(!LOCK_MODE)(
 
       const dangling = backupRun({
         mode,
-        setup: eachSecond('ln -s "$T/gone" "$BK/sinnlos-uploads-$ts.tar"'),
+        fixedTs: TS,
+        setup: `ln -s "$T/gone" "$BK/sinnlos-uploads-${TS}.tar"`,
       });
       expect(dangling.status).toBe(1);
-      expect(dangling.stderr).toContain(".tar exists already");
-      expect(dangling.root.filter((n) => n.startsWith("sinnlos-uploads-"))).toHaveLength(66);
+      expect(dangling.stderr).toContain(`sinnlos-uploads-${TS}.tar exists already`);
+      expect(dangling.root).toContain(`sinnlos-uploads-${TS}.tar`);
       expect(dangling.offsite.filter((n) => n.endsWith(".gz.gpg"))).toEqual([]);
       expect(dangling.docker).toEqual([]);
     });
+
+    it.skipIf(LOCK_MODE !== "runner")(
+      "a root run leaves the lock to the backup root's owner, whose cron run then works (v0.34)",
+      () => {
+        // A fresh lock, and a root-owned one an interrupted root run left behind.
+        for (const setup of [
+          'rm -rf "$BK/offsite"',
+          'rm -rf "$BK/offsite"; : > "$BK/.pg-backup.lock"',
+        ]) {
+          const run = backupRun({
+            mode: LOCK_MODE as ShellMode,
+            cronAfterRoot: true,
+            quickAccess: false,
+            setup,
+          });
+          expect(run.status, run.stderr).toBe(0);
+          expect(run.second?.status, run.second?.stderr).toBe(0);
+          expect(run.lockOwner).toBe("1000");
+          expect(run.lockMode).toBe("600");
+          expect(run.log.filter((l) => l.startsWith("done "))).toEqual([
+            "done nightly",
+            "done nightly",
+          ]);
+        }
+      },
+    );
 
     it("a second run of either kind while one runs exits 1 and writes nothing (v0.34)", () => {
       for (const kind of ["predeploy", "nightly"]) {
