@@ -171,6 +171,12 @@ format`: a scanner posted to a page with a made-up Server Action id,
 
 Newest first. Older releases: [archive/deployment-history.md](archive/deployment-history.md).
 
+**Upgrading to v1.0.0-rc.1 (release candidate).** The v0.36.0 code under the first release-candidate version: no required env, no edge change, no schema change, no new permission, no change in behaviour.
+
+- **From v0.36.0:** nothing to do. From an older release, follow the notes of every release you skip ([From v0.25.x directly](#from-v025x-directly)).
+- **At the first boot:** as v0.36.0, except `[sinnlos] version 1.0.0-rc.1` with the new revision, and the version in the web footer. The `[secrets]` lines are unchanged. On an unchanged, converged v0.36 installation the cms logs no `granted` line and `[bootstrap] permission drift: none (report-only check of 228 managed actions)`.
+- **Rollback** to v0.36.0 is a retag of both images (`17d2f41c8d39`), then `up -d --no-build web cms` ([Rollback](#rollback)). No `FEATURES_OFF` and no SQL step: v0.36.0 knows the role lists.
+
 **Upgrading to v0.36.0 (secret sharing by role).** No required env, no edge change, no schema change, no new permission.
 
 - **Nothing to do:** with both new keys unset, everyone who could send and receive secrets under v0.35 still can.
