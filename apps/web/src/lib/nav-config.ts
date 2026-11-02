@@ -16,20 +16,24 @@
  *     batch 15 the moderators and the department authors (admin_role only
  *     before; decision 06 §L1). It replaces the plan's `adminOnly` flag;
  *   - an entry with a `module` is hidden while FEATURES_OFF switches that
- *     module off (v0.28, lib/switches.ts).
+ *     module off (v0.28, lib/switches.ts);
+ *   - /secrets (`useSecrets`, v0.36 decision D7) is hidden for a known
+ *     role that can neither send nor receive (lib/secret-roles.ts); the
+ *     page itself stays reachable, with the sent list and revoke.
  * The nav is UX only: every page gates itself, and the CMS decides.
  */
 import type { Route } from "next";
 import type { Messages } from "next-intl";
 import type { ModuleName, SwitchName } from "@sinnlos/domain";
 import type { IconName } from "@/components/icon-map";
-import { capabilitiesFor, isReadDenied, type ReadSection } from "@/lib/roles";
+import { KNOWN_ROLES, capabilitiesFor, isReadDenied, type ReadSection } from "@/lib/roles";
+import { canReceiveSecrets, canSendSecrets } from "@/lib/secret-roles";
 import { switchedOff } from "@/lib/switches";
 
 export type NavLabelKey = keyof Messages["nav"];
 
-/** What an entry needs: the read of a section, or the /manage shell. */
-export type NavCapability = ReadSection | "manage";
+/** What an entry needs: the read of a section, the /manage shell, or sending or receiving secrets. */
+export type NavCapability = ReadSection | "manage" | "useSecrets";
 
 export interface NavItem {
   href: Route;
@@ -95,7 +99,7 @@ export const NAV_ITEMS: readonly NavItem[] = [
     href: "/secrets",
     labelKey: "secrets",
     icon: "KeyRound",
-    capability: "secrets",
+    capability: "useSecrets",
     module: "secrets",
   },
   { href: "/manage", labelKey: "admin", icon: "Settings", capability: "manage" },
@@ -122,6 +126,10 @@ export function navItemsFor(
     if (item.module !== undefined && off.has(item.module)) return false;
     if (item.capability === undefined) return true;
     if (item.capability === "manage") return manage;
+    // Both lists hold staff roles only, so this also hides /secrets from guests.
+    if (item.capability === "useSecrets") {
+      return !KNOWN_ROLES.has(role ?? "") || canSendSecrets(role) || canReceiveSecrets(role);
+    }
     return !isReadDenied(role, item.capability);
   });
 }

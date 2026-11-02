@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import de from "../../messages/de.json";
 import en from "../../messages/en.json";
 import { ICONS } from "@/components/icon-map";
@@ -135,6 +135,25 @@ describe("navItemsFor", () => {
       expect(hrefs(role).sort()).toEqual([...EVERYONE, ...READ_GATED].sort());
     },
   );
+
+  it("shows /secrets only to roles that can send or receive (v0.36, D7)", () => {
+    vi.stubEnv("SECRETS_SEND_ROLES", "department_head,team_lead");
+    vi.stubEnv("SECRETS_RECEIVE_ROLES", "team_lead,member");
+    try {
+      const withSecrets = (role: string | null) => hrefs(role).includes("/secrets");
+      expect(withSecrets("department_head")).toBe(true);
+      expect(withSecrets("member")).toBe(true);
+      expect(withSecrets("admin_role")).toBe(false);
+      expect(withSecrets("editor")).toBe(false);
+      expect(withSecrets("guest")).toBe(false);
+      expect(withSecrets("authenticated")).toBe(false);
+      // Like the read gates: a role that could not be read keeps the entry.
+      expect(withSecrets(null)).toBe(true);
+      expect(withSecrets("intern")).toBe(true);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
 
   it("hides the sections of switched-off modules for every role (FEATURES_OFF, v0.28)", () => {
     const off = new Set([
