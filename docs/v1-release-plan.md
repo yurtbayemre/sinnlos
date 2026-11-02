@@ -10,7 +10,7 @@ Status: 2026-10-25, owner-approved. Baseline was v0.25.0 (`0c26656e`). This file
 - **v0.29.0 "polish"** is shipped and live since 2026-10-24 09:55 CEST: branding by config, the accessibility pass, `/healthz` and `infra/ops-check.sh`, the closed-door restore, the v0.25 upgrade floor and the docs split (INSTALL, UPGRADE, OPERATIONS, SSO).
 - **v0.29.1** (dependency fixes, live since 2026-10-25 11:35 CET) and **v0.29.2** (Strapi 5.59.0) follow it.
 - **v0.34.0 "security hardening"** is shipped and live since 2026-11-01 11:17 CET.
-- **v0.35.0 "secret sharing"** (owner request 2026-11-01; plan: [plan-v035-secret-sharing.md](plan-v035-secret-sharing.md)) is built; it goes live after its staging rehearsal, **then v1.0.0-rc.1** (below). v1.0.0 itself waits for the lawyer review of the packages (S5 and the GHCR publication; owner decisions 2026-10-24 and 2026-10-25).
+- **v0.35.0 "secret sharing"** (owner request 2026-11-01; plan: [plan-v035-secret-sharing.md](plan-v035-secret-sharing.md)) is shipped and live since 2026-11-02 07:05 CET. **Next: v1.0.0-rc.1** (below). v1.0.0 itself waits for the lawyer review of the packages (S5 and the GHCR publication; owner decisions 2026-10-24 and 2026-10-25).
 
 ## What v1.0.0 means
 
@@ -162,7 +162,7 @@ The owner rule still applies: **no bloat**. Every item below has the smallest sc
 - [x] **Remove the pre-v0.25 upgrade machinery from the main path** (decision 5). `DATETIME_LEGACY_*` and the old migration runbooks move to the archive.
 - [x] **Final rehearsal** on the final schema and authentication: fresh install, upgrade from v0.25.x and restore (including re-applied anonymisations). Done 2026-10-24 on a fresh host (Caddy) and on staging (Traefik).
 - [x] **v0.34.0 security hardening** (owner request 2026-11-01): the findings of the security review of v0.33.4. Sign-out ends every session, the second-factor forms have an attempt budget, a file opens only for readers of its content, multipart temp files are removed, unpublished wiki pages have no comments, one backup at a time. Shipped 2026-11-01.
-- [ ] **v0.35.0 secret sharing** (owner request 2026-11-01): one person sends one short text (a password, a link, an access code) to one colleague, who can open it once; stored encrypted, at most 24 hours, staff only, no admin view of the content. External recipients come later as their own release. Design, scope, owner decisions and work breakdown: [plan-v035-secret-sharing.md](plan-v035-secret-sharing.md). Built in v0.35.0; shipped once it is live. Before rc.1.
+- [x] **v0.35.0 secret sharing** (owner request 2026-11-01; shipped 2026-11-02): one person sends one short text (a password, a link, an access code) to one colleague, who can open it once; stored encrypted, at most 24 hours, staff only, no admin view of the content. External recipients come later as their own release. Design, scope, owner decisions and work breakdown: [plan-v035-secret-sharing.md](plan-v035-secret-sharing.md). Built in v0.35.0.
 - [ ] **v1.0.0-rc.1:** all package versions at 1.0.0-rc.1, the immutable images validated, then at least one week on the owner's instance with backup, cron-status and restore evidence.
 - [ ] **v1.0.0:** after the lawyer review (S5 and the GHCR publication), all package versions at 1.0.0.
 
@@ -180,6 +180,8 @@ The owner rule still applies: **no bloat**. Every item below has the smallest sc
 ## After v1.0.0
 
 These are deliberately not part of v1.0.0: SCIM or directory sync, OIDC single logout, web push (with quiet hours), a Microsoft Teams personal-app manifest, audit CSV export, S3 media storage, HA/Helm, LTS releases (a natural paid item), the Azure Container Apps test, the AI assistant, the canteen menu / vending API, and secret sharing with external recipients (its own review; see [plan-v035-secret-sharing.md](plan-v035-secret-sharing.md#9-external-recipients-later)).
+
+**Planned next feature: secret sharing by role** (owner request 2026-11-02). Two env lists choose which roles may send and which may receive secrets. For example, only department heads and team leads send, while every staff member receives. Unset means all staff, as in v0.35.0. No schema change. Design, owner decisions and work breakdown: [plan-secret-sharing-by-role.md](plan-secret-sharing-by-role.md). It is planned for after v1.0.0, or before rc.1 as v0.36.0 if the owner pulls it forward.
 
 ## Not planned (bloat)
 
