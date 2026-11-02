@@ -11,7 +11,7 @@ Where sinnlos stands.
 
 | Version           | Date                    | Theme                                                                                          |
 | ----------------- | ----------------------- | ---------------------------------------------------------------------------------------------- |
-| v0.36.0           | —                       | Secret sharing by role: env lists of who may send and who may receive                          |
+| v0.36.0           | 2026-11-02              | Secret sharing by role: env lists of who may send and who may receive                          |
 | v0.35.0           | 2026-11-02              | Secret sharing between colleagues: opened once, stored encrypted                               |
 | v0.30.0 – v0.34.0 | 2026-10-26 – 2026-11-01 | Scale, tidy, CI images and the security hardening of the v0.33.4 review                        |
 | v0.29.0           | —                       | Polish: branding, readiness and monitoring, accessibility, docs split, the v0.25 upgrade floor |
