@@ -25,6 +25,7 @@ vi.mock("next/cache", () => ({ refresh: () => refreshMock() }));
 
 const { createSecret, findSecretRecipients, revealSecret, revokeSecret } =
   await import("./secret-actions");
+const { settleSecretCall } = await import("./secret-share-errors");
 
 const ID = "abcdefghijklmnopqrstuvwx";
 const SENTINEL = "sentinel-7f3a-do-not-log";
@@ -125,8 +126,7 @@ describe("revealSecret", () => {
       [refusal(404), "notFound"],
       [refusal(400), "invalid"],
       [refusal(403), "forbidden"],
-      [refusal(500), "unavailable"],
-      [new TypeError("fetch failed"), "unavailable"],
+      [refusal(429), "unavailable"],
     ];
     for (const [error, code] of cases) {
       strapiMock.mockRejectedValueOnce(error);
@@ -139,12 +139,12 @@ describe("revealSecret", () => {
     strapiMock.mockRejectedValueOnce(new SyntaxError(`Unexpected token in JSON: ${SENTINEL}`));
     strapiMock.mockResolvedValueOnce({ data: { secret: SENTINEL } });
     await revealSecret(ID);
-    await expect(revealSecret(ID)).resolves.toEqual({ ok: false, code: "failed" });
-    await expect(revealSecret(ID)).resolves.toEqual({ ok: false, code: "failed" });
+    await revealSecret(ID);
+    await revealSecret(ID);
     expect(logged).toEqual([
-      "[secrets] reveal failed: 500 → unavailable",
-      "[secrets] reveal failed: - → failed",
-      "[secrets] reveal failed: - → failed",
+      "[secrets] reveal failed: 500 → busy",
+      "[secrets] reveal failed: - → busy",
+      "[secrets] reveal failed: - → busy",
     ]);
     expect(logged.join("\n")).not.toContain(SENTINEL);
   });
@@ -155,6 +155,54 @@ describe("revealSecret", () => {
     const redirectError = signInRedirect();
     strapiMock.mockRejectedValue(redirectError);
     await expect(revealSecret(ID)).rejects.toBe(redirectError);
+  });
+});
+
+/** A cms answer that may follow a committed write, so its outcome is unknown. */
+const lostAnswers = (): [string, () => void][] => [
+  ["a network error", () => strapiMock.mockRejectedValueOnce(new TypeError("fetch failed"))],
+  [
+    "a timeout",
+    () => strapiMock.mockRejectedValueOnce(Object.assign(new Error("t"), { name: "TimeoutError" })),
+  ],
+  ["a 5xx without a code", () => strapiMock.mockRejectedValueOnce(refusal(502))],
+  ["a malformed success", () => strapiMock.mockResolvedValueOnce({ data: null })],
+];
+
+describe("a lost answer to a write is an unknown outcome (busy), never 'try again'", () => {
+  it.each(lostAnswers())("create and reveal after %s", async (_what, lose) => {
+    lose();
+    await expect(createSecret(7, "x", "1h")).resolves.toEqual({ ok: false, code: "busy" });
+    lose();
+    await expect(revealSecret(ID)).resolves.toEqual({ ok: false, code: "busy" });
+  });
+
+  // revoke takes any success body: only its failures can lose an answer.
+  it.each(lostAnswers().slice(0, 3))("revoke after %s", async (_what, lose) => {
+    lose();
+    await expect(revokeSecret(ID)).resolves.toEqual({ ok: false, code: "busy" });
+    expect(refreshMock).not.toHaveBeenCalled();
+  });
+
+  it("keeps the search's plain codes: it changes nothing", async () => {
+    strapiMock.mockRejectedValueOnce(new TypeError("fetch failed"));
+    await expect(findSecretRecipients("a")).resolves.toEqual({ ok: false, code: "unavailable" });
+    strapiMock.mockRejectedValueOnce(refusal(500));
+    await expect(findSecretRecipients("a")).resolves.toEqual({ ok: false, code: "unavailable" });
+  });
+});
+
+describe("settleSecretCall: the browser's call of a write", () => {
+  it("answers busy when the call itself fails, passes results and the sign-in redirect", async () => {
+    await expect(
+      settleSecretCall(Promise.reject(new TypeError("Failed to fetch"))),
+    ).resolves.toEqual({ ok: false, code: "busy" });
+    await expect(settleSecretCall(Promise.resolve({ ok: false, code: "gone" }))).resolves.toEqual({
+      ok: false,
+      code: "gone",
+    });
+    const redirectError = signInRedirect();
+    await expect(settleSecretCall(Promise.reject(redirectError))).rejects.toBe(redirectError);
   });
 });
 

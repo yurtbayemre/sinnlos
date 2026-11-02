@@ -95,5 +95,6 @@ export async function findSecretRecipients(q: string): Result<SecretShareRecipie
         `/api/secret-shares/recipients?q=${encodeURIComponent(q)}`,
       ),
     (res) => (Array.isArray(res?.data) ? res.data : malformed()),
+    false,
   );
 }
