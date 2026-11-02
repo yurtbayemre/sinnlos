@@ -308,6 +308,39 @@ export async function main(args) {
     configured = true;
     console.log("[e2e] Building CMS and web from the current checkout");
     await docker([...compose, "build"], "build", 15 * 60_000);
+    // v0.36 (plan-secret-sharing-by-role.md §4.4): the built web with a bad
+    // role list fails its start like a bad FEATURES_OFF: Next logs the
+    // instrumentation error and answers every request with 500. No cms needed.
+    for (const key of ["SECRETS_SEND_ROLES", "SECRETS_RECEIVE_ROLES"]) {
+      const started = Date.now();
+      const name = `${runId}-web-${key.toLowerCase().replaceAll("_", "-")}`;
+      const log = `bad-${key.toLowerCase()}`;
+      await docker(
+        [
+          ...["run", "--detach", "--name", name, "--label", `${projectLabel}=${runId}`],
+          ...["--publish", "127.0.0.1::3000", "--env", "HOSTNAME=0.0.0.0", "--env", `${key}=guest`],
+          `${runId}-web`,
+        ],
+        log,
+      );
+      try {
+        const address = await docker(["port", name, "3000"], `${log}-port`);
+        assert.match(address, /^127\.0\.0\.1:\d+$/);
+        let status = 0;
+        for (const deadline = Date.now() + 30_000; !status && Date.now() < deadline;) {
+          status = await fetch(`http://${address}/healthz`, { signal: AbortSignal.timeout(2_000) })
+            .then((response) => response.status)
+            .catch(() => new Promise((done) => setTimeout(() => done(0), 250)));
+        }
+        assert.equal(status, 500, `The web with a bad ${key} answered /healthz with ${status}`);
+        await docker(["logs", name], `${log}-logs`);
+        const output = await readFile(join(logs, `${log}-logs.log`), "utf8");
+        assert.ok(output.includes(`${key}: "guest" is not a staff role`), `No ${key} refusal`);
+      } finally {
+        await docker(["rm", "--force", name], `${log}-remove`, 30_000, true);
+      }
+      console.log(`[e2e] A bad ${key} fails the web's start (${Date.now() - started} ms)`);
+    }
     console.log("[e2e] Starting fresh PostgreSQL, CMS fixtures and web");
     await docker(
       [...compose, "up", "--detach", "--wait", "--wait-timeout", "180"],
