@@ -315,15 +315,24 @@ export async function main(args) {
       const started = Date.now();
       const name = `${runId}-web-${key.toLowerCase().replaceAll("_", "-")}`;
       const log = `bad-${key.toLowerCase()}`;
-      await docker(
-        [
-          ...["run", "--detach", "--name", name, "--label", `${projectLabel}=${runId}`],
-          ...["--publish", "127.0.0.1::3000", "--env", "HOSTNAME=0.0.0.0", "--env", `${key}=guest`],
-          `${runId}-web`,
-        ],
-        log,
-      );
       try {
+        // Inside the try: a run that created the container and then failed
+        // or was interrupted still has it removed below.
+        await docker(
+          [
+            ...["run", "--detach", "--name", name, "--label", `${projectLabel}=${runId}`],
+            ...[
+              "--publish",
+              "127.0.0.1::3000",
+              "--env",
+              "HOSTNAME=0.0.0.0",
+              "--env",
+              `${key}=guest`,
+            ],
+            `${runId}-web`,
+          ],
+          log,
+        );
         const address = await docker(["port", name, "3000"], `${log}-port`);
         assert.match(address, /^127\.0\.0\.1:\d+$/);
         let status = 0;
@@ -337,6 +346,8 @@ export async function main(args) {
         const output = await readFile(join(logs, `${log}-logs.log`), "utf8");
         assert.ok(output.includes(`${key}: "guest" is not a staff role`), `No ${key} refusal`);
       } finally {
+        // --force also exits 0 when the container was never created; a
+        // container left anyway fails the label check of the final cleanup.
         await docker(["rm", "--force", name], `${log}-remove`, 30_000, true);
       }
       console.log(`[e2e] A bad ${key} fails the web's start (${Date.now() - started} ms)`);

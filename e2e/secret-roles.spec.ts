@@ -8,7 +8,7 @@ import { loadFixtures, signIn, sql, type Account } from "./helpers";
  * department heads only send; secrets.spec.ts (member to lead) is unchanged.
  * A list change needs a restart, so a role change in the database (the
  * run's psql) puts a person outside a list instead: the cms and the web
- * read the role fresh on every request, as they read the lists. The roles
+ * read the role fresh on every request (the lists only at start). The roles
  * are put back at the end for the specs that follow.
  */
 
