@@ -2,7 +2,13 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { FEATURE_NAMES, MODULE_NAMES, parseFeaturesOff } from "@sinnlos/domain";
+import {
+  FEATURE_NAMES,
+  MODULE_NAMES,
+  STAFF_ROLES,
+  parseFeaturesOff,
+  parseSecretRoles,
+} from "@sinnlos/domain";
 import { afterAll, describe, expect, it } from "vitest";
 import { searchLogRetentionDays } from "../cron/prune-search-logs";
 import { digestsEnabled } from "../digest/send-digests";
@@ -816,6 +822,99 @@ describe("boot-refused values in the preflight (v0.28 keys)", () => {
     // The awk list is the domain list, nothing more.
     const literal = PREFLIGHT_AWK.match(/split\("([a-z -]+)", k, " "\)/);
     expect(sorted(words(literal?.[1] ?? ""))).toEqual(sorted(names));
+  });
+});
+
+describe("secret-sharing role lists in the preflight (v0.36.0)", () => {
+  const KEYS = ["SECRETS_SEND_ROLES", "SECRETS_RECEIVE_ROLES"] as const;
+  /** What compose renders for the cms and the web (a key left out is unset there). */
+  const scan = (cms: Record<string, string>, web: Record<string, string>) =>
+    runAwk(
+      PREFLIGHT_AWK,
+      { fatal_keys: "", warn_keys: "" },
+      JSON.stringify(
+        { services: { cms: { environment: cms }, web: { environment: web } } },
+        null,
+        2,
+      ),
+    ).filter((finding) => finding.startsWith("secrets-"));
+  /** The domain parser's normalized list, or null when it refuses the value. */
+  const parsed = (value: string | undefined) => {
+    try {
+      return parseSecretRoles(value, "KEY").join(",");
+    } catch {
+      return null;
+    }
+  };
+
+  it.skipIf(!HAS_AWK)(
+    "refuses exactly what parseSecretRoles refuses, in the cms or the web environment",
+    () => {
+      for (const value of [
+        "",
+        " ",
+        "member",
+        "MEMBER",
+        "Team_Lead",
+        " Team_Lead , DEPARTMENT_HEAD,team_lead,, ",
+        "\tmember\t",
+        "admin_role,editor,department_head,team_lead,member",
+        ",",
+        ", ,",
+        " ,\t, ",
+        "guest",
+        "member,Guest",
+        "authenticated",
+        "admin",
+        "team lead",
+        "member;editor",
+        "member,",
+      ]) {
+        const env = { SECRETS_SEND_ROLES: value, SECRETS_RECEIVE_ROLES: value };
+        const findings = parsed(value) === null ? KEYS.map((key) => `secrets-invalid ${key}`) : [];
+        expect(scan(env, env), JSON.stringify(value)).toEqual(findings);
+      }
+      // A bad value in one service alone.
+      for (const value of [", ,", "member,Guest"]) {
+        const env = { SECRETS_SEND_ROLES: value, SECRETS_RECEIVE_ROLES: value };
+        const findings = KEYS.map((key) => `secrets-invalid ${key}`);
+        expect(scan(env, {}), `cms ${value}`).toEqual(findings);
+        expect(scan({}, env), `web ${value}`).toEqual(findings);
+      }
+    },
+  );
+
+  it.skipIf(!HAS_AWK)("compares the lists as the domain parser normalizes them", () => {
+    const pairs: [string | undefined, string | undefined][] = [
+      [undefined, undefined],
+      [undefined, ""],
+      ["", "admin_role, editor, department_head, team_lead, member"],
+      ["department_head,team_lead", " TEAM_LEAD,Department_Head , team_lead"],
+      ["team_lead", ""],
+      ["team_lead", undefined],
+      ["team_lead", "department_head"],
+      ["member,editor", "member"],
+    ];
+    const env = (value: string | undefined): Record<string, string> =>
+      value === undefined ? {} : { SECRETS_SEND_ROLES: value, SECRETS_RECEIVE_ROLES: value };
+    for (const [cms, web] of pairs) {
+      const same = parsed(cms) === parsed(web);
+      expect(scan(env(cms), env(web)), `${cms} | ${web}`).toEqual(
+        same ? [] : KEYS.map((key) => `secrets-differ ${key}`),
+      );
+    }
+  });
+
+  it.skipIf(!HAS_AWK)("leaves a value awk cannot judge (non-ASCII, escapes) to the cms", () => {
+    // JavaScript's trim() removes a no-break space, awk's does not: never refused here.
+    expect(parsed("team_lead\u00a0")).toBe("team_lead");
+    // The image's check-boot-env.js refuses these with the domain parser.
+    for (const value of ["team_lead\u00a0", "TEAM_LEAD\u0130", "member\u000b", 't"eam'])
+      expect(scan({ SECRETS_SEND_ROLES: value }, {}), JSON.stringify(value)).toEqual([]);
+  });
+
+  it("the awk staff list is the domain's STAFF_ROLES, in its order", () => {
+    expect(/staff_list = "([a-z_,]+)"/.exec(PREFLIGHT_AWK)?.[1]).toBe(STAFF_ROLES.join(","));
   });
 });
 
