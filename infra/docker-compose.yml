@@ -151,6 +151,11 @@ services:
       # v0.28: modules and features switched off (a comma list, empty = all
       # on); the same value as the web. An unknown name refuses the boot.
       FEATURES_OFF: ${FEATURES_OFF:-}
+      # v0.36.0: the staff roles that may send and receive secrets (comma
+      # lists, empty = all staff); the same values as the web. A name that is
+      # not a staff role refuses the boot.
+      SECRETS_SEND_ROLES: ${SECRETS_SEND_ROLES:-}
+      SECRETS_RECEIVE_ROLES: ${SECRETS_RECEIVE_ROLES:-}
       SEED_DEMO_DATA: ${SEED_DEMO_DATA:-0}
       # Admin seed — auto-create first Strapi admin on fresh database.
       # Refused (error log, no admin) for template placeholders and
@@ -331,6 +336,9 @@ services:
       MEILISEARCH_SEARCH_KEY: ${MEILISEARCH_SEARCH_KEY:-}
       # v0.28: the same switch list as the cms (navigation, pages, search).
       FEATURES_OFF: ${FEATURES_OFF:-}
+      # v0.36.0: the same secret-sharing role lists as the cms (controls only).
+      SECRETS_SEND_ROLES: ${SECRETS_SEND_ROLES:-}
+      SECRETS_RECEIVE_ROLES: ${SECRETS_RECEIVE_ROLES:-}
       # Footer links and analytics (v0.26, infra/.env.example), all optional.
       SOURCE_URL: ${SOURCE_URL:-}
       PRIVACY_URL: ${PRIVACY_URL:-}
