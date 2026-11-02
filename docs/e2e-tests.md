@@ -130,6 +130,12 @@ pending secret from the bell and sees "cannot be opened right now" without
 `/secrets` by its address and revokes that secret. The case puts both roles
 back at its end, for the specs that follow.
 
+Right after the build, before the stack starts, the runner starts the built
+web image alone twice, once with `SECRETS_SEND_ROLES=guest` and once with
+`SECRETS_RECEIVE_ROLES=guest` (no CMS). Each must answer `/healthz` with 500
+and log the key's refusal from the instrumentation hook; the container is
+removed right after. Every run does this, `--check` and `--live` included.
+
 The two Teams cases live in `e2e/teams.spec.ts`. All six cases reuse
 fixture reading and visible-form login from `e2e/helpers.ts`, including the
 signed-in email assertion. They use fresh browser sessions and independent
