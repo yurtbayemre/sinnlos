@@ -1374,10 +1374,12 @@ from the same file), choose the roles that use the module:
   without a role name is a mistake. The cms then refuses to boot (as with
   `MFA_REQUIRED_ROLES`); the web logs the error and answers every request
   with HTTP 500, so its health check fails (as with an unknown
-  `FEATURES_OFF` name). `infra/deploy.sh` and `infra/deploy.sh --check`
-  refuse before anything changes, also when the cms and the web would get
-  different lists.
-- **Clearing a list widens access** back to all staff.
+  `FEATURES_OFF` name). The preflight of `infra/deploy.sh` (also
+  `--check`) refuses before anything is pulled or built, and the
+  boot-value check of the new cms image before the running containers are
+  replaced, also when the cms and the web would get different lists.
+- **Clearing a list widens access** back to all staff, for that list's
+  action only; the other list still applies.
 - **Off for everyone** stays `FEATURES_OFF=secrets`; there is no `none`.
 - **Example:** leads send, every staff member receives, so a lead can hand
   a team member an access code:

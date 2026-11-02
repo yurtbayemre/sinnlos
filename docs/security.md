@@ -1519,9 +1519,10 @@ off for everyone.
 - **Refused at start:** an unknown name, `guest`, `authenticated`, or a
   value of only commas. The cms does not boot; the web answers every
   request with 500 and fails its health check. `infra/deploy.sh` (also
-  `--check`) and the boot-value check in the new cms image refuse such a
-  value in the cms's or the web's environment, and lists that differ
-  between the two, before anything changes.
+  `--check`) refuses such a value in the cms's or the web's environment,
+  and lists that differ between the two, before anything is pulled or
+  built; the boot-value check of the new cms image refuses them before the
+  running containers are replaced.
 - **The cms decides** every request, on top of the eligibility above;
   create and reveal check the fresh rows under their locks:
 
