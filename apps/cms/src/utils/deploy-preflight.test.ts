@@ -827,17 +827,16 @@ describe("boot-refused values in the preflight (v0.28 keys)", () => {
 
 describe("secret-sharing role lists in the preflight (v0.36.0)", () => {
   const KEYS = ["SECRETS_SEND_ROLES", "SECRETS_RECEIVE_ROLES"] as const;
-  /** What compose renders for the cms and the web (a key left out is unset there). */
-  const scan = (cms: Record<string, string>, web: Record<string, string>) =>
+  /** The secret findings of a rendered config, indented as compose does. */
+  const scanConfig = (config: object) =>
     runAwk(
       PREFLIGHT_AWK,
       { fatal_keys: "", warn_keys: "" },
-      JSON.stringify(
-        { services: { cms: { environment: cms }, web: { environment: web } } },
-        null,
-        2,
-      ),
+      JSON.stringify(config, null, 2),
     ).filter((finding) => finding.startsWith("secrets-"));
+  /** What compose renders for the cms and the web (a key left out is unset there). */
+  const scan = (cms: Record<string, string>, web: Record<string, string>) =>
+    scanConfig({ services: { cms: { environment: cms }, web: { environment: web } } });
   /** The domain parser's normalized list, or null when it refuses the value. */
   const parsed = (value: string | undefined) => {
     try {
@@ -911,7 +910,44 @@ describe("secret-sharing role lists in the preflight (v0.36.0)", () => {
     // The image's check-boot-env.js refuses these with the domain parser.
     for (const value of ["team_lead\u00a0", "TEAM_LEAD\u0130", "member\u000b", 't"eam'])
       expect(scan({ SECRETS_SEND_ROLES: value }, {}), JSON.stringify(value)).toEqual([]);
+    // Only that side and the comparison: the other service is still checked.
+    const send = (value: string) => ({ SECRETS_SEND_ROLES: value });
+    expect(scan(send("guest"), send("member\u00a0"))).toEqual([
+      "secrets-invalid SECRETS_SEND_ROLES",
+    ]);
+    expect(scan(send("member\u00a0"), send("guest"))).toEqual([
+      "secrets-invalid SECRETS_SEND_ROLES",
+    ]);
   });
+
+  it.skipIf(!HAS_AWK)(
+    "reads only the service environments, not labels, build args or resources",
+    () => {
+      const send = (value: string) => ({ SECRETS_SEND_ROLES: value });
+      // A label or a build arg of the web named like the key: the bad environment value still counts.
+      expect(
+        scanConfig({
+          services: {
+            cms: { environment: send("member") },
+            web: {
+              environment: send("guest"),
+              labels: send("member"),
+              build: { args: send("member") },
+            },
+          },
+        }),
+      ).toEqual(["secrets-invalid SECRETS_SEND_ROLES"]);
+      // Top-level resources named cms or web, before and after the services: the lists still differ.
+      expect(
+        scanConfig({
+          networks: { web: { labels: send("team_lead") } },
+          services: { cms: { environment: send("team_lead") }, web: { environment: {} } },
+          volumes: { web: { labels: send("team_lead") } },
+          secrets: { cms: { labels: send("guest") } },
+        }),
+      ).toEqual(["secrets-differ SECRETS_SEND_ROLES"]);
+    },
+  );
 
   it("the awk staff list is the domain's STAFF_ROLES, in its order", () => {
     expect(/staff_list = "([a-z_,]+)"/.exec(PREFLIGHT_AWK)?.[1]).toBe(STAFF_ROLES.join(","));

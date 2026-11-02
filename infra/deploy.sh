@@ -353,11 +353,20 @@ preflight_scan() {
       staff_count = split(staff_list, staff_order, ",")
       for (i = 1; i <= staff_count; i++) staff_role[staff_order[i]] = 1
     }
-    # A service of the rendered config (four blanks deep under "services"):
-    # the environment lines below it belong to that service.
-    /^    "[^"]+": [{]$/ {
-      service = $0; sub(/^ *"/, "", service); sub(/".*$/, "", service)
+    # Where a line sits in the rendered config (compose indents by two
+    # blanks): the top-level map, the service under "services", and whether
+    # it is inside that service "environment". Labels, build args and the
+    # top-level networks, volumes, secrets or configs are no environment.
+    /^  "[^"]+": [{]$/ {
+      top = $0; sub(/^ *"/, "", top); sub(/".*$/, "", top)
+      service = ""; in_env = 0
     }
+    /^    "[^"]+": [{]$/ {
+      service = ""; in_env = 0
+      if (top == "services") { service = $0; sub(/^ *"/, "", service); sub(/".*$/, "", service) }
+    }
+    /^      "environment": [{]$/ { in_env = (service != "") }
+    /^      [}]/ { in_env = 0 }
     # Environment entries, one per line: "KEY": "value", (or null).
     /^[ \t]*"[A-Z][A-Z0-9_]*": / {
       line = $0; sub(/^[ \t]*"/, "", line)
@@ -369,7 +378,7 @@ preflight_scan() {
       # Go JSON escapes < and > (so a <secret> stand-in arrives as <...>).
       gsub(/\\u003[cC]/, "<", val); gsub(/\\u003[eE]/, ">", val)
       env[key] = val
-      service_env[service, key] = val
+      if (in_env) service_env[service, key] = val
       if ((key in fatal) && placeholder(val)) print "fatal " key
       else if ((key in warn) && placeholder(val)) print "warn " key
     }
@@ -429,16 +438,16 @@ preflight_scan() {
       # v0.36.0: the secret-sharing role lists, as the cms (register()) and
       # the web (instrumentation.ts) each read them from their own rendered
       # environment; both must hold the same lists. A value awk cannot judge
-      # is left to check-boot-env.js in the new cms image.
+      # ("?") is left to check-boot-env.js in the new cms image, and so is a
+      # comparison with it; the other service is still checked.
       split("SECRETS_SEND_ROLES SECRETS_RECEIVE_ROLES", k, " ")
       for (i = 1; i <= 2; i++) {
         cms_val = service_env["cms", k[i]]
         web_val = service_env["web", k[i]]
-        if (unjudgeable(cms_val) || unjudgeable(web_val)) continue
-        cms_roles = secret_roles(cms_val)
-        web_roles = secret_roles(web_val)
+        cms_roles = unjudgeable(cms_val) ? "?" : secret_roles(cms_val)
+        web_roles = unjudgeable(web_val) ? "?" : secret_roles(web_val)
         if (cms_roles == "!" || web_roles == "!") print "secrets-invalid " k[i]
-        else if (cms_roles != web_roles) print "secrets-differ " k[i]
+        else if (cms_roles != "?" && web_roles != "?" && cms_roles != web_roles) print "secrets-differ " k[i]
       }
       # v0.21 Meilisearch: compose renders MEILI_MASTER_KEY (the meili
       # service) only while the search profile is on (COMPOSE_PROFILES in
