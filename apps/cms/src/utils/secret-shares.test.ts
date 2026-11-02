@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { SECRET_CREATES_PER_MINUTE, SECRET_TEXT_MAX_BYTES } from "@sinnlos/domain";
+import { SECRET_CREATES_PER_MINUTE, SECRET_TEXT_MAX_BYTES, secretRoles } from "@sinnlos/domain";
 import { errors } from "@strapi/utils";
 
 import { Refusal } from "./refusal";
@@ -7,6 +7,9 @@ import {
   LIMITER_MAX_SENDERS,
   __resetCreateLimiterForTest,
   assertNoWriteInput,
+  canReceive,
+  canSend,
+  configureSecretRoles,
   confirmed,
   endShare,
   isEligible,
@@ -199,6 +202,24 @@ describe("isEligible", () => {
     expect(isEligible({ blocked: false, role: { type: "guest" } })).toBe(false);
     expect(isEligible({ blocked: false, role: { type: "authenticated" } })).toBe(false);
     expect(isEligible(null)).toBe(false);
+  });
+});
+
+describe("canSend / canReceive (v0.36.0)", () => {
+  const lead = { blocked: false, role: { type: "team_lead" } };
+  const member = { blocked: false, role: { type: "member" } };
+
+  it("are eligible and in the configured list", () => {
+    configureSecretRoles(secretRoles({ SECRETS_SEND_ROLES: "team_lead" }));
+    expect(canSend(lead)).toBe(true);
+    expect(canSend(member)).toBe(false);
+    expect(canSend({ ...lead, blocked: true })).toBe(false);
+    expect(canReceive(member)).toBe(true);
+    expect(canReceive({ blocked: false, role: { type: "guest" } })).toBe(false);
+    configureSecretRoles(secretRoles({ SECRETS_RECEIVE_ROLES: "team_lead" }));
+    expect(canSend(member)).toBe(true);
+    expect(canReceive(member)).toBe(false);
+    expect(canReceive({ ...lead, blocked: true })).toBe(false);
   });
 });
 
