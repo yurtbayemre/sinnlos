@@ -1,3 +1,5 @@
+import { secretRoles, secretRolesLine } from "@sinnlos/domain";
+
 import { syncAdvancedSettings } from "./bootstrap/advanced-settings";
 import {
   checkEntraConfig,
@@ -44,6 +46,7 @@ import { backfillPollAudience } from "./utils/poll-audience-backfill";
 import { backfillRevisions } from "./utils/revision-backfill";
 import { assertNoRevisionDrafts } from "./utils/revision-dp-guard";
 import { configureShareKey } from "./utils/secret-crypto";
+import { configureSecretRoles } from "./utils/secret-shares";
 import { assertUpgradeFloor } from "./utils/upgrade-floor";
 import { backfillTargetingFlags } from "./utils/targeting-flags-backfill";
 import { trainingEvidenceRetentionYears } from "./utils/training-evidence";
@@ -130,6 +133,12 @@ export default {
     // does any users-permissions JWT mode but legacy-support (refresh mode
     // would bypass the token version and the second-factor claims).
     parseMfaRequiredRoles(process.env.MFA_REQUIRED_ROLES);
+    // v0.36.0: the secret-sharing send and receive lists, read once; a bad
+    // value refuses the boot. The line is printed whatever FEATURES_OFF says:
+    // the deploy compares it with the web's (utils/secret-shares.ts).
+    const secretRoleLists = secretRoles(process.env);
+    configureSecretRoles(secretRoleLists);
+    strapi.log.info(secretRolesLine(secretRoleLists));
     // v0.28: a retention the evidence job cannot read refuses the boot too.
     trainingEvidenceRetentionYears(process.env);
     // v0.28: an unknown FEATURES_OFF value refuses the boot, and every route
