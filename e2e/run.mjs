@@ -213,6 +213,11 @@ export async function main(args) {
       // v0.28: one module off for the whole run (cms and web read the same
       // value); switches.spec.ts checks it, and no other spec uses it.
       FEATURES_OFF: "marketplace",
+      // v0.36: who sends and receives secrets, for the whole run: editors
+      // neither, department heads only send (secret-roles.spec.ts); members
+      // and team leads both, as secrets.spec.ts needs.
+      SECRETS_SEND_ROLES: "department_head,team_lead,member",
+      SECRETS_RECEIVE_ROLES: "team_lead,member",
     };
     await envFile("db", {
       POSTGRES_USER: "sinnlos_e2e",
