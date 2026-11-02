@@ -13,11 +13,14 @@ import { createTestStrapi, type Row, type TestDatabase } from "./harness.test.he
  * v0.34.0) against the schema the real cms creates, on Postgres 16.
  *
  * The cms runs in a schema whose name needs quoting (capitals, a space, a
- * hyphen), next to decoy `public.secret_shares` and `public.notifications`
- * tables with rows that must stay. The file is run as docs/UPGRADE.md says,
- * with the schema in the session setting `sinnlos.schema`. The harness has
- * no psql, so a pg client connects with the same startup option PGOPTIONS
- * would send (`-c sinnlos.schema=<schema>`, the space escaped as `\ `) and
+ * hyphen), next to decoy `secret_shares` and `notifications` tables with
+ * rows in a second schema the test owns, which is the rollback session's
+ * ambient search_path (as an unrelated default would be); `public` is never
+ * touched. The file is run as docs/UPGRADE.md says, with the cms schema in
+ * the session setting `sinnlos.schema` only. The harness has no psql, so a
+ * pg client connects with the startup options PGOPTIONS would send
+ * (`-c search_path=<decoys> -c sinnlos.schema=<schema>`, spaces escaped as
+ * `\ `) and
  * sends the whole file as one simple query, as psql does without
  * meta-commands; a failed run ends its session, as psql's ON_ERROR_STOP does.
  *
@@ -51,6 +54,7 @@ const NOTIFICATION = "api::notification.notification";
 
 describe.skipIf(!PG_URL)("secret-shares-rollback.sql on the cms schema (Postgres 16)", () => {
   const schema = `Sinnlos IT-${randomBytes(3).toString("hex")}`;
+  const decoys = `Sinnlos Decoys-${randomBytes(3).toString("hex")}`;
   const q = (name: string) => `"${name.replace(/"/g, '""')}"`;
   const at = (table: string) => `${q(schema)}.${q(table)}`;
   let admin: PgClient;
@@ -67,7 +71,9 @@ describe.skipIf(!PG_URL)("secret-shares-rollback.sql on the cms schema (Postgres
   async function rollback(target: string) {
     const client = new Client({
       connectionString: PG_URL,
-      options: `-c sinnlos.schema=${target.replace(/ /g, "\\ ")}`,
+      options: [`search_path=${q(decoys)}`, `sinnlos.schema=${target}`]
+        .map((setting) => `-c ${setting.replace(/ /g, "\\ ")}`)
+        .join(" "),
     });
     await client.connect();
     try {
@@ -84,16 +90,16 @@ describe.skipIf(!PG_URL)("secret-shares-rollback.sql on the cms schema (Postgres
     admin = new Client({ connectionString: PG_URL, options: "-c TimeZone=UTC" });
     await admin.connect();
     await sql(`CREATE SCHEMA ${q(schema)}`);
-    // The decoys: same table names in public, with rows.
-    await sql("DROP TABLE IF EXISTS public.secret_shares, public.notifications");
-    await sql("CREATE TABLE public.secret_shares (id integer)");
-    await sql("CREATE TABLE public.notifications (id integer, type text)");
-    await sql("INSERT INTO public.secret_shares VALUES (1), (2)");
-    await sql("INSERT INTO public.notifications VALUES (1, 'secretShared'), (2, 'kudos')");
+    // The decoys: the same table names with rows, in a schema the test owns.
+    await sql(`CREATE SCHEMA ${q(decoys)}`);
+    await sql(`CREATE TABLE ${q(decoys)}.secret_shares (id integer)`);
+    await sql(`CREATE TABLE ${q(decoys)}.notifications (id integer, type text)`);
+    await sql(`INSERT INTO ${q(decoys)}.secret_shares VALUES (1), (2)`);
+    await sql(`INSERT INTO ${q(decoys)}.notifications VALUES (1, 'secretShared'), (2, 'kudos')`);
   });
   afterAll(async () => {
     try {
-      await sql("DROP TABLE IF EXISTS public.secret_shares, public.notifications");
+      await sql(`DROP SCHEMA IF EXISTS ${q(decoys)} CASCADE`);
       await sql(`DROP SCHEMA IF EXISTS ${q(schema)} CASCADE`);
     } finally {
       await admin.end();
@@ -184,9 +190,9 @@ describe.skipIf(!PG_URL)("secret-shares-rollback.sql on the cms schema (Postgres
     expect(await links(shared[0])).toEqual([0, 0]);
     expect(await count(at("notifications"), `id = ${other.id}`)).toBe(1);
     expect(await links(other.id)).toEqual([1, 1]);
-    // The public decoys are untouched.
-    expect(await count("public.secret_shares")).toBe(2);
-    expect(await count("public.notifications")).toBe(2);
+    // The decoys are untouched.
+    expect(await count(`${q(decoys)}.secret_shares`)).toBe(2);
+    expect(await count(`${q(decoys)}.notifications`)).toBe(2);
 
     const second = await rollback(schema);
     expect(second.counts).toEqual({ secret_shares_deleted: "0", notifications_deleted: "0" });
@@ -204,7 +210,7 @@ describe.skipIf(!PG_URL)("secret-shares-rollback.sql on the cms schema (Postgres
       await sql(`ALTER TABLE ${at("secret_shares_away")} RENAME TO secret_shares`);
     }
     expect(await count(at("notifications"), "type = 'secretShared'")).toBe(1);
-    expect(await count("public.secret_shares")).toBe(2);
+    expect(await count(`${q(decoys)}.secret_shares`)).toBe(2);
   });
 
   it("a failure while the notifications are deleted rolls the share deletion back", async () => {
