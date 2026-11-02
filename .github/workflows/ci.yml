@@ -478,16 +478,22 @@ jobs:
       # `up` (v0.30), fed a compose config's cms environment on stdin: its
       # path and imports in the real image; what the cms accepts passes, and
       # a misspelt zone or an unknown role is refused with the cms's message.
+      # v0.36.0: the secret-sharing role lists of the cms and the web, given
+      # as a whole config.
       - name: Boot-value check in the cms image
         if: matrix.app == 'cms'
         run: |
+          # A cms environment, or a whole compose config (cms and web).
           check() {
-            printf '{"services":{"cms":{"environment":%s}}}' "$1" |
+            local config="$1"
+            [[ "${config}" == '{"services"'* ]] || config="{\"services\":{\"cms\":{\"environment\":${config}}}}"
+            printf '%s' "${config}" |
               docker run --rm -i --network none --entrypoint node sinnlos-cms:ci dist/scripts/check-boot-env.js
           }
           check '{}'
           check '{"APP_TIME_ZONE":"Europe/Berlin\t","MFA_REQUIRED_ROLES":"none\t"}'
           check '{"APP_TIME_ZONE":"europe/berlin","MFA_REQUIRED_ROLES":"admin_role, editor"}'
+          check '{"services":{"cms":{"environment":{"SECRETS_SEND_ROLES":"team_lead,department_head"}},"web":{"environment":{"SECRETS_SEND_ROLES":" Department_Head, team_lead"}}}}'
           refused() {
             if out="$(check "$1" 2>&1)"; then
               echo "::error::check-boot-env.js accepted $1"
@@ -498,6 +504,8 @@ jobs:
           }
           refused '{"APP_TIME_ZONE":"Europe/Berln"}' 'APP_TIME_ZONE must be an IANA time zone name'
           refused '{"MFA_REQUIRED_ROLES":"admin_role,Bogus"}' 'MFA_REQUIRED_ROLES: unknown role Bogus'
+          refused '{"services":{"cms":{"environment":{}},"web":{"environment":{"SECRETS_SEND_ROLES":"guest"}}}}' 'web: SECRETS_SEND_ROLES'
+          refused '{"services":{"cms":{"environment":{"SECRETS_SEND_ROLES":"team_lead"}},"web":{"environment":{}}}}' 'SECRETS_SEND_ROLES: the cms and the web would get different lists'
 
   # The production images for arm64 (the owner's host), built natively on a
   # standard arm64 runner (free for public repositories), tagged with the

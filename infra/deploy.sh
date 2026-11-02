@@ -223,7 +223,9 @@ PREFLIGHT_WARN_KEYS="DATABASE_PASSWORD"
 # or the web (apps/web/src/lib/auth-config.ts) runs at start; ENTRA_ENABLED
 # when both are on), "boot-invalid KEY" (v0.28: a value the cms refuses to
 # boot with: TRAINING_EVIDENCE_RETENTION_YEARS, SEARCH_LOG_RETENTION_DAYS,
-# FEATURES_OFF), "meili-invalid KEY" (v0.21:
+# FEATURES_OFF), "secrets-invalid KEY" and "secrets-differ KEY" (v0.36.0: a
+# SECRETS_SEND_ROLES or SECRETS_RECEIVE_ROLES the cms or the web refuses, or
+# different lists in the two services), "meili-invalid KEY" (v0.21:
 # MEILISEARCH_ENABLED=1 without the search profile or a key of the
 # optional Meilisearch, or the profile on with a master key the meili
 # container refuses to start with).
@@ -293,6 +295,27 @@ preflight_scan() {
       }
       return 1
     }
+    # SECRETS_SEND_ROLES, SECRETS_RECEIVE_ROLES (v0.36.0): the list as
+    # parseSecretRoles (packages/domain/src/secret-share.ts) normalizes it,
+    # comma-joined in privilege order: names trimmed, any case, duplicates
+    # fine, unset or blank = all staff. "!" for a value it refuses: another
+    # name (guest included) or commas without a name.
+    function secret_roles(v,    n, i, parts, p, named, want, out) {
+      v = trim(blanks(v))
+      if (v == "") v = staff_list
+      n = split(tolower(v), parts, ",")
+      for (i = 1; i <= n; i++) {
+        p = trim(parts[i])
+        if (p == "") continue
+        if (!(p in staff_role)) return "!"
+        want[p] = 1
+        named = 1
+      }
+      if (!named) return "!"
+      for (i = 1; i <= staff_count; i++)
+        if (staff_order[i] in want) out = out (out == "" ? "" : ",") staff_order[i]
+      return out
+    }
     # ENTRA_SESSION_TTL: <n>m, <n>h or <n>d, more than zero, at most 7d.
     function ttl_ok(v,    n, unit) {
       v = trim(v)
@@ -326,6 +349,14 @@ preflight_scan() {
       n = split(warn_keys, k, " "); for (i = 1; i <= n; i++) warn[k[i]] = 1
       n = split("events training marketplace kudos celebrations polls duty-plans kpis secrets read-confirmations training-reports search-logging", k, " ")
       for (i = 1; i <= n; i++) switch_name[k[i]] = 1
+      staff_list = "admin_role,editor,department_head,team_lead,member"
+      staff_count = split(staff_list, staff_order, ",")
+      for (i = 1; i <= staff_count; i++) staff_role[staff_order[i]] = 1
+    }
+    # A service of the rendered config (four blanks deep under "services"):
+    # the environment lines below it belong to that service.
+    /^    "[^"]+": [{]$/ {
+      service = $0; sub(/^ *"/, "", service); sub(/".*$/, "", service)
     }
     # Environment entries, one per line: "KEY": "value", (or null).
     /^[ \t]*"[A-Z][A-Z0-9_]*": / {
@@ -338,6 +369,7 @@ preflight_scan() {
       # Go JSON escapes < and > (so a <secret> stand-in arrives as <...>).
       gsub(/\\u003[cC]/, "<", val); gsub(/\\u003[eE]/, ">", val)
       env[key] = val
+      service_env[service, key] = val
       if ((key in fatal) && placeholder(val)) print "fatal " key
       else if ((key in warn) && placeholder(val)) print "warn " key
     }
@@ -394,6 +426,20 @@ preflight_scan() {
       if (!int_in(env["TRAINING_EVIDENCE_RETENTION_YEARS"], 1, 30)) print "boot-invalid TRAINING_EVIDENCE_RETENTION_YEARS"
       if (!int_in(env["SEARCH_LOG_RETENTION_DAYS"], 1, 3650)) print "boot-invalid SEARCH_LOG_RETENTION_DAYS"
       if (!switches_ok(env["FEATURES_OFF"])) print "boot-invalid FEATURES_OFF"
+      # v0.36.0: the secret-sharing role lists, as the cms (register()) and
+      # the web (instrumentation.ts) each read them from their own rendered
+      # environment; both must hold the same lists. A value awk cannot judge
+      # is left to check-boot-env.js in the new cms image.
+      split("SECRETS_SEND_ROLES SECRETS_RECEIVE_ROLES", k, " ")
+      for (i = 1; i <= 2; i++) {
+        cms_val = service_env["cms", k[i]]
+        web_val = service_env["web", k[i]]
+        if (unjudgeable(cms_val) || unjudgeable(web_val)) continue
+        cms_roles = secret_roles(cms_val)
+        web_roles = secret_roles(web_val)
+        if (cms_roles == "!" || web_roles == "!") print "secrets-invalid " k[i]
+        else if (cms_roles != web_roles) print "secrets-differ " k[i]
+      }
       # v0.21 Meilisearch: compose renders MEILI_MASTER_KEY (the meili
       # service) only while the search profile is on (COMPOSE_PROFILES in
       # infra/.env). In production Meilisearch does not start without a
@@ -1212,6 +1258,8 @@ entra_inert_keys="$(keys_of entra-inert)"
 oidc_invalid_keys="$(keys_of oidc-invalid)"
 meili_invalid_keys="$(keys_of meili-invalid)"
 boot_invalid_keys="$(keys_of boot-invalid)"
+secrets_invalid_keys="$(keys_of secrets-invalid)"
+secrets_differ_keys="$(keys_of secrets-differ)"
 if [[ -n "${entra_inert_keys}" ]]; then
   echo "NOTE: MS_CLIENT_ID/MS_CLIENT_SECRET are set in infra/.env, but ENTRA_ENABLED is not 1:" >&2
   echo "      Microsoft sign-in stays off and the MS_* values are ignored (safe to delete)." >&2
@@ -1287,6 +1335,21 @@ if [[ -n "${boot_invalid_keys}" ]]; then
   echo "       SEARCH_LOG_RETENTION_DAYS: a whole number of days, 1 to 3650 (unset: 90)." >&2
   echo "       FEATURES_OFF: a comma list of events, training, marketplace, kudos, celebrations, polls," >&2
   echo "       duty-plans, kpis, secrets, read-confirmations, training-reports, search-logging." >&2
+  preflight_failed=1
+fi
+# v0.36.0: a bad secret-sharing role list refuses the cms boot and fails the
+# web's health check; lists that differ would show controls the cms refuses.
+if [[ -n "${secrets_invalid_keys}" ]]; then
+  echo "ERROR: the cms or the web would refuse these secret-sharing role lists in infra/.env: ${secrets_invalid_keys}" >&2
+  echo "       Each is a comma list of admin_role, editor, department_head, team_lead, member" >&2
+  echo "       (any case); empty = all staff. guest, authenticated, any other name and a value of" >&2
+  echo "       commas alone are refused. Off for everyone: FEATURES_OFF=secrets." >&2
+  preflight_failed=1
+fi
+if [[ -n "${secrets_differ_keys}" ]]; then
+  echo "ERROR: the cms and the web would get different secret-sharing role lists: ${secrets_differ_keys}" >&2
+  echo "       infra/docker-compose.yml hands both services the same infra/.env value; a compose" >&2
+  echo "       override or an older compose file sets them apart. Give both the same list." >&2
   preflight_failed=1
 fi
 # 5A-T1: the host the edge serves: with Traefik the host every router
@@ -1681,7 +1744,9 @@ fi
 # The boot values the preflight cannot judge (APP_TIME_ZONE, MFA_REQUIRED_ROLES),
 # checked by the cms's own validators in the new cms image against the
 # rendered compose config (on stdin, never on a command line): a value the new
-# cms would refuse stops the deploy here, before `up`. A plain docker run
+# cms would refuse stops the deploy here, before `up`. v0.36.0: also the
+# secret-sharing role lists of the cms and the web, with the domain parser,
+# and that both are the same (a second net behind the preflight). A plain docker run
 # without a network: `compose run` creates the project's volumes, and a
 # database volume without its container fails the next first-install backup.
 log "Checking the boot values in the new cms image"

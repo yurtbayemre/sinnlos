@@ -1765,3 +1765,81 @@ describe.skipIf(!RUN_SEQUENCES)(
     });
   },
 );
+
+describe.skipIf(!RUN_SEQUENCES)(
+  "deploy.sh --check: the secret-sharing role lists of the cms and the web (v0.36.0)",
+  () => {
+    let r: StepReport[] = [];
+    /** A step's compose config: the stub instance with these lists in the cms and the web. */
+    const lists = (cms: Record<string, string>, web: Record<string, string>) => {
+      const config = JSON.parse(COMPOSE_JSON);
+      Object.assign(config.services.cms.environment, cms);
+      Object.assign(config.services.web.environment, web);
+      return `cat > "$T/compose.json" <<'COMPOSE_JSON'\n${JSON.stringify(config, null, 2)}\nCOMPOSE_JSON`;
+    };
+    const SEND = "SECRETS_SEND_ROLES";
+    const RECEIVE = "SECRETS_RECEIVE_ROLES";
+    beforeAll(() => {
+      r = deploys([
+        /* 0 */ { before: lists({}, {}), args: ["--check"] },
+        /* 1 */ {
+          before: lists(
+            { [SEND]: "department_head,team_lead", [RECEIVE]: "" },
+            {
+              [SEND]: " Team_Lead,DEPARTMENT_HEAD , team_lead",
+              [RECEIVE]: "member,editor,admin_role,team_lead,department_head",
+            },
+          ),
+          args: ["--check"],
+        },
+        /* 2 */ {
+          before: lists({ [SEND]: "member,guest" }, { [SEND]: "member,guest" }),
+          args: ["--check"],
+        },
+        /* 3 */ { before: lists({}, { [RECEIVE]: ", ," }), args: ["--check"] },
+        /* 4 */ { before: lists({ [SEND]: "team_lead" }, { [SEND]: "" }), args: ["--check"] },
+      ]);
+    }, SEQUENCE_BUDGET);
+
+    it("passes both unset, and lists that normalize equal", () => {
+      for (const run of [r[0], r[1]]) {
+        expect(run.status, run.stderr).toBe(0);
+        expect(run.stdout).toContain("--check: nothing deployed.");
+        expect(run.stderr).not.toContain("secret-sharing");
+      }
+    });
+
+    it("refuses a bad cms value and a bad web value, naming the key and never the value", () => {
+      for (const [run, key] of [
+        [r[2], SEND],
+        [r[3], RECEIVE],
+      ] as const) {
+        expect(run.status).toBe(1);
+        expect(run.stderr).toContain(
+          `ERROR: the cms or the web would refuse these secret-sharing role lists in infra/.env: ${key}`,
+        );
+        expect(run.stderr).toContain("Preflight failed. Nothing was changed.");
+        expect(run.stdout).not.toContain("--check: nothing deployed.");
+      }
+      expect(r[2].stderr).not.toContain("member,guest");
+      expect(r[3].stderr).not.toContain(", ,");
+    });
+
+    it("refuses lists that differ between the cms and the web", () => {
+      expect(r[4].status).toBe(1);
+      expect(r[4].stderr).toContain(
+        "ERROR: the cms and the web would get different secret-sharing role lists: SECRETS_SEND_ROLES",
+      );
+      expect(r[4].stderr).not.toContain("would refuse these secret-sharing");
+      expect(r[4].stdout).not.toContain("--check: nothing deployed.");
+    });
+
+    it("touches nothing in --check", () => {
+      for (const run of r) {
+        expect(called(run, /^curl |^docker (tag|image rm|run|pull)|compose .* (build|up)/)).toEqual(
+          [],
+        );
+      }
+    });
+  },
+);
