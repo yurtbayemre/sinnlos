@@ -2,12 +2,11 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
-import { unstable_rethrow } from "next/navigation";
 import { Copy, Eye } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { actionFailure, type ActionFailure } from "@/lib/action-result";
+import type { ActionFailure } from "@/lib/action-result";
 import { revealSecret } from "@/lib/secret-actions";
-import type { SecretCode } from "@/lib/secret-share-errors";
+import { settleSecretCall, type SecretCode } from "@/lib/secret-share-errors";
 import { documentHasAnalytics } from "@/components/secrets/clean-document";
 import { SecretError } from "@/components/secrets/secret-error";
 
@@ -48,14 +47,7 @@ export function useRevealSecret(id: string) {
     const mine = ++generation.current;
     setPending(true);
     setFailure(null);
-    let result: Awaited<ReturnType<typeof revealSecret>>;
-    try {
-      result = await revealSecret(id);
-    } catch (error) {
-      // The sign-in redirect of an expired session is Next's to handle.
-      unstable_rethrow(error);
-      result = actionFailure("unavailable");
-    }
+    const result = await settleSecretCall(revealSecret(id));
     if (mine !== generation.current) return;
     setPending(false);
     if (result.ok && result.data) setText(result.data.text);

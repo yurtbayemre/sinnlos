@@ -103,6 +103,17 @@ describe("useRevealSecret", () => {
     expect(state.text).toBeNull();
   });
 
+  it("shows the unknown-outcome failure when the call itself is lost", async () => {
+    revealSecret.mockImplementationOnce(() => Promise.reject(new TypeError("Failed to fetch")));
+    await click();
+    await browser.act(async () => {
+      await clicked;
+    });
+    expect(state.failure).toEqual({ ok: false, code: "busy" });
+    expect(state.text).toBeNull();
+    expect(state.pending).toBe(false);
+  });
+
   it("reloads instead of revealing in a document that loaded Plausible", async () => {
     win().plausible = () => undefined;
     await click();

@@ -16,7 +16,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { startCmsAction } from "@/lib/action-result";
 import { createSecret, findSecretRecipients } from "@/lib/secret-actions";
-import type { SecretCode } from "@/lib/secret-share-errors";
+import { settleSecretCall, type SecretCode } from "@/lib/secret-share-errors";
 import { useCleanDocument } from "@/components/secrets/clean-document";
 import { SecretError } from "@/components/secrets/secret-error";
 
@@ -80,7 +80,7 @@ export function NewSecretForm() {
     if (!recipient || !isSecretText(text)) return;
     setError(null);
     startCmsAction(startTransition, {
-      action: () => createSecret(recipient.id, text, lifetime),
+      action: () => settleSecretCall(createSecret(recipient.id, text, lifetime)),
       onSuccess: (data) => {
         setText("");
         router.push((data ? `/secrets/${data.id}` : "/secrets") as Route);

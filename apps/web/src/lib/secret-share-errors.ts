@@ -11,6 +11,13 @@
  * The codes are the refusals of @sinnlos/domain SECRET_SHARE_REFUSALS, found
  * by status AND `details.code` (`unavailable` has three causes with three
  * statuses), or the common codes of action-result.ts.
+ *
+ * A mutation (create, reveal, revoke) whose outcome is unknown answers
+ * `busy`, like the cms's own: a lost or cut answer (network, timeout), a 5xx
+ * without a refusal code and a malformed success may all follow a committed
+ * write, so "try again" could send a second share or meet a consumed one.
+ * The same holds when the browser loses the Server Action call itself
+ * (`settleSecretCall`).
  */
 import { unstable_rethrow } from "next/navigation";
 import { SECRET_SHARE_REFUSALS, type SecretShareRefusal } from "@sinnlos/domain";
@@ -19,6 +26,7 @@ import {
   cmsErrorInfo,
   commonCmsFailure,
   isNetworkError,
+  type ActionFailure,
   type ActionResult,
   type CommonCode,
 } from "@/lib/action-result";
@@ -31,14 +39,30 @@ const REFUSALS = Object.entries(SECRET_SHARE_REFUSALS) as [
   { status: number; code: string },
 ][];
 
-/** The code of a caught failure (never a control-flow error). */
-export function secretFailureCode(error: unknown): SecretCode {
+/** The code of a caught failure (never a control-flow error); see the header for `mutation`. */
+export function secretFailureCode(error: unknown, mutation = false): SecretCode {
   if (error instanceof StrapiError) {
     const code = error.strapiDetails?.code;
     const refusal = REFUSALS.find(([, r]) => r.status === error.status && r.code === code);
-    return refusal ? refusal[0] : commonCmsFailure(cmsErrorInfo(error)).code;
+    if (refusal) return refusal[0];
+    return mutation && error.status >= 500 ? "busy" : commonCmsFailure(cmsErrorInfo(error)).code;
   }
+  if (mutation) return "busy";
   return isNetworkError(error) ? "unavailable" : "failed";
+}
+
+/**
+ * A Server Action call of a mutation from the browser: when the call itself
+ * fails (the web unreachable, the answer lost), its outcome is unknown.
+ * The sign-in redirect still reaches Next.
+ */
+export function settleSecretCall<R>(
+  call: Promise<R>,
+): Promise<R | ActionFailure<SecretShareRefusal>> {
+  return call.catch((error: unknown) => {
+    unstable_rethrow(error);
+    return actionFailure<SecretShareRefusal>("busy");
+  });
 }
 
 /**
@@ -49,12 +73,13 @@ export async function runSecretAction<T, Data>(
   label: string,
   fn: () => Promise<T>,
   data: (value: T) => Data,
+  mutation = true,
 ): Promise<ActionResult<SecretShareRefusal, Data>> {
   try {
     return { ok: true, data: data(await fn()) };
   } catch (error) {
     unstable_rethrow(error);
-    const code = secretFailureCode(error);
+    const code = secretFailureCode(error, mutation);
     const status = error instanceof StrapiError ? error.status : "-";
     console.warn(`[secrets] ${label} failed: ${status} → ${code}`);
     return actionFailure(code);

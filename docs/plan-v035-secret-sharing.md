@@ -19,7 +19,7 @@ A person sends one short text (a password, a link, an access code, a note) to on
 **The promise** (for staff, the data-protection officer and the works council):
 
 - Only the named recipient can open a share, once, while both people are active staff. Other employees, department heads, editors and intranet admins cannot read it through the intranet; there is no admin view of shares and no export of their content. (An `admin_role` who exports a person's data for Art. 15 sees that person's share metadata: counterpart, times, state.)
-- The content is stored encrypted. It is deleted from the database when it is opened or revoked. At its expiry (at most 24 hours) it can no longer be opened, and it is deleted at the next successful cleanup (normally within a minute).
+- The content is stored encrypted. It is deleted from the database when it is opened or revoked. At its expiry (at most 24 hours) it can no longer be opened, and it is deleted by the next successful cleanups: each run handles at most 200 shares per step, so this is normally within a minute, while a backlog after an outage takes several runs.
 - The sender sees whether the share was retrieved (never the content), for 7 days. After that the remaining metadata is deleted.
 
 **What it does not promise** (written into `docs/security.md` and `docs/data-protection.md`):
@@ -28,7 +28,7 @@ A person sends one short text (a password, a link, an access code, a note) to on
 - "Retrieved" means the share was consumed by an authorised open attempt of the recipient; delivery of the text is not confirmed, and it never proves that a human read it. A response lost on the way, or a lost database acknowledgement at the moment of opening (the share is consumed, the answer is `busy`), loses the text (at most once).
 - After opening, the recipient can copy, screenshot or forward the text. Clipboard, browser extensions and password managers are outside the intranet's control.
 - A stolen signed-in session of the recipient can open the share, as with all other intranet content. Sign-out ends every session once the cms confirms the revocation (v0.34.0). Shares survive a sign-out and can be opened after a fresh sign-in.
-- Eligibility means the account as stored in the intranet (exists, not blocked, staff role), checked when a share is created, listed and opened; the identity provider's live status is not consulted. If a person is blocked or loses the staff role, their pending shares are cancelled at the next successful cleanup; a block or role loss undone before that cleanup leaves the share pending.
+- Eligibility means the account as stored in the intranet (exists, not blocked, staff role), checked when a share is created, listed and opened; the identity provider's live status is not consulted. If a person is blocked or loses the staff role, their pending shares are cancelled by a successful cleanup run that reaches them; a block or role loss undone before that leaves the share pending.
 - Notifications are an ordinary admin-visible type: an admin can see in the panel that "A sent B a secret" (never the content).
 
 ## 2. Scope
@@ -82,7 +82,7 @@ A person sends one short text (a password, a link, an access code, a note) to on
 
 ### 3.5 Eligibility
 
-Both parties must exist, be unblocked and hold a staff role at create and at reveal (persisted cms state, see section 1). In `list` and `findOne`, a pending share whose other party is not eligible keeps its stored state, is shown as "currently unavailable" and is left out of the recipient's pending inbox; `cancelled` appears only after a committed transition. The other party is shown in every state through the existing blocked-user sanitizer (`utils/sanitize-user-contact.ts`: `{ displayName, blocked }` for a blocked person). The janitor cancels pending shares of ineligible users at its next successful run. Anonymisation deletes transactionally (section 5). No hook in each block or role write path (cut; the semantics are stated in section 1).
+Both parties must exist, be unblocked and hold a staff role at create and at reveal (persisted cms state, see section 1). In `list` and `findOne`, a pending share whose other party is not eligible keeps its stored state, is shown as "currently unavailable" and is left out of the recipient's pending inbox; `cancelled` appears only after a committed transition. The other party is shown in every state through the existing blocked-user sanitizer (`utils/sanitize-user-contact.ts`: `{ displayName, blocked }` for a blocked person). The janitor cancels pending shares of ineligible users in its successful runs (at most 200 per step and run). Anonymisation deletes transactionally (section 5). No hook in each block or role write path (cut; the semantics are stated in section 1).
 
 ### 3.6 Admin panel
 
