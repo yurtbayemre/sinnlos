@@ -1478,8 +1478,10 @@ delete". A share can be opened for 1 hour (the default) or 24 hours.
 - The text is stored encrypted. Its envelope is deleted when the share is
   opened (`retrieved`) or revoked. After its expiry it can no longer be
   opened, and the janitor (every minute, also with the module off) deletes
-  it at its next successful run. The metadata goes 7 days after the share
-  ended. The sender sees the state, never the text.
+  it in its next successful runs. Each run handles at most 200 shares per
+  step, so a backlog after an outage takes several runs (normally minutes),
+  and a run that passed does not mean the backlog is gone. The metadata
+  goes 7 days after the share ended. The sender sees the state, never the text.
 
 **What it does not promise.**
 
@@ -1497,7 +1499,7 @@ delete". A share can be opened for 1 hour (the default) or 24 hours.
   A stolen signed-in session of the recipient can open a share, like any
   other content.
 - A person blocked or without a staff role keeps their pending shares
-  until the janitor's next successful run cancels them; undone before that,
+  until a successful janitor run reaches and cancels them; undone before that,
   they stay pending (shown as "currently unavailable" meanwhile). There is
   no hook in each block or role write.
 - The notification ("X sent you a secret", never the text) is an ordinary

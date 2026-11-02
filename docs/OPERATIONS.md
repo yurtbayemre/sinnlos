@@ -1335,10 +1335,12 @@ short text to one colleague, opened once
   a staff role turn `cancelled` (each with its text and notification
   deleted), shares whose sender or recipient no longer exists are deleted in
   every state, and ended shares are deleted 7 days after their end. It is
-  one more job in `infra/ops-check.sh`'s expected set. With
-  `CRON_ENABLED=false`, or while the job fails, an expired share still
-  cannot be opened, but its encrypted text stays in the database until the
-  job's next successful run.
+  one more job in `infra/ops-check.sh`'s expected set. Each run handles at
+  most 200 shares per step, so a backlog takes several successful runs,
+  normally a few minutes; a run that passed does not mean the backlog is
+  gone. With `CRON_ENABLED=false`, or while the job fails, an expired share
+  still cannot be opened, but its encrypted text stays in the database until
+  successful runs have worked through it.
 - **A restore** closes every restored share before the site reopens
   ([Restoring a database dump](#restoring-a-database-dump), "Secret shares in a restore").
 - **Never rotate `ENCRYPTION_KEY` to purge shares.** It also encrypts the
