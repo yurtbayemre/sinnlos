@@ -437,6 +437,9 @@ function hermeticEnv(): Record<string, string | undefined> {
     LOCAL_REGISTRATION: undefined,
     // v0.28: every module and feature on unless a suite switches one off.
     FEATURES_OFF: undefined,
+    // v0.36.0: every staff role sends and receives unless a suite narrows it.
+    SECRETS_SEND_ROLES: undefined,
+    SECRETS_RECEIVE_ROLES: undefined,
     WEB_INTERNAL_URL: undefined,
     REVALIDATE_SECRET: undefined,
     LIVE_EVENTS_DISABLED: undefined,
