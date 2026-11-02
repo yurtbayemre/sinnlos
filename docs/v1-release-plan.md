@@ -11,7 +11,7 @@ Status: 2026-10-25, owner-approved. Baseline was v0.25.0 (`0c26656e`). This file
 - **v0.29.1** (dependency fixes, live since 2026-10-25 11:35 CET) and **v0.29.2** (Strapi 5.59.0) follow it.
 - **v0.34.0 "security hardening"** is shipped and live since 2026-11-01 11:17 CET.
 - **v0.35.0 "secret sharing"** (owner request 2026-11-01; plan: [plan-v035-secret-sharing.md](plan-v035-secret-sharing.md)) is shipped and live since 2026-11-02 07:05 CET.
-- **v0.36.0 "secret sharing by role"** (owner request 2026-11-02; plan: [plan-secret-sharing-by-role.md](plan-secret-sharing-by-role.md)) comes before rc.1 (owner decision D6). **Next: v1.0.0-rc.1** (below). v1.0.0 itself waits for the lawyer review of the packages (S5 and the GHCR publication; owner decisions 2026-10-24 and 2026-10-25).
+- **v0.36.0 "secret sharing by role"** (owner request 2026-11-02; plan: [plan-secret-sharing-by-role.md](plan-secret-sharing-by-role.md)) is shipped and live since 2026-11-02 18:54 CET, before rc.1 (owner decision D6). **Next: v1.0.0-rc.1** (below). v1.0.0 itself waits for the lawyer review of the packages (S5 and the GHCR publication; owner decisions 2026-10-24 and 2026-10-25).
 
 ## What v1.0.0 means
 
