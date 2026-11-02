@@ -49,7 +49,7 @@ Then edit `infra/.env`. The comments in the file explain every key.
 - **Branding (optional):** `SITE_NAME` (the instance name in titles, the sidebar, the sign-in page, e-mail subjects and the authenticator app; at most 40 characters), `SITE_LOGO_URL` and `SITE_ICON_URL` (`https://` addresses; visitors' browsers fetch them before sign-in, so host them yourself) and `SITE_ACCENT` (`#rrggbb`; a colour that fails the contrast checks falls back to the default with a warning). Unset keeps the default look. The footer always names sinnlos and its source.
 - **Single sign-on (optional):** Microsoft Entra ID or one OIDC provider, see [SSO.md](SSO.md). SSO users get their second factor from the identity provider; `MFA_REQUIRED_ROLES` applies to password accounts only.
 - **`SITE_ALLOW_CIDRS`** stays empty. It closes the whole site to everyone outside the listed networks, for a restore ([OPERATIONS.md, Restore](OPERATIONS.md#restore)).
-- **Modules and data protection:** `FEATURES_OFF` switches off modules you do not use (`events`, `training`, `marketplace`, `kudos`, `celebrations`, `polls`, `duty-plans`, `kpis`, `secrets`) and the features `read-confirmations`, `training-reports` and `search-logging`; empty keeps everything on. While `secrets` (secret sharing, v0.35) is on, the web loads no Plausible script, also when `PLAUSIBLE_SCRIPT_URL` and `PLAUSIBLE_DOMAIN` are set (it logs one line at start saying so): a third-party script must not share a page with an opened secret. To keep Plausible, switch `secrets` off. `TRAINING_EVIDENCE_RETENTION_YEARS` (3) and `SEARCH_LOG_RETENTION_DAYS` (90) set two retention periods. Hand [data-protection.md](data-protection.md) (German) to your data-protection officer and works council: it lists every data class, who sees it, when it is deleted, and how export and anonymisation work.
+- **Modules and data protection:** `FEATURES_OFF` switches off modules you do not use (`events`, `training`, `marketplace`, `kudos`, `celebrations`, `polls`, `duty-plans`, `kpis`, `secrets`) and the features `read-confirmations`, `training-reports` and `search-logging`; empty keeps everything on. While `secrets` (secret sharing, v0.35) is on, the web loads no Plausible script, also when `PLAUSIBLE_SCRIPT_URL` and `PLAUSIBLE_DOMAIN` are set (it logs one line at start saying so): a third-party script must not share a page with an opened secret. To keep Plausible, switch `secrets` off. Who sends and receives secrets (v0.36): `SECRETS_SEND_ROLES` and `SECRETS_RECEIVE_ROLES`, each a comma list out of `admin_role`, `editor`, `department_head`, `team_lead`, `member`; empty means all five staff roles, and clearing a list widens access again. An unknown name, `guest`, `authenticated` or a value of only commas refuses the start. For example `SECRETS_SEND_ROLES=department_head,team_lead` with an empty `SECRETS_RECEIVE_ROLES`: leads send, every staff member receives ([OPERATIONS.md](OPERATIONS.md#who-may-send-and-receive-v036), also for changing them later). Off for everyone stays `FEATURES_OFF=secrets`. `TRAINING_EVIDENCE_RETENTION_YEARS` (3) and `SEARCH_LOG_RETENTION_DAYS` (90) set two retention periods. Hand [data-protection.md](data-protection.md) (German) to your data-protection officer and works council: it lists every data class, who sees it, when it is deleted, and how export and anonymisation work.
 
 `infra/deploy.sh --check` validates the file and changes nothing.
 
@@ -403,7 +403,9 @@ sudoers rule for the pre-deploy backup (step 1,
    image id). Before anything is replaced it runs the boot-value check of
    the new cms image (v0.30: `dist/scripts/check-boot-env.js` on the
    rendered compose config, in a container without network); a value the
-   cms would refuse to boot with (`APP_TIME_ZONE`, `MFA_REQUIRED_ROLES`)
+   cms would refuse to boot with (`APP_TIME_ZONE`, `MFA_REQUIRED_ROLES`,
+   and since v0.36 `SECRETS_SEND_ROLES` / `SECRETS_RECEIVE_ROLES`, for the
+   cms and the web, which must get the same lists)
    stops the deploy with the cms's own message and the running containers
    unchanged. Then it restarts the stack with the Traefik override
    (`up -d --no-build`). If `up` fails while the cms is still running but
@@ -493,6 +495,9 @@ The preflight fails (naming keys, never values) when:
   only earn a note (they are ignored), or a warning when they are a real app
   registration (a GUID client id plus a secret: Microsoft sign-in of the
   running release, if any, is off after the deploy); neither stops it;
+- `SECRETS_SEND_ROLES` or `SECRETS_RECEIVE_ROLES` holds a name other than
+  the five staff roles, or only commas, in the cms's or the web's
+  environment, or the two services would get different lists (v0.36);
 - `DOMAIN` does not fit the instance (since batch 10): the five Traefik
   routers do not all match one host, or that host is not a bare host name,
   is a placeholder, or is not the host of `WEB_PUBLIC_URL` and

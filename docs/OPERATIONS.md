@@ -1327,7 +1327,8 @@ time zone again and holds values in N row(s)`; it cannot tell a manual
 The module `secrets` (switch in `FEATURES_OFF`) lets one employee send one
 short text to one colleague, opened once
 ([security.md](security.md), [data-protection.md](data-protection.md),
-"Geheimnisse"). For operations:
+"Geheimnisse"). Since v0.36 two keys choose the roles that send and
+receive ([below](#who-may-send-and-receive-v036)). For operations:
 
 - **The janitor.** The cron job `secret-share-janitor` runs every minute,
   whatever `FEATURES_OFF` says (it is erasure): pending shares past their
@@ -1353,6 +1354,78 @@ short text to one colleague, opened once
   module on and a key shorter than 32 characters, the cms logs one error
   line at boot and the module refuses to send or open; the rest of the
   intranet runs.
+
+### Who may send and receive (v0.36)
+
+Two keys in `infra/.env`, read by the cms and the web (compose passes both
+from the same file), choose the roles that use the module:
+
+| Key                     | Meaning                    | Unset or empty               |
+| ----------------------- | -------------------------- | ---------------------------- |
+| `SECRETS_SEND_ROLES`    | the roles that may send    | all five staff roles (v0.35) |
+| `SECRETS_RECEIVE_ROLES` | the roles that may receive | all five staff roles (v0.35) |
+
+- **Values:** a comma list out of `admin_role`, `editor`, `department_head`,
+  `team_lead` and `member`. Names are trimmed and case-insensitive;
+  duplicates are fine. Guests and the `authenticated` fallback never take
+  part.
+- **Refused:** an unknown name, `guest`, `authenticated`, or a value of
+  only commas and spaces (`,`): an empty key means all staff, a value
+  without a role name is a mistake. The cms then refuses to boot (as with
+  `MFA_REQUIRED_ROLES`); the web logs the error and answers every request
+  with HTTP 500, so its health check fails (as with an unknown
+  `FEATURES_OFF` name). `infra/deploy.sh` and `infra/deploy.sh --check`
+  refuse before anything changes, also when the cms and the web would get
+  different lists.
+- **Clearing a list widens access** back to all staff.
+- **Off for everyone** stays `FEATURES_OFF=secrets`; there is no `none`.
+- **Example:** leads send, every staff member receives, so a lead can hand
+  a team member an access code:
+
+  ```
+  SECRETS_SEND_ROLES=department_head,team_lead
+  SECRETS_RECEIVE_ROLES=
+  ```
+
+  To keep it among leads only, set `SECRETS_RECEIVE_ROLES=department_head,team_lead`
+  as well.
+
+What the lists change. The cms decides every request; the web only hides
+the controls ([security.md](security.md#secret-sharing)).
+
+- **Outside the send list:** no "New secret" button, `/secrets/new` shows
+  "Not available for your account", and the cms refuses a create or a
+  recipient search (403).
+- **Outside the receive list:** the recipient search does not find the
+  person, `/secrets` has no "For you" section, a share opened from the bell
+  shows its details as not available, without "Show and delete", and the
+  cms refuses the open (403). The share stays pending until it expires,
+  so it opens again when the role is back in the list before that.
+- **A sender who loses the send right:** their pending shares stay
+  openable until they expire (at most 24 hours). `FEATURES_OFF=secrets`
+  suspends every share at once.
+- **The sent list stays** for every staff member at `/secrets`, with
+  revoke. The menu entry "Secrets" shows only for people who can send or
+  receive; someone who can do neither opens `/secrets` by its address.
+
+**Changing the lists:**
+
+1. Edit `infra/.env` and run `infra/deploy.sh --check`. It validates both
+   keys for the cms and the web and compares them.
+2. Recreate both apps with the new values, from the checkout:
+   `docker compose -p infra -f infra/docker-compose.yml up -d --no-build cms web`
+   (on a host Traefik add `-f infra/docker-compose.traefik.yml` after the
+   first file).
+3. Compare the boot lines. Both must be identical and show the new lists:
+
+   ```bash
+   docker logs infra-cms-1 2>&1 | grep '\[secrets\] send:' | tail -n 1
+   docker logs infra-web-1 2>&1 | grep '\[secrets\] send:' | tail -n 1
+   # Expect in both: [secrets] send: department_head, team_lead; receive: all staff
+   ```
+
+4. Check one person of each side: a member gets no "New secret" button,
+   a lead can send.
 
 ---
 
