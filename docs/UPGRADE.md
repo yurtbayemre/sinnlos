@@ -24,6 +24,7 @@ What changed for the operator between v0.25 and this release. The release notes 
 9. **This release** (v0.29): nothing to set. `DATETIME_LEGACY_ZONE` and `DATETIME_LEGACY_UTC_UNTIL` are no longer read; delete them from `infra/.env`. Optional: the branding keys ([INSTALL.md](INSTALL.md)), `SITE_ALLOW_CIDRS` and `infra/ops-check.sh` ([OPERATIONS.md](OPERATIONS.md#monitoring)).
 10. **Upload references** (v0.34): before the first v0.34 deploy, review the existing `/uploads/` links in texts once with `infra/diagnostics/upload-references.sql` ([OPERATIONS.md](OPERATIONS.md#upload-references)); from v0.34 a file opens only for readers of its content.
 11. **Secret sharing** (v0.35): nothing to set. The new module `secrets` is on after the upgrade; while it is on, no page loads Plausible. To wait for your works council, add `secrets` to `FEATURES_OFF` first (the v0.35.0 note below).
+12. **Secret sharing by role** (v0.36): nothing to set. Optional: `SECRETS_SEND_ROLES` and `SECRETS_RECEIVE_ROLES` choose who sends and receives; empty keeps all staff ([OPERATIONS.md](OPERATIONS.md#who-may-send-and-receive-v036)).
 
 ## Update procedure (production-safe)
 
@@ -169,6 +170,13 @@ format`: a scanner posted to a page with a made-up Server Action id,
 ## Release notes
 
 Newest first. Older releases: [archive/deployment-history.md](archive/deployment-history.md).
+
+**Upgrading to v0.36.0 (secret sharing by role).** No required env, no edge change, no schema change, no new permission.
+
+- **Nothing to do:** with both new keys unset, everyone who could send and receive secrets under v0.35 still can.
+- **Optional:** `SECRETS_SEND_ROLES` and `SECRETS_RECEIVE_ROLES` in `infra/.env` choose the staff roles that send and receive; empty means all staff, and clearing a list gives all staff that action again (the other list still applies). Values, refusals and the change procedure: [OPERATIONS.md](OPERATIONS.md#who-may-send-and-receive-v036). An unknown name, `guest`, `authenticated` or a value of only commas, in the cms's or the web's environment, or different lists for the two, stop `infra/deploy.sh`: its preflight (also `--check`) before anything is pulled or built, the boot-value check of the new cms image before the running containers are replaced. The preflight names the keys, never their values; the boot-value check prints the parser's message with `cms: ` or `web: ` in front. Off for everyone stays `FEATURES_OFF=secrets`. `infra/.env.example` lists both keys, empty.
+- **At the first boot:** the cms and the web each log `[secrets] send: all staff; receive: all staff` (with lists set, the roles instead), at every start and whatever `FEATURES_OFF` says; the two lines must be identical. v0.36 adds no permission: on an unchanged, converged v0.35 installation the cms logs no `granted` line and `[bootstrap] permission drift: none (report-only check of 228 managed actions)`; everything else as v0.35.0.
+- **Rollback** to v0.35.0 is a retag of both images (`8c14032b45cb`). v0.35.0 ignores both keys and opens the module to all staff again. When the restriction matters, set `FEATURES_OFF=secrets` in `infra/.env` before the retag (v0.35.0 knows that name), then recreate both apps with the retagged images (`up -d --no-build web cms`, [Rollback](#rollback)); remove it again when you roll forward.
 
 **Upgrading to v0.35.0 (secret sharing).** No required env, no edge change. The schema gains one table.
 

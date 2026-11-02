@@ -44,6 +44,9 @@ vi.mock("./bootstrap/secret-share-admin-closure", () => ({
   closeSecretSharesInAdmin: syncStep("closeSecretSharesInAdmin"),
 }));
 vi.mock("./utils/secret-crypto", () => ({ configureShareKey: syncStep("configureShareKey") }));
+vi.mock("./utils/secret-shares", () => ({
+  configureSecretRoles: syncStep("configureSecretRoles"),
+}));
 vi.mock("./bootstrap/multipart-cleanup", () => ({
   registerMultipartCleanup: syncStep("registerMultipartCleanup"),
 }));
@@ -125,6 +128,8 @@ describe("src/index.ts lifecycle order (B01)", () => {
       "enforceSecretGuard",
       "checkEntraConfig",
       "checkOidcConfig",
+      // v0.36.0: the secret-sharing role lists, read once.
+      "configureSecretRoles",
       // v0.28: before bootstrap() registers the routes.
       "decorateSwitchedRoutes",
       "registerMultipartCleanup",
@@ -199,6 +204,22 @@ describe("src/index.ts lifecycle order (B01)", () => {
     expect(calls[calls.length - 1]).toBe("backfillTargetingFlags");
     expect(calls).not.toContain("seedDemoData");
     expect(calls).not.toContain("ensureDraftTwins");
+  });
+
+  it("a bad secret-sharing role list stops register() before the routes; a good one is printed", async () => {
+    await lifecycle.register({ strapi });
+    expect(strapi.log.info).toHaveBeenCalledWith("[secrets] send: all staff; receive: all staff");
+    calls.length = 0;
+    process.env.SECRETS_RECEIVE_ROLES = "guest";
+    try {
+      await expect(lifecycle.register({ strapi })).rejects.toThrow(
+        /^SECRETS_RECEIVE_ROLES: "guest"/,
+      );
+    } finally {
+      delete process.env.SECRETS_RECEIVE_ROLES;
+    }
+    expect(calls).not.toContain("configureSecretRoles");
+    expect(calls).not.toContain("decorateSwitchedRoutes");
   });
 
   it("a database below the upgrade floor stops register() before anything else", async () => {

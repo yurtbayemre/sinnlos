@@ -9,8 +9,13 @@
  * The plaintext exists only in the create and reveal request handlers of the
  * cms and in the deliberate Server Action result of the web: only the
  * encrypted envelope ever reaches persistence, a log line or a subscriber.
+ *
+ * v0.36.0 (docs/plan-secret-sharing-by-role.md): two env lists narrow who
+ * may send and who may receive (secretRoles below); unset, both are all
+ * staff, as in v0.35.0.
  */
 import { isDocumentId, isRowId } from "./entry-id.js";
+import { STAFF_ROLES, type RoleType } from "./roles.js";
 
 // ---------------------------------------------------------------------------
 // Vocabulary and limits.
@@ -113,16 +118,93 @@ export function isSecretText(value: unknown): value is string {
 }
 
 // ---------------------------------------------------------------------------
+// Who may send and who may receive (v0.36.0, plan §2.1).
+//
+// SECRETS_SEND_ROLES and SECRETS_RECEIVE_ROLES: comma lists of staff role
+// types, read by the cms at boot and by the web at runtime, passed to both
+// from the same .env. Unset or empty is all staff; clearing a list widens
+// access again. Off for everyone stays FEATURES_OFF=secrets (no `none`).
+// The cms decides every request: sending needs an eligible caller (unblocked
+// staff) in the send list, receiving and opening an eligible recipient in
+// the receive list. A sender who later leaves the send list keeps their
+// pending shares openable until they expire (D5).
+
+/** The two lists, each in STAFF_ROLES order. */
+export interface SecretRoles {
+  /** SECRETS_SEND_ROLES: who may create shares and search recipients. */
+  send: readonly RoleType[];
+  /** SECRETS_RECEIVE_ROLES: who may be chosen as recipient and open a share. */
+  receive: readonly RoleType[];
+}
+
+/**
+ * The staff roles of one list's value: trimmed, case-insensitive,
+ * duplicates allowed, unset or blank = all staff. The result is in
+ * STAFF_ROLES order, so two equal settings compare and print equal. Throws,
+ * naming `key`, on a name that is not a staff role (guest and authenticated
+ * included) and on a value without any name (",", ", ,"): an empty key means
+ * all staff, a value without a role is a mistake.
+ */
+export function parseSecretRoles(value: string | undefined, key: string): readonly RoleType[] {
+  const trimmed = (value ?? "").trim();
+  if (trimmed === "") return STAFF_ROLES;
+  const names = trimmed
+    .split(",")
+    .map((name) => name.trim())
+    .filter(Boolean);
+  if (names.length === 0) throw new Error(`${key}: "${trimmed}" names no role (empty = all staff)`);
+  const wanted = names.map((name) => name.toLowerCase());
+  const unknown = names.find((name) => !secretRolesAllow(STAFF_ROLES, name.toLowerCase()));
+  if (unknown !== undefined) {
+    throw new Error(
+      `${key}: "${unknown}" is not a staff role (one of ${STAFF_ROLES.join(", ")}; empty = all staff)`,
+    );
+  }
+  return STAFF_ROLES.filter((role) => wanted.includes(role));
+}
+
+/** Both lists of an env; throws like parseSecretRoles. */
+export function secretRoles(env: Record<string, string | undefined>): SecretRoles {
+  return {
+    send: parseSecretRoles(env.SECRETS_SEND_ROLES, "SECRETS_SEND_ROLES"),
+    receive: parseSecretRoles(env.SECRETS_RECEIVE_ROLES, "SECRETS_RECEIVE_ROLES"),
+  };
+}
+
+/**
+ * Whether `role` (a role type: `role.type` of a user row, the web viewer's
+ * role) is in `roles`. Exact and fail-closed: null, a non-string or a
+ * differently-cased value is in no list. Eligibility (unblocked) is the
+ * caller's own check.
+ */
+export function secretRolesAllow(roles: readonly RoleType[], role: unknown): boolean {
+  return (roles as readonly unknown[]).includes(role);
+}
+
+/**
+ * The boot line the cms and the web each print once at start; the deploy
+ * compares the two, so both build it here.
+ */
+export function secretRolesLine(roles: SecretRoles): string {
+  const show = (list: readonly RoleType[]) =>
+    list.length === STAFF_ROLES.length ? "all staff" : list.join(", ");
+  return `[secrets] send: ${show(roles.send)}; receive: ${show(roles.receive)}`;
+}
+
+// ---------------------------------------------------------------------------
 // Errors.
 
 /**
  * The refusal codes (`error.details.code` of Strapi's error body; the
  * message is fixed and never echoes the text). A share the caller may not
- * see, or that does not exist, is a plain 404 without a code. The status
- * depends on the cause, not only on the code: SECRET_SHARE_REFUSALS.
+ * see, or that does not exist, is a plain 404 without a code. A caller
+ * outside the send list (create, recipient search) or, at reveal, outside
+ * the receive list gets a plain 403 without a code (v0.36.0); the web shows
+ * them no such control, so it only happens in races. The status depends on
+ * the cause, not only on the code: SECRET_SHARE_REFUSALS.
  */
 export const SECRET_SHARE_ERROR_CODES = [
-  /** The recipient is missing, oneself, or not an active staff member. */
+  /** The recipient is missing, oneself, not an active staff member, or outside the receive list. */
   "recipient",
   /** The text is missing, blank, not well-formed or longer than SECRET_TEXT_MAX_BYTES. */
   "text",
@@ -209,13 +291,18 @@ export interface SecretShareSummary {
   /** The stored state: a share turns `cancelled` only after a committed transition. */
   state: SecretShareState;
   terminalAt: string | null;
-  /** Pending, unexpired and both parties eligible now; false is "currently unavailable" while pending. */
+  /**
+   * Pending, unexpired, the sender eligible now (the send list is not
+   * required, D5) and the recipient eligible and in the receive list now; the
+   * same rule in list and detail, for both sides. False is "currently
+   * unavailable" while pending.
+   */
   available: boolean;
 }
 
 /** GET /api/secret-shares?sentPage=. */
 export interface SecretShareList {
-  /** Pending shares to the caller that can be opened now. */
+  /** Pending shares to the caller that can be opened now: none while outside the receive list. */
   received: SecretShareSummary[];
   /** The caller's shares, newest first: pending, and ended ones within their retention. */
   sent: SecretShareSummary[];
@@ -239,7 +326,11 @@ export interface SecretShareRevoked {
   id: string;
 }
 
-/** One person of GET /api/secret-shares/recipients?q=: eligible staff, never the caller. */
+/**
+ * One person of GET /api/secret-shares/recipients?q=: eligible staff in the
+ * receive list, never the caller (the filter is part of the query, before
+ * its limit).
+ */
 export interface SecretShareRecipient {
   id: number;
   displayName: string;

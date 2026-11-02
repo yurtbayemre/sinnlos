@@ -1,6 +1,6 @@
 # Secret sharing by role ("Geheimnisse" per role group)
 
-**Status:** planned (owner request 2026-11-02), not scheduled. A follow-up to v0.35.0 ([plan-v035-secret-sharing.md](plan-v035-secret-sharing.md)).
+**Status:** owner decisions confirmed 2026-11-02 (all defaults; D6: v0.36.0 before rc.1); built in v0.36.0. A follow-up to v0.35.0 ([plan-v035-secret-sharing.md](plan-v035-secret-sharing.md)).
 **Reviews:** Codex plan rounds r1–r3 revise, r4 approve (2026-11-02).
 
 **The request (owner, 2026-11-02):** choose per role who can use secret sharing. The example: off for everyone in principle, but leading positions can use it.

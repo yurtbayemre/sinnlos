@@ -4,6 +4,7 @@ import { getFormatter, getTranslations } from "next-intl/server";
 import { formatInstant } from "@/lib/date-format";
 import { loadSecretDetail } from "@/lib/loaders/secrets";
 import { isReadDenied } from "@/lib/roles";
+import { canReceiveSecrets } from "@/lib/secret-roles";
 import { getViewer } from "@/lib/viewer";
 import { PageHeader } from "@/components/page-header";
 import { SectionUnavailablePage } from "@/components/section-unavailable";
@@ -40,6 +41,10 @@ export default async function SecretPage({ params }: { params: Promise<{ id: str
   const name = share.counterpart?.displayName ?? tCommon("unknown");
   const when = (iso: string | null) => formatInstant(format, iso, WHEN) ?? "";
   const received = share.direction === "received";
+  // v0.36: a recipient outside SECRETS_RECEIVE_ROLES sees the share as not
+  // available, without the reveal (the cms says so too, and refuses the open).
+  const shown =
+    received && !canReceiveSecrets(viewer.role) ? { ...share, available: false } : share;
 
   return (
     <div className="space-y-8">
@@ -57,9 +62,9 @@ export default async function SecretPage({ params }: { params: Promise<{ id: str
       <Card>
         <CardContent className="space-y-4 p-6">
           <p className="text-sm">
-            <SecretState share={share} when={when} />
+            <SecretState share={shown} when={when} />
           </p>
-          {received && share.state === "pending" && share.available && (
+          {received && shown.state === "pending" && shown.available && (
             <RevealSecret id={share.id} />
           )}
           {!received && share.state === "pending" && <RevokeSecret id={share.id} />}

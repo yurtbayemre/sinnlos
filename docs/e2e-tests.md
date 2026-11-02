@@ -115,6 +115,27 @@ still streaming holds a hidden copy of a Suspense fragment (`<div hidden
 id="S:1">` under `body`) for about a second, so a text locator can briefly
 match twice; that is why the ordinary run keeps live events off.
 
+The `secret-roles` case in `e2e/secret-roles.spec.ts` (v0.36) checks who may
+send and receive. The whole run sets `SECRETS_SEND_ROLES=department_head,team_lead,member`
+and `SECRETS_RECEIVE_ROLES=team_lead,member` for the CMS and the web: editors
+neither send nor receive, department heads only send, and `secret-sharing`
+(member to lead) runs as before. The lead sends to the member, who opens it.
+The editor has no Secrets entry, no "New secret" button and no "For you"
+section, keeps "Sent by you", and gets the "not available" page on
+`/secrets/new`. A list change needs a restart, so a role change through the
+run's psql puts a person outside a list instead (the CMS and the web read the
+role fresh on every request): the member, moved to department head, opens a
+pending secret from the bell and sees "cannot be opened right now" without
+"Show and delete"; the lead, moved to editor, has no Secrets entry, opens
+`/secrets` by its address and revokes that secret. The case puts both roles
+back at its end, for the specs that follow.
+
+Right after the build, before the stack starts, the runner starts the built
+web image alone twice, once with `SECRETS_SEND_ROLES=guest` and once with
+`SECRETS_RECEIVE_ROLES=guest` (no CMS). Each must answer `/healthz` with 500
+and log the key's refusal from the instrumentation hook; the container is
+removed right after. Every run does this, `--check` and `--live` included.
+
 The two Teams cases live in `e2e/teams.spec.ts`. All six cases reuse
 fixture reading and visible-form login from `e2e/helpers.ts`, including the
 signed-in email assertion. They use fresh browser sessions and independent
@@ -132,6 +153,7 @@ pnpm test:e2e --grep training-exam-completion
 pnpm test:e2e --grep training-confirm-completion
 pnpm test:e2e --grep training-authoring
 pnpm test:e2e --grep secret-sharing
+pnpm test:e2e --grep secret-roles
 pnpm --filter @sinnlos/e2e test:live   # secret-live, live events on
 ```
 
@@ -247,7 +269,7 @@ Preflight JWTs stay in memory; browser cases must log in through the UI.
 
 Playwright receives `SINNLOS_E2E_BASE_URL` and `SINNLOS_E2E_FIXTURES` from
 the runner, and `SINNLOS_E2E_PSQL`: the psql command of the run's database
-(a `docker exec` on the pinned endpoint), used only to move a secret's expiry. The private fixture JSON contains `runId`, `users.lead/member/editor`
+(a `docker exec` on the pinned endpoint), used only to move a secret's expiry and, in `secret-roles`, to change two fixture users' roles. The private fixture JSON contains `runId`, `users.lead/member/editor`
 (email/password/documentId) and `teams.editable/readonly`
 (slug/name/description/documentId), plus `training.course` (title/slug/documentId)
 and `training.lesson` (title/documentId). `exam` and `confirm` have

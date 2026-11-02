@@ -49,6 +49,14 @@
  * ping follows the commit, utils/live-events.ts) and deleted, by type and
  * link, in every transaction that ends the share, with an explicit
  * after-commit ping.
+ *
+ * ROLES (v0.36.0, docs/plan-secret-sharing-by-role.md §2.2). register()
+ * reads SECRETS_SEND_ROLES and SECRETS_RECEIVE_ROLES once
+ * (configureSecretRoles). canSend and canReceive add the lists to
+ * isEligible, on the fresh rows under the locks: create needs a sender who
+ * canSend and a recipient who canReceive, the recipient search a caller who
+ * canSend, reveal a caller who canReceive and a sender who is only eligible
+ * (D5). Revoke, the lists' access, findOne and the janitor keep isEligible.
  */
 import {
   SECRET_CREATES_PER_DAY,
@@ -69,8 +77,10 @@ import {
   isSecretShareLifetime,
   isSecretText,
   parseRowId,
+  secretRolesAllow,
   secretShareExpiresAt,
   secretShareLink,
+  type SecretRoles,
   type SecretShareCreated,
   type SecretShareDetail,
   type SecretShareList,
@@ -86,7 +96,7 @@ import { errors } from "@strapi/utils";
 import { mfaDecision, type RequestAssurance } from "../extensions/users-permissions/strapi-server";
 import { afterCommit } from "./after-commit";
 import { emitLiveEvent } from "./live-events";
-import { lockUserRow, mfaRequiredRoles, versionOf, type MfaHost } from "./mfa-core";
+import { lockUserRow, mfaRequiredRoles, roleTypeOf, versionOf, type MfaHost } from "./mfa-core";
 import { NOTIFICATION_UID, buildNotification } from "./notify";
 import { refuse } from "./refusal";
 import { openEnvelope, sealEnvelope, shareKey } from "./secret-crypto";
@@ -397,6 +407,26 @@ export function isEligible(row: Row | null | undefined): boolean {
   return isRecord(row) && row.blocked !== true && hasRole(row as never, STAFF_ROLES);
 }
 
+/** The lists of this boot; nobody until register() configured them (fail closed). */
+let roles: SecretRoles = { send: [], receive: [] };
+
+/** register(): the lists as read once at boot (@sinnlos/domain secretRoles). */
+export function configureSecretRoles(lists: SecretRoles): void {
+  roles = lists;
+}
+
+/** May send now: eligible and in the send list. */
+export const canSend = (row: Row | null | undefined): boolean =>
+  isEligible(row) && secretRolesAllow(roles.send, roleTypeOf(row));
+
+/** May receive and open now: eligible and in the receive list. */
+export const canReceive = (row: Row | null | undefined): boolean =>
+  isEligible(row) && secretRolesAllow(roles.receive, roleTypeOf(row));
+
+const forbidden = (): never => {
+  throw new errors.ForbiddenError("Forbidden");
+};
+
 const displayNameOf = (row: Row | null): string =>
   (row && (text(row.displayName)?.trim() || text(row.username))) || "";
 
@@ -534,7 +564,8 @@ export async function createShare(
   return confirmed(strapi, "create", async (trx) => {
     await lockPeople(strapi, trx, [caller.userId, input.recipient]);
     const sender = await assertFreshCaller(strapi, caller);
-    if (!isEligible(await loadPerson(strapi, input.recipient))) refuseShare("recipient");
+    if (!canSend(sender)) forbidden();
+    if (!canReceive(await loadPerson(strapi, input.recipient))) refuseShare("recipient");
 
     const shares = strapi.db.query(SECRET_SHARE_UID);
     const now = new Date();
@@ -616,7 +647,8 @@ export async function revealShare(
     const seen = await findShare(strapi, documentId);
     if (!seen || seen.recipientId !== caller.userId) return notFound();
     await lockPeople(strapi, trx, [seen.senderId, seen.recipientId]);
-    await assertFreshCaller(strapi, caller);
+    // Outside the receive list: refused, the share stays pending until it expires.
+    if (!canReceive(await assertFreshCaller(strapi, caller))) forbidden();
     await lockShareRow(strapi, trx, seen.id);
     const share = await findShare(strapi, documentId, true);
     if (!share || share.recipientId !== caller.userId) return notFound();
@@ -625,6 +657,7 @@ export async function revealShare(
     if (!sender || share.state !== "pending") refuseShare("gone");
     const now = new Date();
     if (share.expiresAt <= now.getTime() || share.envelope == null) refuseShare("gone");
+    // Eligible is enough: a sender who left the send list keeps their shares openable (D5).
     if (!isEligible(sender)) refuseShare("partyIneligible");
     const plain = openEnvelope(key, share.envelope, {
       documentId: share.documentId,
@@ -685,15 +718,31 @@ async function peopleById(strapi: SecretShareHost, ids: number[]): Promise<Map<n
 const personOf = (row: Row | undefined): SecretSharePerson | null =>
   row ? { displayName: displayNameOf(row), blocked: row.blocked === true } : null;
 
-function summaryOf(share: Share, counterpart: Row | undefined, now: number): SecretShareSummary {
+/**
+ * A share as `callerId` sees it; `people` holds both parties. `available` is
+ * the one definition for list and detail, both sides: pending, unexpired,
+ * the sender eligible (not necessarily in the send list, D5), the recipient
+ * able to receive.
+ */
+function summaryOf(
+  share: Share,
+  people: Map<number, Row>,
+  callerId: number,
+  now: number,
+): SecretShareSummary {
+  const otherId = share.senderId === callerId ? share.recipientId : share.senderId;
   return {
     id: share.documentId,
-    counterpart: personOf(counterpart),
+    counterpart: personOf(people.get(otherId)),
     createdAt: new Date(share.createdAt).toISOString(),
     expiresAt: new Date(share.expiresAt).toISOString(),
     state: share.state,
     terminalAt: share.terminalAt === null ? null : new Date(share.terminalAt).toISOString(),
-    available: share.state === "pending" && share.expiresAt > now && isEligible(counterpart),
+    available:
+      share.state === "pending" &&
+      share.expiresAt > now &&
+      isEligible(people.get(share.senderId)) &&
+      canReceive(people.get(share.recipientId)),
   };
 }
 
@@ -763,15 +812,17 @@ export async function listShares(
     .filter((share): share is Share => share !== null);
   const sent = sentRows.slice(0, SECRET_SENT_PAGE_SIZE);
   const people = await peopleById(strapi, [
+    callerId,
     ...received.map((share) => share.senderId),
     ...sent.map((share) => share.recipientId),
   ]);
+  const summary = (share: Share) => summaryOf(share, people, callerId, now);
   return {
-    // A share whose sender is not eligible now stays pending, out of the inbox.
-    received: received
-      .filter((share) => isEligible(people.get(share.senderId)))
-      .map((share) => summaryOf(share, people.get(share.senderId), now)),
-    sent: sent.map((share) => summaryOf(share, people.get(share.recipientId), now)),
+    // Only what the caller can open now: a share whose sender is not eligible,
+    // or any share while the caller is outside the receive list, stays pending
+    // out of the inbox.
+    received: received.map(summary).filter((share) => share.available),
+    sent: sent.map(summary),
     hasMore: sentRows.length > SECRET_SENT_PAGE_SIZE,
   };
 }
@@ -790,12 +841,15 @@ export async function shareDetail(
     return notFound();
   }
   const direction = share.senderId === callerId ? "sent" : "received";
-  const otherId = direction === "sent" ? share.recipientId : share.senderId;
-  const people = await peopleById(strapi, [otherId]);
-  return { ...summaryOf(share, people.get(otherId), Date.now()), direction };
+  const people = await peopleById(strapi, [share.senderId, share.recipientId]);
+  return { ...summaryOf(share, people, callerId, Date.now()), direction };
 }
 
-/** GET /api/secret-shares/recipients?q=: eligible staff by name, never the caller. */
+/**
+ * GET /api/secret-shares/recipients?q=: staff who can receive, by name,
+ * never the caller; only for a caller who can send. The receive list is part
+ * of the query, before its limit.
+ */
 export async function shareRecipients(
   strapi: SecretShareHost,
   callerId: number,
@@ -806,6 +860,7 @@ export async function shareRecipients(
   if (typeof q !== "string" || Array.from(q).length > SECRET_RECIPIENTS_QUERY_MAX) {
     throw new errors.ValidationError("Invalid q");
   }
+  if (!canSend(await loadPerson(strapi, callerId))) forbidden();
   const term = q.trim();
   const found = rows(
     await strapi.db.query(USER_UID).findMany({
@@ -813,7 +868,7 @@ export async function shareRecipients(
         $and: [
           { id: { $ne: callerId } },
           { $or: [{ blocked: false }, { blocked: { $null: true } }] },
-          { role: { type: { $in: [...STAFF_ROLES] } } },
+          { role: { type: { $in: [...roles.receive] } } },
           ...(term
             ? [{ $or: [{ displayName: { $containsi: term } }, { username: { $containsi: term } }] }]
             : []),
@@ -825,7 +880,7 @@ export async function shareRecipients(
       limit: SECRET_RECIPIENTS_LIMIT,
     }),
   );
-  return found.filter(isEligible).map((row) => ({
+  return found.filter(canReceive).map((row) => ({
     id: row.id as number,
     displayName: displayNameOf(row),
     department: isRecord(row.department) ? text(row.department.name) : null,

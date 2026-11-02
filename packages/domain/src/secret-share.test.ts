@@ -11,10 +11,15 @@ import {
   SECRET_TEXT_MAX_BYTES,
   isSecretShareLifetime,
   isSecretText,
+  parseSecretRoles,
+  secretRoles,
+  secretRolesAllow,
+  secretRolesLine,
   secretShareAdditionalData,
   secretShareExpiresAt,
   secretShareLink,
 } from "./secret-share.js";
+import { STAFF_ROLES } from "./roles.js";
 
 const DOC = "a1b2c3d4e5f6g7h8i9j0k1l2";
 const EXPIRES = new Date("2026-11-01T12:34:56.789Z");
@@ -161,5 +166,77 @@ describe("input rules", () => {
 describe("secretShareLink", () => {
   it("is the share's page", () => {
     expect(secretShareLink(DOC)).toBe(`/secrets/${DOC}`);
+  });
+});
+
+/** SECRETS_SEND_ROLES / SECRETS_RECEIVE_ROLES (v0.36.0, plan §2.1). */
+describe("parseSecretRoles", () => {
+  const KEY = "SECRETS_SEND_ROLES";
+
+  it("is all staff when unset or empty, as in v0.35.0", () => {
+    for (const value of [undefined, "", "   "]) {
+      expect(parseSecretRoles(value, KEY), JSON.stringify(value)).toEqual(STAFF_ROLES);
+    }
+    expect(STAFF_ROLES).toEqual(["admin_role", "editor", "department_head", "team_lead", "member"]);
+  });
+
+  it("reads a trimmed, case-insensitive comma list with duplicates, in STAFF_ROLES order", () => {
+    expect(parseSecretRoles(" Team_Lead , DEPARTMENT_HEAD,team_lead,, ", KEY)).toEqual([
+      "department_head",
+      "team_lead",
+    ]);
+    // Two spellings of one setting compare and print equal.
+    expect(parseSecretRoles("member,admin_role", KEY)).toEqual(
+      parseSecretRoles("ADMIN_ROLE, member, member", KEY),
+    );
+  });
+
+  it("refuses a value without any role name, naming the key", () => {
+    for (const value of [",", ", ,", " ,, "]) {
+      expect(() => parseSecretRoles(value, KEY), value).toThrow(
+        /^SECRETS_SEND_ROLES: .*names no role/,
+      );
+    }
+  });
+
+  it("refuses an unknown name, guest and authenticated, naming the key and the name", () => {
+    for (const name of ["admin", "Guest", "authenticated", "team lead"]) {
+      expect(() => parseSecretRoles(`member,${name}`, "SECRETS_RECEIVE_ROLES"), name).toThrow(
+        `SECRETS_RECEIVE_ROLES: "${name}" is not a staff role`,
+      );
+    }
+  });
+});
+
+describe("secretRoles / secretRolesAllow / secretRolesLine", () => {
+  it("reads both keys and names the bad one", () => {
+    expect(secretRoles({})).toEqual({ send: STAFF_ROLES, receive: STAFF_ROLES });
+    expect(secretRoles({ SECRETS_SEND_ROLES: "team_lead", SECRETS_RECEIVE_ROLES: "" })).toEqual({
+      send: ["team_lead"],
+      receive: STAFF_ROLES,
+    });
+    expect(() => secretRoles({ SECRETS_RECEIVE_ROLES: "guest" })).toThrow(
+      /^SECRETS_RECEIVE_ROLES:/,
+    );
+  });
+
+  it("allows exactly the listed role types, fail-closed", () => {
+    const roles = ["department_head", "team_lead"] as const;
+    expect(secretRolesAllow(roles, "team_lead")).toBe(true);
+    for (const role of ["member", "Team_Lead", " team_lead", "guest", "", null, undefined, 1]) {
+      expect(secretRolesAllow(roles, role), JSON.stringify(role)).toBe(false);
+    }
+  });
+
+  it("prints the boot line, all staff for a full list however it was written", () => {
+    expect(secretRolesLine(secretRoles({}))).toBe("[secrets] send: all staff; receive: all staff");
+    expect(
+      secretRolesLine(
+        secretRoles({
+          SECRETS_SEND_ROLES: "team_lead,department_head",
+          SECRETS_RECEIVE_ROLES: "member,team_lead,department_head,editor,admin_role",
+        }),
+      ),
+    ).toBe("[secrets] send: department_head, team_lead; receive: all staff");
   });
 });

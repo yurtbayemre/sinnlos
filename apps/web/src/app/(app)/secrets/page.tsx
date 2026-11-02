@@ -6,6 +6,7 @@ import type { SecretShareSummary } from "@sinnlos/domain";
 import { formatInstant } from "@/lib/date-format";
 import { loadSecretList, sentPageOf } from "@/lib/loaders/secrets";
 import { isReadDenied } from "@/lib/roles";
+import { canReceiveSecrets, canSendSecrets } from "@/lib/secret-roles";
 import { getViewer } from "@/lib/viewer";
 import { EmptyState } from "@/components/empty-state";
 import { FetchErrorBanner } from "@/components/fetch-error";
@@ -27,7 +28,9 @@ const WHEN = { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit
 /**
  * /secrets (v0.35): the pending secrets for the viewer, the secrets the
  * viewer sent (newest first, `?sentPage=`) and "New secret". Metadata only:
- * no text is ever read here.
+ * no text is ever read here. Since v0.36 "New secret" only for senders and
+ * the received section only for receivers (lib/secret-roles.ts); the sent
+ * section, with revoke, for every staff member.
  */
 export default async function SecretsPage({
   searchParams,
@@ -53,40 +56,44 @@ export default async function SecretsPage({
   return (
     <div className="space-y-8">
       <PageHeader title={t("title")} description={t("description")}>
-        <Button asChild>
-          <Link href="/secrets/new">
-            <Plus className="h-4 w-4" aria-hidden="true" />
-            {t("new")}
-          </Link>
-        </Button>
+        {canSendSecrets(viewer.role) && (
+          <Button asChild>
+            <Link href="/secrets/new">
+              <Plus className="h-4 w-4" aria-hidden="true" />
+              {t("new")}
+            </Link>
+          </Button>
+        )}
       </PageHeader>
 
       {!list && <FetchErrorBanner />}
 
-      <section className="space-y-3">
-        <SectionLabel icon={Inbox}>{t("received")}</SectionLabel>
-        {list && list.received.length === 0 ? (
-          <EmptyState icon={KeyRound} title={t("receivedEmpty")} />
-        ) : (
-          <div className="space-y-2">
-            {list?.received.map((share) => (
-              <Card key={share.id}>
-                <CardContent className="flex flex-wrap items-center justify-between gap-2 p-4">
-                  <Link
-                    href={`/secrets/${share.id}` as Route}
-                    className="font-medium hover:underline"
-                  >
-                    {t("fromName", { name: name(share) })}
-                  </Link>
-                  <span className="text-xs text-muted-foreground">
-                    {t("expires", { when: when(share.expiresAt) })}
-                  </span>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        )}
-      </section>
+      {canReceiveSecrets(viewer.role) && (
+        <section className="space-y-3">
+          <SectionLabel icon={Inbox}>{t("received")}</SectionLabel>
+          {list && list.received.length === 0 ? (
+            <EmptyState icon={KeyRound} title={t("receivedEmpty")} />
+          ) : (
+            <div className="space-y-2">
+              {list?.received.map((share) => (
+                <Card key={share.id}>
+                  <CardContent className="flex flex-wrap items-center justify-between gap-2 p-4">
+                    <Link
+                      href={`/secrets/${share.id}` as Route}
+                      className="font-medium hover:underline"
+                    >
+                      {t("fromName", { name: name(share) })}
+                    </Link>
+                    <span className="text-xs text-muted-foreground">
+                      {t("expires", { when: when(share.expiresAt) })}
+                    </span>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          )}
+        </section>
+      )}
 
       <section className="space-y-3">
         <SectionLabel icon={Send}>{t("sent")}</SectionLabel>
