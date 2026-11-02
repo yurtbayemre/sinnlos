@@ -1416,7 +1416,8 @@ the controls ([security.md](security.md#secret-sharing)).
    `docker compose -p infra -f infra/docker-compose.yml up -d --no-build cms web`
    (on a host Traefik add `-f infra/docker-compose.traefik.yml` after the
    first file).
-3. Compare the boot lines. Both must be identical and show the new lists:
+3. Compare the boot lines (printed at every start, also with `secrets` in
+   `FEATURES_OFF`). Both must be identical and show the new lists:
 
    ```bash
    docker logs infra-cms-1 2>&1 | grep '\[secrets\] send:' | tail -n 1
