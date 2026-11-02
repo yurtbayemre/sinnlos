@@ -406,8 +406,8 @@ sudoers rule for the pre-deploy backup (step 1,
    cms would refuse to boot with (`APP_TIME_ZONE`, `MFA_REQUIRED_ROLES`,
    and since v0.36 `SECRETS_SEND_ROLES` / `SECRETS_RECEIVE_ROLES`, for the
    cms and the web, which must get the same lists)
-   stops the deploy with the cms's own message and the running containers
-   unchanged. Then it restarts the stack with the Traefik override
+   stops the deploy with the cms's own message (for the role lists prefixed
+   `cms: ` or `web: `) and the running containers unchanged. Then it restarts the stack with the Traefik override
    (`up -d --no-build`). If `up` fails while the cms is still running but
    not healthy (a long first boot or migration), deploy.sh prints how to
    inspect it instead of rollback commands.
