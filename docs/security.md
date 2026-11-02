@@ -1470,7 +1470,9 @@ delete". A share can be opened for 1 hour (the default) or 24 hours.
   staff role (`admin_role`, `editor`, `department_head`, `team_lead`,
   `member`). Guests and the `authenticated` fallback neither send nor
   receive. This is checked at create, in the lists and at the open, against
-  the stored account; the identity provider is not asked.
+  the stored account; the identity provider is not asked. Since v0.36 the
+  operator can narrow sending and receiving to some of these roles
+  (below, "Who may send and receive").
 - Nobody else reads the text through the intranet: no admin view, no
   export of the text. An Art. 15 export (also by an `admin_role` for
   another person) lists a person's shares as metadata only: counterpart,
@@ -1504,6 +1506,51 @@ delete". A share can be opened for 1 hour (the default) or 24 hours.
   no hook in each block or role write.
 - The notification ("X sent you a secret", never the text) is an ordinary
   notification: technical admins see it in the panel.
+
+**Who may send and receive** (v0.36; design:
+[plan-secret-sharing-by-role.md](./plan-secret-sharing-by-role.md)).
+`SECRETS_SEND_ROLES` and `SECRETS_RECEIVE_ROLES` (cms and web, the same
+values; one parser, `parseSecretRoles` in `@sinnlos/domain`) each name staff
+roles; unset or empty means all five, as in v0.35. The admin panel cannot
+narrow it: the boot restores the users-permissions grants, so the lists
+are the only way besides `FEATURES_OFF=secrets`, which turns the module
+off for everyone.
+
+- **Refused at start:** an unknown name, `guest`, `authenticated`, or a
+  value of only commas. The cms does not boot; the web answers every
+  request with 500 and fails its health check. `infra/deploy.sh` (also
+  `--check`) and the boot-value check in the new cms image refuse such a
+  value in the cms's or the web's environment, and lists that differ
+  between the two, before anything changes.
+- **The cms decides** every request, on top of the eligibility above;
+  create and reveal check the fresh rows under their locks:
+
+  | Request          | Check                                                                                      |
+  | ---------------- | ------------------------------------------------------------------------------------------ |
+  | create           | the caller may send, the recipient may receive                                             |
+  | recipient search | the caller may send; the receive filter is part of the database query, before its limit    |
+  | reveal           | the caller may receive now; the sender is eligible, the send list is not checked again     |
+  | revoke, lists    | unchanged: every staff member sees their own shares and revokes the pending ones they sent |
+
+  A share is `available` when it is pending and unexpired, its sender is
+  eligible and its recipient may receive, the same in list and detail. The
+  received list holds only shares the caller can open, so it is empty for
+  someone outside the receive list.
+
+- **Refusals,** all existing shapes: a caller who may not send (create,
+  search) or not receive (reveal) gets a plain 403, and a share refused at
+  the reveal stays pending until it expires; a recipient outside the
+  receive list is the 400 `recipient` of a non-staff id. No new error code.
+- **The web only hides controls** (`canSendSecrets`, `canReceiveSecrets`
+  from the same values): the "New secret" button and `/secrets/new` for
+  senders, the received section and the reveal for receivers, the menu
+  entry for people who can do either. Every staff member keeps `/secrets`
+  with their sent list and revoke. A 403 reaches the web only in a race,
+  and it shows the generic "not allowed" text.
+- **Narrowing is not cancelling.** A sender who loses the send right
+  keeps their pending shares openable until they expire (at most 24
+  hours); a recipient who loses the receive right gets them back when the
+  role returns in time. `FEATURES_OFF=secrets` suspends all access at once.
 
 **Read once, at most once.** Create, reveal and revoke each run in one
 transaction under three locks in a fixed order: the directory lock, both
