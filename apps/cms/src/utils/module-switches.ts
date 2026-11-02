@@ -41,6 +41,7 @@ export const MODULE_APIS: Readonly<Record<ModuleName, readonly string[]>> = {
   polls: ["poll", "poll-vote"],
   "duty-plans": ["duty-plan"],
   kpis: ["kpi"],
+  secrets: ["secret-share"],
 };
 
 /** Routes whose module is not their API's, by handler. */

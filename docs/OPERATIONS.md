@@ -175,7 +175,9 @@ retried or failed step never leaves an old "passed" behind:
   failed `createdb` works) and creates it again, runs `pg_restore
 --no-owner --exit-on-error --single-transaction`, and checks that the
   database holds the dump's tables and at least one `up_users` row (both
-  queries with `ON_ERROR_STOP`); a failed `apply` may be run again;
+  queries with `ON_ERROR_STOP`), then closes every secret share the dump
+  holds (v0.35, "Secret shares in a restore" below); a failed `apply` may
+  be run again;
 - `rotate-jwt` runs only after `apply` passed for this attempt: it refuses
   a `JWT_SECRET` exported in the shell (Compose would hand that to the
   cms instead of `infra/.env`) and an `infra/.env` without exactly one
@@ -313,6 +315,21 @@ holds the reservation).
 The cms then brings the schema up to its own release on boot (it adds what
 an older dump lacks). A dump from before v0.25 is refused ([If the cms refuses to boot](#if-the-cms-refuses-to-boot)).
 
+**Secret shares in a restore** (v0.35): a dump holds the encrypted
+text of every share that was pending when it was taken, also of
+shares opened or revoked since; restored as they are, they could be opened
+a second time. So `apply`, after its checks and before it passes, closes
+them in one transaction, in the cms's schema (`DATABASE_SCHEMA` as Compose
+hands it to the cms; unset: `public`; the `up_users` check reads the same
+schema): every envelope is deleted, pending shares turn
+`cancelled` (with their end time), shares that had ended keep their state
+and times, and every `secretShared` notification is deleted. A second run
+changes nothing, and a dump from before v0.35 (no `secret_shares` table in
+that schema) is left as it is. When the purge fails, `apply` stops and does not pass,
+so `rotate-jwt` and `start` refuse: the restored database may still hold
+shares that can be opened; fix the cause and `apply` again, or `back`.
+Senders see their restored pending shares as cancelled and send again.
+
 **Why a script** (2026-10-13): the restore was first four shell
 functions pasted into the operator's shell and walked twice that morning.
 A pasted function cannot fully protect itself: errexit or tracing
@@ -334,7 +351,9 @@ after the checks, the reservation, the legacy-zone overlay) and, with
 legacy-zone overlay (a dump cut off in its data, an older dump over a
 newer database, a swapped dump path, a failed `createdb` and a failed
 restore with their retries and the way back, a compose file that pins
-`JWT_SECRET`, an exported one, the `.env`-only pair and a held lock).
+`JWT_SECRET`, an exported one, the `.env`-only pair, a held lock, and
+since v0.35 the secret-share purge: without and with the table, a retry,
+a purged database restored again and a purge that fails).
 `infra/deploy-flow.test.ts` pins `infra/deploy.sh`'s refusal while the
 reservation exists, also from a second clone that shares
 `DEPLOY_STATE_DIR` while the real script restores in the first.
@@ -1300,6 +1319,40 @@ time zone again and holds values in N row(s)`; it cannot tell a manual
   `column` or `columnType` override on a `datetime` attribute: Strapi then
   re-creates the column naive through an `ALTER` (the guard converts it back
   at the same boot, but it is avoidable DDL).
+
+---
+
+## Secret shares (v0.35)
+
+The module `secrets` (switch in `FEATURES_OFF`) lets one employee send one
+short text to one colleague, opened once
+([security.md](security.md), [data-protection.md](data-protection.md),
+"Geheimnisse"). For operations:
+
+- **The janitor.** The cron job `secret-share-janitor` runs every minute,
+  whatever `FEATURES_OFF` says (it is erasure): pending shares past their
+  expiry turn `expired`, pending shares with a blocked party or one without
+  a staff role turn `cancelled` (each with its text and notification
+  deleted), shares whose sender or recipient no longer exists are deleted in
+  every state, and ended shares are deleted 7 days after their end. It is
+  one more job in `infra/ops-check.sh`'s expected set. Each run handles at
+  most 200 shares per step, so a backlog takes several successful runs,
+  normally a few minutes; a run that passed does not mean the backlog is
+  gone. With `CRON_ENABLED=false`, or while the job fails, an expired share
+  still cannot be opened, but its encrypted text stays in the database until
+  successful runs have worked through it.
+- **A restore** closes every restored share before the site reopens
+  ([Restoring a database dump](#restoring-a-database-dump), "Secret shares in a restore").
+- **Never rotate `ENCRYPTION_KEY` to purge shares.** It also encrypts the
+  second-factor secrets, which then stop working. A share whose text no
+  longer opens turns `cancelled` when its recipient tries. To remove every
+  share at once, run `infra/diagnostics/secret-shares-rollback.sql` (it
+  deletes all shares and their notifications; [UPGRADE.md](UPGRADE.md),
+  "Upgrading to v0.35.0").
+- **The key.** The shares' key is derived from `ENCRYPTION_KEY`. With the
+  module on and a key shorter than 32 characters, the cms logs one error
+  line at boot and the module refuses to send or open; the rest of the
+  intranet runs.
 
 ---
 

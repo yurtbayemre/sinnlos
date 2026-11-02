@@ -91,6 +91,13 @@ export const NAV_ITEMS: readonly NavItem[] = [
   },
   { href: "/polls", labelKey: "polls", icon: "BarChart3", module: "polls" },
   { href: "/documents", labelKey: "documents", icon: "FileText" },
+  {
+    href: "/secrets",
+    labelKey: "secrets",
+    icon: "KeyRound",
+    capability: "secrets",
+    module: "secrets",
+  },
   { href: "/manage", labelKey: "admin", icon: "Settings", capability: "manage" },
 ];
 

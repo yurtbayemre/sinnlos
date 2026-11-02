@@ -66,6 +66,8 @@ const DRAFT_AND_PUBLISH: Readonly<Record<string, boolean>> = {
   "api::quick-link.quick-link": true,
   "api::reaction.reaction": false,
   "api::search-log.search-log": false,
+  // v0.35.0: one row per share, never a draft.
+  "api::secret-share.secret-share": false,
   // Same as department (I-ORG).
   "api::team.team": false,
   "api::wiki-page.wiki-page": true,

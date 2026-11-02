@@ -75,6 +75,46 @@ that edit before publication. A member in a separate browser session must see
 the final content and pass the quiz with the new answer. The course and lesson
 are created by browser actions; no authoring target is pre-seeded.
 
+The `secret-sharing` case in `e2e/secrets.spec.ts` (v0.35) has the member send
+secrets to the team lead through `/secrets/new`. Every `/secrets` answer it
+can produce carries `Cache-Control` with `private` and `no-store`: the
+sign-in redirect, the not-found page for an unknown and a malformed id, the
+page and its RSC payload. The lead's bell links to the secret (after a page
+load: live events are off in this run). The secret's page holds no text before
+"Show and delete"; two sessions of the lead click at the same time and exactly
+one gets the text, the other the refusal. Reload, the RSC payload, back and
+forward show no text. A replayed reveal Server Action with a foreign `Origin`
+is refused while the same call from the site's origin works. A share revoked
+or expired while the lead's page is open cannot be opened; the expiry is the
+one change made in the database, through the run's psql
+(`SINNLOS_E2E_PSQL`). A reveal answer held until the lead's next page has
+rendered never shows its text. A guest has no Secrets entry and gets the "not
+available" page. Further browser contexts of the lead reuse its stored session
+instead of signing in again.
+
+Where each `Cache-Control` gate is proved (Next 16.4.3, production build).
+The page, its RSC payload, the not-found and the error view (the CMS read made
+to fail by renaming `secret_shares` for a moment through the run's psql) are
+checked in `secret-sharing` after the reveal, each without the sentinel in its
+body. Next already sends `private, no-cache, no-store` on these dynamic
+renders; the `next.config.mjs` rule on `/secrets/:path*` adds nothing there.
+The sign-in redirect of `proxy.ts` is the answer the rule exists for: a run
+without the rule showed it without any `Cache-Control`, so `headers()` does
+reach responses produced by the proxy. A switched-off module is the proxy's
+rewrite to the 404 page; the run checks it on the marketplace (switched off
+here) and finds it no-store. `/secrets` with secrets off takes the same
+rewrite (`proxy.test.ts`) under the same rule; it needs no stack of its own.
+
+The `secret-live` case runs only in its own stack with live events on in the
+CMS and the web (`WEB_INTERNAL_URL=http://web:3000`), started by
+`pnpm --filter @sinnlos/e2e test:live` (`run.mjs --live --grep secret-live`);
+the ordinary run skips it. The lead's open page records its stream's events; a
+secret sent meanwhile arrives as a ping, and the bell changes without a page
+load, long before its 120-second poll. With live events on, a page that is
+still streaming holds a hidden copy of a Suspense fragment (`<div hidden
+id="S:1">` under `body`) for about a second, so a text locator can briefly
+match twice; that is why the ordinary run keeps live events off.
+
 The two Teams cases live in `e2e/teams.spec.ts`. All six cases reuse
 fixture reading and visible-form login from `e2e/helpers.ts`, including the
 signed-in email assertion. They use fresh browser sessions and independent
@@ -91,6 +131,8 @@ pnpm test:e2e --grep training-quiz-completion
 pnpm test:e2e --grep training-exam-completion
 pnpm test:e2e --grep training-confirm-completion
 pnpm test:e2e --grep training-authoring
+pnpm test:e2e --grep secret-sharing
+pnpm --filter @sinnlos/e2e test:live   # secret-live, live events on
 ```
 
 `check:setup` is a runtime smoke check, not a browser E2E pass. An empty
@@ -124,9 +166,10 @@ change can start the E2E job's private PostgreSQL without enabling the
 separate integration or timezone database suites. A change containing only
 `docs/**/*.md` starts neither E2E nor any database tests.
 
-The job budget is 50 minutes, with at most five minutes each for dependency
-and browser installation, 36 minutes for the runner and three minutes for
-upload. Within the runner, builds have 15 minutes, startup has 210 seconds
+The job budget is 65 minutes, with at most five minutes each for dependency
+and browser installation, 36 minutes for the runner, 15 for the separate
+live-events run (`test:live`, which rebuilds from the same layer cache) and
+three minutes for upload. Within the runner, builds have 15 minutes, startup has 210 seconds
 (including a 180-second readiness limit), and Playwright has five minutes
 with an outer six-minute limit. These limits leave time for normal failure
 cleanup and diagnostics. A forced GitHub cancellation can kill the process
@@ -203,7 +246,8 @@ during CMS startup, and its login is tested through the actual browser form.
 Preflight JWTs stay in memory; browser cases must log in through the UI.
 
 Playwright receives `SINNLOS_E2E_BASE_URL` and `SINNLOS_E2E_FIXTURES` from
-the runner. The private fixture JSON contains `runId`, `users.lead/member/editor`
+the runner, and `SINNLOS_E2E_PSQL`: the psql command of the run's database
+(a `docker exec` on the pinned endpoint), used only to move a secret's expiry. The private fixture JSON contains `runId`, `users.lead/member/editor`
 (email/password/documentId) and `teams.editable/readonly`
 (slug/name/description/documentId), plus `training.course` (title/slug/documentId)
 and `training.lesson` (title/documentId). `exam` and `confirm` have

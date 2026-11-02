@@ -387,4 +387,13 @@ describe("proxy() — switched-off modules and features", () => {
     vi.stubEnv("FEATURES_OFF", "");
     expect(passes(await proxy(request("/events")))).toBe(true);
   });
+
+  it("rewrites /secrets with secrets off like any off module (v0.35)", async () => {
+    vi.stubEnv("FEATURES_OFF", "secrets");
+    for (const path of ["/secrets", "/secrets/new", "/secrets/abcdefghijklmnopqrstuvwx"]) {
+      expect(rewrittenTo(await proxy(request(path))), path).toBe(
+        "https://intranet.example.test/_switched-off",
+      );
+    }
+  });
 });

@@ -224,6 +224,13 @@ describe("role vocabulary of the permission constants (S02)", () => {
       "plugin::users-permissions.user.create",
       "plugin::users-permissions.user.update",
       "plugin::users-permissions.user.destroy",
+      // v0.35.0: secret sharing is staff only.
+      "api::secret-share.secret-share.create",
+      "api::secret-share.secret-share.list",
+      "api::secret-share.secret-share.findOne",
+      "api::secret-share.secret-share.reveal",
+      "api::secret-share.secret-share.revoke",
+      "api::secret-share.secret-share.recipients",
     ]);
   });
 

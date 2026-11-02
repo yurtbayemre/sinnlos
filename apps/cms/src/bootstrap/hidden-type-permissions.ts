@@ -18,6 +18,12 @@
  * re-review of plan 16-0). Super admins are reset to the registered
  * actions by Strapi at every boot.
  *
+ * v0.35.0: secret shares lose EVERY Content Manager grant, read included
+ * (CLOSED_TYPE_UIDS): no admin reads a share in the panel. Super admins are
+ * reset by Strapi before the application bootstrap, so the removal holds for
+ * them too; bootstrap/secret-share-admin-closure.ts refuses the type in the
+ * Content Manager whatever a role is granted later.
+ *
  * Deletes through the admin permission service (`deleteByIds`, the call
  * Strapi's cleanup makes), so the role links go with the rows and the
  * `permission.delete` event fires. Throws when that service is gone after a
@@ -25,7 +31,14 @@
  * the panel open.
  */
 
+import { SECRET_SHARE_UID } from "../utils/secret-shares";
+
 export const ADMIN_PERMISSION_UID = "admin::permission";
+
+/** Hidden types that lose every Content Manager action, read included. */
+export const CLOSED_TYPE_UIDS: readonly string[] = [SECRET_SHARE_UID];
+
+const CONTENT_MANAGER_ACTION_PREFIX = "plugin::content-manager.";
 
 /** The Content Manager actions a hidden type loses (read is not among them). */
 export const HIDDEN_TYPE_WRITE_ACTIONS = [
@@ -75,14 +88,24 @@ export async function removeHiddenTypeWritePermissions(
   }
   const subjects = hiddenContentTypeUids(strapi.contentTypes);
   if (subjects.length === 0) return;
+  const closed = subjects.filter((uid) => CLOSED_TYPE_UIDS.includes(uid));
+  const writes = { subject: { $in: subjects }, action: { $in: [...HIDDEN_TYPE_WRITE_ACTIONS] } };
   const rows = await strapi.db.query(ADMIN_PERMISSION_UID).findMany({
     select: ["id", "subject"],
-    where: { subject: { $in: subjects }, action: { $in: [...HIDDEN_TYPE_WRITE_ACTIONS] } },
+    where:
+      closed.length === 0
+        ? writes
+        : {
+            $or: [
+              writes,
+              { subject: { $in: closed }, action: { $startsWith: CONTENT_MANAGER_ACTION_PREFIX } },
+            ],
+          },
   });
   if (rows.length === 0) return;
   await permissions.deleteByIds(rows.map((row) => row.id));
   const removedFrom = [...new Set(rows.map((row) => String(row.subject)))].sort();
   strapi.log.info(
-    `[admin-permissions] removed ${rows.length} Content Manager write permission(s) on hidden types: ${removedFrom.join(", ")}`,
+    `[admin-permissions] removed ${rows.length} Content Manager permission(s) on hidden types: ${removedFrom.join(", ")}`,
   );
 }

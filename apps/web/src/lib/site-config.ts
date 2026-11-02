@@ -1,4 +1,4 @@
-import { SITE_NAME_MAX_LENGTH, parseSiteName } from "@sinnlos/domain";
+import { SITE_NAME_MAX_LENGTH, featuresOff, parseSiteName } from "@sinnlos/domain";
 import pkg from "../../package.json";
 import { deriveAccentPalette, hexToHsl, type AccentTokens, type ThemeName } from "./contrast";
 
@@ -81,6 +81,16 @@ export function plausibleScript(env: Env): { src: string; domain: string } | nul
     warnOnce("PLAUSIBLE", "[site] analytics need PLAUSIBLE_SCRIPT_URL and PLAUSIBLE_DOMAIN; off");
   }
   return null;
+}
+
+/**
+ * The analytics script the root layout renders: none while the module
+ * `secrets` is on (v0.35, plan §3.10). A third-party script must not share
+ * a document with a revealed secret, and client navigation keeps a script
+ * loaded on any page alive into /secrets, so it stays off on every page.
+ */
+export function analyticsScript(env: Env): { src: string; domain: string } | null {
+  return featuresOff(env).has("secrets") ? plausibleScript(env) : null;
 }
 
 /**

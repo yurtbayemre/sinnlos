@@ -20,7 +20,9 @@ import { uploadedByOf } from "./upload-orphans";
  * are `organisation`; JSON and upload sources follow (duty shifts, stamped
  * uploads); the audit trail by actor and by target. export-coverage.test.ts
  * walks the schemas and fails on a relation to the user model that is in
- * neither list. A walk longer than EXPORT_MAX_ROWS fails the export rather
+ * neither list. Secret shares (v0.35.0) link people by scalar ids, which no
+ * relation walk sees: `secretShares` reads them explicitly, both directions,
+ * as metadata (counterpart, times, state), never the content. A walk longer than EXPORT_MAX_ROWS fails the export rather
  * than cutting it; the cap counts the person's rows, not the rows read
  * (v0.31). Draft-and-publish types list each stored state
  * (`publishedAt` null = the draft).
@@ -34,6 +36,7 @@ import { uploadedByOf } from "./upload-orphans";
 const USER_UID = "plugin::users-permissions.user";
 const FILE_UID = "plugin::upload.file";
 const AUDIT_UID = "api::audit-event.audit-event";
+const SECRET_SHARE_UID = "api::secret-share.secret-share";
 const PAGE = 500;
 /** Rows per class at most; more fails the export instead of truncating it. */
 export const EXPORT_MAX_ROWS = 100_000;
@@ -267,6 +270,11 @@ export const NOT_INCLUDED = [
       "The `detail` column can hold third-party data (titles, file names). The export lists time, action, type and document id; the details are reviewed by hand on demand.",
   },
   {
+    category: "Inhalte von Geheimnissen / secret contents",
+    reason:
+      "Only the recipient can open a secret, once; the intranet keeps no readable copy for anyone else. The stored text is deleted when the secret is opened or revoked; after its expiry it can no longer be opened, and it is deleted at the next successful cleanup. Backups follow their own retention. A secret still pending is handled by the operator on request, never exported as text.",
+  },
+  {
     category: "Sicherungen / backups",
     reason: "Restored only after a disaster; they rotate and are deleted on schedule.",
   },
@@ -405,6 +413,7 @@ export async function exportUser(
     );
   }
   content.dutyShifts = await dutyShifts(strapi, id);
+  Object.assign(content, await secretShares(strapi, id));
   content.uploads = await stampedUploads(strapi, id);
 
   const documentId = text(user.documentId);
@@ -481,6 +490,40 @@ async function dutyShifts(strapi: ExportHost, id: number): Promise<Row[]> {
     }
   }
   return out;
+}
+
+/**
+ * The person's secret shares, sent and received (v0.35.0): the counterpart's
+ * name, the times and the state; the envelope is never selected.
+ */
+async function secretShares(
+  strapi: ExportHost,
+  id: number,
+): Promise<{ secretSharesSent: Row[]; secretSharesReceived: Row[] }> {
+  const select = ["senderId", "recipientId", "createdAt", "expiresAt", "state", "terminalAt"];
+  const sent = await walk(strapi, SECRET_SHARE_UID, { senderId: id }, select);
+  const received = await walk(strapi, SECRET_SHARE_UID, { recipientId: id }, select);
+  const others = [
+    ...new Set([...sent.map((row) => row.recipientId), ...received.map((row) => row.senderId)]),
+  ];
+  const names = new Map<unknown, string | null>();
+  for (let start = 0; start < others.length; start += PAGE) {
+    const people = (await strapi.db.query(USER_UID).findMany({
+      where: { id: { $in: others.slice(start, start + PAGE) } },
+      select: ["id", "displayName", "username"],
+    })) as unknown;
+    for (const person of Array.isArray(people) ? people.filter(isRecord) : []) {
+      names.set(person.id, nameOf(person));
+    }
+  }
+  const meta = (row: Row) => pick(row, ["createdAt", "expiresAt", "state", "terminalAt"]);
+  return {
+    secretSharesSent: sent.map((row) => ({ to: names.get(row.recipientId) ?? null, ...meta(row) })),
+    secretSharesReceived: received.map((row) => ({
+      from: names.get(row.senderId) ?? null,
+      ...meta(row),
+    })),
+  };
 }
 
 /** Files the hardened upload stamped with the person (utils/upload-orphans.ts). */

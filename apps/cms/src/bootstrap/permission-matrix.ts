@@ -432,6 +432,16 @@ export const AUTHORING_ACTION_GRANTS: Readonly<Record<string, readonly MatrixRol
   ...authoringGrants("api::wiki-page.wiki-page", WIKI_PAGE_MODERATOR_ACTIONS, MODERATORS),
 };
 
+/** The six actions of api/secret-share (v0.35.0), staff only. */
+export const SECRET_SHARE_ACTIONS = [
+  "create",
+  "list",
+  "findOne",
+  "reveal",
+  "revoke",
+  "recipients",
+].map((action) => `api::secret-share.secret-share.${action}`);
+
 export const CUSTOM_ACTION_GRANTS: Record<string, readonly MatrixRoleType[] | "*"> = {
   ...AUTHORING_ACTION_GRANTS,
   "api::audit-event.audit-event.list": [ADMIN],
@@ -530,6 +540,9 @@ export const CUSTOM_ACTION_GRANTS: Record<string, readonly MatrixRoleType[] | "*
   // provider_metadata.uploadedBy and without any remaining relation — see
   // controllers/classified.ts.
   "api::classified.classified.cleanupUploads": STAFF_ROLES,
+  // v0.35.0: secret sharing between staff (utils/secret-shares.ts); the
+  // controller checks the role again, guest and `authenticated` are revoked.
+  ...Object.fromEntries(SECRET_SHARE_ACTIONS.map((action) => [action, STAFF_ROLES])),
 };
 
 /**
@@ -652,6 +665,8 @@ const LEGACY_REVOKED_PERMISSIONS: Partial<Record<MatrixRoleType, string[]>> = {
     // an early version of this bootstrap granted guest read access.
     "api::classified.classified.find",
     "api::classified.classified.findOne",
+    // v0.35.0: never granted; listed so no row can ever open them.
+    ...SECRET_SHARE_ACTIONS,
   ],
   authenticated: [
     ...ORG_STRUCTURE_ACTIONS,
@@ -660,6 +675,8 @@ const LEGACY_REVOKED_PERMISSIONS: Partial<Record<MatrixRoleType, string[]>> = {
     // an earlier bootstrap granted it, and the row survived on existing
     // databases (found by infra/diagnostics/prod-perm-diff.sql).
     "api::kudos.kudos.celebrations",
+    // v0.35.0: never granted; listed so no row can ever open them.
+    ...SECRET_SHARE_ACTIONS,
   ],
 };
 
@@ -689,6 +706,8 @@ const PUBLIC_REVOKED_PERMISSIONS = [
   "plugin::users-permissions.auth.emailConfirmation",
   "plugin::users-permissions.auth.connect",
   ...USER_WRITE_ACTIONS,
+  // v0.35.0: never granted; listed so no row can ever open them.
+  ...SECRET_SHARE_ACTIONS,
 ];
 
 export const REVOKED_PERMISSIONS: Record<string, string[]> = {

@@ -18,7 +18,8 @@
 # STUB_UP_FAIL, STUB_ON_STOP (bash run when web and cms stop),
 # STUB_RM_AS_USER, STUB_KILL_AFTER_STARTED, STUB_KILL_AFTER_ARCHIVE and
 # STUB_STATE_WRITE_FAIL (below), STUB_PGDUMP_FAIL, STUB_CREATEDB_FAIL (dropdb
-# runs, createdb fails), STUB_RESTORE_FAIL, STUB_LOCK_HELD.
+# runs, createdb fails), STUB_RESTORE_FAIL, STUB_PURGE_FAIL (the secret-share
+# purge after the restore fails), STUB_LOCK_HELD.
 : "${T:?}" "${REPO:?}"
 
 # What compose hands the cms: an exported JWT_SECRET, else a compose file
@@ -116,6 +117,16 @@ stub_db() {
       in="$(cat)"
       case "${in}" in
         *pg_tables*) wc -l <"${T}/db/tables" | tr -d ' ' ;;
+        *to_regclass*)
+          if awk '$1 == "secret_shares" { f = 1 } END { exit !f }' "${T}/db/tables"; then echo t; else echo f; fi
+          ;;
+        *secret_shares*)
+          echo "psql: secret-share purge" >>"${T}/calls"
+          if [[ -n "${STUB_PURGE_FAIL:-}" ]]; then
+            echo 'ERROR:  injected' >&2
+            return 1
+          fi
+          ;;
         *up_users*)
           r="$(awk '$1 == "up_users" { print $2 }' "${T}/db/tables")"
           if [[ -z "${r}" ]]; then
@@ -177,9 +188,12 @@ docker() {
       echo running >"${T}/apps"
       ;;
     config)
-      # STUB_SITE_ALLOW: what the caddy service gets as SITE_ALLOW_CIDRS.
-      printf '{\n  "services": {\n    "caddy": {\n      "environment": {\n        "SITE_ALLOW_CIDRS": "%s"\n      }\n    },\n    "cms": {\n      "environment": {\n        "ADMIN_JWT_SECRET": "a\\u003cb",\n        "JWT_SECRET": "%s"\n      }\n    }\n  }\n}\n' \
-        "${STUB_SITE_ALLOW:-}" "$(stub_effective_jwt)"
+      # STUB_SITE_ALLOW: what the caddy service gets as SITE_ALLOW_CIDRS;
+      # STUB_DB_SCHEMA: the cms's DATABASE_SCHEMA line (empty: none, as in
+      # the compose files).
+      printf '{\n  "services": {\n    "caddy": {\n      "environment": {\n        "SITE_ALLOW_CIDRS": "%s"\n      }\n    },\n    "cms": {\n      "environment": {\n        "ADMIN_JWT_SECRET": "a\\u003cb",\n%s        "JWT_SECRET": "%s"\n      }\n    }\n  }\n}\n' \
+        "${STUB_SITE_ALLOW:-}" "${STUB_DB_SCHEMA:+        \"DATABASE_SCHEMA\": ${STUB_DB_SCHEMA},
+}" "$(stub_effective_jwt)"
       ;;
     exec)
       shift 2

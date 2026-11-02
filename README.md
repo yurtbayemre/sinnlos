@@ -74,6 +74,10 @@ Further reading:
   comprehension quizzes with an optional completion gate, and a per-user
   completion report.
 - **Notifications** and opt-in **e-mail digests** (daily or weekly).
+- **Secret sharing** (v0.35): a password, a link or an access code to one
+  colleague, stored encrypted, opened once with "Show and delete" and then
+  deleted; at most 24 hours; no admin view of the text
+  ([security model](./docs/security.md#secret-sharing)).
 - **Authoring in the web** at `/manage`: editors and admins write
   announcements, events, polls, quick links and documents (with the file
   upload) with drafts, a preview, scheduled publishing and a check for
@@ -100,7 +104,7 @@ Further reading:
   anonymisation for `TRAINING_EVIDENCE_RETENTION_YEARS`; blocked people
   leave the directory; nightly jobs apply the retention rules. Every module
   outside the base (events, training, marketplace, kudos, celebrations,
-  polls, duty plans, KPIs) and the read confirmations, named training
+  polls, duty plans, KPIs, secrets) and the read confirmations, named training
   reports and search logging can be switched off with `FEATURES_OFF`.
   The German inventory is [docs/data-protection.md](./docs/data-protection.md).
 
@@ -178,6 +182,7 @@ rules are in
 | `wiki-revision`   | One recorded state of a page after each changing draft save; read through the wiki-page history routes only            |
 | `content-version` | Per-document revision behind the concurrent-change check (`If-Match`); written by the cms only, no route               |
 | `audit-event`     | Append-only activity trail, one row per change of a guarded document (keys, no values); kept 365 days, admin-only read |
+| `secret-share`    | One short text from one employee to one colleague, opened once; stored encrypted; own routes only                      |
 | _profile_         | Routes-only: `GET`/`PUT /api/me`, the self-service profile                                                             |
 | _entra-auth_      | Routes-only: `POST /api/auth/entra/exchange`, the server-to-server step of the Microsoft sign-in (404 when off)        |
 | _oidc-auth_       | Routes-only: `POST /api/auth/oidc/exchange`, the server-to-server step of the OIDC sign-in (404 when off)              |
@@ -356,6 +361,12 @@ Custom actions and plugin routes (`✓` = granted, `—` = not granted):
 | `api::user-management.user-management.export` | `GET /api/user-management/:id/export` | ✓ | — | — | — | — | — | — |
 | `api::user-management.user-management.anonymisePreview` | `GET /api/user-management/:id/anonymise` | ✓ | — | — | — | — | — | — |
 | `api::user-management.user-management.anonymise` | `POST /api/user-management/:id/anonymise` | ✓ | — | — | — | — | — | — |
+| `api::secret-share.secret-share.create` | `POST /api/secret-shares` | ✓ | ✓ | ✓ | ✓ | ✓ | — | — |
+| `api::secret-share.secret-share.list` | `GET /api/secret-shares` | ✓ | ✓ | ✓ | ✓ | ✓ | — | — |
+| `api::secret-share.secret-share.findOne` | `GET /api/secret-shares/:id` | ✓ | ✓ | ✓ | ✓ | ✓ | — | — |
+| `api::secret-share.secret-share.reveal` | `POST /api/secret-shares/:id/reveal` | ✓ | ✓ | ✓ | ✓ | ✓ | — | — |
+| `api::secret-share.secret-share.revoke` | `POST /api/secret-shares/:id/revoke` | ✓ | ✓ | ✓ | ✓ | ✓ | — | — |
+| `api::secret-share.secret-share.recipients` | `GET /api/secret-shares/recipients` | ✓ | ✓ | ✓ | ✓ | ✓ | — | — |
 <!-- custom-action-grants:end -->
 
 The anonymous `public` role holds none of these, and the cms revokes the

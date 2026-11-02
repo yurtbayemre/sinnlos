@@ -52,7 +52,13 @@ const ELLIPSIS = "…";
 
 /** notification.type (schema enum). */
 export type NotificationType =
-  "announcement" | "comment" | "event" | "kudos" | "trainingDue" | "trainingExpired";
+  | "announcement"
+  | "comment"
+  | "event"
+  | "kudos"
+  | "trainingDue"
+  | "trainingExpired"
+  | "secretShared";
 
 /**
  * One piece of a title: fixed text, or a value that falls back to

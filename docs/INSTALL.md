@@ -20,7 +20,7 @@ Every command below runs on the host as the **deploy user**, the user that owns 
 ## 2. The code
 
 ```sh
-git clone --branch v0.34.0 https://github.com/yurtbayemre/sinnlos.git
+git clone --branch v0.35.0 https://github.com/yurtbayemre/sinnlos.git
 cd sinnlos
 ```
 
@@ -49,7 +49,7 @@ Then edit `infra/.env`. The comments in the file explain every key.
 - **Branding (optional):** `SITE_NAME` (the instance name in titles, the sidebar, the sign-in page, e-mail subjects and the authenticator app; at most 40 characters), `SITE_LOGO_URL` and `SITE_ICON_URL` (`https://` addresses; visitors' browsers fetch them before sign-in, so host them yourself) and `SITE_ACCENT` (`#rrggbb`; a colour that fails the contrast checks falls back to the default with a warning). Unset keeps the default look. The footer always names sinnlos and its source.
 - **Single sign-on (optional):** Microsoft Entra ID or one OIDC provider, see [SSO.md](SSO.md). SSO users get their second factor from the identity provider; `MFA_REQUIRED_ROLES` applies to password accounts only.
 - **`SITE_ALLOW_CIDRS`** stays empty. It closes the whole site to everyone outside the listed networks, for a restore ([OPERATIONS.md, Restore](OPERATIONS.md#restore)).
-- **Modules and data protection:** `FEATURES_OFF` switches off modules you do not use (`events`, `training`, `marketplace`, `kudos`, `celebrations`, `polls`, `duty-plans`, `kpis`) and the features `read-confirmations`, `training-reports` and `search-logging`; empty keeps everything on. `TRAINING_EVIDENCE_RETENTION_YEARS` (3) and `SEARCH_LOG_RETENTION_DAYS` (90) set two retention periods. Hand [data-protection.md](data-protection.md) (German) to your data-protection officer and works council: it lists every data class, who sees it, when it is deleted, and how export and anonymisation work.
+- **Modules and data protection:** `FEATURES_OFF` switches off modules you do not use (`events`, `training`, `marketplace`, `kudos`, `celebrations`, `polls`, `duty-plans`, `kpis`, `secrets`) and the features `read-confirmations`, `training-reports` and `search-logging`; empty keeps everything on. While `secrets` (secret sharing, v0.35) is on, the web loads no Plausible script, also when `PLAUSIBLE_SCRIPT_URL` and `PLAUSIBLE_DOMAIN` are set (it logs one line at start saying so): a third-party script must not share a page with an opened secret. To keep Plausible, switch `secrets` off. `TRAINING_EVIDENCE_RETENTION_YEARS` (3) and `SEARCH_LOG_RETENTION_DAYS` (90) set two retention periods. Hand [data-protection.md](data-protection.md) (German) to your data-protection officer and works council: it lists every data class, who sees it, when it is deleted, and how export and anonymisation work.
 
 `infra/deploy.sh --check` validates the file and changes nothing.
 

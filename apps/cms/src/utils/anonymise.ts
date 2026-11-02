@@ -18,6 +18,7 @@ import { lockUserRow, type MfaHost } from "./mfa-core";
 import { NOTIFICATION_UID, buildNotification, type NotificationType } from "./notify";
 import { refuse } from "./refusal";
 import { fillMissingSnapshots, publicationStamp } from "./training-evidence";
+import { deleteShares, sharesOf, SECRET_SHARE_UID } from "./secret-shares";
 import { removeReserved, reserveRemoval } from "./upload-orphans";
 import { assertActiveAdmin, lockDirectory, type UserAdminHost } from "./user-admin";
 import { reportRunFailure } from "../cron/run-context";
@@ -45,7 +46,10 @@ import { reportRunFailure } from "../cron/run-context";
  *      all their notifications (anchors too: new fan-outs skip blocked
  *      recipients), their read confirmations (owner decision), their ads
  *      through the Document Service (its lifecycle records the delete and
- *      removes the images after the commit);
+ *      removes the images after the commit), and (v0.35.0) every secret
+ *      share they sent or received, in any state and whatever FEATURES_OFF
+ *      says, with its notification: explicit scalar queries on senderId and
+ *      recipientId, which no relation inventory sees;
  *   3. the row: username `former-<documentId>`, e-mail
  *      `former-<documentId>@anonymised.invalid` (documentIds are unique; a
  *      unique violation fails the whole run and overwrites nothing), the
@@ -144,7 +148,10 @@ const rows = (value: unknown): Row[] => (Array.isArray(value) ? value.filter(isR
 
 /** The rows the anonymisation deletes, by class: type and the relation naming the person. */
 const DELETED_BY_RELATION: Readonly<
-  Record<Exclude<AnonymiseDeletedClass, "classifieds">, { uid: string; field: string }>
+  Record<
+    Exclude<AnonymiseDeletedClass, "classifieds" | "secretShares">,
+    { uid: string; field: string }
+  >
 > = {
   reactions: { uid: "api::reaction.reaction", field: "author" },
   pollVotes: { uid: "api::poll-vote.poll-vote", field: "voter" },
@@ -173,8 +180,11 @@ const KEPT_BY_RELATION: Readonly<
 const zeroes = <K extends string>(keys: readonly K[]) =>
   Object.fromEntries(keys.map((key) => [key, 0])) as Record<K, number>;
 
-/** Other people's notifications naming the person as their actor. */
-const namingWhere = (id: number): Row => ({ actor: { id } });
+/**
+ * Other people's notifications naming the person as their actor. A
+ * `secretShared` one is deleted with its share, never rewritten.
+ */
+const namingWhere = (id: number): Row => ({ actor: { id }, type: { $ne: "secretShared" } });
 
 async function countAll(strapi: AnonymiseHost, id: number): Promise<AnonymiseCounts> {
   const deleted = zeroes(ANONYMISE_DELETED);
@@ -184,6 +194,7 @@ async function countAll(strapi: AnonymiseHost, id: number): Promise<AnonymiseCou
       .count({ where: { [field]: { id } } });
   }
   deleted.classifieds = await strapi.db.query(CLASSIFIED_UID).count({ where: { author: { id } } });
+  deleted.secretShares = await strapi.db.query(SECRET_SHARE_UID).count({ where: sharesOf(id) });
   const kept = zeroes(ANONYMISE_KEPT);
   for (const [key, { uid, field, documents }] of Object.entries(KEPT_BY_RELATION)) {
     kept[key as AnonymiseKeptClass] = await strapi.db.query(uid).count({
@@ -250,6 +261,7 @@ export async function deletePersonalRows(
     if (documentId) await strapi.documents(CLASSIFIED_UID).delete({ documentId });
   }
   deleted.classifieds = ads.length;
+  deleted.secretShares = await deleteShares(strapi as never, sharesOf(id));
   return deleted;
 }
 

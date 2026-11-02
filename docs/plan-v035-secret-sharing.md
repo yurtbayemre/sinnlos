@@ -1,11 +1,16 @@
 # Secret sharing (v0.35.0): design and plan
 
-Status: planned, not built yet (2026-11-01).
+Status: owner decisions confirmed 2026-11-01; built in v0.35.0. The few places where the build differs from the text below:
+
+- **Statuses by cause:** a refusal's HTTP status follows its cause (`SECRET_SHARE_REFUSALS` in `packages/domain/src/secret-share.ts`): `unavailable` is 409 while the other party is not eligible, 503 without a usable key and 410 after a committed cancellation; `busy` is 503 (§3.9).
+- **Plausible, also in an existing tab:** besides the root layout's rule (§3.10), the new-secret form and the reveal check the document itself. A tab opened while the module was off keeps an executed Plausible script across client navigation, so a document that ever loaded it reloads before a text can be typed or shown (`apps/web/src/components/secrets/clean-document.ts`).
+- **Live events in e2e:** the live-events case runs in its own stack (`run.mjs --live`, `pnpm --filter @sinnlos/e2e test:live`); the ordinary run keeps live events off.
+- **SQLite after a failed COMMIT:** the pool's `validate` (`apps/cms/config/database.ts`) refuses a connection still in a transaction, so a connection a failed COMMIT left open is disposed of instead of reused (§3.4).
 
 - **Owner request (2026-11-01):** a module that shares secrets, links and passwords, like an internal one-time secret, from user to user. External recipients maybe later; they may be too insecure for now.
 - **When:** built as v0.35.0, before v1.0.0-rc.1.
 - **Review:** Codex researched the design, then reviewed this plan in five rounds until it approved it (15, 11, 3 and 2 findings, all adopted below).
-- **Open:** the owner decisions in section 10, each with its recommended default.
+- **Owner decisions:** all nine of section 10 confirmed at their defaults (2026-11-01).
 
 ## 1. What it is, and what it promises
 
@@ -14,7 +19,7 @@ A person sends one short text (a password, a link, an access code, a note) to on
 **The promise** (for staff, the data-protection officer and the works council):
 
 - Only the named recipient can open a share, once, while both people are active staff. Other employees, department heads, editors and intranet admins cannot read it through the intranet; there is no admin view of shares and no export of their content. (An `admin_role` who exports a person's data for Art. 15 sees that person's share metadata: counterpart, times, state.)
-- The content is stored encrypted. It is deleted from the database when it is opened or revoked. At its expiry (at most 24 hours) it can no longer be opened, and it is deleted at the next successful cleanup (normally within a minute).
+- The content is stored encrypted. It is deleted from the database when it is opened or revoked. At its expiry (at most 24 hours) it can no longer be opened, and it is deleted by the next successful cleanups: each run handles at most 200 shares per step, so this is normally within a minute, while a backlog after an outage takes several runs.
 - The sender sees whether the share was retrieved (never the content), for 7 days. After that the remaining metadata is deleted.
 
 **What it does not promise** (written into `docs/security.md` and `docs/data-protection.md`):
@@ -23,7 +28,7 @@ A person sends one short text (a password, a link, an access code, a note) to on
 - "Retrieved" means the share was consumed by an authorised open attempt of the recipient; delivery of the text is not confirmed, and it never proves that a human read it. A response lost on the way, or a lost database acknowledgement at the moment of opening (the share is consumed, the answer is `busy`), loses the text (at most once).
 - After opening, the recipient can copy, screenshot or forward the text. Clipboard, browser extensions and password managers are outside the intranet's control.
 - A stolen signed-in session of the recipient can open the share, as with all other intranet content. Sign-out ends every session once the cms confirms the revocation (v0.34.0). Shares survive a sign-out and can be opened after a fresh sign-in.
-- Eligibility means the account as stored in the intranet (exists, not blocked, staff role), checked when a share is created, listed and opened; the identity provider's live status is not consulted. If a person is blocked or loses the staff role, their pending shares are cancelled at the next successful cleanup; a block or role loss undone before that cleanup leaves the share pending.
+- Eligibility means the account as stored in the intranet (exists, not blocked, staff role), checked when a share is created, listed and opened; the identity provider's live status is not consulted. If a person is blocked or loses the staff role, their pending shares are cancelled by a successful cleanup run that reaches them; a block or role loss undone before that leaves the share pending.
 - Notifications are an ordinary admin-visible type: an admin can see in the panel that "A sent B a secret" (never the content).
 
 ## 2. Scope
@@ -77,7 +82,7 @@ A person sends one short text (a password, a link, an access code, a note) to on
 
 ### 3.5 Eligibility
 
-Both parties must exist, be unblocked and hold a staff role at create and at reveal (persisted cms state, see section 1). In `list` and `findOne`, a pending share whose other party is not eligible keeps its stored state, is shown as "currently unavailable" and is left out of the recipient's pending inbox; `cancelled` appears only after a committed transition. The other party is shown in every state through the existing blocked-user sanitizer (`utils/sanitize-user-contact.ts`: `{ displayName, blocked }` for a blocked person). The janitor cancels pending shares of ineligible users at its next successful run. Anonymisation deletes transactionally (section 5). No hook in each block or role write path (cut; the semantics are stated in section 1).
+Both parties must exist, be unblocked and hold a staff role at create and at reveal (persisted cms state, see section 1). In `list` and `findOne`, a pending share whose other party is not eligible keeps its stored state, is shown as "currently unavailable" and is left out of the recipient's pending inbox; `cancelled` appears only after a committed transition. The other party is shown in every state through the existing blocked-user sanitizer (`utils/sanitize-user-contact.ts`: `{ displayName, blocked }` for a blocked person). The janitor cancels pending shares of ineligible users in its successful runs (at most 200 per step and run). Anonymisation deletes transactionally (section 5). No hook in each block or role write path (cut; the semantics are stated in section 1).
 
 ### 3.6 Admin panel
 
@@ -100,14 +105,14 @@ New cron job `secret-share-janitor`, every minute, bounded batches, registered r
 | `create`     | `POST /api/secret-shares` `{ recipient, text, lifetime: "1h" \| "24h" }` → `{ id, expiresAt }`                                                                                                                                                                                                                                                                   | staff                 |
 | `list`       | `GET /api/secret-shares?sentPage=` → `{ received: [pending, to me, eligible], sent: [mine: pending, and ended ones within their 7-day retention; with terminalAt], hasMore }`, metadata only; `sentPage` a bounded positive integer (validated like `utils/user-admin.ts` pages), 20 per page, ordered `created_at DESC, id DESC`, 21 rows fetched for `hasMore` | staff                 |
 | `findOne`    | `GET /api/secret-shares/:id` → metadata for its sender or recipient; anything else 404                                                                                                                                                                                                                                                                           | staff                 |
-| `reveal`     | `POST /api/secret-shares/:id/reveal` → `{ text }` once; otherwise 404, or 410 with a fixed code                                                                                                                                                                                                                                                                  | recipient             |
+| `reveal`     | `POST /api/secret-shares/:id/reveal` → `{ text }` once; otherwise 404, or a fixed code (Errors)                                                                                                                                                                                                                                                                  | recipient             |
 | `revoke`     | `POST /api/secret-shares/:id/revoke`                                                                                                                                                                                                                                                                                                                             | sender, while pending |
 | `recipients` | `GET /api/secret-shares/recipients?q=` → `{ id, displayName, department }` of eligible staff, not oneself                                                                                                                                                                                                                                                        | staff                 |
 
 - Fixed DTOs; `private` does not sanitise raw query results, so nothing else is returned. No `populate`, `fields`, `filters` or `sort` is accepted.
 - **Permissions:** six managed actions, 222 → **228**; 30 grants (six actions × five staff roles); explicit revocations for `public`, `guest` and `authenticated`. Snapshots, route matrix, README permission table and `prod-perm-diff.sql` follow. All routes stay outside the restricted-session (MFA pending) allowlist.
 - **Headers:** a cms middleware sets `Cache-Control: private, no-store` on `/api/secret-shares` and below, errors included.
-- **Errors:** fixed codes (`recipient`, `text`, `lifetime`, `quota`, `gone`, `unavailable`, `busy`); the text is never echoed.
+- **Errors:** fixed codes (`recipient`, `text`, `lifetime`, `quota`, `gone`, `unavailable`, `busy`); the text is never echoed. The status follows the cause (frozen in `packages/domain/src/secret-share.ts`, `SECRET_SHARE_REFUSALS`): 400 for `recipient`, `text` and `lifetime`; 429 `quota`; 410 `gone`; `unavailable` is 409 while the other party is not eligible (the share stays pending), 503 when the module has no usable key, 410 after a committed cancellation (the envelope did not open); 503 `busy`. `busy` is an unknown outcome: after a create a new pending share and its notification may exist (a lost COMMIT acknowledgement), so the web tells the sender to check the sent list before sending again.
 
 ### 3.10 Web
 

@@ -23,12 +23,23 @@ const nextConfig = {
   agentRules: false,
   // Don't advertise the framework in responses.
   poweredByHeader: false,
+  // v0.35: `next dev` logs every Server Action call with its arguments (on by
+  // default since Next 16.4), and createSecret's include the secret.
+  logging: { serverFunctions: false },
   // v0.34: an intranet is not for search engines. public/robots.txt says
   // Disallow: /, and every web response carries X-Robots-Tag, so a crawler
   // that reaches a URL anyway (a shared link to /sign-in) does not index
   // it. The cms's responses (/api, /admin) do not pass through Next.
+  // v0.35: the secret pages (their redirects, errors and the 404 of the
+  // switched-off module included) are never stored by a browser or a proxy.
   async headers() {
-    return [{ source: "/:path*", headers: [{ key: "X-Robots-Tag", value: "noindex, nofollow" }] }];
+    return [
+      { source: "/:path*", headers: [{ key: "X-Robots-Tag", value: "noindex, nofollow" }] },
+      {
+        source: "/secrets/:path*",
+        headers: [{ key: "Cache-Control", value: "private, no-store" }],
+      },
+    ];
   },
   // NOTE: no `images` config — nothing renders through next/image. Avatars
   // and document links use plain <img>/<a> (radix Avatar's <img>), which

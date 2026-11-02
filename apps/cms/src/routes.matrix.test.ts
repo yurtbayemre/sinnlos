@@ -5,6 +5,7 @@ import {
   CUSTOM_ACTION_GRANTS,
   PERMISSION_MATRIX,
   REVOKED_PERMISSIONS,
+  SECRET_SHARE_ACTIONS,
   computeDesiredGrants,
 } from "./bootstrap/permission-matrix";
 import { ADMIN, MODERATORS } from "./bootstrap/roles";
@@ -423,6 +424,15 @@ const GOLDEN: Record<string, PolicySpec[]> = {
   "api::kudos.kudos.create": [],
   "api::kudos.kudos.delete": ADMIN_OR_EDITOR,
   "api::kudos.kudos.celebrations": [],
+
+  // v0.35.0: secret sharing; the controller checks the staff caller and the
+  // share's parties (utils/secret-shares.ts).
+  "api::secret-share.secret-share.create": [],
+  "api::secret-share.secret-share.list": [],
+  "api::secret-share.secret-share.findOne": [],
+  "api::secret-share.secret-share.reveal": [],
+  "api::secret-share.secret-share.revoke": [],
+  "api::secret-share.secret-share.recipients": [],
 
   "api::lesson.lesson.find": training("lesson"),
   "api::lesson.lesson.findOne": training("lesson"),
@@ -1018,9 +1028,12 @@ describe("route → policy matrix (S01)", async () => {
         "plugin::users-permissions.user.create",
         "plugin::users-permissions.user.update",
         "plugin::users-permissions.user.destroy",
+        // v0.35.0: secret sharing (staff only; anonymous callers never).
+        ...SECRET_SHARE_ACTIONS,
       ]);
+      // No role holds the auth flows or the generic user writes.
       const granted = new Set(computeDesiredGrants().map((grant) => grant.action));
-      for (const action of REVOKED_PERMISSIONS.public)
+      for (const action of REVOKED_PERMISSIONS.public.filter((a) => a.startsWith("plugin::")))
         expect(granted.has(action), action).toBe(false);
     });
   });

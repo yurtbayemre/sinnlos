@@ -6,10 +6,14 @@
  *   2. every variable infra/docker-compose.yml and the Traefik overlay
  *      interpolate appears in infra/.env.example,
  *   3. Strapi telemetry is off and the cms cron jobs are on in both
- *      examples, as compose defaults them.
+ *      examples, as compose defaults them,
+ *   4. infra/.env.example and infra/deploy.sh's preflight name every
+ *      FEATURES_OFF switch (v0.35: the preflight refuses a name it lacks).
  */
 import { readdirSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
+
+import { FEATURE_NAMES, MODULE_NAMES } from "../packages/domain/src/features";
 
 const read = (relative: string): string =>
   readFileSync(new URL(relative, import.meta.url), "utf8").replace(/\r\n/g, "\n");
@@ -78,5 +82,20 @@ describe("cms runtime defaults in both examples", () => {
     const lines = example.split("\n");
     expect(lines).toContain("STRAPI_TELEMETRY_DISABLED=true");
     expect(lines).toContain("CRON_ENABLED=true");
+  });
+});
+
+describe("FEATURES_OFF switch names", () => {
+  const names = [...MODULE_NAMES, ...FEATURE_NAMES];
+
+  it("infra/.env.example names every module and feature", () => {
+    const comment = INFRA_EXAMPLE.slice(0, INFRA_EXAMPLE.indexOf("\nFEATURES_OFF="));
+    const block = comment.slice(comment.lastIndexOf("# Modules:")).replace(/\n# /g, " ");
+    expect(names.filter((name) => !new RegExp(`[ ,]${name}[ ,.]`).test(block))).toEqual([]);
+  });
+
+  it("infra/deploy.sh's preflight accepts exactly these names", () => {
+    const list = /n = split\("([a-z -]+)", k, " "\)/.exec(read("./deploy.sh"))?.[1] ?? "";
+    expect(list.split(" ").sort()).toEqual([...names].sort());
   });
 });

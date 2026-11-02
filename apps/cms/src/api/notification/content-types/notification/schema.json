@@ -11,7 +11,15 @@
   "attributes": {
     "type": {
       "type": "enumeration",
-      "enum": ["announcement", "comment", "event", "kudos", "trainingDue", "trainingExpired"],
+      "enum": [
+        "announcement",
+        "comment",
+        "event",
+        "kudos",
+        "trainingDue",
+        "trainingExpired",
+        "secretShared"
+      ],
       "required": true
     },
     "title": { "type": "string", "required": true },

@@ -2,8 +2,8 @@
 
 Read-only checks to run on the production host. None of them change data.
 The SQL runs inside `BEGIN TRANSACTION READ ONLY` … `ROLLBACK`, and no secret
-values are printed. The one exception, a one-time cleanup that changes data
-only when armed, is described at the end.
+values are printed. Two exceptions, described at the end, change data: a
+one-time cleanup (only when armed) and the v0.35 rollback SQL.
 
 | File                                  | What it shows                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | ------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -103,3 +103,31 @@ A real comment by the smoke author's account would match as well; check the
 dry run's titles first. Deleted notifications come back only from a backup.
 `apps/cms/src/utils/cleanup-live-smoke-notifications.pg.test.ts` runs the file
 against Postgres 16.
+
+## Rollback from v0.35: `secret-shares-rollback.sql` (changes data)
+
+Part of the rollback to v0.34.0 ([docs/UPGRADE.md](../../docs/UPGRADE.md),
+"Upgrading to v0.35.0"): after the retag, it deletes **every** secret share
+and every `secretShared` notification in one transaction and prints how many
+went. v0.34 has no janitor, so the shares' metadata would otherwise stay
+forever, and its bell would show the notifications with a dead link. It has
+no dry run: it is the rollback step itself.
+
+```bash
+docker exec -i infra-db-1 sh -c 'psql -X -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"' \
+  < infra/diagnostics/secret-shares-rollback.sql
+```
+
+It works in the cms's schema only, `public` by default. When the cms runs
+with another `DATABASE_SCHEMA`, name it (a space in the name as `\ `):
+
+```bash
+docker exec -i -e PGOPTIONS='-c sinnlos.schema=<DATABASE_SCHEMA>' infra-db-1 \
+  sh -c 'psql -X -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"' \
+  < infra/diagnostics/secret-shares-rollback.sql
+```
+
+Tables of the same names in other schemas are never touched. Where the
+schema has no `secret_shares` table (a database that never ran v0.35, or
+the wrong schema) it stops with `relation "secret_shares" does not exist`
+and changes nothing.

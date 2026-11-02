@@ -23,6 +23,7 @@ What changed for the operator between v0.25 and this release. The release notes 
 8. **Data protection** (v0.28): nothing to set. New nightly jobs from 03:20 to 03:56; optional `FEATURES_OFF`, `TRAINING_EVIDENCE_RETENTION_YEARS` and `SEARCH_LOG_RETENTION_DAYS`.
 9. **This release** (v0.29): nothing to set. `DATETIME_LEGACY_ZONE` and `DATETIME_LEGACY_UTC_UNTIL` are no longer read; delete them from `infra/.env`. Optional: the branding keys ([INSTALL.md](INSTALL.md)), `SITE_ALLOW_CIDRS` and `infra/ops-check.sh` ([OPERATIONS.md](OPERATIONS.md#monitoring)).
 10. **Upload references** (v0.34): before the first v0.34 deploy, review the existing `/uploads/` links in texts once with `infra/diagnostics/upload-references.sql` ([OPERATIONS.md](OPERATIONS.md#upload-references)); from v0.34 a file opens only for readers of its content.
+11. **Secret sharing** (v0.35): nothing to set. The new module `secrets` is on after the upgrade; while it is on, no page loads Plausible. To wait for your works council, add `secrets` to `FEATURES_OFF` first (the v0.35.0 note below).
 
 ## Update procedure (production-safe)
 
@@ -155,6 +156,11 @@ was set to 1.` / ``(Use `node --trace-warnings ...` …)``. Strapi's
   Node 24 then waits 1 ms instead and the task runs on time. Harmless;
   first seen in the v0.17.0 watch (2026-10-19), possible on every
   release with Node 24;
+- since v0.35 the cms logs `[admin-permissions] removed 1 Content Manager
+permission(s) on hidden types: api::secret-share.secret-share` at every
+  boot: Strapi's reset of the super admin grants read on every type again,
+  and the boot takes it back for the secret shares. Expected; anything
+  else in that line is not;
 - the web may log `The Server Reference ID did not match the expected
 format`: a scanner posted to a page with a made-up Server Action id,
   and Next refused it before any code ran. Harmless; first seen
@@ -163,6 +169,28 @@ format`: a scanner posted to a page with a made-up Server Action id,
 ## Release notes
 
 Newest first. Older releases: [archive/deployment-history.md](archive/deployment-history.md).
+
+**Upgrading to v0.35.0 (secret sharing).** No required env, no edge change. The schema gains one table.
+
+- **New module `secrets`** ("Geheimnisse" / "Secrets"): one employee sends one short text (a password, a link, an access code; at most 8 KiB) to one colleague, who opens it once with an explicit click; the stored copy is deleted then. Lifetime 1 hour (the default) or 24 hours; staff only, no guests. The sender sees for 7 days whether it was retrieved, never the text. What it promises and what not, for your data-protection officer and works council: [security.md](security.md#secret-sharing) and [data-protection.md](data-protection.md), "Geheimnisse".
+- **On after the upgrade**, like every module. To wait for the works council's agreement, add `secrets` to `FEATURES_OFF` in `infra/.env` before the deploy and remove it after the agreement. This note informs; the software does not enforce the consent.
+- **Analytics:** while `secrets` is on, no page loads the Plausible script, also when `PLAUSIBLE_SCRIPT_URL` and `PLAUSIBLE_DOMAIN` are set (the web logs one line at start). To keep Plausible, switch `secrets` off.
+- **Key:** derived from `ENCRYPTION_KEY`; nothing new to set. With a key shorter than 32 characters the cms logs one error line at boot and the module refuses to send or open; the rest of the intranet runs. Never rotate `ENCRYPTION_KEY` to purge shares ([OPERATIONS.md](OPERATIONS.md#secret-shares-v035)).
+- **At the first boot:** the table `secret_shares` with its indexes, the notification type `secretShared` (not in the e-mail digest), six new permission actions for the five staff roles and one more cron job, `secret-share-janitor`, every minute, also with the module off. The cms logs `[bootstrap] granted 30 permission(s) across intranet roles` and `[bootstrap] permission drift: none (report-only check of 228 managed actions)`, and no "revoked" line.
+- **Restore:** `infra/restore-db.sh apply` closes every restored share before the site reopens: their texts are deleted, pending ones cancelled, their notifications deleted ([OPERATIONS.md](OPERATIONS.md#restoring-a-database-dump)).
+- **Rollback** to v0.34.0, in this order:
+  1. remove `secrets` from `FEATURES_OFF` if it is there (v0.34 refuses the unknown name at the cms boot, the web start and in `infra/deploy.sh`);
+  2. retag both images to v0.34.0 (`84ebeb217a05`);
+  3. run `infra/diagnostics/secret-shares-rollback.sql`. It deletes **every** share and every `secretShared` notification in one transaction and prints the schema and the counts; v0.34 has no janitor, so the shares' metadata would otherwise stay forever:
+
+     ```bash
+     docker exec -i infra-db-1 sh -c 'psql -X -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"' \
+       < infra/diagnostics/secret-shares-rollback.sql
+     ```
+
+     It works in the schema `public`. A cms with another `DATABASE_SCHEMA` names it by adding `-e PGOPTIONS='-c sinnlos.schema=<DATABASE_SCHEMA>'` after `docker exec -i` (a space in the name as `\ `; [infra/diagnostics/README.md](../infra/diagnostics/README.md)).
+
+  The rollback is complete only when the SQL ran successfully. Until then v0.34's bell shows those notifications with its fallback icon and a dead link (they are not in the digest). The empty table and the inert permission rows stay (`DATABASE_FORCE_MIGRATION` stays off); v0.34 writes nothing to the table. v0.34's `infra/restore-db.sh` does not close restored shares: after a restore on v0.34 of a backup taken under v0.35, run the SQL again before the site opens.
 
 **Upgrading to v0.34.0 (security hardening).** No required env, no edge change, no schema change. The findings of the security review of v0.33.4.
 

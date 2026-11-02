@@ -85,6 +85,10 @@ export async function requireReady(url, signal) {
 
 /** @param {string[]} args */
 export async function main(args) {
+  // v0.35: `--live` first runs this stack with live events on (cms and
+  // web), for secrets.spec.ts's `secret-live` (package script test:live).
+  const live = args[0] === "--live";
+  if (live) args = args.slice(1);
   const checkOnly = args.length === 1 && args[0] === "--check";
   assert.ok(!args.includes("--check") || checkOnly, "Use --check alone");
   const runId = `sinnlos-e2e-${randomBytes(12).toString("hex")}`;
@@ -96,7 +100,7 @@ export async function main(args) {
   await writeFile(join(runtime, "owner"), runId, { mode: 0o600, flag: "wx" });
   await mkdir(logs, { recursive: true });
   const secret = () => randomBytes(32).toString("hex");
-  const secrets = Array.from({ length: 19 }, secret);
+  const secrets = Array.from({ length: 20 }, secret);
   const [
     dbPassword,
     leadPassword,
@@ -107,6 +111,7 @@ export async function main(args) {
     privacyPassword,
     leaverPassword,
     a11yPassword,
+    guestPassword,
     appKey1,
     appKey2,
     apiSalt,
@@ -202,7 +207,7 @@ export async function main(args) {
       DEMO_MODE: "0",
       ENTRA_ENABLED: "0",
       AUTH_LOCAL_ENABLED: "1",
-      LIVE_EVENTS_DISABLED: "1",
+      ...(live ? {} : { LIVE_EVENTS_DISABLED: "1" }),
       REVALIDATE_SECRET: revalidate,
       INTERNAL_UPLOAD_TOKEN: upload,
       // v0.28: one module off for the whole run (cms and web read the same
@@ -232,6 +237,10 @@ export async function main(args) {
       E2E_LEAVER_PASSWORD: leaverPassword,
       // v0.29: the accessibility spec's own admin (it enrolls and completes a lesson).
       E2E_A11Y_PASSWORD: a11yPassword,
+      // v0.35: a guest, who gets no secrets (secrets.spec.ts).
+      E2E_GUEST_PASSWORD: guestPassword,
+      // The cms's live pings go to this run's web (--live only).
+      ...(live ? { WEB_INTERNAL_URL: "http://web:3000" } : {}),
       // v0.27: only the admins need a second factor here, so the older specs
       // (editor, lead, member) sign in as before while mfa.spec.ts and
       // invite.spec.ts go through the mandatory enrollment.
@@ -326,6 +335,7 @@ export async function main(args) {
       "a11y",
       "admin",
       "editor",
+      "guest",
       "inviter",
       "lead",
       "leaver",
@@ -392,6 +402,25 @@ export async function main(args) {
               SINNLOS_E2E_BASE_URL: baseURL,
               SINNLOS_E2E_FIXTURES: join(runtime, "fixtures.json"),
               SINNLOS_E2E_MAILPIT: `http://${mailpitAddress}`,
+              SINNLOS_E2E_LIVE: live ? "1" : "",
+              // v0.35: psql in this run's database, for the one change a
+              // browser cannot make (a secret's expiry, secrets.spec.ts).
+              SINNLOS_E2E_PSQL: JSON.stringify([
+                ...dockerPrefix,
+                "exec",
+                "-i",
+                `${runId}-db-1`,
+                "psql",
+                "-X",
+                "-q",
+                "-tA",
+                "-v",
+                "ON_ERROR_STOP=1",
+                "-U",
+                "sinnlos_e2e",
+                "-d",
+                "sinnlos_e2e",
+              ]),
             },
             timeout: 6 * 60_000,
             signal: controller.signal,

@@ -83,4 +83,19 @@ describe("APP_TIME_ZONE in the web", () => {
     vi.stubEnv("FEATURES_OFF", "events,chat");
     expect(() => register()).toThrow(/chat/);
   });
+
+  it("register() says once that Plausible stays off while the module secrets is on (v0.35)", () => {
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
+    const line = "[site] Plausible is configured but not loaded while the module secrets is on";
+    vi.stubEnv("APP_TIME_ZONE", "Europe/Berlin");
+    vi.stubEnv("FEATURES_OFF", "");
+    vi.stubEnv("PLAUSIBLE_SCRIPT_URL", "https://plausible.example.com/js/script.js");
+    vi.stubEnv("PLAUSIBLE_DOMAIN", "intranet.example.com");
+    register();
+    expect(info).toHaveBeenCalledWith(line);
+    info.mockClear();
+    vi.stubEnv("FEATURES_OFF", "secrets");
+    register();
+    expect(info).not.toHaveBeenCalledWith(line);
+  });
 });

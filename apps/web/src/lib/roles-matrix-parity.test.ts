@@ -256,6 +256,7 @@ const SECTION_READS: Record<ReadSection, string[]> = {
   marketplace: [`${A.classified}.find`, `${A.classified}.findOne`],
   duties: [`${A.dutyPlan}.find`, `${A.dutyPlan}.findOne`],
   kpis: [`${A.kpi}.find`, `${A.kpi}.findOne`],
+  secrets: ["api::secret-share.secret-share.list", "api::secret-share.secret-share.findOne"],
   training: [
     `${A.course}.find`,
     `${A.lesson}.find`,

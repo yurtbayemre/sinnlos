@@ -9,7 +9,13 @@
 
 /** notification.type (schema enum). */
 export type NotificationTitleType =
-  "announcement" | "comment" | "event" | "kudos" | "trainingDue" | "trainingExpired";
+  | "announcement"
+  | "comment"
+  | "event"
+  | "kudos"
+  | "trainingDue"
+  | "trainingExpired"
+  | "secretShared";
 
 /** The values a title template names. */
 export interface NotificationTitleParams {
@@ -40,6 +46,7 @@ export const NOTIFICATION_TITLES: Readonly<
       { param: "subject", fallback: "a course" },
       '" has expired, please repeat it',
     ],
+    secretShared: [{ param: "actor", fallback: "Someone" }, " sent you a secret"],
   },
   de: {
     announcement: ["Neuigkeit: ", { param: "subject", fallback: "Ohne Titel" }],
@@ -57,6 +64,7 @@ export const NOTIFICATION_TITLES: Readonly<
       { param: "subject", fallback: "ein Kurs" },
       "“ ist abgelaufen, bitte wiederholen",
     ],
+    secretShared: [{ param: "actor", fallback: "Jemand" }, " hat Ihnen ein Geheimnis geschickt"],
   },
 };
 

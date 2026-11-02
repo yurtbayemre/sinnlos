@@ -11,6 +11,8 @@ Where sinnlos stands.
 
 | Version           | Date                    | Theme                                                                                          |
 | ----------------- | ----------------------- | ---------------------------------------------------------------------------------------------- |
+| v0.35.0           | —                       | Secret sharing between colleagues: opened once, stored encrypted                               |
+| v0.30.0 – v0.34.0 | 2026-10-26 – 2026-11-01 | Scale, tidy, CI images and the security hardening of the v0.33.4 review                        |
 | v0.29.0           | —                       | Polish: branding, readiness and monitoring, accessibility, docs split, the v0.25 upgrade floor |
 | v0.28.0           | 2026-10-23              | Data protection: export, anonymisation, training evidence, retention, module switches          |
 | v0.27.0           | 2026-10-23              | Accounts: invitations, password reset, second factor                                           |

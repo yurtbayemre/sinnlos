@@ -1,5 +1,8 @@
+import { SECRET_SHARE_INDEXES } from "@sinnlos/domain";
+
 import { SCHEDULED_UIDS, UNPUBLISH_SCHEDULED_UIDS } from "../utils/authoring-uids";
 import { CONTENT_VERSION_UID } from "../utils/document-lock";
+import { SECRET_SHARE_UID } from "../utils/secret-shares";
 import { WIKI_REVISION_UID } from "../utils/wiki-revisions";
 
 /**
@@ -25,6 +28,11 @@ import { WIKI_REVISION_UID } from "../utils/wiki-revisions";
  *     digest and the janitors (utils/notification-source.ts), every thread
  *     and reaction read, and the acknowledgement report index go by (v0.31,
  *     #171). Plain.
+ *   - secret_shares (v0.35.0, @sinnlos/domain SECRET_SHARE_INDEXES):
+ *     UNIQUE (document_id), the opaque id every route and the notification
+ *     link go by, and the reads of the inbox, the sent list, the daily cap
+ *     and the janitor: (recipient_id, state), (sender_id, created_at),
+ *     (state, expires_at), (terminal_at).
  *
  * `CREATE … INDEX IF NOT EXISTS`, on Postgres and SQLite. Strapi's schema
  * sync never drops an index it did not create (@strapi/database
@@ -146,6 +154,22 @@ export function documentIndexSpecs(strapi: DocumentIndexHost): IndexSpec[] {
   pair("api::comment.comment", "target");
   pair("api::reaction.reaction", "target");
   pair("api::acknowledgement.acknowledgement", "target");
+  const shares = metaOf(strapi, SECRET_SHARE_UID);
+  for (const { attributes, unique } of SECRET_SHARE_INDEXES) {
+    const columns = attributes.map((attribute) =>
+      columnOf(
+        shares,
+        attribute,
+        attribute.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`),
+      ),
+    );
+    specs.push({
+      name: `${shares.tableName}_${columns.join("_")}_${unique ? "uq" : "idx"}`,
+      table: shares.tableName,
+      columns,
+      unique,
+    });
+  }
   return specs;
 }
 

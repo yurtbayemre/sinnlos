@@ -4,7 +4,9 @@
  * load before the `strapi` global exists) and holds no schedule state of its
  * own: the overlap flag lives in the closure `buildCronTasks` returns.
  *
- * Order: the scheduled publisher runs every minute (decision 06 §D); the
+ * Order: the scheduled publisher and (v0.35.0) the secret-share janitor
+ * run every minute (decision 06 §D; ended secrets must go within a minute,
+ * whatever any backup holds, docs/plan-v035-secret-sharing.md §3.8); the
  * janitors run from 03:20 to 03:56 APP_TIME_ZONE; the training expiry
  * reminders at 06:45, so the digest that mails at 07:30 carries them. When the host's nightly backup runs (infra/backup/pg-backup.sh,
  * or the host's backup-run at 04:00; docs/OPERATIONS.md, "Automated daily backups (cron)") does not
@@ -62,6 +64,7 @@ import { sweepAnonymised, type AnonymiseHost } from "../utils/anonymise";
 import { pruneTrainingEvidence } from "../utils/training-evidence";
 import { purgeExpiredClassifieds, type ClassifiedJanitorStrapi } from "./purge-expired-classifieds";
 import { runScheduledPublishing, type ScheduledPublishStrapi } from "./scheduled-publish";
+import { runSecretShareJanitor, type SecretShareJanitorStrapi } from "./secret-share-janitor";
 import { sweepOrphanedUploads } from "./sweep-orphaned-uploads";
 import { sendTrainingReminders, type TrainingReminderStrapi } from "./training-reminders";
 import { unlinkPollVoters, type PollVoterJanitorStrapi } from "../utils/poll-voter-retention";
@@ -80,6 +83,7 @@ export type CronStrapi = DigestStrapi &
   ScheduledPublishStrapi &
   TrainingReminderStrapi &
   SearchStrapi &
+  SecretShareJanitorStrapi &
   CronStatusStrapi;
 
 /** One cron task: a pure description, no state. */
@@ -122,6 +126,18 @@ export function cronRegistry(
         const result = await runScheduledPublishing(strapi);
         const failed = result.failed.length;
         if (failed > 0) reportRunFailure(null, `${failed} scheduled change(s) failed`);
+      },
+    },
+    // v0.35.0: secret shares past their expiry or with an ineligible party
+    // end, those of removed accounts and ended ones after 7 days go
+    // (secret-share-janitor.ts). Every minute, whatever FEATURES_OFF says:
+    // it is erasure.
+    {
+      name: "secret-share-janitor",
+      rule: "* * * * *",
+      tz: timeZone,
+      fn: async (strapi) => {
+        await runSecretShareJanitor(strapi);
       },
     },
     // v0.28: re-applies the anonymisation's deletions and notification

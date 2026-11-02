@@ -56,6 +56,8 @@ function fixturePassword(key) {
 async function start() {
   assert.equal(process.cwd(), appDir, "Run this starter only in the CMS image");
   assert.ok(existsSync("/.dockerenv"), "The E2E starter requires its disposable Docker container");
+  // v0.35: the live-events run (run.mjs --live) points the cms at its web.
+  const live = process.env.WEB_INTERNAL_URL !== undefined;
   const expected = {
     NODE_ENV: "production",
     TZ: "UTC",
@@ -66,7 +68,7 @@ async function start() {
     ENV_PATH: "/tmp/no-such-e2e.env",
     CRON_ENABLED: "0",
     DIGESTS_DISABLED: "1",
-    LIVE_EVENTS_DISABLED: "1",
+    ...(live ? { WEB_INTERNAL_URL: "http://web:3000" } : { LIVE_EVENTS_DISABLED: "1" }),
     ENTRA_ENABLED: "0",
     AUTH_LOCAL_ENABLED: "1",
     SEED_DEMO_DATA: "0",
@@ -77,6 +79,7 @@ async function start() {
   for (const [key, value] of Object.entries(expected)) {
     assert.equal(process.env[key], value, `Unexpected E2E setting: ${key}`);
   }
+  if (live) assert.equal(process.env.LIVE_EVENTS_DISABLED, undefined, "Live events must be on");
   assert.ok(!process.env.DATABASE_URL, "DATABASE_URL is not supported by the E2E starter");
   assert.equal(process.env.DATABASE_SCHEMA ?? "public", "public", "E2E uses a fresh public schema");
   assert.ok(process.env.DATABASE_PASSWORD, "The disposable database requires a password");
@@ -135,6 +138,12 @@ async function start() {
       a11y: {
         email: "a11y@e2e.test",
         password: fixturePassword("E2E_A11Y_PASSWORD"),
+        documentId: "",
+      },
+      // v0.35 (secrets.spec.ts): a guest, who neither sends nor receives secrets.
+      guest: {
+        email: "guest@e2e.test",
+        password: fixturePassword("E2E_GUEST_PASSWORD"),
         documentId: "",
       },
     },
@@ -404,7 +413,7 @@ async function start() {
     2,
     "Expected two published documents",
   );
-  assert.equal(await cms.db.query(userUid).count(), 8, "Expected eight local users");
+  assert.equal(await cms.db.query(userUid).count(), 9, "Expected nine local users");
   assert.equal(await cms.db.query(teamUid).count(), 2, "Expected two teams");
   for (const [key, fixture] of Object.entries(fixtures.users)) {
     const user = await cms.db.query(userUid).findOne({
