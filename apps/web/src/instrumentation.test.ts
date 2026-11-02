@@ -84,6 +84,33 @@ describe("APP_TIME_ZONE in the web", () => {
     expect(() => register()).toThrow(/chat/);
   });
 
+  it("register() logs the secret roles like the cms and refuses a bad list (v0.36)", () => {
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
+    vi.stubEnv("APP_TIME_ZONE", "Europe/Berlin");
+    vi.stubEnv("FEATURES_OFF", "");
+    vi.stubEnv("SECRETS_SEND_ROLES", "");
+    vi.stubEnv("SECRETS_RECEIVE_ROLES", undefined);
+    register();
+    expect(info).toHaveBeenCalledWith("[secrets] send: all staff; receive: all staff");
+    vi.stubEnv("SECRETS_SEND_ROLES", "Team_Lead, department_head");
+    register();
+    expect(info).toHaveBeenCalledWith(
+      "[secrets] send: department_head, team_lead; receive: all staff",
+    );
+    // Any of these makes the start fail: Next answers every request with 500.
+    for (const [key, value] of [
+      ["SECRETS_SEND_ROLES", "guest"],
+      ["SECRETS_SEND_ROLES", " , "],
+      ["SECRETS_RECEIVE_ROLES", "authenticated"],
+      ["SECRETS_RECEIVE_ROLES", "member,boss"],
+    ]) {
+      vi.stubEnv("SECRETS_SEND_ROLES", "");
+      vi.stubEnv("SECRETS_RECEIVE_ROLES", "");
+      vi.stubEnv(key, value);
+      expect(() => register(), `${key}=${value}`).toThrow(key);
+    }
+  });
+
   it("register() says once that Plausible stays off while the module secrets is on (v0.35)", () => {
     const info = vi.spyOn(console, "info").mockImplementation(() => {});
     const line = "[site] Plausible is configured but not loaded while the module secrets is on";

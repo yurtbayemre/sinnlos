@@ -5,9 +5,11 @@
  * loading instrumentation hook: …" and answers every request with 500, so
  * the healthcheck fails instead of pages quietly computing deadlines or
  * rendering dates in a wrong zone. The same holds for an unknown
- * FEATURES_OFF value (v0.28, lib/switches.ts), which refuses the cms boot.
+ * FEATURES_OFF value (v0.28, lib/switches.ts), which refuses the cms boot,
+ * and for a bad SECRETS_SEND_ROLES or SECRETS_RECEIVE_ROLES (v0.36,
+ * lib/secret-roles.ts).
  */
-import { featuresOff } from "@sinnlos/domain";
+import { featuresOff, secretRoles, secretRolesLine } from "@sinnlos/domain";
 import { canonicalTimeZone, resolveAppTimeZone } from "./lib/plain-date";
 import { analyticsScript, plausibleScript } from "./lib/site-config";
 
@@ -52,6 +54,8 @@ export function register(): void {
   if (warning) console.warn(warning);
   const off = [...featuresOff(process.env)].sort();
   console.info(off.length ? `[switches] off: ${off.join(", ")}` : "[switches] everything on");
+  // The same line as the cms boot: the deploy compares the two.
+  console.info(secretRolesLine(secretRoles(process.env)));
   if (plausibleScript(process.env) && !analyticsScript(process.env)) {
     console.info("[site] Plausible is configured but not loaded while the module secrets is on");
   }
