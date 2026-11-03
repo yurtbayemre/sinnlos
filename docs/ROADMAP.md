@@ -11,6 +11,7 @@ Where sinnlos stands.
 
 | Version           | Date                    | Theme                                                                                          |
 | ----------------- | ----------------------- | ---------------------------------------------------------------------------------------------- |
+| v1.0.0-rc.1       | 2026-11-03              | Release candidate: the v0.36.0 code, one week of soak on the owner's instance                  |
 | v0.36.0           | 2026-11-02              | Secret sharing by role: env lists of who may send and who may receive                          |
 | v0.35.0           | 2026-11-02              | Secret sharing between colleagues: opened once, stored encrypted                               |
 | v0.30.0 – v0.34.0 | 2026-10-26 – 2026-11-01 | Scale, tidy, CI images and the security hardening of the v0.33.4 review                        |
