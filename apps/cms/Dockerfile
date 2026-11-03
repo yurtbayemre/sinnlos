@@ -3,7 +3,7 @@
 # (and so deps and builder) and `runner` both start FROM this stage. A stage
 # alias rather than a build ARG, because Dependabot's docker updater reads
 # FROM lines only: a digest in an ARG default would never be bumped again.
-FROM node:24-alpine@sha256:06d7adf3e0ef61a13f1d28682726366f97a15aa1888c934d3ecec86c33918b53 AS node-base
+FROM node:24-alpine@sha256:8a32c8cf649a49915a66e81e7a609223c708d0adabf288ee3f4077d765542f85 AS node-base
 
 FROM node-base AS base
 # No compiler: better-sqlite3 13 ships its N-API binaries in the package
