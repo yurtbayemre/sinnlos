@@ -23,9 +23,9 @@
     "test:e2e": "pnpm --filter @sinnlos/e2e test"
   },
   "devDependencies": {
-    "prettier": "^3.9.10",
-    "vite": "^8.3.5",
-    "vitest": "^5.0.5"
+    "prettier": "^3.10.1",
+    "vite": "^8.3.8",
+    "vitest": "^5.1.0"
   },
   "engines": {
     "node": "^22.13.0 || ^24.0.0",
