@@ -28,6 +28,13 @@ describe("the root viewport", () => {
   });
 });
 
+describe("the root referrer policy", () => {
+  it("sends no Referer to another origin and keeps it within this one", async () => {
+    // Next renders it as <meta name="referrer" content="same-origin">.
+    expect((await generateMetadata()).referrer).toBe("same-origin");
+  });
+});
+
 describe("the root branding", () => {
   afterEach(() => vi.unstubAllEnvs());
 

@@ -16,10 +16,19 @@ const inter = Inter({ subsets: ["latin"], variable: "--font-inter", display: "sw
  * SITE_ICON_URL replaces the bundled icons. The bundled ones live in
  * public/, not in the app/ file conventions, because Next would always add a
  * convention favicon next to configured icons.
+ *
+ * `referrer: "same-origin"` (v1.1, Mermaid): a request to another origin
+ * carries no Referer, one to this origin keeps it. The edge's header says
+ * strict-origin-when-cross-origin, which would tell an external host the
+ * intranet's origin; a diagram's image shape (`A@{ img: … }`) fetches its
+ * picture before any sanitizer runs and has no referrerpolicy of its own, as
+ * Markdown images have. The meta tag wins over the header. An element's own
+ * referrerpolicy still wins over both (the YouTube iframe needs its origin).
  */
 export async function generateMetadata(): Promise<Metadata> {
   const { name, iconUrl } = brand(process.env);
   return {
+    referrer: "same-origin",
     title: {
       default: name ?? `${DEFAULT_SITE_NAME} Intranet`,
       // parseSiteName refuses a name with "%s": Next substitutes every one.
