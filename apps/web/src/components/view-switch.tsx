@@ -1,4 +1,5 @@
 import Link from "next/link";
+import type { Route } from "next";
 import type { LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -21,7 +22,7 @@ export function ViewSwitch({ label, items }: { label: string; items: ViewSwitchI
       {items.map(({ href, active, icon: Icon, text }) => (
         <Link
           key={href}
-          href={href}
+          href={href as Route}
           aria-current={active ? "page" : undefined}
           className={cn(
             "inline-flex items-center gap-1.5 rounded-[10px] px-3 py-1.5 text-sm font-medium transition-colors",
