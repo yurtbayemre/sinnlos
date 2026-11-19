@@ -7,7 +7,7 @@ import { useCleanDocument } from "@/components/secrets/clean-document";
 import { Button } from "@/components/ui/button";
 import { downloadBlob } from "@/lib/browser-download";
 import {
-  isTooMuchData,
+  createQrMaker,
   pngBlob,
   textPayload,
   vcardPayload,
@@ -44,7 +44,8 @@ const INPUT =
  * of them, and they stay locked until the document is known to be free of analytics
  * (useCleanDocument, as on the secrets pages). The picture's alt text names the kind of
  * content, never the content (a Wi-Fi password). Refusals and "too much data" come through
- * a live region; a change of any field drops the picture it no longer matches.
+ * a live region; a change of any field, of the kind or of the size drops the picture it no
+ * longer matches, and an answer still on its way (the library loads on the first click).
  */
 export function QrTool() {
   const t = useTranslations("tools.qr");
@@ -55,17 +56,23 @@ export function QrTool() {
   const [size, setSize] = useState<Size>("medium");
   const [made, setMade] = useState<{ kind: Kind; png: string; svg: string } | null>(null);
   const [issue, setIssue] = useState<QrIssue | "failed" | null>(null);
+  const [maker] = useState(createQrMaker);
 
-  const edit = (change: Partial<typeof EMPTY>) => {
-    setFields((current) => ({ ...current, ...change }));
+  // Whatever is shown or still being made no longer matches the fields after any change.
+  const drop = () => {
+    maker.invalidate();
     setMade(null);
     setIssue(null);
   };
 
+  const edit = (change: Partial<typeof EMPTY>) => {
+    setFields((current) => ({ ...current, ...change }));
+    drop();
+  };
+
   const generate = async (event: React.FormEvent) => {
     event.preventDefault();
-    setMade(null);
-    setIssue(null);
+    drop();
     const built =
       kind === "text"
         ? textPayload(fields.text)
@@ -76,18 +83,11 @@ export function QrTool() {
       setIssue(built.issue);
       return;
     }
-    try {
-      // The library loads here, so no other page carries it.
-      const { default: QRCode } = await import("qrcode");
-      const options = { errorCorrectionLevel: "M", width: SIZES[size] } as const;
-      const [png, svg] = await Promise.all([
-        QRCode.toDataURL(built.payload, options),
-        QRCode.toString(built.payload, { ...options, type: "svg" }),
-      ]);
-      setMade({ kind, png, svg });
-    } catch (error) {
-      setIssue(isTooMuchData(error) ? "tooMuchData" : "failed");
-    }
+    // null: a change or a newer click came while this was being made, and it is dropped.
+    const answer = await maker.make(built.payload, SIZES[size]);
+    if (answer === null) return;
+    if (typeof answer === "string") setIssue(answer);
+    else setMade({ kind, ...answer });
   };
 
   const field = (name: string, label: string, input: React.ReactNode) => (
@@ -118,8 +118,7 @@ export function QrTool() {
                   checked={kind === value}
                   onChange={() => {
                     setKind(value);
-                    setMade(null);
-                    setIssue(null);
+                    drop();
                   }}
                 />
                 {t(`kinds.${value}`)}
@@ -262,7 +261,7 @@ export function QrTool() {
             value={size}
             onChange={(event) => {
               setSize(event.target.value as Size);
-              setMade(null);
+              drop();
             }}
             className={INPUT}
           >

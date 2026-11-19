@@ -69,10 +69,34 @@ export const vcardEscape = (value: string) =>
     .replace(/\r\n|\r|\n/g, "\\n");
 
 /**
+ * Folds a vCard content line at 75 octets (RFC 2426 section 2.6): the rest goes on lines that
+ * start with one space, and a UTF-8 character is never cut in two. Unfolding (CRLF and the
+ * space removed) gives the line back.
+ */
+export function foldVcardLine(line: string): string {
+  const encoder = new TextEncoder();
+  const physical: string[] = [];
+  let current = "";
+  let octets = 0;
+  for (const char of line) {
+    const size = encoder.encode(char).length;
+    if (octets + size > 75) {
+      physical.push(current);
+      current = " ";
+      octets = 1;
+    }
+    current += char;
+    octets += size;
+  }
+  physical.push(current);
+  return physical.join("\r\n");
+}
+
+/**
  * A contact card with `VERSION`, `N` and `FN` always present: a given name, a family name or
- * both (one is enough), then an optional phone and email. Lines end in CRLF as the format
- * asks. A control character, line breaks included, in any field is refused (no way to add a
- * line of one's own).
+ * both (one is enough), then an optional phone and email. Every line, the last one included,
+ * ends in CRLF and is folded at 75 octets, as the format asks. A control character, line
+ * breaks included, in any field is refused (no way to add a line of one's own).
  */
 export function vcardPayload(input: {
   givenName: string;
@@ -99,7 +123,7 @@ export function vcardPayload(input: {
   if (phone) lines.push(`TEL:${vcardEscape(phone)}`);
   if (email) lines.push(`EMAIL:${vcardEscape(email)}`);
   lines.push("END:VCARD");
-  return accept(lines.join("\r\n"));
+  return accept(lines.map((line) => `${foldVcardLine(line)}\r\n`).join(""));
 }
 
 /** Whether `qrcode` refused a text because it does not fit into any code (its messages). */
@@ -111,4 +135,47 @@ export function isTooMuchData(error: unknown): boolean {
 export function pngBlob(dataUrl: string): Blob {
   const binary = atob(dataUrl.slice(dataUrl.indexOf(",") + 1));
   return new Blob([Uint8Array.from(binary, (char) => char.charCodeAt(0))], { type: "image/png" });
+}
+
+/** A code as the page shows and offers it: the PNG as a data URL, the SVG as text. */
+export interface QrImages {
+  png: string;
+  svg: string;
+}
+
+/**
+ * Makes the PNG and the SVG of a payload at level M, width in pixels. The library loads on
+ * the first call (`load`, a dynamic import(): no other page carries it). Runs are numbered:
+ * `invalidate()` (the page's fields changed) or a newer `make()` turns every answer still on
+ * its way into `null`, so a page never shows a code for what its fields no longer say. A
+ * text that does not fit answers `"tooMuchData"`, any other failure `"failed"`.
+ */
+export function createQrMaker(
+  load: () => Promise<{ default: Pick<typeof import("qrcode"), "toDataURL" | "toString"> }> = () =>
+    import("qrcode"),
+) {
+  let newest = 0;
+  return {
+    invalidate(): void {
+      newest += 1;
+    },
+    async make(
+      payload: string,
+      width: number,
+    ): Promise<QrImages | "tooMuchData" | "failed" | null> {
+      const run = ++newest;
+      try {
+        const { default: QRCode } = await load();
+        const options = { errorCorrectionLevel: "M", width } as const;
+        const [png, svg] = await Promise.all([
+          QRCode.toDataURL(payload, options),
+          QRCode.toString(payload, { ...options, type: "svg" }),
+        ]);
+        return run === newest ? { png, svg } : null;
+      } catch (error) {
+        if (run !== newest) return null;
+        return isTooMuchData(error) ? "tooMuchData" : "failed";
+      }
+    },
+  };
 }

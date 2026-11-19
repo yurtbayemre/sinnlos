@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   QR_MAX_CHARACTERS,
+  createQrMaker,
+  foldVcardLine,
   isTooMuchData,
   pngBlob,
   textPayload,
@@ -123,7 +125,7 @@ describe("vcardPayload", () => {
     expect(vcardPayload(card)).toEqual({
       ok: true,
       payload:
-        "BEGIN:VCARD\r\nVERSION:3.0\r\nN:Muster;Max;;;\r\nFN:Max Muster\r\nTEL:+49 30 1234\r\nEMAIL:m@x.de\r\nEND:VCARD",
+        "BEGIN:VCARD\r\nVERSION:3.0\r\nN:Muster;Max;;;\r\nFN:Max Muster\r\nTEL:+49 30 1234\r\nEMAIL:m@x.de\r\nEND:VCARD\r\n",
     });
   });
 
@@ -131,11 +133,11 @@ describe("vcardPayload", () => {
     const empty = { phone: "", email: "" };
     expect(vcardPayload({ ...empty, givenName: "Max", familyName: "" })).toEqual({
       ok: true,
-      payload: "BEGIN:VCARD\r\nVERSION:3.0\r\nN:;Max;;;\r\nFN:Max\r\nEND:VCARD",
+      payload: "BEGIN:VCARD\r\nVERSION:3.0\r\nN:;Max;;;\r\nFN:Max\r\nEND:VCARD\r\n",
     });
     expect(vcardPayload({ ...empty, givenName: "", familyName: "Muster" })).toEqual({
       ok: true,
-      payload: "BEGIN:VCARD\r\nVERSION:3.0\r\nN:Muster;;;;\r\nFN:Muster\r\nEND:VCARD",
+      payload: "BEGIN:VCARD\r\nVERSION:3.0\r\nN:Muster;;;;\r\nFN:Muster\r\nEND:VCARD\r\n",
     });
     expect(vcardPayload({ ...card, givenName: " ", familyName: "" })).toEqual({
       ok: false,
@@ -155,7 +157,7 @@ describe("vcardPayload", () => {
     expect(result).toEqual({
       ok: true,
       payload:
-        "BEGIN:VCARD\r\nVERSION:3.0\r\nN:Muster\\, Jr.;Max\\;Moritz;;;\r\nFN:Max\\;Moritz Muster\\, Jr.\r\nEMAIL:a\\;b@x.de\r\nEND:VCARD",
+        "BEGIN:VCARD\r\nVERSION:3.0\r\nN:Muster\\, Jr.;Max\\;Moritz;;;\r\nFN:Max\\;Moritz Muster\\, Jr.\r\nEMAIL:a\\;b@x.de\r\nEND:VCARD\r\n",
     });
   });
 
@@ -181,6 +183,75 @@ describe("vcardPayload", () => {
     const lines = (vcardPayload(card) as { payload: string }).payload.split("\r\n");
     expect(lines.filter((line) => line === "END:VCARD")).toHaveLength(1);
     expect(lines.filter((line) => line === "BEGIN:VCARD")).toHaveLength(1);
+  });
+});
+
+/** A small vCard reader for the round trip: unfold, split the lines, split values on unescaped separators. */
+function readCard(payload: string) {
+  expect(payload.endsWith("\r\n"), "the last line ends in CRLF").toBe(true);
+  const unfolded = payload.replace(/\r\n[ \t]/g, "");
+  const properties = new Map<string, string>();
+  for (const line of unfolded.split("\r\n").slice(0, -1)) {
+    properties.set(line.slice(0, line.indexOf(":")), line.slice(line.indexOf(":") + 1));
+  }
+  const parts = (value: string) => {
+    const result = [""];
+    for (let at = 0; at < value.length; at += 1) {
+      const char = value[at]!;
+      if (char === "\\") {
+        const next = value[(at += 1)]!;
+        result[result.length - 1] += next === "n" ? "\n" : next;
+      } else if (char === ";") result.push("");
+      else result[result.length - 1] += char;
+    }
+    return result;
+  };
+  return { properties, parts };
+}
+
+describe("vcardPayload: folding and the round trip", () => {
+  const octets = (line: string) => new TextEncoder().encode(line).length;
+
+  it("folds a line at 75 octets, a space starting each continuation, and unfolds to the original", () => {
+    const line = `FN:${"x".repeat(200)}`;
+    const folded = foldVcardLine(line).split("\r\n");
+    expect(folded.length).toBeGreaterThan(2);
+    expect(folded.every((part) => octets(part) <= 75)).toBe(true);
+    expect(folded.slice(1).every((part) => part.startsWith(" "))).toBe(true);
+    expect(folded.join("\r\n").replace(/\r\n /g, "")).toBe(line);
+    expect(foldVcardLine("short line")).toBe("short line");
+    expect(foldVcardLine("x".repeat(75))).toBe("x".repeat(75));
+    expect(foldVcardLine("x".repeat(76)).split("\r\n")).toEqual(["x".repeat(75), " x"]);
+  });
+
+  it("never cuts a multi-byte character in two, and counts octets, not characters", () => {
+    const text = `FN:${"ä".repeat(60)}${String.fromCodePoint(0x1f600).repeat(20)}`;
+    const folded = foldVcardLine(text).split("\r\n");
+    expect(folded.every((part) => octets(part) <= 75)).toBe(true);
+    expect(folded.join("\r\n").replace(/\r\n /g, "")).toBe(text);
+    expect(folded.join("")).not.toContain("�");
+  });
+
+  it("an 80-character first name gives folded lines that unfold and unescape to the input", () => {
+    const input = {
+      givenName: "A".repeat(80),
+      familyName: "Müller; Jr., \\ der Große",
+      phone: "+49 (0)30 / 1234-5678",
+      email: `${"long.address;with,separators".repeat(4)}@example.org`,
+    };
+    const result = vcardPayload(input);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const physical = result.payload.split("\r\n").slice(0, -1);
+    expect(physical.every((part) => octets(part) <= 75)).toBe(true);
+    expect(physical.some((part) => part.startsWith(" "))).toBe(true);
+
+    const { properties, parts } = readCard(result.payload);
+    expect(properties.get("VERSION")).toBe("3.0");
+    expect(parts(properties.get("N")!)).toEqual([input.familyName, input.givenName, "", "", ""]);
+    expect(parts(properties.get("FN")!)).toEqual([`${input.givenName} ${input.familyName}`]);
+    expect(parts(properties.get("TEL")!)).toEqual([input.phone]);
+    expect(parts(properties.get("EMAIL")!)).toEqual([input.email]);
   });
 });
 
@@ -214,5 +285,65 @@ describe("pngBlob", () => {
     const blob = pngBlob(dataUrl);
     expect(blob.type).toBe("image/png");
     expect(new Uint8Array(await blob.arrayBuffer())).toEqual(bytes);
+  });
+});
+
+describe("createQrMaker: answers that come too late", () => {
+  /** A promise the test settles by hand: the library import that is still loading. */
+  function gate() {
+    let open!: () => void;
+    const opened = new Promise<void>((resolve) => (open = resolve));
+    return { open, opened };
+  }
+  const library = () => import("qrcode");
+
+  it("makes a PNG data URL and an SVG at the width asked for", async () => {
+    const answer = await createQrMaker(library).make("https://example.org", 256);
+    expect(answer).not.toBeNull();
+    expect(answer).not.toBe("failed");
+    const { png, svg } = answer as { png: string; svg: string };
+    expect(png).toMatch(/^data:image\/png;base64,/);
+    expect(svg).toMatch(/^<svg [^>]*width="256"/);
+  });
+
+  it("drops an answer when the fields changed while the library was loading", async () => {
+    const loading = gate();
+    const maker = createQrMaker(async () => {
+      await loading.opened;
+      return library();
+    });
+    const pending = maker.make("old password", 256);
+    maker.invalidate();
+    loading.open();
+    expect(await pending).toBeNull();
+  });
+
+  it("drops the older of two runs and keeps the newer, whichever finishes first", async () => {
+    const loading = gate();
+    let calls = 0;
+    const maker = createQrMaker(async () => {
+      if (calls++ === 0) await loading.opened;
+      return library();
+    });
+    const older = maker.make("older", 256);
+    const newer = await maker.make("newer", 256);
+    expect(newer).toMatchObject({ png: expect.stringMatching(/^data:image\/png/) });
+    loading.open();
+    expect(await older).toBeNull();
+  });
+
+  it("answers too much data and a failed load, and drops those answers too once stale", async () => {
+    expect(await createQrMaker(library).make("x".repeat(3000), 256)).toBe("tooMuchData");
+    const broken = createQrMaker(() => Promise.reject(new Error("chunk failed")));
+    expect(await broken.make("a", 256)).toBe("failed");
+    const loading = gate();
+    const late = createQrMaker(async () => {
+      await loading.opened;
+      throw new Error("chunk failed");
+    });
+    const pending = late.make("a", 256);
+    late.invalidate();
+    loading.open();
+    expect(await pending).toBeNull();
   });
 });

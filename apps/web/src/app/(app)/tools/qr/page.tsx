@@ -2,7 +2,7 @@ import { getTranslations } from "next-intl/server";
 import { PageHeader } from "@/components/page-header";
 import { SectionUnavailablePage } from "@/components/section-unavailable";
 import { QrTool } from "@/components/tools/qr-tool";
-import { isReadDenied } from "@/lib/roles";
+import { canRead } from "@/lib/roles";
 import { getViewer } from "@/lib/viewer";
 
 export async function generateMetadata() {
@@ -12,13 +12,14 @@ export async function generateMetadata() {
 
 /**
  * The QR code page (v1.1 "Tools"): the page itself is a client component that works in the
- * browser only (components/tools/qr-tool.tsx). It reads the same capability as the hub, so
- * guests get the explanation instead.
+ * browser only (components/tools/qr-tool.tsx). It reads the same capability as the hub, but
+ * fail-closed (canRead): a guest, and a role that could not be read or is unknown, get the
+ * explanation instead, because no CMS read decides for this page.
  */
 export default async function QrToolPage() {
   const t = await getTranslations("tools.qr");
   const viewer = await getViewer();
-  if (isReadDenied(viewer.role, "processes")) {
+  if (!canRead(viewer.role, "processes")) {
     return <SectionUnavailablePage title={t("title")} description={t("description")} />;
   }
   return (

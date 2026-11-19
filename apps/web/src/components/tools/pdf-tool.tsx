@@ -12,7 +12,6 @@ import {
   PDF_MAX_PAGES,
   PDF_MAX_RESULT_BYTES,
   runPdfJob,
-  warmUpPdfLibrary,
   type PdfIssue,
   type PdfKind,
   type PdfProgress,
@@ -84,7 +83,6 @@ export function PdfTool() {
   const choose = (list: FileList | null) => {
     const picked = Array.from(list ?? []);
     if (picked.length === 0) return;
-    warmUpPdfLibrary();
     const added = picked.map((file) => ({ id: nextId.current++, file }));
     setStatus({ kind: "idle" });
     setNote("");

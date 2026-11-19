@@ -706,7 +706,7 @@
       "title": "PDF-Werkzeuge",
       "description": "PDFs zusammenfügen sowie Seiten auswählen, drehen und löschen, im Browser.",
       "privacy": "Ihre Dateien und Eingaben werden nicht übertragen. Die Bearbeitung läuft in Ihrem Browser.",
-      "notice": "Das Ergebnis ist eine neue Datei aus den übernommenen Seiten. Formulare, Lesezeichen, Tags für die Barrierefreiheit, Signaturen und Dokumenteigenschaften werden nicht zugesagt und gehen in der Regel verloren. Dieses Werkzeug schwärzt nichts: Inhalte lassen sich damit nicht sicher unkenntlich machen.",
+      "notice": "Das Ergebnis ist eine neue Datei aus den übernommenen Seiten. Formulare, Lesezeichen, Verweise innerhalb des Dokuments (Weblinks bleiben), Ebenen, Tags für die Barrierefreiheit, Signaturen und Dokumenteigenschaften werden nicht zugesagt und gehen in der Regel verloren. Dieses Werkzeug schwärzt nichts und ist kein Weg, vertrauliche Inhalte zu entfernen: Der eigene Inhalt einer gelöschten Seite wird nicht übernommen, Schriften, Bilder und andere Teile, die sie mit übernommenen Seiten teilt, bleiben aber in der Datei.",
       "limits": "Grenzen: zusammen höchstens {size} MB und {pages} Seiten. Verschlüsselte oder passwortgeschützte Dateien werden nicht bearbeitet.",
       "mode": "Was möchten Sie tun?",
       "modes": {
@@ -760,6 +760,7 @@
         "encrypted": "{name} ist verschlüsselt oder passwortgeschützt. Verschlüsselte PDFs werden nicht bearbeitet.",
         "broken": "{name} lässt sich nicht lesen. Die Datei ist beschädigt oder keine PDF-Datei.",
         "deleteAll": "Damit würden alle Seiten gelöscht. Mindestens eine Seite muss bleiben.",
+        "strayPages": "Das Ergebnis würde Seiten enthalten, die nicht ausgewählt sind (zum Beispiel über Verweise im Dokument). Es wird nicht erstellt.",
         "resultTooBig": "Das Ergebnis wäre größer als {size} MB und wird nicht erstellt.",
         "failed": "Das hat nicht geklappt. Bitte versuchen Sie es erneut."
       },

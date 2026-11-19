@@ -706,7 +706,7 @@
       "title": "PDF tools",
       "description": "Merge PDFs, and pick, rotate or delete pages, in your browser.",
       "privacy": "Your files and entries are not transmitted. They are processed in your browser.",
-      "notice": "The result is a new file made of the pages that are kept. Forms, bookmarks, accessibility tags, signatures and document properties are not promised and are usually lost. This tool does not black out anything: it cannot make content safely unreadable.",
+      "notice": "The result is a new file made of the pages that are kept. Forms, bookmarks, links inside the document (web links stay), layers, accessibility tags, signatures and document properties are not promised and are usually lost. This tool does not black out anything and is not a way to remove confidential content: a deleted page's own content is left out, but fonts, images and other parts it shares with kept pages stay in the file.",
       "limits": "Limits: at most {size} MB and {pages} pages in total. Encrypted or password-protected files are not processed.",
       "mode": "What do you want to do?",
       "modes": {
@@ -760,6 +760,7 @@
         "encrypted": "{name} is encrypted or password-protected. Encrypted PDFs are not processed.",
         "broken": "{name} cannot be read. The file is damaged or not a PDF.",
         "deleteAll": "That would delete every page. At least one page must stay.",
+        "strayPages": "The result would contain pages that were not selected (for example through links inside the document). It is not created.",
         "resultTooBig": "The result would be larger than {size} MB and is not created.",
         "failed": "That did not work. Please try again."
       },
