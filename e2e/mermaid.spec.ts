@@ -15,9 +15,11 @@ import { loadFixtures, signIn } from "./helpers";
  *     script and onerror, a click callback, a `javascript:` link, a `themeCSS` with a url())
  *     runs nothing, keeps no handler attribute and no script, and the downgrade does not
  *     take effect: labels stay text (no form, no img), the CSS asks for nothing;
+ *   - a sequence message with math, which is HTML whatever htmlLabels says, is drawn as math
+ *     without the form, the picture and the inline style with a url() written beside it;
  *   - the one request a diagram can still make, the picture of an image shape, carries no
- *     Referer (the root layout's referrer policy; the edge's header alone would send the
- *     origin);
+ *     Referer (the root layout's `<meta name="referrer" content="same-origin">`, a literal
+ *     tag at the top of `<head>`; the edge's header alone would send the origin);
  *   - a diagram that does not parse stays its source with a hint; a plain fence is as before;
  *   - the drawn diagram has an accessible name and the source one disclosure away;
  *   - the theme switch draws it again, in the other theme's CSS;
@@ -50,9 +52,17 @@ const HOSTILE = [
   "  B --> P",
   "```",
 ].join("\n");
+// A sequence message with math is HTML whatever htmlLabels says: DOMPurify's own list of
+// tags is what keeps a form, a picture and an inline style with a url() out of it.
+const MATH = [
+  "```mermaid",
+  "sequenceDiagram",
+  `  A->>B: $$x^2$$<form action='${EVIL}/f'><input type=password></form><img src='${EVIL}/m.png'><span style='background:url(${EVIL}/s.png)'>s</span>`,
+  "```",
+].join("\n");
 const BROKEN = ["```mermaid", "flowchart TD", "  A --> --> B ((((", "```"].join("\n");
 const PLAIN = ["```js", "const a = 1;", "```"].join("\n");
-const BODY = ["Intro text.", PLAIN, FLOW, HOSTILE, BROKEN].join("\n\n");
+const BODY = ["Intro text.", PLAIN, FLOW, HOSTILE, MATH, BROKEN].join("\n\n");
 
 const SPACE = "E2E Mermaid space";
 const PAGE = "E2E Mermaid page";
@@ -130,6 +140,12 @@ async function expectInert(page: Page, group: Locator, dialogs: string[]) {
   expect(dialogs).toEqual([]);
 }
 
+/** The math message is drawn as math; the form, the picture and the styled span in it are gone. */
+async function expectMathOnly(group: Locator) {
+  await expect(group.locator("math")).toHaveCount(1);
+  await expect(group.locator("form, input, img, button, [style*='url(']")).toHaveCount(0);
+}
+
 test("mermaid-in-markdown", async ({ page }) => {
   test.setTimeout(120_000);
   const fixtures = loadFixtures();
@@ -155,7 +171,7 @@ test("mermaid-in-markdown", async ({ page }) => {
     await main.getByRole("tab", { name: "Preview", exact: true }).click();
     const preview = main.getByRole("tabpanel", { name: "Preview" });
     // The fences are the plain source first, then the diagrams.
-    await expect(diagrams()).toHaveCount(2);
+    await expect(diagrams()).toHaveCount(3);
     await expect(firstSvg(diagrams())).toBeVisible();
     expect(await mermaidLoaded(), "a fence did not load Mermaid").toBe(true);
 
@@ -165,13 +181,15 @@ test("mermaid-in-markdown", async ({ page }) => {
     ).toBeVisible();
     await expect(preview.locator("pre code.language-js")).toHaveText("const a = 1;\n");
     await expectInert(page, diagrams().nth(1), dialogs);
+    await expectMathOnly(diagrams().nth(2));
     expect(problems).toEqual([]);
   });
 
   await test.step("The picture of an image shape is the only request, and it carries no Referer", async () => {
     // Native image shapes fetch their picture while drawing: the document's referrer policy
     // is all that keeps the intranet's origin from the host. The picture in the label, the
-    // form's action and the CSS url() are never requested.
+    // form's action, the CSS url() and the picture, form and styled span of the math
+    // message are never requested.
     await expect.poll(() => evil.length).toBeGreaterThan(0);
     expect(evil.filter((request) => !request.url.endsWith("/pixel.png"))).toEqual([]);
     expect(evil.filter((request) => request.referer !== undefined)).toEqual([]);
@@ -191,12 +209,13 @@ test("mermaid-in-markdown", async ({ page }) => {
   await test.step("The page draws it after a clean hydration, names it and keeps the source one click away", async () => {
     await page.goto("/announcements");
     await expect(main.getByText(TITLE, { exact: true })).toBeVisible();
-    await expect(diagrams()).toHaveCount(2);
+    await expect(diagrams()).toHaveCount(3);
     await expect(main.getByText(ERROR_HINT, { exact: true })).toBeVisible();
     // The diagram's own title names the SVG, the group names the others.
     await expect(diagrams().first().locator("svg title")).toHaveText("Delivery flow");
     await expect(diagrams().first().locator("svg")).toHaveAttribute("aria-labelledby", /.+/);
     await expectInert(page, diagrams().nth(1), dialogs);
+    await expectMathOnly(diagrams().nth(2));
     expect(evil.filter((request) => request.referer !== undefined)).toEqual([]);
 
     const source = diagrams().first().locator("details");
@@ -218,13 +237,13 @@ test("mermaid-in-markdown", async ({ page }) => {
     await page.getByRole("button", { name: "Toggle theme", exact: true }).click();
     await expect(page.locator("html")).toHaveClass(/dark/);
     await expect.poll(css).not.toBe(before);
-    await expect(diagrams()).toHaveCount(2);
+    await expect(diagrams()).toHaveCount(3);
     expect(problems).toEqual([]);
   });
 
   await test.step("Without JavaScript the page has the source: the server's own HTML holds the fences", async () => {
     const html = await (await page.request.get("/announcements")).text();
-    expect(html.match(/<pre><code class="language-mermaid">/g)).toHaveLength(3);
+    expect(html.match(/<pre><code class="language-mermaid">/g)).toHaveLength(4);
     expect(html).toContain("flowchart TD");
     expect(html).not.toContain("sinnlosMermaid");
   });

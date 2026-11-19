@@ -91,9 +91,10 @@ editor's, and a fence loads it; the fences draw as SVG in the preview and on the
 with no hydration error; a hostile diagram (an `%%{init}%%` asking for `securityLevel`
 "loose" and HTML labels, a label with a form, a picture, script and `onerror`, a click
 callback, a `javascript:` link, a `themeCSS` with a `url()`) runs nothing, keeps no
-handler attribute, shows its label markup as text and asks for nothing; the picture of an
-image shape is the one request left and it carries no `Referer` (the root layout's
-referrer policy); a diagram that does not parse stays its source with a hint; the SVG is
+handler attribute, shows its label markup as text and asks for nothing; a sequence message
+with math (HTML whatever `htmlLabels` says) is drawn without the form, picture and styled
+span written beside it; the picture of an image shape is the one request left and it
+carries no `Referer` (the root layout's `<meta name="referrer">`); a diagram that does not parse stays its source with a hint; the SVG is
 named (`accTitle` or the group's "Diagram") and the source is one disclosure away; the
 theme switch draws it again in the other theme's CSS; the HTML the server sends holds
 each fence as a plain code block, which is all a browser without JavaScript gets (the
