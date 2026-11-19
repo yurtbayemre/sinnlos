@@ -84,6 +84,12 @@ leaves for its address; labels and documentation with markup run no script; the
 downloaded `.bpmn` and `.svg` are clean and the `.svg`, reopened as a file, makes no
 request; the canvas is a tab stop; a team lead reaches the editor, a member does not.
 
+The `org-chart-departments-view` case in `e2e/org-chart.spec.ts` (v1.1) has a member
+open the org chart's department view from the Tools hub: department, team, lead and
+member count in nested lists, the view switch with `aria-current` and the URL as its
+state. A guest gets the reporting-line chart without a switch and the "not available"
+explanation for `?view=departments`.
+
 The `secret-sharing` case in `e2e/secrets.spec.ts` (v0.35) has the member send
 secrets to the team lead through `/secrets/new`. Every `/secrets` answer it
 can produce carries `Cache-Control` with `private` and `no-store`: the

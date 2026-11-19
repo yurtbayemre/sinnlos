@@ -12,13 +12,27 @@ import { StrapiError } from "@/lib/strapi-error";
  * an unknown id a 404, a failed read goes to error.tsx; the diagram is handed to the
  * lazy viewer as the stored XML, with the description in the page.
  */
-const who = vi.hoisted(() => ({ role: "member" as string | null }));
+const who = vi.hoisted(() => ({
+  role: "member" as string | null,
+  /** Sections whose read is denied on top of the role's own grants (to test one gate alone). */
+  denied: new Set<string>(),
+}));
 const listMock = vi.fn<() => Promise<unknown>>();
 const oneMock = vi.fn<(documentId: string) => Promise<unknown>>();
 
 vi.mock("@/lib/strapi", () => ({
   api: { processes: { list: () => listMock(), one: (id: string) => oneMock(id) } },
 }));
+vi.mock("@/lib/roles", async (importOriginal) => {
+  const roles = await importOriginal<typeof import("@/lib/roles")>();
+  return {
+    ...roles,
+    isReadDenied: (role: string | null, section: Parameters<typeof roles.isReadDenied>[1]) =>
+      who.denied.has(section) || roles.isReadDenied(role, section),
+    canRead: (role: string | null, section: Parameters<typeof roles.canRead>[1]) =>
+      !who.denied.has(section) && roles.canRead(role, section),
+  };
+});
 vi.mock("@/lib/viewer", () => ({
   getViewer: async () => ({ id: 7, displayName: "V", role: who.role, department: null }),
 }));
@@ -60,17 +74,42 @@ const hrefs = (tree: ReturnType<typeof elements>) =>
 
 beforeEach(() => {
   who.role = "member";
+  who.denied.clear();
   listMock.mockReset().mockResolvedValue({ data: [row()], meta: {} });
   oneMock.mockReset().mockResolvedValue({ data: [row({ diagram: XML })] });
   vi.spyOn(console, "error").mockImplementation(() => {});
 });
 
 describe("/tools", () => {
-  it("offers the Processes tile (and no other tile yet) to a staff role, without any request", async () => {
+  it("offers the Processes tile and the org chart's department view to a staff role, without any request", async () => {
+    const tree = elements(await hub.default());
+    expect(hrefs(tree)).toEqual(["/tools/processes", "/people/org-chart?view=departments"]);
+    expect(has(tree, SectionUnavailablePage)).toBe(false);
+    expect(listMock).not.toHaveBeenCalled();
+  });
+
+  it("leaves out the department tile, and only that, for a viewer who may not read departments", async () => {
+    who.denied.add("departments");
     const tree = elements(await hub.default());
     expect(hrefs(tree)).toEqual(["/tools/processes"]);
     expect(has(tree, SectionUnavailablePage)).toBe(false);
-    expect(listMock).not.toHaveBeenCalled();
+  });
+
+  it.each([null, "intern"])(
+    "leaves out the department tile for the missing or unknown role %j (fail-closed), the hub itself still reads",
+    async (role) => {
+      who.role = role;
+      const tree = elements(await hub.default());
+      expect(hrefs(tree)).toEqual(["/tools/processes"]);
+      expect(has(tree, SectionUnavailablePage)).toBe(false);
+    },
+  );
+
+  it("keeps the whole hub gated on the processes read, whatever the department tile would do", async () => {
+    who.denied.add("processes");
+    const tree = elements(await hub.default());
+    expect(has(tree, SectionUnavailablePage)).toBe(true);
+    expect(hrefs(tree)).toEqual([]);
   });
 
   it.each(["guest"])("%s gets the explanation", async (role) => {

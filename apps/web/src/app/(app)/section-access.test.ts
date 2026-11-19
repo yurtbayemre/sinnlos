@@ -82,6 +82,7 @@ const { SectionUnavailable, SectionUnavailablePage } =
 const { AckBanner } = await import("@/components/dashboard/ack-banner");
 const { TrainingBanner } = await import("@/components/training/training-banner");
 const { LatestNews } = await import("@/components/dashboard/latest-news");
+const { ViewSwitch } = await import("@/components/view-switch");
 
 const pages = {
   announcements: (await import("./announcements/page")).default,
@@ -94,6 +95,10 @@ const pages = {
       page.default({ searchParams: Promise.resolve({}) }),
     ),
 };
+const orgChart = (query: { view?: string }) =>
+  import("./people/org-chart/page").then((page) =>
+    page.default({ searchParams: Promise.resolve(query) }),
+  );
 const dashboard = (await import("./page")).default;
 
 /** Every element in a returned page tree (through children). */
@@ -150,6 +155,56 @@ describe("section pages", () => {
     await pages.kudos();
     expect(calls).toContain("celebrations");
   });
+});
+
+/**
+ * The org chart's department view is gated fail-closed (canRead), unlike the
+ * pages above: a role that is missing or unknown (a failed /api/me) gets no
+ * department or team request, no switch, and the explanation. The
+ * reporting-line chart has no gate and keeps loading for everyone.
+ */
+describe("org chart", () => {
+  it.each(["guest", null, "intern"])(
+    "%s: the department view is the explanation and no request at all",
+    async (role) => {
+      viewer.role = role;
+      expect(has(elements(await orgChart({ view: "departments" })), SectionUnavailablePage)).toBe(
+        true,
+      );
+      expect(calls).toEqual([]);
+    },
+  );
+
+  it.each(["guest", null, "intern"])(
+    "%s: the reporting-line chart still loads, without a view switch or any org request",
+    async (role) => {
+      viewer.role = role;
+      const tree = elements(await orgChart({}));
+      expect(calls).toEqual(["users"]);
+      expect(has(tree, SectionUnavailablePage)).toBe(false);
+      expect(has(tree, ViewSwitch)).toBe(false);
+    },
+  );
+
+  it.each(["member", "authenticated"])(
+    "%s: the department view reads the departments and the teams, not the users",
+    async (role) => {
+      viewer.role = role;
+      const tree = elements(await orgChart({ view: "departments" }));
+      expect(calls.sort()).toEqual(["departments.list", "teams.list"]);
+      expect(has(tree, SectionUnavailablePage)).toBe(false);
+      expect(has(tree, ViewSwitch)).toBe(true);
+    },
+  );
+
+  it.each([undefined, "", "reporting", "Departments"])(
+    "the view %j is the reporting-line chart",
+    async (view) => {
+      viewer.role = "member";
+      await orgChart({ view });
+      expect(calls).toEqual(["users"]);
+    },
+  );
 });
 
 describe("dashboard", () => {

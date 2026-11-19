@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { Calendar, CalendarDays, Clock, Download, List, MapPin } from "lucide-react";
 import { getFormatter, getTranslations } from "next-intl/server";
 import type { EventListItem } from "@/lib/api/events";
@@ -10,12 +9,13 @@ import { loadEvents } from "@/lib/loaders/events";
 import { getSession } from "@/lib/session";
 import { getViewer } from "@/lib/viewer";
 import type { EventRsvpSummary } from "@/lib/types";
-import { cn, displayNameOf } from "@/lib/utils";
+import { displayNameOf } from "@/lib/utils";
 import { EmptyState } from "@/components/empty-state";
 import { FetchErrorBanner } from "@/components/fetch-error";
 import { PageHeader } from "@/components/page-header";
 import { Card, CardContent } from "@/components/ui/card";
 import { SectionLabel } from "@/components/ui/section-label";
+import { ViewSwitch } from "@/components/view-switch";
 import { EventRsvpPanel } from "@/components/events/event-rsvp-panel";
 import { EventsMonthView } from "@/components/events/events-month-view";
 
@@ -50,40 +50,21 @@ export default async function EventsPage({
   const isMonthView = view.mode === "month";
   const selfName = session?.user?.name ?? null;
 
-  const switchLinkClass = (active: boolean) =>
-    cn(
-      "inline-flex items-center gap-1.5 rounded-[10px] px-3 py-1.5 text-sm font-medium transition-colors",
-      "outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
-      active
-        ? "bg-primary text-primary-foreground ring-1 ring-primary-text"
-        : "text-muted-foreground hover:bg-muted",
-    );
-
   return (
     <div className="space-y-8">
       <PageHeader title={t("title")} description={t("description")}>
-        <div
-          role="group"
-          aria-label={t("viewLabel")}
-          className="inline-flex rounded-xl border p-0.5"
-        >
-          <Link
-            href="/events"
-            aria-current={!isMonthView ? "page" : undefined}
-            className={switchLinkClass(!isMonthView)}
-          >
-            <List className="h-4 w-4" aria-hidden="true" />
-            {t("viewList")}
-          </Link>
-          <Link
-            href="/events?view=month"
-            aria-current={isMonthView ? "page" : undefined}
-            className={switchLinkClass(isMonthView)}
-          >
-            <CalendarDays className="h-4 w-4" aria-hidden="true" />
-            {t("viewMonth")}
-          </Link>
-        </div>
+        <ViewSwitch
+          label={t("viewLabel")}
+          items={[
+            { href: "/events", active: !isMonthView, icon: List, text: t("viewList") },
+            {
+              href: "/events?view=month",
+              active: isMonthView,
+              icon: CalendarDays,
+              text: t("viewMonth"),
+            },
+          ]}
+        />
       </PageHeader>
 
       {view.failed && <FetchErrorBanner />}

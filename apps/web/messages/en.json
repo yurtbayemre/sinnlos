@@ -167,7 +167,20 @@
     "filterByDepartment": "Filter by department",
     "orgChartIssues": "{count, plural, one {# person is} other {# people are}} shown at the top level because a manager assignment is inconsistent (a loop, or someone set as their own manager). An admin can fix the manager under Manage → Users.",
     "orgCycle": "Manager chain loops back here",
-    "orgSelfManager": "Set as their own manager"
+    "orgSelfManager": "Set as their own manager",
+    "viewLabel": "View",
+    "viewReporting": "Reporting lines",
+    "viewDepartments": "Departments",
+    "deptHead": "Head",
+    "deptNoHead": "No head set",
+    "deptLead": "Team lead",
+    "deptNoLead": "No team lead set",
+    "deptMembers": "{count, plural, one {# member} other {# members}}",
+    "deptNoTeams": "No teams",
+    "deptUnassigned": "Teams without a department",
+    "deptEmptyTitle": "No departments yet",
+    "deptEmptyHint": "Admins create departments under Manage; they then show up here.",
+    "deptTruncated": "List truncated: there are more departments or teams than are loaded here. Some are missing from this view."
   },
   "events": {
     "title": "Events",
@@ -701,6 +714,10 @@
     "processes": {
       "title": "Processes",
       "description": "Business processes as diagrams, each with a description in words."
+    },
+    "orgChart": {
+      "title": "Departments in the org chart",
+      "description": "Departments with their head, teams, team leads and member counts at a glance."
     }
   },
   "processes": {

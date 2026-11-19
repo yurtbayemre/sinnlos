@@ -15,6 +15,7 @@
  * the regular roots, so the page can show them with a warning. A manager
  * outside the list (not loaded, or blocked) makes a regular root, as before.
  */
+import type { DepartmentListItem, TeamListItem, UserName } from "@/lib/api/org";
 
 export type OrgIssue = "self-manager" | "cycle";
 
@@ -85,4 +86,62 @@ export function buildOrgTree<P extends { id: number; manager?: { id: number } | 
     else roots.push(node);
   }
   return { roots: [...roots, ...marked], issues: marked.length };
+}
+
+/** A team of the department view: its lead and the size of its roster. */
+export interface DepartmentChartTeam {
+  id: number;
+  name: string;
+  slug: string;
+  lead: UserName | null;
+  memberCount: number;
+}
+
+export interface DepartmentChartBranch {
+  id: number;
+  name: string;
+  slug: string;
+  head: UserName | null;
+  teams: DepartmentChartTeam[];
+}
+
+export interface DepartmentChart {
+  /** In the order of the loader (by name). */
+  departments: DepartmentChartBranch[];
+  /** Teams without a department, or whose department is not in the list (a truncated walk). */
+  unassigned: DepartmentChartTeam[];
+}
+
+/**
+ * The org chart's second view (v1.1): department → head → teams → lead →
+ * member count, from the two existing loaders. The department list only
+ * delivers team rows without lead or members, so the teams come from the
+ * team list and are grouped by their department. A team is never dropped:
+ * one without a department is listed under `unassigned`. A team id listed
+ * twice (the page walk can repeat a boundary row when teams change between
+ * two requests) is one team: the first entry wins.
+ */
+export function buildDepartmentChart(
+  departments: readonly DepartmentListItem[],
+  teams: readonly TeamListItem[],
+): DepartmentChart {
+  const branches = new Map<number, DepartmentChartBranch>();
+  for (const { id, name, slug, head } of departments) {
+    branches.set(id, { id, name, slug, head: head ?? null, teams: [] });
+  }
+  const unassigned: DepartmentChartTeam[] = [];
+  const seen = new Set<number>();
+  for (const { id, name, slug, lead, members, department } of teams) {
+    if (seen.has(id)) continue;
+    seen.add(id);
+    const branch = department ? branches.get(department.id) : undefined;
+    (branch ? branch.teams : unassigned).push({
+      id,
+      name,
+      slug,
+      lead: lead ?? null,
+      memberCount: members?.length ?? 0,
+    });
+  }
+  return { departments: [...branches.values()], unassigned };
 }

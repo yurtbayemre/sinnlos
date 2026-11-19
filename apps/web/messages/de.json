@@ -167,7 +167,20 @@
     "filterByDepartment": "Nach Abteilung filtern",
     "orgChartIssues": "{count, plural, one {# Person steht} other {# Personen stehen}} ganz oben, weil eine Manager-Zuordnung nicht stimmt (ein Kreis, oder jemand ist sich selbst als Manager zugeordnet). Ein Admin kann die vorgesetzte Person unter „Verwaltung“ → „Benutzer“ korrigieren.",
     "orgCycle": "Manager-Kette führt hierher zurück",
-    "orgSelfManager": "Sich selbst als Manager zugeordnet"
+    "orgSelfManager": "Sich selbst als Manager zugeordnet",
+    "viewLabel": "Ansicht",
+    "viewReporting": "Berichtslinien",
+    "viewDepartments": "Abteilungen",
+    "deptHead": "Leitung",
+    "deptNoHead": "Keine Leitung eingetragen",
+    "deptLead": "Teamleitung",
+    "deptNoLead": "Keine Teamleitung eingetragen",
+    "deptMembers": "{count, plural, one {# Mitglied} other {# Mitglieder}}",
+    "deptNoTeams": "Keine Teams",
+    "deptUnassigned": "Teams ohne Abteilung",
+    "deptEmptyTitle": "Noch keine Abteilungen",
+    "deptEmptyHint": "Admins legen Abteilungen unter „Verwaltung“ an; sie erscheinen dann hier.",
+    "deptTruncated": "Liste gekürzt: Es gibt mehr Abteilungen oder Teams, als hier geladen werden. Einige fehlen in dieser Ansicht."
   },
   "events": {
     "title": "Termine",
@@ -701,6 +714,10 @@
     "processes": {
       "title": "Prozesse",
       "description": "Geschäftsprozesse als Diagramm, jeweils mit einer Beschreibung in Worten."
+    },
+    "orgChart": {
+      "title": "Abteilungen im Organigramm",
+      "description": "Abteilungen mit Leitung, Teams, Teamleitung und Mitgliederzahl auf einen Blick."
     }
   },
   "processes": {
