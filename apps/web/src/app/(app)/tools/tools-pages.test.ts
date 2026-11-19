@@ -68,7 +68,7 @@ beforeEach(() => {
 describe("/tools", () => {
   it("offers a tile per tool to a staff role, without any request", async () => {
     const tree = elements(await hub.default());
-    expect(hrefs(tree)).toEqual(["/tools/processes", "/tools/pdf"]);
+    expect(hrefs(tree)).toEqual(["/tools/processes", "/tools/pdf", "/tools/qr"]);
     expect(has(tree, SectionUnavailablePage)).toBe(false);
     expect(listMock).not.toHaveBeenCalled();
   });

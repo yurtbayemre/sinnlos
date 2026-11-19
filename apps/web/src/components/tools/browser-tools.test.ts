@@ -55,8 +55,15 @@ const TOOLS: Array<[entry: string, reaches: string[]]> = [
     "components/tools/pdf-tool.tsx",
     ["lib/pdf-tools.ts", "lib/browser-download.ts", "components/secrets/clean-document.ts"],
   ],
+  [
+    "components/tools/qr-tool.tsx",
+    ["lib/qr-code.ts", "lib/browser-download.ts", "components/secrets/clean-document.ts"],
+  ],
 ];
-const PAGES = ["app/(app)/tools/pdf/page.tsx"];
+const PAGES: Array<[page: string, tool: string]> = [
+  ["app/(app)/tools/pdf/page.tsx", "@/components/tools/pdf-tool"],
+  ["app/(app)/tools/qr/page.tsx", "@/components/tools/qr-tool"],
+];
 
 const BANNED_MODULES =
   /^(@\/lib\/(strapi|api|session|viewer|auth|loaders)|@\/auth|next\/headers|next-auth|server-only)(\/|$)/;
@@ -87,7 +94,7 @@ describe.each(TOOLS)("the client bundle of %s", (entry, reaches) => {
   });
 });
 
-describe.each(PAGES)("the page module %s", (entry) => {
+describe.each(PAGES)("the page module %s", (entry, tool) => {
   it("imports the read gate and the tool, no action and no data client", () => {
     const text = readFileSync(join(SRC, entry), "utf8");
     expect(text).not.toMatch(/["']use server["']/);
@@ -96,7 +103,7 @@ describe.each(PAGES)("the page module %s", (entry) => {
       [
         "@/components/page-header",
         "@/components/section-unavailable",
-        "@/components/tools/pdf-tool",
+        tool,
         "@/lib/roles",
         "@/lib/viewer",
       ].sort(),
@@ -125,5 +132,36 @@ describe("where the libraries load", () => {
     expect(using.map((file) => file.name)).toEqual(["lib/pdf-tools.ts"]);
     expect(using[0]!.text).not.toMatch(/\bfrom\s+["']@cantoo\/pdf-lib["']/);
     expect(using[0]!.text).toMatch(/import\(\s*"@cantoo\/pdf-lib"\s*\)/);
+  });
+});
+
+describe("where qrcode loads", () => {
+  const importing = (needle: RegExp) => {
+    const names: string[] = [];
+    (function walk(dir: string) {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const path = join(dir, entry.name);
+        if (entry.isDirectory()) walk(path);
+        else if (/\.tsx?$/.test(entry.name) && !/\.test\.(tsx?|helper\.ts)$/.test(entry.name)) {
+          if (needle.test(readFileSync(path, "utf8"))) {
+            names.push(relative(SRC, path).replaceAll("\\", "/"));
+          }
+        }
+      }
+    })(SRC);
+    return names.sort();
+  };
+
+  it("is imported statically by the server's MFA page only, and by a dynamic import() in the QR tool", () => {
+    expect(importing(/\bfrom\s+["']qrcode["']/)).toEqual(["app/mfa/setup/page.tsx"]);
+    expect(importing(/import\(\s*"qrcode"\s*\)/)).toEqual(["components/tools/qr-tool.tsx"]);
+  });
+
+  it("has a browser build the bundlers pick for the client (no pngjs, no fs)", () => {
+    const manifest = JSON.parse(
+      readFileSync(join(SRC, "..", "node_modules", "qrcode", "package.json"), "utf8"),
+    ) as { browser: Record<string, string | false> };
+    expect(manifest.browser["./lib/index.js"]).toBe("./lib/browser.js");
+    expect(manifest.browser.fs).toBe(false);
   });
 });

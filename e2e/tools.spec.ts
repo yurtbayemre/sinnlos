@@ -5,13 +5,17 @@ import { expect, test, type Page } from "@playwright/test";
 import { loadFixtures, signIn } from "./helpers";
 
 /**
- * The browser tools of /tools (v1.1 "Tools"): the PDF tools. Everything happens in the
- * browser, so only a browser run can show it:
+ * The browser tools of /tools (v1.1 "Tools"): the PDF tools and the QR code page.
+ * Everything happens in the browser, so only a browser run can show it:
  *   - pdf-merge: two PDFs are merged in the order the buttons give, the downloaded file has
  *     the summed page count and the pages in that order; an encrypted file is refused by
  *     name and nothing is downloaded;
- *   - tools-send-nothing: with sentinel data in a PDF, a request listener sees no
- *     request that carries it, including after client-side navigation from another page;
+ *   - qr-png-and-svg: a code for a link downloads as a PNG (a real PNG, at the chosen size)
+ *     and an SVG; a Wi-Fi code's picture is named by its kind, never by the password; a line
+ *     break in a field and too much data are refused with a message;
+ *   - tools-send-nothing: with sentinel data in a PDF and a Wi-Fi password, a request
+ *     listener sees no request that carries it, including after client-side navigation
+ *     from another page;
  *   - pdf-ten-jobs-memory-guide: ten jobs in a row, as a ROUGH Chromium guide to
  *     memory (the JS heap only; its thresholds are provisional until the staging rehearsal,
  *     like the limits in lib/pdf-tools.ts).
@@ -77,6 +81,20 @@ async function openPdfTool(page: Page) {
   await expect(page.getByLabel("PDF files", { exact: true })).toBeEnabled();
 }
 
+/** The QR page, by client-side navigation from wherever the app is: the nav, then the hub's tile. */
+async function openQrTool(page: Page) {
+  await page
+    .getByRole("navigation", { name: "Main navigation" })
+    .getByRole("link", { name: "Tools", exact: true })
+    .click();
+  await expect(page).toHaveURL("/tools");
+  await page.getByRole("link", { name: /QR code/ }).click();
+  await expect(page).toHaveURL("/tools/qr");
+  await expect(page.getByRole("heading", { level: 1, name: "QR code" })).toBeVisible();
+  // Unlocked only once the document is known to carry no analytics (useCleanDocument).
+  await expect(page.getByLabel("The link or text", { exact: true })).toBeEnabled();
+}
+
 const names = (page: Page) =>
   page.getByRole("list", { name: "Chosen files" }).getByRole("listitem");
 
@@ -130,6 +148,7 @@ test("pdf-merge", async ({ page }, testInfo) => {
     await run.click();
     await expect(
       page
+        .getByRole("main")
         .getByRole("alert")
         .filter({ hasText: /^locked\.pdf is encrypted or password-protected/ }),
     ).toBeVisible();
@@ -140,7 +159,7 @@ test("pdf-merge", async ({ page }, testInfo) => {
     await page.getByRole("radio", { name: "Pick pages", exact: true }).check();
     // The list still holds the other files: this action takes exactly one.
     await run.click();
-    await expect(page.getByRole("alert")).toContainText("exactly one file");
+    await expect(page.getByRole("main").getByRole("alert")).toContainText("exactly one file");
     for (const name of ["a.pdf", "b.pdf"]) {
       await page.getByRole("button", { name: `Remove ${name}`, exact: true }).click();
     }
@@ -148,10 +167,85 @@ test("pdf-merge", async ({ page }, testInfo) => {
     await files.setInputFiles(pdfFile("three.pdf", await makePdf(3, 200)));
     await page.getByLabel("Pages", { exact: true }).fill("2-4");
     await run.click();
-    await expect(page.getByRole("alert")).toContainText("The file has only 3 pages.");
+    await expect(page.getByRole("main").getByRole("alert")).toContainText(
+      "The file has only 3 pages.",
+    );
     await page.getByLabel("Pages", { exact: true }).fill("3, 1");
     await run.click();
     await expect(page.getByRole("status").filter({ hasText: /^Done: 2 pages/ })).toBeVisible();
+  });
+});
+
+test("qr-png-and-svg", async ({ page }, testInfo) => {
+  const fixtures = loadFixtures();
+  await signIn(page, fixtures.users.member);
+  await openQrTool(page);
+  const create = page.getByRole("button", { name: "Create QR code", exact: true });
+  const main = page.getByRole("main");
+
+  await test.step("A link downloads as a PNG at the chosen size, and as an SVG", async () => {
+    await page.getByLabel("The link or text", { exact: true }).fill("https://example.org/qr?e2e=1");
+    await page.getByLabel("Size", { exact: true }).selectOption({ label: "Small (256 pixels)" });
+    await create.click();
+    await expect(main.getByRole("img", { name: "QR code for a link or text" })).toBeVisible();
+    await expect(
+      page.getByRole("status").filter({ hasText: "The QR code was created." }),
+    ).toBeAttached();
+
+    const [png] = await Promise.all([
+      page.waitForEvent("download"),
+      page.getByRole("button", { name: "Download as PNG", exact: true }).click(),
+    ]);
+    expect(png.suggestedFilename()).toBe("qr-code.png");
+    const pngFile = testInfo.outputPath("qr-code.png");
+    await png.saveAs(pngFile);
+    const bytes = readFileSync(pngFile);
+    expect([...bytes.subarray(0, 8)]).toEqual([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    expect(bytes.readUInt32BE(16), "PNG width").toBe(256);
+
+    const [svg] = await Promise.all([
+      page.waitForEvent("download"),
+      page.getByRole("button", { name: "Download as SVG", exact: true }).click(),
+    ]);
+    expect(svg.suggestedFilename()).toBe("qr-code.svg");
+    const svgFile = testInfo.outputPath("qr-code.svg");
+    await svg.saveAs(svgFile);
+    expect(readFileSync(svgFile, "utf8")).toMatch(/^<svg [^>]*width="256"/);
+  });
+
+  await test.step("A Wi-Fi code is named by its kind, never by its password", async () => {
+    await page.getByRole("radio", { name: "Wi-Fi", exact: true }).check();
+    // Changing the kind drops the picture of the other one.
+    await expect(main.getByRole("img", { name: /QR code/ })).toHaveCount(0);
+    await page.getByLabel("Network name (SSID)", { exact: true }).fill("E2E guest net");
+    await page.getByLabel("Password", { exact: true }).fill("e2e-wifi-password");
+    await create.click();
+    const picture = main.getByRole("img", { name: "QR code for a Wi-Fi login", exact: true });
+    await expect(picture).toBeVisible();
+    expect(await picture.getAttribute("alt")).not.toMatch(/e2e-wifi-password|E2E guest/);
+  });
+
+  await test.step("A line break in a field and too much data are refused with a message", async () => {
+    await page.getByLabel("Password", { exact: true }).fill("");
+    await create.click();
+    await expect(
+      page.getByRole("main").getByRole("alert").filter({ hasText: "Enter the password" }),
+    ).toBeVisible();
+
+    await page.getByRole("radio", { name: "Contact", exact: true }).check();
+    await page.getByLabel("First name", { exact: true }).fill("Max");
+    // U+2028 would start a new line in some readers; an input field accepts it.
+    await page.getByLabel("Last name", { exact: true }).fill("Muster\u2028END:VCARD");
+    await create.click();
+    await expect(page.getByRole("main").getByRole("alert")).toContainText(
+      "line break or a control character",
+    );
+    await expect(main.getByRole("img", { name: /QR code/ })).toHaveCount(0);
+
+    await page.getByRole("radio", { name: "Link or text", exact: true }).check();
+    await page.getByLabel("The link or text", { exact: true }).fill("x".repeat(2400));
+    await create.click();
+    await expect(page.getByRole("main").getByRole("alert")).toContainText("too much data");
   });
 });
 
@@ -194,6 +288,22 @@ test("tools-send-nothing", async ({ page }) => {
       page.getByRole("button", { name: "Download merged.pdf", exact: true }).click(),
     ]);
     expect(download.suggestedFilename()).toBe("merged.pdf");
+    expect(carrying()).toEqual([]);
+  });
+
+  await test.step("A Wi-Fi password with a sentinel makes a code; no request carries it either", async () => {
+    // From the PDF page to the QR page, again without a page load.
+    await openQrTool(page);
+    await page.getByRole("radio", { name: "Wi-Fi", exact: true }).check();
+    await page.getByLabel("Network name (SSID)", { exact: true }).fill("sentinel net");
+    await page.getByLabel("Password", { exact: true }).fill(SENTINEL);
+    await page.getByRole("button", { name: "Create QR code", exact: true }).click();
+    await expect(page.getByRole("img", { name: "QR code for a Wi-Fi login" })).toBeVisible();
+    const [png] = await Promise.all([
+      page.waitForEvent("download"),
+      page.getByRole("button", { name: "Download as PNG", exact: true }).click(),
+    ]);
+    expect(png.suggestedFilename()).toBe("qr-code.png");
     expect(carrying()).toEqual([]);
   });
 });

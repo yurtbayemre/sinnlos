@@ -771,6 +771,57 @@
         "beyond": "„{part}“: Die Datei hat nur {pageCount, plural, one {# Seite} other {# Seiten}}.",
         "tooMany": "Es sind mehr als {max} Seiten ausgewählt."
       }
+    },
+    "qr": {
+      "title": "QR-Code",
+      "description": "QR-Codes für Links, WLAN-Zugänge und Kontakte erzeugen, im Browser.",
+      "privacy": "Ihre Eingaben werden nicht übertragen und nicht gespeichert. Der Code entsteht in Ihrem Browser.",
+      "notice": "Der Code enthält Ihre Eingaben im Klartext: Wer ihn sieht oder scannt, kann sie lesen, ein WLAN-Passwort eingeschlossen.",
+      "kind": "Inhalt",
+      "kinds": {
+        "text": "Link oder Text",
+        "wifi": "WLAN",
+        "contact": "Kontakt"
+      },
+      "text": "Der Link oder Text",
+      "textHint": "Ein Link mit https:// öffnet sich beim Scannen im Browser.",
+      "ssid": "Netzwerkname (SSID)",
+      "password": "Passwort",
+      "security": "Verschlüsselung",
+      "securities": {
+        "WPA": "WPA, WPA2 oder WPA3",
+        "WEP": "WEP",
+        "nopass": "Keine (offenes Netz)"
+      },
+      "givenName": "Vorname",
+      "familyName": "Nachname",
+      "phone": "Telefon",
+      "email": "E-Mail",
+      "contactHint": "Vor- oder Nachname genügt; Telefon und E-Mail sind freiwillig.",
+      "size": "Größe",
+      "sizes": {
+        "small": "Klein (256 Pixel)",
+        "medium": "Mittel (512 Pixel)",
+        "large": "Groß (1024 Pixel)"
+      },
+      "generate": "QR-Code erzeugen",
+      "generated": "Der QR-Code wurde erzeugt.",
+      "alt": {
+        "text": "QR-Code für einen Link oder Text",
+        "wifi": "QR-Code für den Zugang zu einem WLAN",
+        "contact": "QR-Code für eine Kontaktkarte"
+      },
+      "downloadPng": "Als PNG herunterladen",
+      "downloadSvg": "Als SVG herunterladen",
+      "errors": {
+        "empty": "Geben Sie einen Link oder Text ein.",
+        "ssidMissing": "Geben Sie den Netzwerknamen ein.",
+        "passwordMissing": "Geben Sie das Passwort ein, oder wählen Sie „Keine (offenes Netz)“.",
+        "nameMissing": "Geben Sie einen Vor- oder Nachnamen ein.",
+        "controlCharacter": "Die Eingabe enthält einen Zeilenumbruch oder ein Steuerzeichen. Das ist in diesem Feld nicht erlaubt.",
+        "tooMuchData": "Das sind zu viele Daten für einen QR-Code. Kürzen Sie die Eingabe.",
+        "failed": "Das hat nicht geklappt. Bitte versuchen Sie es erneut."
+      }
     }
   },
   "processes": {

@@ -771,6 +771,57 @@
         "beyond": "“{part}”: The file has only {pageCount, plural, one {# page} other {# pages}}.",
         "tooMany": "More than {max} pages are selected."
       }
+    },
+    "qr": {
+      "title": "QR code",
+      "description": "Make QR codes for links, Wi-Fi logins and contacts, in your browser.",
+      "privacy": "Your entries are not transmitted or stored. The code is made in your browser.",
+      "notice": "The code holds your entries as plain text: anyone who sees or scans it can read them, a Wi-Fi password included.",
+      "kind": "Content",
+      "kinds": {
+        "text": "Link or text",
+        "wifi": "Wi-Fi",
+        "contact": "Contact"
+      },
+      "text": "The link or text",
+      "textHint": "A link starting with https:// opens in the browser when it is scanned.",
+      "ssid": "Network name (SSID)",
+      "password": "Password",
+      "security": "Encryption",
+      "securities": {
+        "WPA": "WPA, WPA2 or WPA3",
+        "WEP": "WEP",
+        "nopass": "None (open network)"
+      },
+      "givenName": "First name",
+      "familyName": "Last name",
+      "phone": "Phone",
+      "email": "Email",
+      "contactHint": "A first or a last name is enough; phone and email are optional.",
+      "size": "Size",
+      "sizes": {
+        "small": "Small (256 pixels)",
+        "medium": "Medium (512 pixels)",
+        "large": "Large (1024 pixels)"
+      },
+      "generate": "Create QR code",
+      "generated": "The QR code was created.",
+      "alt": {
+        "text": "QR code for a link or text",
+        "wifi": "QR code for a Wi-Fi login",
+        "contact": "QR code for a contact card"
+      },
+      "downloadPng": "Download as PNG",
+      "downloadSvg": "Download as SVG",
+      "errors": {
+        "empty": "Enter a link or text.",
+        "ssidMissing": "Enter the network name.",
+        "passwordMissing": "Enter the password, or choose “None (open network)”.",
+        "nameMissing": "Enter a first or a last name.",
+        "controlCharacter": "The entry contains a line break or a control character. That is not allowed in this field.",
+        "tooMuchData": "That is too much data for a QR code. Shorten the entry.",
+        "failed": "That did not work. Please try again."
+      }
     }
   },
   "processes": {
