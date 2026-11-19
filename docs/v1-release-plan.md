@@ -2,7 +2,7 @@
 
 Status: 2026-10-25, owner-approved. Baseline was v0.25.0 (`0c26656e`). This file lists **everything that still has to be done before v1.0.0**. Each item gets ticked when its release ships.
 
-**Current state (2026-11-03):**
+**Current state (2026-11-19):**
 
 - **v0.26.0 "portable"** is shipped and live since 2026-10-23 03:26 CEST.
 - **v0.27.0 "accounts"** is shipped and live since 2026-10-23 12:47 CEST; the owner's browser check passed.
@@ -12,7 +12,8 @@ Status: 2026-10-25, owner-approved. Baseline was v0.25.0 (`0c26656e`). This file
 - **v0.34.0 "security hardening"** is shipped and live since 2026-11-01 11:17 CET.
 - **v0.35.0 "secret sharing"** (owner request 2026-11-01; plan: [plan-v035-secret-sharing.md](plan-v035-secret-sharing.md)) is shipped and live since 2026-11-02 07:05 CET.
 - **v0.36.0 "secret sharing by role"** (owner request 2026-11-02; plan: [plan-secret-sharing-by-role.md](plan-secret-sharing-by-role.md)) is shipped and live since 2026-11-02 18:54 CET, before rc.1 (owner decision D6).
-- **v1.0.0-rc.1** (the v0.36.0 code under the release-candidate version, PR #226; a pre-release) is live since 2026-11-03 07:08 CET. Its soak runs until 2026-11-10 07:09 CET at the earliest: checks on day 1, 4 and 7, and one restore drill by the owner. v1.0.0 itself waits for the soak and for the lawyer review of the packages (S5 and the GHCR publication; owner decisions 2026-10-24 and 2026-10-25).
+- **v1.0.0-rc.1** (the v0.36.0 code under the release-candidate version, PR #226; a pre-release) was live from 2026-11-03 07:08 CET to 2026-11-19. Its soak checks on day 1, 4 and 7 were green; the restore drill was still open when rc.2 replaced it.
+- **v1.0.0-rc.2 "Tools"** (owner request 2026-11-19, built before v1.0.0; PR #231; a pre-release) is live since 2026-11-19 17:42 CET: processes (BPMN), browser-only PDF and QR tools, Mermaid in Markdown and the org chart's department view. Its soak runs until 2026-11-26 17:42 CET at the earliest: checks on day 1, 4 and 7, and one restore drill by the owner. v1.0.0 itself waits for the soak and for the lawyer review of the packages (S5, now with the bpmn.io watermark clause of bpmn-js, and the GHCR publication; owner decisions 2026-10-24 and 2026-10-25).
 
 ## What v1.0.0 means
 
