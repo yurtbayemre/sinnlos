@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { buildOrgTree, type OrgNode } from "./org-tree";
+import type { DepartmentListItem, TeamListItem } from "@/lib/api/org";
+import { buildDepartmentChart, buildOrgTree, type OrgNode } from "./org-tree";
 
 /**
  * The org chart tree (FX49): every person exactly once, self-managers and
@@ -106,5 +107,75 @@ describe("buildOrgTree", () => {
 
   it("returns nothing for nobody", () => {
     expect(buildOrgTree([])).toEqual({ roots: [], issues: 0 });
+  });
+});
+
+/**
+ * The department view's chart (v1.1): department → head → teams → lead →
+ * member count, from the department and the team list. A team is never lost.
+ */
+const dept = (id: number, over: Partial<DepartmentListItem> = {}): DepartmentListItem =>
+  ({ id, name: `d${id}`, slug: `d${id}`, ...over }) as DepartmentListItem;
+const team = (id: number, departmentId: number | null, over: Partial<TeamListItem> = {}) =>
+  ({
+    id,
+    name: `t${id}`,
+    slug: `t${id}`,
+    department: departmentId === null ? null : { id: departmentId },
+    ...over,
+  }) as TeamListItem;
+const ada = { id: 7, displayName: "Ada" };
+
+describe("buildDepartmentChart", () => {
+  it("returns nothing for nothing", () => {
+    expect(buildDepartmentChart([], [])).toEqual({ departments: [], unassigned: [] });
+  });
+
+  it("keeps a department without a head and without teams", () => {
+    const chart = buildDepartmentChart([dept(1)], []);
+    expect(chart.departments).toEqual([{ id: 1, name: "d1", slug: "d1", head: null, teams: [] }]);
+    expect(chart.unassigned).toEqual([]);
+  });
+
+  it("puts the head on its department and groups each team under its own", () => {
+    const chart = buildDepartmentChart(
+      [dept(1, { head: ada }), dept(2)],
+      [team(10, 2), team(11, 1), team(12, 2)],
+    );
+    expect(
+      chart.departments.map((d) => [d.id, d.head?.id ?? null, d.teams.map((t) => t.id)]),
+    ).toEqual([
+      [1, 7, [11]],
+      [2, null, [10, 12]],
+    ]);
+  });
+
+  it("shows a team without a lead and counts its members (none, or a missing roster)", () => {
+    const chart = buildDepartmentChart(
+      [dept(1)],
+      [
+        team(10, 1, { lead: ada, members: [ada, { id: 8, displayName: "Bob" }] }),
+        team(11, 1, { members: [] }),
+        team(12, 1),
+      ],
+    );
+    expect(
+      chart.departments[0]!.teams.map((t) => [t.id, t.lead?.id ?? null, t.memberCount]),
+    ).toEqual([
+      [10, 7, 2],
+      [11, null, 0],
+      [12, null, 0],
+    ]);
+  });
+
+  it("lists a team without a department, or with one that was not loaded, as unassigned", () => {
+    const chart = buildDepartmentChart([dept(1)], [team(10, null), team(11, 99), team(12, 1)]);
+    expect(chart.unassigned.map((t) => t.id)).toEqual([10, 11]);
+    expect(chart.departments[0]!.teams.map((t) => t.id)).toEqual([12]);
+  });
+
+  it("keeps the order of the lists it is given", () => {
+    const chart = buildDepartmentChart([dept(3), dept(1), dept(2)], []);
+    expect(chart.departments.map((d) => d.id)).toEqual([3, 1, 2]);
   });
 });

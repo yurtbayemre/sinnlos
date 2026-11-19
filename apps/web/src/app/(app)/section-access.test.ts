@@ -93,7 +93,12 @@ const pages = {
     import("./marketplace/page").then((page) =>
       page.default({ searchParams: Promise.resolve({}) }),
     ),
+  orgChartDepartments: () => orgChart({ view: "departments" }),
 };
+const orgChart = (query: { view?: string }) =>
+  import("./people/org-chart/page").then((page) =>
+    page.default({ searchParams: Promise.resolve(query) }),
+  );
 const dashboard = (await import("./page")).default;
 
 /** Every element in a returned page tree (through children). */
@@ -150,6 +155,38 @@ describe("section pages", () => {
     await pages.kudos();
     expect(calls).toContain("celebrations");
   });
+});
+
+describe("org chart", () => {
+  it("a guest's reporting-line chart still loads, without a view switch or any org request", async () => {
+    const tree = elements(await orgChart({}));
+    expect(calls).toEqual(["users"]);
+    expect(has(tree, SectionUnavailablePage)).toBe(false);
+    const links = tree.map((element) => element.props.href).filter(Boolean);
+    expect(links).not.toContain("/people/org-chart?view=departments");
+  });
+
+  it("a guest asking for the department view gets the explanation and no request at all", async () => {
+    expect(has(elements(await orgChart({ view: "departments" })), SectionUnavailablePage)).toBe(
+      true,
+    );
+    expect(calls).toEqual([]);
+  });
+
+  it("a member's department view reads the departments and the teams, not the users", async () => {
+    viewer.role = "member";
+    await orgChart({ view: "departments" });
+    expect(calls.sort()).toEqual(["departments.list", "teams.list"]);
+  });
+
+  it.each([undefined, "", "reporting", "Departments"])(
+    "the view %j is the reporting-line chart",
+    async (view) => {
+      viewer.role = "member";
+      await orgChart({ view });
+      expect(calls).toEqual(["users"]);
+    },
+  );
 });
 
 describe("dashboard", () => {
