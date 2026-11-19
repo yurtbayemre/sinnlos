@@ -80,8 +80,11 @@ describe("/people/org-chart", () => {
     expect(out).toMatch(/Head:\s*(<!-- -->)?\s*<a [^>]*href="\/people\/7"[^>]*>Ada Lovelace<\/a>/);
     expect(out).toContain("Team lead:");
     expect(out).toContain("2 members");
-    // A list inside a list item of a list.
-    expect(out).toMatch(/<ul[^>]*><li><div[\s\S]*<\/div><ul[^>]*><li>/);
+    // A list inside a list item of a list, both announced as lists (Tailwind drops the markers).
+    expect(out).toMatch(/<ul role="list"[^>]*><li><div[\s\S]*<\/div><ul role="list"[^>]*><li>/);
+    expect(out).not.toMatch(/<ul(?![^>]*role="list")/);
+    // The person links are underlined, so a name in a sentence reads as a link without hover.
+    expect(out).toMatch(/class="[^"]*\sunderline\s[^"]*" href="\/people\/7"/);
     expect(departmentsMock).toHaveBeenCalledTimes(1);
     expect(teamsMock).toHaveBeenCalledTimes(1);
   });
@@ -110,7 +113,19 @@ describe("/people/org-chart", () => {
     const out = await html({ view: "departments" });
     expect(out).toContain(en.people.deptTruncated);
     expect(out).toContain("Engineering");
-    expect(await html({ view: "departments" })).toMatch(/role="status"/);
+    expect(out).toMatch(/role="status"/);
+  });
+
+  it("names a head and a lead with a blank display name by their username", async () => {
+    const blank = { id: 7, displayName: "  ", username: "ada" };
+    departmentsMock.mockResolvedValue({
+      data: [{ ...engineering, head: blank }],
+      truncated: false,
+    });
+    teamsMock.mockResolvedValue({ data: [{ ...platform, lead: blank }], truncated: false });
+    const out = await html({ view: "departments" });
+    expect(out.match(/href="\/people\/7"[^>]*>ada<\/a>/g)).toHaveLength(2);
+    expect(out).not.toContain("Unknown");
   });
 
   it("shows no truncation notice for a complete list", async () => {

@@ -174,6 +174,24 @@ describe("buildDepartmentChart", () => {
     expect(chart.departments[0]!.teams.map((t) => t.id)).toEqual([12]);
   });
 
+  it("lists a team id that comes twice (a page walk repeating a boundary row) once, first entry wins", () => {
+    const chart = buildDepartmentChart(
+      [dept(1)],
+      [
+        team(10, 1, { name: "first" }),
+        team(11, 1),
+        team(10, 1, { name: "again" }),
+        team(12, null),
+        team(12, null),
+      ],
+    );
+    expect(chart.departments[0]!.teams.map((t) => [t.id, t.name])).toEqual([
+      [10, "first"],
+      [11, "t11"],
+    ]);
+    expect(chart.unassigned.map((t) => t.id)).toEqual([12]);
+  });
+
   it("keeps the order of the lists it is given", () => {
     const chart = buildDepartmentChart([dept(3), dept(1), dept(2)], []);
     expect(chart.departments.map((d) => d.id)).toEqual([3, 1, 2]);

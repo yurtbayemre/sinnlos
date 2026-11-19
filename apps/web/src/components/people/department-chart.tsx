@@ -3,7 +3,7 @@ import { useTranslations } from "next-intl";
 import { Card, CardContent } from "@/components/ui/card";
 import type { UserName } from "@/lib/api/org";
 import type { DepartmentChart as Chart, DepartmentChartTeam } from "@/lib/org-tree";
-import { displayNameOf } from "@/lib/utils";
+import { cn, displayNameOf } from "@/lib/utils";
 
 const linkClass =
   "rounded-md outline-hidden hover:underline focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background";
@@ -12,12 +12,14 @@ const linkClass =
  * The org chart's department view (v1.1): nested lists, department (h2) →
  * its teams (h3), each with its head or lead and the member count. Static
  * markup, fully expanded, so it works without JavaScript; the tree of
- * reporting lines stays the default view (org-tree.tsx).
+ * reporting lines stays the default view (org-tree.tsx). The lists carry
+ * role="list": Tailwind removes their markers, and VoiceOver then stops
+ * announcing them as lists.
  */
 export function DepartmentChart({ chart }: { chart: Chart }) {
   const t = useTranslations("people");
   return (
-    <ul className="space-y-4">
+    <ul role="list" className="space-y-4">
       {chart.departments.map((department) => (
         <li key={department.id}>
           <Card className="mb-1">
@@ -50,7 +52,7 @@ export function DepartmentChart({ chart }: { chart: Chart }) {
 function Teams({ teams }: { teams: DepartmentChartTeam[] }) {
   const t = useTranslations("people");
   return (
-    <ul className="ml-3 space-y-1 border-l border-border/50 pl-6">
+    <ul role="list" className="ml-3 space-y-1 border-l border-border/50 pl-6">
       {teams.map((team) => (
         <li key={team.id}>
           <Card>
@@ -79,7 +81,11 @@ function Person({ label, none, person }: { label: string; none: string; person: 
       {person ? (
         <>
           {label}:{" "}
-          <Link href={`/people/${person.id}`} className={linkClass}>
+          {/* Underlined: a name inside a sentence is not recognisable as a link without hover. */}
+          <Link
+            href={`/people/${person.id}`}
+            className={cn(linkClass, "underline underline-offset-2")}
+          >
             {displayNameOf(person, "Unknown")}
           </Link>
         </>

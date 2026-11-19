@@ -1,10 +1,10 @@
 import Link from "next/link";
 import { getTranslations } from "next-intl/server";
-import { Network, Workflow } from "lucide-react";
+import { Building2, Workflow } from "lucide-react";
 import { PageHeader } from "@/components/page-header";
 import { SectionUnavailablePage } from "@/components/section-unavailable";
 import { Card, CardContent } from "@/components/ui/card";
-import { isReadDenied } from "@/lib/roles";
+import { canRead, isReadDenied } from "@/lib/roles";
 import { getViewer } from "@/lib/viewer";
 
 export async function generateMetadata() {
@@ -26,7 +26,8 @@ export default async function ToolsPage() {
   if (isReadDenied(viewer.role, "processes")) {
     return <SectionUnavailablePage title={t("title")} description={t("description")} />;
   }
-  const mayReadOrg = !isReadDenied(viewer.role, "departments");
+  // Fail-closed, unlike the hub's own gate: no tile for a role that is missing or unknown.
+  const mayReadOrg = canRead(viewer.role, "departments");
   return (
     <div className="space-y-8">
       <PageHeader title={t("title")} description={t("description")} />
@@ -60,7 +61,7 @@ export default async function ToolsPage() {
               <Card className="h-full transition-colors hover:bg-accent/40">
                 <CardContent className="flex h-full items-start gap-3 py-4">
                   <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
-                    <Network className="h-5 w-5" aria-hidden="true" />
+                    <Building2 className="h-5 w-5" aria-hidden="true" />
                   </span>
                   <span>
                     <span className="block font-medium">{t("orgChart.title")}</span>

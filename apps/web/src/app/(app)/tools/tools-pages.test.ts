@@ -29,6 +29,8 @@ vi.mock("@/lib/roles", async (importOriginal) => {
     ...roles,
     isReadDenied: (role: string | null, section: Parameters<typeof roles.isReadDenied>[1]) =>
       who.denied.has(section) || roles.isReadDenied(role, section),
+    canRead: (role: string | null, section: Parameters<typeof roles.canRead>[1]) =>
+      !who.denied.has(section) && roles.canRead(role, section),
   };
 });
 vi.mock("@/lib/viewer", () => ({
@@ -92,6 +94,16 @@ describe("/tools", () => {
     expect(hrefs(tree)).toEqual(["/tools/processes"]);
     expect(has(tree, SectionUnavailablePage)).toBe(false);
   });
+
+  it.each([null, "intern"])(
+    "leaves out the department tile for the missing or unknown role %j (fail-closed), the hub itself still reads",
+    async (role) => {
+      who.role = role;
+      const tree = elements(await hub.default());
+      expect(hrefs(tree)).toEqual(["/tools/processes"]);
+      expect(has(tree, SectionUnavailablePage)).toBe(false);
+    },
+  );
 
   it("keeps the whole hub gated on the processes read, whatever the department tile would do", async () => {
     who.denied.add("processes");

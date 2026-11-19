@@ -117,7 +117,9 @@ export interface DepartmentChart {
  * member count, from the two existing loaders. The department list only
  * delivers team rows without lead or members, so the teams come from the
  * team list and are grouped by their department. A team is never dropped:
- * one without a department is listed under `unassigned`.
+ * one without a department is listed under `unassigned`. A team id listed
+ * twice (the page walk can repeat a boundary row when teams change between
+ * two requests) is one team: the first entry wins.
  */
 export function buildDepartmentChart(
   departments: readonly DepartmentListItem[],
@@ -128,7 +130,10 @@ export function buildDepartmentChart(
     branches.set(id, { id, name, slug, head: head ?? null, teams: [] });
   }
   const unassigned: DepartmentChartTeam[] = [];
+  const seen = new Set<number>();
   for (const { id, name, slug, lead, members, department } of teams) {
+    if (seen.has(id)) continue;
+    seen.add(id);
     const branch = department ? branches.get(department.id) : undefined;
     (branch ? branch.teams : unassigned).push({
       id,

@@ -1,21 +1,20 @@
-import Link from "next/link";
 import { AlertTriangle, Building2, Contact, Network } from "lucide-react";
 import { getTranslations } from "next-intl/server";
 import { ORG_CHART_QUERY, toOrgPeople } from "@/lib/people-dto";
 import { buildDepartmentChart } from "@/lib/org-tree";
-import { isReadDenied } from "@/lib/roles";
+import { canRead } from "@/lib/roles";
 import { api } from "@/lib/strapi";
 import { fetchAllUsers } from "@/lib/users";
 import { tryFetch } from "@/lib/safe-fetch";
 import type { UserLite } from "@/lib/types";
 import { getViewer } from "@/lib/viewer";
-import { cn } from "@/lib/utils";
 import { EmptyState } from "@/components/empty-state";
 import { FetchErrorBanner } from "@/components/fetch-error";
 import { PageHeader } from "@/components/page-header";
 import { DepartmentChart } from "@/components/people/department-chart";
 import { OrgTree } from "@/components/people/org-tree";
 import { SectionUnavailablePage } from "@/components/section-unavailable";
+import { ViewSwitch } from "@/components/view-switch";
 
 export async function generateMetadata() {
   const t = await getTranslations("people");
@@ -23,38 +22,6 @@ export async function generateMetadata() {
 }
 
 type Translate = Awaited<ReturnType<typeof getTranslations<"people">>>;
-
-/** Same switch as the events page: links, so it works without JavaScript and is linkable. */
-function ViewSwitch({ departments, t }: { departments: boolean; t: Translate }) {
-  const linkClass = (active: boolean) =>
-    cn(
-      "inline-flex items-center gap-1.5 rounded-[10px] px-3 py-1.5 text-sm font-medium transition-colors",
-      "outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
-      active
-        ? "bg-primary text-primary-foreground ring-1 ring-primary-text"
-        : "text-muted-foreground hover:bg-muted",
-    );
-  return (
-    <div role="group" aria-label={t("viewLabel")} className="inline-flex rounded-xl border p-0.5">
-      <Link
-        href="/people/org-chart"
-        aria-current={!departments ? "page" : undefined}
-        className={linkClass(!departments)}
-      >
-        <Network className="h-4 w-4" aria-hidden="true" />
-        {t("viewReporting")}
-      </Link>
-      <Link
-        href="/people/org-chart?view=departments"
-        aria-current={departments ? "page" : undefined}
-        className={linkClass(departments)}
-      >
-        <Building2 className="h-4 w-4" aria-hidden="true" />
-        {t("viewDepartments")}
-      </Link>
-    </div>
-  );
-}
 
 export default async function OrgChartPage({
   searchParams,
@@ -66,10 +33,11 @@ export default async function OrgChartPage({
     searchParams,
     getViewer(),
   ]);
-  // The department view reads departments and teams (one grant set, ORG_READER_ROLES):
-  // a role without it gets no request and no switch (SH02). The reporting-line
-  // chart has no such gate and stays as it was.
-  const mayReadOrg = !isReadDenied(viewer.role, "departments");
+  // The department view reads departments and teams (one grant set, ORG_READER_ROLES).
+  // Fail-closed: a role that is missing or unknown (a failed /api/me) gets no
+  // request and no switch either, not even a read the CMS would then refuse.
+  // The reporting-line chart has no such gate and stays as it was.
+  const mayReadOrg = canRead(viewer.role, "departments");
   const departmentsView = query.view === "departments";
   if (departmentsView && !mayReadOrg) {
     return <SectionUnavailablePage title={t("orgChart")} />;
@@ -78,7 +46,25 @@ export default async function OrgChartPage({
   return (
     <div className="space-y-6">
       <PageHeader title={t("orgChart")}>
-        {mayReadOrg && <ViewSwitch departments={departmentsView} t={t} />}
+        {mayReadOrg && (
+          <ViewSwitch
+            label={t("viewLabel")}
+            items={[
+              {
+                href: "/people/org-chart",
+                active: !departmentsView,
+                icon: Network,
+                text: t("viewReporting"),
+              },
+              {
+                href: "/people/org-chart?view=departments",
+                active: departmentsView,
+                icon: Building2,
+                text: t("viewDepartments"),
+              },
+            ]}
+          />
+        )}
       </PageHeader>
       {departmentsView ? await departmentBody(t) : await reportingBody(t)}
     </div>
