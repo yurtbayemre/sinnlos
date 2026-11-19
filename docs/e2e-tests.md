@@ -92,9 +92,10 @@ with no hydration error; a hostile diagram (an `%%{init}%%` asking for `security
 "loose" and HTML labels, a label with a form, a picture, script and `onerror`, a click
 callback, a `javascript:` link, a `themeCSS` with a `url()`) runs nothing, keeps no
 handler attribute, shows its label markup as text and asks for nothing; a sequence message
-with math (HTML whatever `htmlLabels` says) is drawn without the form, picture and styled
-span written beside it; the picture of an image shape is the one request left and it
-carries no `Referer` (the root layout's `<meta name="referrer">`); a diagram that does not parse stays its source with a hint; the SVG is
+with math (HTML whatever `htmlLabels` says) is drawn without the form, picture, table
+background, inline style, SVG fill and filter and srcset written beside it, and no attribute
+of it names the evil host; the picture of an image shape is the one request left and it
+carries no `Referer` (the `(app)` layout's `<meta name="referrer">`); a diagram that does not parse stays its source with a hint; the SVG is
 named (`accTitle` or the group's "Diagram") and the source is one disclosure away; the
 theme switch draws it again in the other theme's CSS; the HTML the server sends holds
 each fence as a plain code block, which is all a browser without JavaScript gets (the
