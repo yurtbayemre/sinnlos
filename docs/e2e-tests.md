@@ -89,11 +89,20 @@ announcement with `mermaid` fences, preview and publish it. Only a browser can s
 it checks: the Mermaid library is in no script of a page without a fence, not even the
 editor's, and a fence loads it; the fences draw as SVG in the preview and on the page,
 with no hydration error; a hostile diagram (an `%%{init}%%` asking for `securityLevel`
-"loose", HTML labels with script and `onerror`, a click callback, a `javascript:` link)
-runs nothing and keeps no handler attribute; a diagram that does not parse stays its
-source with a hint; the SVG is named (`accTitle` or the group's "Diagram") and the source
-is one disclosure away; the theme switch draws it again; the HTML the server sends holds
-each fence as a plain code block, which is all a browser without JavaScript gets.
+"loose" and HTML labels, a label with a form, a picture, script and `onerror`, a click
+callback, a `javascript:` link, a `themeCSS` with a `url()`) runs nothing, keeps no
+handler attribute, shows its label markup as text and asks for nothing; the picture of an
+image shape is the one request left and it carries no `Referer` (the root layout's
+referrer policy); a diagram that does not parse stays its source with a hint; the SVG is
+named (`accTitle` or the group's "Diagram") and the source is one disclosure away; the
+theme switch draws it again in the other theme's CSS; the HTML the server sends holds
+each fence as a plain code block, which is all a browser without JavaScript gets (the
+browser itself would keep a streamed boundary hidden, as for every page).
+
+The `mermaid-in-wiki-page` case in the same file has an editor create a wiki space and a
+page with a sequence diagram followed by a `## actor0` heading: the page draws the
+diagram after a clean hydration, `#actor0` leads to the heading (every id of the SVG
+carries the render id), and the page's HTML holds the fence as plain source.
 
 The `secret-sharing` case in `e2e/secrets.spec.ts` (v0.35) has the member send
 secrets to the team lead through `/secrets/new`. Every `/secrets` answer it
@@ -174,6 +183,7 @@ pnpm test:e2e --grep training-confirm-completion
 pnpm test:e2e --grep training-authoring
 pnpm test:e2e --grep process-authoring-and-reading
 pnpm test:e2e --grep mermaid-in-markdown
+pnpm test:e2e --grep mermaid-in-wiki-page
 pnpm test:e2e --grep secret-sharing
 pnpm test:e2e --grep secret-roles
 pnpm --filter @sinnlos/e2e test:live   # secret-live, live events on
