@@ -427,6 +427,77 @@ describe("runPdfJob: what a page carries along", () => {
     });
   });
 
+  it("removes every annotation except a web link: a FreeText, a highlight, a note and a popup go", async () => {
+    const lib = await import("@cantoo/pdf-lib");
+    const { doc, first, ref } = await threePages(lib);
+    const note = ref({ Type: "Annot", Subtype: "Text", Rect: [0, 0, 20, 20], Contents: "note" });
+    first.node.set(
+      lib.PDFName.of("Annots"),
+      doc.context.obj([
+        ref({
+          Type: "Annot",
+          Subtype: "FreeText",
+          Rect: [10, 10, 90, 40],
+          Contents: lib.PDFString.of("DO NOT APPROVE"),
+          DA: lib.PDFString.of("/Helv 12 Tf 0 g"),
+        }),
+        ref({ Type: "Annot", Subtype: "Highlight", Rect: [0, 50, 90, 60], QuadPoints: [] }),
+        note,
+        ref({ Type: "Annot", Subtype: "Popup", Rect: [0, 0, 50, 50], Parent: note }),
+        ref({
+          Type: "Annot",
+          Subtype: "Link",
+          Rect: [0, 120, 50, 150],
+          A: { S: "URI", URI: lib.PDFString.of(URL_OF_LINK) },
+        }),
+      ]),
+    );
+    const file = source(await doc.save(), "annotated.pdf");
+    // A plain copy keeps all five annotations (so the test can see what is removed).
+    const plain = await lib.PDFDocument.load(await file.arrayBuffer());
+    expect(plain.getPage(0).node.Annots()?.size()).toBe(5);
+    const result = await runPdfJob(job({ kind: "rotate", files: [file] }));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(await annotationsOfFirstPage(result.bytes)).toEqual([
+      { subtype: "Link", rect: [0, 120, 50, 150], uri: URL_OF_LINK },
+    ]);
+  });
+
+  it("drops a page's PieceInfo, SeparationInfo and PresSteps, which can name other pages and data", async () => {
+    const lib = await import("@cantoo/pdf-lib");
+    const { doc, first, second, third } = await threePages(lib);
+    const { PDFName, PDFString } = lib;
+    // A private entry that names page 3's content, and a list of pages.
+    first.node.set(
+      PDFName.of("PieceInfo"),
+      doc.context.obj({
+        App: {
+          LastModified: PDFString.of("D:20260101000000Z"),
+          Private: third.node.get(PDFName.of("Contents")),
+        },
+      }),
+    );
+    first.node.set(
+      PDFName.of("SeparationInfo"),
+      doc.context.obj({ Pages: [first.ref, second.ref, third.ref], DeviceColorant: "Black" }),
+    );
+    first.node.set(PDFName.of("PresSteps"), doc.context.obj({ Type: "NavNode", Next: third.ref }));
+    const file = source(await doc.save(), "hooks.pdf");
+    const plain = await plainCopy(file);
+    expect(plain.text, "a plain copy carries page 3's content along").toContain(MARKER);
+    expect(plain.count).toBeGreaterThan(2);
+
+    const deleted = await runPdfJob(job({ kind: "delete", files: [file], ranges: "3" }));
+    expect(deleted.ok).toBe(true);
+    if (!deleted.ok) return;
+    expect(await pageObjects(deleted.bytes)).toMatchObject({ count: 2, pages: 2 });
+    expect((await pageObjects(deleted.bytes)).text).not.toContain(MARKER);
+    // Rotating every page was refused by the stray-page guard because of SeparationInfo.
+    const rotated = await runPdfJob(job({ kind: "rotate", files: [file] }));
+    expect(rotated.ok).toBe(true);
+  });
+
   it("a file without links, forms or references passes the stray-page check", async () => {
     const result = await runPdfJob(
       job({ kind: "split", files: [await pdf(3, "a.pdf")], ranges: "2" }),
@@ -494,5 +565,142 @@ describe("runPdfJob: damaged and oversized files", () => {
     } finally {
       vi.restoreAllMocks();
     }
+  });
+});
+
+describe("runPdfJob: relative web links", () => {
+  /** Page 1 carries four web links; the catalog has a /URI /Base when `base` is given. */
+  async function linksFile(base?: string) {
+    const lib = await import("@cantoo/pdf-lib");
+    const { doc, first, ref } = await threePages(lib);
+    const link = (y: number, address: string) =>
+      ref({
+        Type: "Annot",
+        Subtype: "Link",
+        Rect: [0, y, 50, y + 10],
+        A: { S: "URI", URI: lib.PDFString.of(address) },
+      });
+    first.node.set(
+      lib.PDFName.of("Annots"),
+      doc.context.obj([
+        link(0, "other.html"),
+        link(20, "#section"),
+        link(40, "https://abs.example/x"),
+        link(60, "mailto:a@b.example"),
+      ]),
+    );
+    if (base !== undefined) {
+      doc.catalog.set(lib.PDFName.of("URI"), doc.context.obj({ Base: lib.PDFString.of(base) }));
+    }
+    return source(await doc.save(), "links.pdf");
+  }
+  const addresses = async (bytes: Uint8Array) =>
+    (await annotationsOfFirstPage(bytes)).map((annot) => annot.uri);
+
+  it("resolves a relative address against the source's /URI /Base, and leaves absolute ones alone", async () => {
+    const result = await runPdfJob(
+      job({ kind: "rotate", files: [await linksFile("http://example.org/docs/")] }),
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(await addresses(result.bytes)).toEqual([
+      "http://example.org/docs/other.html",
+      "http://example.org/docs/#section",
+      "https://abs.example/x",
+      "mailto:a@b.example",
+    ]);
+  });
+
+  it("without a base keeps the address as it is, and so does a base that is no address", async () => {
+    for (const base of [undefined, "not a base"]) {
+      const result = await runPdfJob(job({ kind: "rotate", files: [await linksFile(base)] }));
+      expect(result.ok, String(base)).toBe(true);
+      if (!result.ok) continue;
+      expect(await addresses(result.bytes), String(base)).toEqual([
+        "other.html",
+        "#section",
+        "https://abs.example/x",
+        "mailto:a@b.example",
+      ]);
+    }
+  });
+
+  it("uses each file's own base when files are merged", async () => {
+    const result = await runPdfJob(
+      job({
+        kind: "merge",
+        files: [await linksFile("http://one.example/a/"), await linksFile("http://two.example/b/")],
+      }),
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const { PDFDocument, PDFDict, PDFName, PDFString } = await import("@cantoo/pdf-lib");
+    const merged = await PDFDocument.load(result.bytes);
+    const first = (page: number) => {
+      const annots = merged.getPage(page).node.Annots()!;
+      return annots
+        .lookup(0, PDFDict)
+        .lookup(PDFName.of("A"), PDFDict)
+        .lookup(PDFName.of("URI"), PDFString)
+        .decodeText();
+    };
+    expect([first(0), first(3)]).toEqual([
+      "http://one.example/a/other.html",
+      "http://two.example/b/other.html",
+    ]);
+  });
+});
+
+describe("runPdfJob: a page tree pdf-lib reads only in part", () => {
+  const damagedTree = async (
+    change: (lib: Lib, doc: Awaited<ReturnType<typeof threePages>>) => void,
+  ) => {
+    const lib = await import("@cantoo/pdf-lib");
+    const parts = await threePages(lib);
+    change(lib, parts);
+    return source(await parts.doc.save(), "tree.pdf");
+  };
+
+  it("refuses a file with a page that has no /Type (pdf-lib would see one page less)", async () => {
+    const file = await damagedTree((lib, { second }) => second.node.delete(lib.PDFName.of("Type")));
+    // The fixture is real: a lenient load counts two pages, not three, with /Count 3.
+    const { PDFDocument } = await import("@cantoo/pdf-lib");
+    expect((await PDFDocument.load(await file.arrayBuffer())).getPageCount()).toBe(2);
+    for (const kind of ["rotate", "merge"] as const) {
+      const files = kind === "merge" ? [file, file] : [file];
+      expect(await runPdfJob(job({ kind, files })), kind).toEqual({
+        ok: false,
+        issue: { code: "broken", name: "tree.pdf" },
+      });
+    }
+  });
+
+  it("refuses a /Count that does not match the pages below it, either way", async () => {
+    for (const count of [2, 4]) {
+      const file = await damagedTree((lib, { doc }) =>
+        doc.catalog.Pages().set(lib.PDFName.of("Count"), lib.PDFNumber.of(count)),
+      );
+      expect(await runPdfJob(job({ kind: "rotate", files: [file] })), String(count)).toEqual({
+        ok: false,
+        issue: { code: "broken", name: "tree.pdf" },
+      });
+    }
+  });
+
+  it("refuses a page tree that contains itself", async () => {
+    const file = await damagedTree((lib, { doc }) => {
+      const tree = doc.catalog.Pages();
+      tree.Kids().push(doc.catalog.get(lib.PDFName.of("Pages"))!);
+      tree.set(lib.PDFName.of("Count"), lib.PDFNumber.of(3));
+    });
+    expect(await runPdfJob(job({ kind: "rotate", files: [file] }))).toEqual({
+      ok: false,
+      issue: { code: "broken", name: "tree.pdf" },
+    });
+  });
+
+  it("takes an ordinary file", async () => {
+    const file = await damagedTree(() => {});
+    expect(await runPdfJob(job({ kind: "rotate", files: [file] }))).toMatchObject({ ok: true });
   });
 });

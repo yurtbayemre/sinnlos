@@ -10,12 +10,15 @@
  * forms, bookmarks, layers, tags, signatures and document properties. A page copy follows
  * every reference of the page, so a kept page's annotations would pull the pages they
  * point to (a link to a deleted page, a form field with a widget on it) into the output:
- * only web links (a Link with a URI action) are kept (`keepWebLinks`), and a finished
- * output with more page objects than pages is refused (`hasStrayPages`).
+ * every annotation except a web link (a Link with a URI action) is dropped, with the
+ * page's other private hooks (`keepWebLinks`), and a finished output with more page
+ * objects than pages is refused (`hasStrayPages`). A file whose page tree has a child that
+ * is no page or page tree, or a count that does not match its leaves, is refused as broken
+ * (`hasSoundPageTree`): the pages pdf-lib does not see would be lost without a word.
  *
- * This is NOT a way to remove confidential content. A deleted page is not copied, but
- * what it shares with a kept page (fonts, images, other resources) is, and the tool does
- * not black out anything; the page says both.
+ * This is NOT a way to remove confidential content. Pages that are left out leave the page
+ * tree, but data they share with kept pages (fonts, images, other resources) may remain in
+ * the file, and the tool does not black out anything; the page says both.
  */
 
 /**
@@ -120,14 +123,38 @@ const nextTask = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 
 type PdfLib = typeof import("@cantoo/pdf-lib");
 
+/** The base address of a document's relative web links (`/URI /Base` in its catalog), if any. */
+function webBase(lib: PdfLib, doc: PdfLib["PDFDocument"]["prototype"]): string | undefined {
+  const { PDFDict, PDFHexString, PDFName, PDFString } = lib;
+  const base = doc.catalog.lookupMaybe(PDFName.of("URI"), PDFDict)?.lookup(PDFName.of("Base"));
+  return base instanceof PDFString || base instanceof PDFHexString ? base.decodeText() : undefined;
+}
+
+/** A link address made absolute against `base`; what is already absolute, or cannot be, stays. */
+function absoluteUri(uri: string, base: string | undefined): string {
+  if (!base || /^[a-z][a-z0-9+.-]*:/i.test(uri)) return uri;
+  try {
+    return new URL(uri, base).href;
+  } catch {
+    return uri;
+  }
+}
+
 /**
  * Replaces the annotations of a page that is about to be copied by plain copies of its web
- * links, a Link whose action is a URI, and drops the page's article beads and additional
- * actions. Everything else an annotation can be (a link to a page, a form widget, a popup)
- * names other objects, and copying the page would copy them and the pages they sit on. A kept
- * link is rebuilt from its rectangle and its URI string alone, without a frame.
+ * links, a Link whose action is a URI, and drops the page's article beads, additional
+ * actions and the private hooks PieceInfo, SeparationInfo and PresSteps (they can name other
+ * pages or private data). Every other annotation, a comment, a highlight, a stamp, ink, a
+ * form widget or a link to a page, is gone: it names other objects, and copying the page
+ * would copy them and the pages they sit on. A kept link is rebuilt from its rectangle and
+ * its URI string alone, without a frame; a relative address is made absolute against the
+ * source's `/URI /Base` first, because the output has none.
  */
-function keepWebLinks(lib: PdfLib, node: PdfLib["PDFPageLeaf"]["prototype"]): void {
+function keepWebLinks(
+  lib: PdfLib,
+  node: PdfLib["PDFPageLeaf"]["prototype"],
+  base: string | undefined,
+): void {
   const { PDFArray, PDFDict, PDFHexString, PDFName, PDFNumber, PDFString } = lib;
   const links = [];
   const annots = node.Annots();
@@ -145,6 +172,8 @@ function keepWebLinks(lib: PdfLib, node: PdfLib["PDFPageLeaf"]["prototype"]): vo
     ) {
       continue;
     }
+    const text = uri.decodeText();
+    const absolute = absoluteUri(text, base);
     links.push(
       node.context.register(
         node.context.obj({
@@ -152,15 +181,47 @@ function keepWebLinks(lib: PdfLib, node: PdfLib["PDFPageLeaf"]["prototype"]): vo
           Subtype: "Link",
           Rect: corners,
           Border: [0, 0, 0],
-          A: { S: "URI", URI: uri },
+          A: { S: "URI", URI: absolute === text ? uri : PDFString.of(absolute) },
         }),
       ),
     );
   }
   if (links.length > 0) node.set(PDFName.of("Annots"), node.context.obj(links));
   else node.delete(PDFName.of("Annots"));
-  node.delete(PDFName.of("B"));
-  node.delete(PDFName.of("AA"));
+  for (const key of ["B", "AA", "PieceInfo", "SeparationInfo", "PresSteps"]) {
+    node.delete(PDFName.of(key));
+  }
+}
+
+/**
+ * Whether every child in a document's page tree is a /Pages or /Page dictionary and each
+ * /Count matches the pages below it. pdf-lib walks the tree and skips a child it does not
+ * recognise (a leaf without /Type), so a file that fails this would lose pages unseen.
+ */
+function hasSoundPageTree(lib: PdfLib, doc: PdfLib["PDFDocument"]["prototype"]): boolean {
+  const { PDFPageLeaf, PDFPageTree } = lib;
+  const seen = new Set<object>();
+  const leavesOf = (tree: PdfLib["PDFPageTree"]["prototype"]): number | null => {
+    if (seen.has(tree)) return null;
+    seen.add(tree);
+    const kids = tree.Kids();
+    let leaves = 0;
+    for (let i = 0; i < kids.size(); i += 1) {
+      const kid = kids.lookup(i);
+      if (kid instanceof PDFPageLeaf) leaves += 1;
+      else if (kid instanceof PDFPageTree) {
+        const below = leavesOf(kid);
+        if (below === null) return null;
+        leaves += below;
+      } else return null;
+    }
+    return tree.Count().asNumber() === leaves ? leaves : null;
+  };
+  try {
+    return leavesOf(doc.catalog.Pages()) !== null;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -247,7 +308,9 @@ export async function runPdfJob(
             )));
         return refuse({ code: encrypted ? "encrypted" : "broken", name: file.name });
       }
-      if (count === 0) return refuse({ code: "broken", name: file.name });
+      if (count === 0 || !hasSoundPageTree(lib, source)) {
+        return refuse({ code: "broken", name: file.name });
+      }
       // 2. The total pages, after parsing and before anything is copied.
       totalPages += count;
       if (totalPages > PDF_MAX_PAGES) return refuse({ code: "tooManyPages" });
@@ -257,7 +320,8 @@ export async function runPdfJob(
       if ("code" in selection) return refuse(selection);
       const { keep, turned } = selection;
       const pages = source.getPages();
-      for (const at of keep) keepWebLinks(lib, pages[at]!.node);
+      const base = webBase(lib, source);
+      for (const at of keep) keepWebLinks(lib, pages[at]!.node, base);
       let copies;
       try {
         copies = await output.copyPages(source, keep);

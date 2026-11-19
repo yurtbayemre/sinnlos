@@ -13,13 +13,22 @@ import { describe, expect, it } from "vitest";
  * import the viewer to apply the read gate and nothing that moves data. The libraries
  * load lazily: pdf-lib and qrcode are reached by a dynamic import() only.
  *
- * This is a source check, not bundle proof: the chunks of the built routes are measured
- * on the built app (the release's bundle check).
+ * This is a SMOKE test, not proof: patterns over the source text, which strings, aliases and
+ * computed access can fool, and not the built bundle. It catches the ordinary ways code
+ * reaches a network, the URL or the page. The proof is the built app's chunks (the release's
+ * bundle check) and the request listener in e2e/tools.spec.ts.
  */
 const SRC = join(__dirname, "..", "..");
 
-/** Comments out: a word in a comment is no import and no call. */
-const codeOf = (text: string) => text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+/**
+ * Code without what does not run: comments (a word in a comment is no import and no call,
+ * trailing ones included) and type-only imports and exports, which are erased.
+ */
+const codeOf = (text: string) =>
+  text
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/(^|\s)\/\/.*$/gm, "$1")
+    .replace(/\b(?:import|export)\s+type\b[^;]*;/g, "");
 
 /** `from "x"`, a side-effect `import "x"` and `require("x")`. */
 const STATIC_IMPORT =
@@ -106,7 +115,19 @@ const CHANNELS: Record<string, RegExp> = {
     /\bnew\s+(?:Image|Audio)\s*\(|createElement\(\s*["'](?:img|script|iframe|link|form|object|embed|video|audio|source)["']|\.src(?:set)?\s*=/,
   form: /\bFormData\b|\.submit\s*\(|\brequestSubmit\b|<form\b[^>]*\b(?:action|method)\s*=|\bformAction\b/,
   context: /\bpostMessage\b|new\s+(?:Shared)?Worker\s*\(|BroadcastChannel|serviceWorker/,
+  // Elements that load or navigate: JSX iframes and scripts, `srcSet`, `setAttribute("src"`,
+  // anchors with an href. (The one <img> and the download's `link.href` are checked apart.)
+  element:
+    /<(?:iframe|script|embed|video|audio|frame)\b|\bsrcSet\s*=|\bsetAttribute\(\s*["'](?:src|srcset|href|action|data|formaction)["']|<a\b[^>]*\bhref\s*=/,
+  anchor: /\.href\s*=/,
 };
+
+/** The one place that sets an anchor's href: the download's object URL (see below). */
+const DOWNLOAD = "lib/browser-download.ts";
+
+/** The <img> tags in `code` that do not show the code's own data URL. */
+const foreignImages = (code: string) =>
+  (code.match(/<img\b[^>]*>/g) ?? []).filter((tag) => !/\bsrc=\{made\.png\}/.test(tag));
 
 describe("the guards themselves", () => {
   it("read every way of importing a module", () => {
@@ -125,8 +146,24 @@ describe("the guards themselves", () => {
     expect(isLibrary("qrcodes", "qrcode")).toBe(false);
   });
 
-  it("ignore a comment that names a module or a call", () => {
-    expect(staticSpecifiers(codeOf('// import "qrcode"\n/* from "qrcode" */'))).toEqual([]);
+  it("ignore what does not run: comments, trailing ones too, and type-only imports and exports", () => {
+    const code = [
+      '// import "qrcode"',
+      '/* from "qrcode" */',
+      'const a = 1; // fetch(url) and import "qrcode"',
+      'import type { X } from "qrcode";',
+      'import type {\n  Y,\n  Z,\n} from "@cantoo/pdf-lib";',
+      'export type { X } from "qrcode";',
+      'const link = "https://example.org/a"; // a URL is not a comment',
+    ].join("\n");
+    const run = codeOf(code);
+    expect(staticSpecifiers(run)).toEqual([]);
+    expect(run).not.toMatch(CHANNELS.request!);
+    expect(run).toContain("https://example.org/a");
+  });
+
+  it("still see a runtime import beside a type-only one", () => {
+    expect(staticSpecifiers(codeOf('import { type X, load } from "qrcode";'))).toEqual(["qrcode"]);
   });
 
   it.each([
@@ -150,8 +187,22 @@ describe("the guards themselves", () => {
     ["form", '<form action="/x" onSubmit={go}>'],
     ["context", "worker.postMessage(data)"],
     ["context", "new Worker(url)"],
+    ["element", "<iframe src={target} />"],
+    ["element", "<iframe\n  title={x}\n  src={target}\n/>"],
+    ["element", "<img srcSet={`${target} 1x`} alt={x} />"],
+    ["element", "<script src={target} />"],
+    ["element", 'node.setAttribute("src", target)'],
+    ["element", "node.setAttribute('href', target)"],
+    ["element", "<a href={target}>go</a>"],
+    ["anchor", "link.href = target"],
   ])("catch a %s channel: %s", (channel, code) => {
     expect(code).toMatch(CHANNELS[channel]!);
+  });
+
+  it("see an <img> that does not show the code's own data URL", () => {
+    expect(foreignImages("<img src={target} alt={x} />")).toHaveLength(1);
+    expect(foreignImages('<img src="https://example.org/x.png" alt="" />')).toHaveLength(1);
+    expect(foreignImages("<img\n  src={made.png}\n  alt={x}\n/>")).toHaveLength(0);
   });
 
   it.each([
@@ -160,6 +211,9 @@ describe("the guards themselves", () => {
     'document.createElement("a")',
     "<img src={made.png} alt={t('alt')} />",
     'if (location === "x") {}',
+    "const abbr = <abbr title={x}>a</abbr>;",
+    "const set = new Set<number>();",
+    "const href = new URL(target).href;",
   ])("leave what the tools do alone: %s", (code) => {
     for (const [channel, pattern] of Object.entries(CHANNELS)) {
       expect(code, channel).not.toMatch(pattern);
@@ -186,17 +240,14 @@ describe.each(TOOLS)("the client bundle of %s", (entry, reaches) => {
   it("sends and stores nothing, in no channel", () => {
     for (const [name, code] of files) {
       for (const [channel, pattern] of Object.entries(CHANNELS)) {
+        if (channel === "anchor" && name === DOWNLOAD) continue;
         expect(code, `${name}: ${channel}`).not.toMatch(pattern);
       }
     }
   });
 
   it("loads no remote image: an <img> shows the code's own data URL", () => {
-    for (const [name, code] of files) {
-      for (const tag of code.match(/<img\b[^>]*>/g) ?? []) {
-        expect(tag, name).toMatch(/\bsrc=\{made\.png\}/);
-      }
-    }
+    for (const [name, code] of files) expect(foreignImages(code), name).toEqual([]);
   });
 
   it("reaches neither library statically (they load by a dynamic import())", () => {
@@ -249,5 +300,13 @@ describe("where the libraries load", () => {
     ) as { browser: Record<string, string | false> };
     expect(manifest.browser["./lib/index.js"]).toBe("./lib/browser.js");
     expect(manifest.browser.fs).toBe(false);
+  });
+});
+
+describe("the download", () => {
+  it("sets an anchor's href to its own object URL, and to nothing else", () => {
+    const code = SOURCES.find((file) => file.name === DOWNLOAD)!.code;
+    expect(code.match(/\.href\s*=[^;]*;/g)).toEqual([".href = url;"]);
+    expect(code).toMatch(/const url = URL\.createObjectURL\(blob\);/);
   });
 });
