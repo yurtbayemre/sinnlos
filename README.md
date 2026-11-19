@@ -475,6 +475,11 @@ The cms trusts the `X-Forwarded-For` header the edge sets, so the edge must over
 
 Each release checks the main screens for WCAG 2.1 A and AA with axe in the browser tests ([e2e/a11y.spec.ts](./e2e/a11y.spec.ts)), in light and dark mode. The screens are: sign-in and the second factor, the dashboard, search, an editor form, a lesson with its quiz, kudos and polls. A manual keyboard and zoom pass covers the same paths.
 
+Known limits:
+
+- **Process diagrams (Tools, BPMN):** drawing a diagram needs a mouse or touch. Importing a `.bpmn` file, writing the description, saving and publishing work by keyboard. Every process has a required description in words, which is the reading alternative to the diagram.
+- **Mermaid diagrams in Markdown:** the drawn diagram is a picture with the label "Diagramm"; its source text stays one disclosure ("Quelltext anzeigen") away.
+
 This is a test, not a conformance claim. Please report a barrier as an issue.
 
 ## Scripts

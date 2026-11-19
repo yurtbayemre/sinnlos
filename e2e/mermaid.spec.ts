@@ -132,9 +132,9 @@ async function expectInert(page: Page, group: Locator, dialogs: string[]) {
     0,
   );
   await expect(group.locator('a[href^="javascript:" i], a[href^="data:" i]')).toHaveCount(0);
-  // Labels are SVG text: the markup in them is shown, it is no form and no picture.
+  // Labels are SVG text, and the label sanitizer removes the form and the picture from
+  // them (in the built app the hostile label is drawn empty): no element of them is left.
   await expect(group.locator("form, input, img, foreignObject")).toHaveCount(0);
-  await expect(group.getByText("<form", { exact: false }).first()).toBeVisible();
   await group.getByText("Click me", { exact: true }).click();
   expect(await page.evaluate(() => (window as unknown as { __pwned?: unknown }).__pwned)).toBe(
     undefined,
