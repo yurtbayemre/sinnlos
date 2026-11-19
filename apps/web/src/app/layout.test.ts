@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { isValidElement, type ReactElement, type ReactNode } from "react";
+import { NextIntlClientProvider } from "next-intl";
 
 /**
  * The root layout's viewport (issue #71): `viewport-fit=cover`, without
@@ -11,9 +12,16 @@ import { isValidElement, type ReactElement, type ReactNode } from "react";
  * branding keys.
  */
 vi.mock("next/font/google", () => ({ Inter: () => ({ variable: "font-inter" }) }));
+const CATALOG = vi.hoisted(() => ({
+  nav: { home: "Home" },
+  markdown: { mermaidDiagram: "Diagram" },
+  tools: { title: "Tools", pdf: { title: "PDF" } },
+  processes: { title: "Processes" },
+  manage: { common: { save: "Save" } },
+}));
 vi.mock("next-intl/server", () => ({
   getLocale: async () => "de",
-  getMessages: async () => ({}),
+  getMessages: async () => CATALOG,
 }));
 
 const { default: RootLayout, generateMetadata, viewport } = await import("./layout");
@@ -92,5 +100,40 @@ describe("the root branding", () => {
     vi.stubEnv("SITE_ACCENT", "#0f766e;}body{display:none");
     expect(await headOf()).toBeUndefined();
     warn.mockRestore();
+  });
+});
+
+/** The first element of `type` in a rendered tree (children, nested arrays). */
+function findElement(
+  node: ReactNode,
+  type: unknown,
+): ReactElement<Record<string, unknown>> | undefined {
+  if (Array.isArray(node)) {
+    for (const child of node) {
+      const found = findElement(child, type);
+      if (found) return found;
+    }
+    return undefined;
+  }
+  if (!isValidElement<{ children?: ReactNode }>(node)) return undefined;
+  if (node.type === type) return node as ReactElement<Record<string, unknown>>;
+  return findElement(node.props.children, type);
+}
+
+describe("the root message provider", () => {
+  it("sends the catalog without the namespaces only /tools reads, and keeps the rest", async () => {
+    // Every page carries the catalog inline; app/(app)/tools/layout.tsx gives the /tools
+    // subtree the whole one. `markdown` stays: Mermaid renders wherever Markdown does.
+    const tree = (await RootLayout({ children: null })) as ReactElement;
+    const provider = findElement(tree, NextIntlClientProvider);
+    expect(provider).toBeDefined();
+    const messages = provider!.props.messages as Record<string, unknown>;
+    expect(messages).not.toHaveProperty("tools");
+    expect(messages).not.toHaveProperty("processes");
+    expect(messages).toEqual({
+      nav: CATALOG.nav,
+      markdown: CATALOG.markdown,
+      manage: CATALOG.manage,
+    });
   });
 });

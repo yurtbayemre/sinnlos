@@ -5,6 +5,7 @@ import { getLocale, getMessages } from "next-intl/server";
 import Script from "next/script";
 import "./globals.css";
 import { ThemeProvider } from "@/components/theme-provider";
+import { withoutToolsMessages } from "@/i18n/messages";
 import { paletteCss } from "@/lib/contrast";
 import { analyticsScript, brand, DEFAULT_SITE_NAME } from "@/lib/site-config";
 
@@ -75,7 +76,9 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         {plausible && (
           <Script data-domain={plausible.domain} src={plausible.src} strategy="afterInteractive" />
         )}
-        <NextIntlClientProvider messages={messages}>
+        {/* Not the /tools namespaces: app/(app)/tools/layout.tsx gives that subtree
+            the whole catalog (the catalog travels inline in every page). */}
+        <NextIntlClientProvider messages={withoutToolsMessages(messages)}>
           {/* disableTransitionOnChange: without it every colour transition
               in the UI animates during a theme switch (FX31). */}
           <ThemeProvider
