@@ -75,6 +75,15 @@ that edit before publication. A member in a separate browser session must see
 the final content and pass the quiz with the new answer. The course and lesson
 are created by browser actions; no authoring target is pre-seeded.
 
+The `process-authoring-and-reading` case in `e2e/processes.spec.ts` (v1.1) has an
+editor import a BPMN file into `/manage/processes/new`, save and publish it, and a
+member read it under `/tools`. Only a browser can show what it checks: the bpmn.io
+watermark (`.bjs-powered-by`) is visible and the topmost element in the editor and the
+viewer; a diagram whose colour is a `url(...)` is refused at import and no request
+leaves for its address; labels and documentation with markup run no script; the
+downloaded `.bpmn` and `.svg` are clean and the `.svg`, reopened as a file, makes no
+request; the canvas is a tab stop; a team lead reaches the editor, a member does not.
+
 The `secret-sharing` case in `e2e/secrets.spec.ts` (v0.35) has the member send
 secrets to the team lead through `/secrets/new`. Every `/secrets` answer it
 can produce carries `Cache-Control` with `private` and `no-store`: the
@@ -152,6 +161,7 @@ pnpm test:e2e --grep training-quiz-completion
 pnpm test:e2e --grep training-exam-completion
 pnpm test:e2e --grep training-confirm-completion
 pnpm test:e2e --grep training-authoring
+pnpm test:e2e --grep process-authoring-and-reading
 pnpm test:e2e --grep secret-sharing
 pnpm test:e2e --grep secret-roles
 pnpm --filter @sinnlos/e2e test:live   # secret-live, live events on
