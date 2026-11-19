@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import type { PDFContext as PdfContext } from "@cantoo/pdf-lib";
 import {
   PDF_MAX_INPUT_BYTES,
   PDF_MAX_OBJECTS,
@@ -273,7 +274,7 @@ describe("runPdfJob: refusals", () => {
     // Each file reports half the limit plus one: together they are one over it.
     const count = vi
       .spyOn(PDFContext.prototype, "enumerateIndirectObjects")
-      .mockImplementation(function (this: InstanceType<typeof PDFContext>) {
+      .mockImplementation(function (this: PdfContext) {
         const objects = real.call(this);
         return Array.from(
           { length: PDF_MAX_OBJECTS / 2 + 1 },
