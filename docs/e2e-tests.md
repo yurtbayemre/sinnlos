@@ -84,6 +84,17 @@ leaves for its address; labels and documentation with markup run no script; the
 downloaded `.bpmn` and `.svg` are clean and the `.svg`, reopened as a file, makes no
 request; the canvas is a tab stop; a team lead reaches the editor, a member does not.
 
+The `mermaid-in-markdown` case in `e2e/mermaid.spec.ts` (v1.1) has an editor write an
+announcement with `mermaid` fences, preview and publish it. Only a browser can show what
+it checks: the Mermaid library is in no script of a page without a fence, not even the
+editor's, and a fence loads it; the fences draw as SVG in the preview and on the page,
+with no hydration error; a hostile diagram (an `%%{init}%%` asking for `securityLevel`
+"loose", HTML labels with script and `onerror`, a click callback, a `javascript:` link)
+runs nothing and keeps no handler attribute; a diagram that does not parse stays its
+source with a hint; the SVG is named (`accTitle` or the group's "Diagram") and the source
+is one disclosure away; the theme switch draws it again; the HTML the server sends holds
+each fence as a plain code block, which is all a browser without JavaScript gets.
+
 The `secret-sharing` case in `e2e/secrets.spec.ts` (v0.35) has the member send
 secrets to the team lead through `/secrets/new`. Every `/secrets` answer it
 can produce carries `Cache-Control` with `private` and `no-store`: the
@@ -162,6 +173,7 @@ pnpm test:e2e --grep training-exam-completion
 pnpm test:e2e --grep training-confirm-completion
 pnpm test:e2e --grep training-authoring
 pnpm test:e2e --grep process-authoring-and-reading
+pnpm test:e2e --grep mermaid-in-markdown
 pnpm test:e2e --grep secret-sharing
 pnpm test:e2e --grep secret-roles
 pnpm --filter @sinnlos/e2e test:live   # secret-live, live events on
