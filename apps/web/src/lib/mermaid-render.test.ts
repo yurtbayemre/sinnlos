@@ -22,6 +22,7 @@ describe("mermaidConfig", () => {
       suppressErrorRendering: true,
       htmlLabels: false,
       flowchart: { htmlLabels: false },
+      dompurifyConfig: expect.any(Object),
       secure: [
         "secure",
         "securityLevel",
@@ -33,9 +34,46 @@ describe("mermaidConfig", () => {
         "themeCSS",
         "fontFamily",
         "altFontFamily",
+        "dompurifyConfig",
       ],
       theme: "default",
     });
+  });
+
+  it("has Mermaid's DOMPurify drop form controls and everything that loads or embeds, in every label", () => {
+    // Labels are HTML whatever htmlLabels says in a few places (a sequence message with
+    // $$math$$, an architecture service's icon text, an event model's data), and
+    // DOMPurify keeps all of these by default. Browser check: e2e/mermaid.spec.ts.
+    const { FORBID_TAGS, FORBID_ATTR } = mermaidConfig(false).dompurifyConfig ?? {};
+    expect(FORBID_TAGS).toEqual(
+      expect.arrayContaining([
+        "style",
+        "form",
+        "input",
+        "button",
+        "textarea",
+        "select",
+        "option",
+        "img",
+        "picture",
+        "source",
+        "video",
+        "audio",
+        "iframe",
+        "object",
+        "embed",
+        "link",
+        "meta",
+        "base",
+        "image",
+        "feImage",
+        "use",
+      ]),
+    );
+    // Links stay: Markdown links go anywhere too.
+    expect(FORBID_TAGS).not.toContain("a");
+    // An inline style="…url(…)" is a request that ignores the page's referrer policy.
+    expect(FORBID_ATTR).toEqual(["style"]);
   });
 
   it("keeps every key of the installed Mermaid's own secure list (passing `secure` replaces it)", () => {
@@ -99,11 +137,15 @@ describe("a diagram cannot change the settings", () => {
     expect(config.maxEdges).toBe(mermaid.mermaidAPI.defaultConfig.maxEdges);
   });
 
-  it("does not take a dompurifyConfig from a diagram (it is no config key)", async () => {
+  it("does not take a dompurifyConfig from a diagram: ours stays", async () => {
     const config = await configAfterParsing(
-      `%%{init: {"dompurifyConfig": {"ADD_ATTR": ["onerror"]}}}%%\n${FLOW}`,
+      `%%{init: {"dompurifyConfig": {"FORBID_TAGS": [], "ADD_ATTR": ["onerror"]}}}%%\n${FLOW}`,
     );
-    expect(config).not.toHaveProperty("dompurifyConfig");
+    expect(config.dompurifyConfig).toEqual(mermaidConfig(false).dompurifyConfig);
+    const framed = await configAfterParsing(
+      `---\nconfig:\n  dompurifyConfig:\n    FORBID_TAGS: []\n---\n${FLOW}`,
+    );
+    expect(framed.dompurifyConfig).toEqual(mermaidConfig(false).dompurifyConfig);
   });
 
   describe("HTML labels, theme CSS and fonts", () => {

@@ -38,18 +38,59 @@ const MERMAID_SECURE_KEYS = [
 ];
 
 /**
+ * What Mermaid's DOMPurify may not leave in label text (`sanitizeText` takes
+ * this as `dompurifyConfig`, in place of its own `FORBID_TAGS: ["style"]`, so
+ * `style` stays): form controls, and every element that loads or embeds
+ * something. Not enough alone: DOMPurify keeps all of these by default, and
+ * some labels are HTML whatever `htmlLabels` says (a sequence message with
+ * `$$math$$`, an architecture service's icon text, an event model's data).
+ * `a` stays: Markdown links go anywhere too.
+ */
+const FORBIDDEN_LABEL_TAGS = [
+  "style",
+  "form",
+  "input",
+  "button",
+  "textarea",
+  "select",
+  "option",
+  "optgroup",
+  "img",
+  "picture",
+  "source",
+  "track",
+  "video",
+  "audio",
+  "iframe",
+  "frame",
+  "frameset",
+  "object",
+  "embed",
+  "applet",
+  "link",
+  "meta",
+  "base",
+  "image",
+  "feImage",
+  "use",
+];
+
+/**
  * The settings of every render; `startOnLoad` is Mermaid's scan of `.mermaid`
  * elements on page load.
  *
  * Labels are SVG text, not HTML (`htmlLabels: false`, also under `flowchart`,
  * which two code paths read on their own): strict mode keeps the HTML a label
  * carries after DOMPurify (a <form>, an <a>, an <img> that requests its
- * address with the document's referrer), so no label may be HTML. A diagram
- * cannot turn it back on, nor restyle itself: `htmlLabels` (Mermaid checks
- * nested keys too, so `flowchart.htmlLabels` as well), `themeCSS` and the font
- * keys join the keys no diagram can set. Native image shapes
- * (`A@{ img: … }`) still fetch their picture; the document's referrer policy
- * (root layout metadata) is what keeps the intranet's address from it.
+ * address with the document's referrer), so no label may be HTML. The cost:
+ * `$$math$$` is drawn only where the renderer makes it HTML anyway (sequence
+ * messages), a flowchart label shows it as text. A diagram cannot turn the
+ * setting back on, nor restyle itself: `htmlLabels` (Mermaid checks nested
+ * keys too, so `flowchart.htmlLabels` as well), `themeCSS`, the font keys and
+ * `dompurifyConfig` join the keys no diagram can set (`dompurifyConfig` is no
+ * config key of Mermaid yet, so a diagram's one is dropped today). Native
+ * image shapes (`A@{ img: … }`) still fetch their picture; the root layout's
+ * referrer policy is what keeps the intranet's address from it.
  */
 export function mermaidConfig(dark: boolean): MermaidConfig {
   return {
@@ -58,7 +99,15 @@ export function mermaidConfig(dark: boolean): MermaidConfig {
     suppressErrorRendering: true,
     htmlLabels: false,
     flowchart: { htmlLabels: false },
-    secure: [...MERMAID_SECURE_KEYS, "htmlLabels", "themeCSS", "fontFamily", "altFontFamily"],
+    dompurifyConfig: { FORBID_TAGS: FORBIDDEN_LABEL_TAGS, FORBID_ATTR: ["style"] },
+    secure: [
+      ...MERMAID_SECURE_KEYS,
+      "htmlLabels",
+      "themeCSS",
+      "fontFamily",
+      "altFontFamily",
+      "dompurifyConfig",
+    ],
     theme: dark ? "dark" : "default",
   };
 }
@@ -69,7 +118,9 @@ export function mermaidConfig(dark: boolean): MermaidConfig {
  * diagrams on a page then repeat them, and a heading that slugs the same
  * would lose its #fragment to the SVG. Every id without the render id gets it
  * as a prefix, and the `url(#…)` and `href="#…"` references to it follow.
- * Only the attributes of tags are read, never a label's text.
+ * Only the attributes of tags are read, never a label's text. Not covered, as
+ * no Mermaid 12.3.0 diagram of ~75 rendered (every type) emits one: a quoted
+ * `url("#…")` and a `url(#…)` inside `<style>` text; extend if one does.
  */
 export function namespaceIds(svg: string, root: string): string {
   const tag = /<[a-zA-Z][^<>]*>/g;
