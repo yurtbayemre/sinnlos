@@ -60,23 +60,14 @@ export default async function RootLayout({ children }: { children: React.ReactNo
 
   return (
     <html lang={locale} suppressHydrationWarning className={inter.variable}>
-      {/* The referrer policy of the whole app (v1.1, Mermaid): a request to another
-          origin carries no Referer, one to this origin keeps it. The edge's header
-          says strict-origin-when-cross-origin, which would tell an external host the
-          intranet's origin; a diagram's image shape (`A@{ img: … }`) fetches its
-          picture with no referrerpolicy of its own, as Markdown images have. A literal
-          tag in the first bytes of <head>, not the metadata API: Next streams that
-          after the page, and a request made before it would still send the origin.
-          The meta wins over the header; a page's own metadata `referrer` (set-password:
-          no-referrer) comes after it and replaces it; an element's own referrerpolicy
-          wins over both (the YouTube iframe needs its origin). */}
-      <head>
-        <meta name="referrer" content="same-origin" />
-        {/* SITE_ACCENT's verified tokens (lib/contrast.ts), built from numbers
-            only; unlayered, so they outrank the @layer base tokens of
-            globals.css. */}
-        {palette && <style>{paletteCss(palette)}</style>}
-      </head>
+      {/* SITE_ACCENT's verified tokens (lib/contrast.ts), built from numbers
+          only; unlayered, so they outrank the @layer base tokens of
+          globals.css. */}
+      {palette && (
+        <head>
+          <style>{paletteCss(palette)}</style>
+        </head>
+      )}
       <body className="font-sans antialiased">
         {/* Plausible (cookieless) only when the operator configures it
             (v0.26, M2) and the module secrets is off (v0.35); script.js
