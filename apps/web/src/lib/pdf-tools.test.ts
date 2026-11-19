@@ -508,13 +508,15 @@ describe("runPdfJob: what a page carries along", () => {
 
 /** The annotations of the first page of a saved file: subtype, rectangle and URI. */
 async function annotationsOfFirstPage(bytes: Uint8Array) {
-  const { PDFDocument, PDFDict, PDFName, PDFString, PDFNumber, PDFArray } =
+  const { PDFDocument, PDFDict, PDFName, PDFString, PDFHexString, PDFNumber, PDFArray } =
     await import("@cantoo/pdf-lib");
   const annots = (await PDFDocument.load(bytes)).getPage(0).node.Annots();
   return Array.from({ length: annots?.size() ?? 0 }, (_, i) => {
     const annot = annots!.lookup(i, PDFDict);
     const rect = annot.lookup(PDFName.of("Rect"), PDFArray);
-    const uri = annot.lookupMaybe(PDFName.of("A"), PDFDict)?.lookup(PDFName.of("URI"), PDFString);
+    const uri = annot
+      .lookupMaybe(PDFName.of("A"), PDFDict)
+      ?.lookup(PDFName.of("URI"), PDFString, PDFHexString);
     return {
       subtype: annot.lookup(PDFName.of("Subtype"), PDFName).decodeText(),
       rect: Array.from({ length: rect.size() }, (_, at) => rect.lookup(at, PDFNumber).asNumber()),
@@ -569,25 +571,27 @@ describe("runPdfJob: damaged and oversized files", () => {
 });
 
 describe("runPdfJob: relative web links", () => {
-  /** Page 1 carries four web links; the catalog has a /URI /Base when `base` is given. */
-  async function linksFile(base?: string) {
+  const ADDRESSES = ["other.html", "#section", "https://abs.example/x", "mailto:a@b.example"];
+
+  /** Page 1 carries a web link per address; the catalog has a /URI /Base when `base` is given. */
+  async function linksFile(base?: string, addresses = ADDRESSES) {
     const lib = await import("@cantoo/pdf-lib");
     const { doc, first, ref } = await threePages(lib);
+    // An address with parentheses or a backslash is written as a hex string: valid either way.
+    const written = (address: string) =>
+      /[()\\]/.test(address)
+        ? lib.PDFHexString.fromBytes(new TextEncoder().encode(address))
+        : lib.PDFString.of(address);
     const link = (y: number, address: string) =>
       ref({
         Type: "Annot",
         Subtype: "Link",
         Rect: [0, y, 50, y + 10],
-        A: { S: "URI", URI: lib.PDFString.of(address) },
+        A: { S: "URI", URI: written(address) },
       });
     first.node.set(
       lib.PDFName.of("Annots"),
-      doc.context.obj([
-        link(0, "other.html"),
-        link(20, "#section"),
-        link(40, "https://abs.example/x"),
-        link(60, "mailto:a@b.example"),
-      ]),
+      doc.context.obj(addresses.map((address, at) => link(at * 20, address))),
     );
     if (base !== undefined) {
       doc.catalog.set(lib.PDFName.of("URI"), doc.context.obj({ Base: lib.PDFString.of(base) }));
@@ -625,6 +629,28 @@ describe("runPdfJob: relative web links", () => {
     }
   });
 
+  it("writes a changed address so that the output loads strictly, parentheses and backslashes included", async () => {
+    const { PDFDocument } = await import("@cantoo/pdf-lib");
+    const cases = [
+      ["https://example.org/docs/", "other(1.html", "https://example.org/docs/other(1.html"],
+      ["https://example.org/docs/", "a)b.html", "https://example.org/docs/a)b.html"],
+      ["app://host/dir/", "x(y\\z.html", "app://host/dir/x(y\\z.html"],
+    ] as const;
+    for (const [base, address, resolved] of cases) {
+      const result = await runPdfJob(
+        job({ kind: "rotate", files: [await linksFile(base, [address])] }),
+      );
+      expect(result.ok, address).toBe(true);
+      if (!result.ok) continue;
+      // A strict reload of the output, the way a viewer's strict reader would take it ...
+      await expect(
+        PDFDocument.load(result.bytes, { throwOnInvalidObject: true }),
+      ).resolves.toBeDefined();
+      // ... and the address comes back exactly as resolved.
+      expect(await addresses(result.bytes), address).toEqual([resolved]);
+    }
+  });
+
   it("uses each file's own base when files are merged", async () => {
     const result = await runPdfJob(
       job({
@@ -634,14 +660,15 @@ describe("runPdfJob: relative web links", () => {
     );
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    const { PDFDocument, PDFDict, PDFName, PDFString } = await import("@cantoo/pdf-lib");
+    const { PDFDocument, PDFDict, PDFName, PDFString, PDFHexString } =
+      await import("@cantoo/pdf-lib");
     const merged = await PDFDocument.load(result.bytes);
     const first = (page: number) => {
       const annots = merged.getPage(page).node.Annots()!;
       return annots
         .lookup(0, PDFDict)
         .lookup(PDFName.of("A"), PDFDict)
-        .lookup(PDFName.of("URI"), PDFString)
+        .lookup(PDFName.of("URI"), PDFString, PDFHexString)
         .decodeText();
     };
     expect([first(0), first(3)]).toEqual([
@@ -697,6 +724,36 @@ describe("runPdfJob: a page tree pdf-lib reads only in part", () => {
       ok: false,
       issue: { code: "broken", name: "tree.pdf" },
     });
+  });
+
+  it("refuses a tree that repeats a subtree before anything counts its pages", async () => {
+    const lib = await import("@cantoo/pdf-lib");
+    const { PDFDocument, PDFName } = lib;
+    // 20 levels, each listing the level below twice: 2^20 pages if it were walked, in a few KB.
+    const doc = await PDFDocument.create();
+    const page = doc.addPage([100, 100]);
+    let child = page.ref;
+    let leaves = 1;
+    for (let level = 0; level < 20; level += 1) {
+      leaves *= 2;
+      child = doc.context.register(
+        doc.context.obj({ Type: "Pages", Kids: [child, child], Count: leaves }),
+      );
+    }
+    doc.catalog.set(PDFName.of("Pages"), child);
+    const file = source(await doc.save(), "repeated.pdf");
+    expect(file.size).toBeLessThan(5_000);
+
+    const counted = vi.spyOn(PDFDocument.prototype, "getPageCount");
+    try {
+      expect(await runPdfJob(job({ kind: "rotate", files: [file] }))).toEqual({
+        ok: false,
+        issue: { code: "broken", name: "repeated.pdf" },
+      });
+      expect(counted).not.toHaveBeenCalled();
+    } finally {
+      counted.mockRestore();
+    }
   });
 
   it("takes an ordinary file", async () => {

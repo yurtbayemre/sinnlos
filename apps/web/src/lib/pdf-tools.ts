@@ -181,7 +181,13 @@ function keepWebLinks(
           Subtype: "Link",
           Rect: corners,
           Border: [0, 0, 0],
-          A: { S: "URI", URI: absolute === text ? uri : PDFString.of(absolute) },
+          // A changed address is written as a hex string: a literal one would need its
+          // parentheses and backslashes escaped, which PDFString.of does not do.
+          A: {
+            S: "URI",
+            URI:
+              absolute === text ? uri : PDFHexString.fromBytes(new TextEncoder().encode(absolute)),
+          },
         }),
       ),
     );
@@ -294,8 +300,10 @@ export async function runPdfJob(
           parseSpeed: ParseSpeeds.Fast,
           throwOnInvalidObject: true,
         });
-        // A file can load and still have no page tree.
-        count = source.getPageCount();
+        // A file can load and still have no page tree. The tree is checked before anything
+        // walks it: getPageCount() expands a tree that repeats a subtree (a few KB can make
+        // millions of entries); an unsound tree counts as no pages and is refused below.
+        count = hasSoundPageTree(lib, source) ? source.getPageCount() : 0;
       } catch (error) {
         // The strict parse already trips over the scrambled objects of an encrypted file,
         // before pdf-lib looks at /Encrypt: ask the lenient parse which of the two it is.
@@ -308,9 +316,7 @@ export async function runPdfJob(
             )));
         return refuse({ code: encrypted ? "encrypted" : "broken", name: file.name });
       }
-      if (count === 0 || !hasSoundPageTree(lib, source)) {
-        return refuse({ code: "broken", name: file.name });
-      }
+      if (count === 0) return refuse({ code: "broken", name: file.name });
       // 2. The total pages, after parsing and before anything is copied.
       totalPages += count;
       if (totalPages > PDF_MAX_PAGES) return refuse({ code: "tooManyPages" });
