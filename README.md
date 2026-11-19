@@ -78,6 +78,12 @@ Further reading:
   colleague, stored encrypted, opened once with "Show and delete" and then
   deleted; at most 24 hours; no admin view of the text
   ([security model](./docs/security.md#secret-sharing)).
+- **Tools** (v1.0.0-rc.2, module `tools`): **processes** as BPMN diagrams
+  (bpmn-js, with a required description in words; authored like duty plans),
+  and **PDF tools** (merge, pick, rotate, delete pages) and a **QR code**
+  generator that work in the browser only. **Mermaid diagrams** in every
+  Markdown body, and a **department view** of the org chart
+  ([security model](./docs/security.md#tools-and-diagrams)).
 - **Authoring in the web** at `/manage`: editors and admins write
   announcements, events, polls, quick links and documents (with the file
   upload) with drafts, a preview, scheduled publishing and a check for
@@ -473,7 +479,7 @@ The cms trusts the `X-Forwarded-For` header the edge sets, so the edge must over
 
 ## Accessibility
 
-Each release checks the main screens for WCAG 2.1 A and AA with axe in the browser tests ([e2e/a11y.spec.ts](./e2e/a11y.spec.ts)), in light and dark mode. The screens are: sign-in and the second factor, the dashboard, search, an editor form, a lesson with its quiz, kudos and polls. A manual keyboard and zoom pass covers the same paths.
+Each release checks the main screens for WCAG 2.1 A and AA with axe in the browser tests ([e2e/a11y.spec.ts](./e2e/a11y.spec.ts)), in light and dark mode. The screens are: sign-in and the second factor, the dashboard, search, an editor form, a lesson with its quiz, kudos and polls, the Tools hub, the PDF and QR tools and the org chart's department view. A manual keyboard and zoom pass covers the same paths.
 
 Known limits:
 

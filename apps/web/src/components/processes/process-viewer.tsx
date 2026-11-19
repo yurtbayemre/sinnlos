@@ -13,18 +13,8 @@ import { AlertCircle, Download } from "lucide-react";
 import { hasUnsafePaint } from "@sinnlos/domain";
 import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
+import { downloadBlob } from "@/lib/browser-download";
 import { diagramFileName } from "@/lib/process-diagram";
-
-/** Saves `content` as a file the browser downloads; the object URL is revoked once it started. */
-function download(content: string, type: string, name: string) {
-  const url = URL.createObjectURL(new Blob([content], { type }));
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = name;
-  link.click();
-  // Safari loses a download whose URL is revoked in the same task.
-  setTimeout(() => URL.revokeObjectURL(url), 0);
-}
 
 /**
  * One process diagram (v1.1 "Tools"): the bpmn-js NavigatedViewer (zoom and move, no
@@ -73,7 +63,7 @@ export default function ProcessViewer({ title, xml }: { title: string; xml: stri
     try {
       const { svg } = (await viewer.current?.saveSVG()) ?? { svg: "" };
       if (svg === "") throw new Error("no svg");
-      download(svg, "image/svg+xml", diagramFileName(title, "svg"));
+      downloadBlob(new Blob([svg], { type: "image/svg+xml" }), diagramFileName(title, "svg"));
     } catch {
       setDownloadFailed(true);
     }
@@ -112,7 +102,12 @@ export default function ProcessViewer({ title, xml }: { title: string; xml: stri
           variant="outline"
           size="sm"
           disabled={xml.trim() === ""}
-          onClick={() => download(xml, "application/xml", diagramFileName(title, "bpmn"))}
+          onClick={() =>
+            downloadBlob(
+              new Blob([xml], { type: "application/xml" }),
+              diagramFileName(title, "bpmn"),
+            )
+          }
         >
           <Download className="h-4 w-4" aria-hidden="true" />
           {t("downloadBpmn")}

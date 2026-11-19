@@ -171,11 +171,16 @@ format`: a scanner posted to a page with a made-up Server Action id,
 
 Newest first. Older releases: [archive/deployment-history.md](archive/deployment-history.md).
 
-**Upgrading to the next release (Tools; in progress, v1.0.0-rc.2).** No required env, no edge change. The schema gains one table.
+**Upgrading to v1.0.0-rc.2 (Tools).** No required env, no edge change. The schema gains one table. A new release candidate: its soak starts again.
 
-- **New module `tools`** ("Tools"): the first tool is Processes (BPMN diagrams with a required description in words). Staff and `authenticated` read published processes, guests do not. Admins and editors author everywhere; department heads and team leads author for their own department. The module is **on after the upgrade**. To keep it off, add `tools` to `FEATURES_OFF` in `infra/.env` before the deploy.
+- **New module `tools`** ("Werkzeuge" / "Tools"), a hub at `/tools`:
+  - **Processes:** BPMN diagrams with a required description in words. Staff and `authenticated` read published processes, guests do not. Admins and editors author everywhere; department heads and team leads author for their own department.
+  - **PDF tools** (merge, pick, rotate, delete pages) and a **QR code** generator (link or text, Wi-Fi, contact), in the browser only: no file or entry is sent or stored. They are not a way to remove confidential content from a PDF.
+  - The module is **on after the upgrade**. To keep it off, add `tools` to `FEATURES_OFF` in `infra/.env` before the deploy.
+- **Not switched by `tools`:** Mermaid diagrams in every Markdown body (a ` ```mermaid ` fence, drawn in the browser; without JavaScript the source shows) and the department view of the org chart (`/people/org-chart?view=departments`, staff only).
+- **Referrer:** signed-in pages now send no `Referer` to other sites (`<meta name="referrer" content="same-origin">`); same-origin requests keep it. The edge's `Referrer-Policy` header is unchanged. Details: [security.md](security.md#tools-and-diagrams).
 - **Analytics:** Plausible now loads only while **both** `secrets` and `tools` are off. With `secrets` on (the default), nothing changes.
-- **At the first boot:** the cms creates the table `processes` and logs `[bootstrap] granted 42 permission(s) across intranet roles` and `[bootstrap] permission drift: none (report-only check of 238 managed actions)`. It logs no "revoked" line.
+- **At the first boot:** `[sinnlos] version 1.0.0-rc.2` with the new revision. The cms creates the table `processes` and logs `[bootstrap] granted 42 permission(s) across intranet roles` and `[bootstrap] permission drift: none (report-only check of 238 managed actions)`. It logs no "revoked" line.
 - **Rollback** to v1.0.0-rc.1, in this order:
   1. remove `tools` from `FEATURES_OFF` if it is there (rc.1 refuses the unknown name at the cms boot, at the web start and in `infra/deploy.sh`);
   2. retag both images to rc.1 (`c33f75dadfcc`), then `up -d --no-build web cms` ([Rollback](#rollback)).

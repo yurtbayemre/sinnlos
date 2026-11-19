@@ -14,7 +14,8 @@ import { loadFixtures, signIn } from "./helpers";
  *   - a hostile diagram (an `%%{init}%%` that asks for securityLevel "loose", HTML labels,
  *     script and onerror, a click callback, a `javascript:` link, a `themeCSS` with a url())
  *     runs nothing, keeps no handler attribute and no script, and the downgrade does not
- *     take effect: labels stay text (no form, no img), the CSS asks for nothing;
+ *     take effect: labels are SVG text and the form and the picture are removed from them (the
+ *     node is drawn empty), the CSS asks for nothing;
  *   - a sequence message with math, which is HTML whatever htmlLabels says, is drawn as math
  *     without the form, the picture and the table background, the inline style, the SVG fill
  *     and filter, the srcset written beside it: no attribute of the diagram names the host;

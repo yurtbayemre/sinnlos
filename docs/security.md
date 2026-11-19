@@ -41,6 +41,7 @@ behind most rules (its §5 conventions, kept in
   - [Module and feature switches](#module-and-feature-switches)
   - [Course reports](#course-reports)
   - [Secret sharing](#secret-sharing)
+  - [Tools and diagrams](#tools-and-diagrams)
 - [Upload hardening](#upload-hardening)
   - [Who may open a file](#who-may-open-a-file)
 - [Frontend role gating](#frontend-role-gating)
@@ -1648,6 +1649,52 @@ the URL fragment, defences against mail and chat link scanners that open
 links, and they would let the company's domain serve text to anyone. That
 is its own release and review (plan, section 9); v0.35 has no dormant code
 for it.
+
+### Tools and diagrams
+
+v1.0.0-rc.2 adds the Tools section (module `tools`) and diagrams in Markdown.
+
+**Processes (BPMN).** The diagram is stored as BPMN 2.0 XML and drawn by bpmn-js in the
+browser only; the cms never parses it. The cms lifecycle (every writer, the admin panel
+included) refuses a diagram over 300 000 characters or 700 KiB as JSON, characters XML 1.0
+forbids, a root other than `definitions` in the BPMN MODEL namespace, any `<!DOCTYPE` or
+`<!ENTITY`, and any colour attribute (`fill`, `stroke`, `background-color`, `border-color`,
+`color`, under any namespace prefix, the empty one included) whose value is not a plain
+colour: a `url(...)` there would make every viewer's browser request an address. The same
+check (`hasUnsafePaint` in `packages/domain`) runs in the browser before the viewer or the
+editor draws a diagram. This is a storage guard, not a sanitizer: bpmn-js renders labels
+as SVG text.
+
+**Mermaid in Markdown.** A ` ```mermaid ` fence is drawn in the browser after the page
+loaded (the server and a browser without JavaScript show the source). The settings
+(`apps/web/src/lib/mermaid-render.ts`): `securityLevel: "strict"`, HTML labels off, and a
+`secure` list that keeps a diagram's `%%{init}%%` or front matter from changing the
+security level, HTML labels, the theme CSS, the fonts, the sanitizer settings or the arrow
+marker URLs. Text that Mermaid still inserts as HTML (math, some icon and event labels)
+passes DOMPurify with form controls and every loading or embedding element removed. A
+DOMPurify hook on the one `dompurify` instance Mermaid uses (3.4.17, a direct web
+dependency so both resolve to the same module; a test pins that) drops any attribute that
+loads something: `src`, `srcset`, `background`, `poster`, `action`, `formaction`, `ping`,
+non-fragment `href`/`xlink:href` (links on `a` stay, checked by DOMPurify itself) and any
+value with a `url(...)` or `image-set(...)` that is not a `#fragment`. Nothing else in the
+web uses DOMPurify today; a later user shares the hook. The SVG is inserted with
+`dangerouslySetInnerHTML`, the only place in the web that does so. What a diagram can
+still fetch: the picture of Mermaid's own image shape (`A@{ img: "https://…" }`), as a
+Markdown image can. Mermaid is part of Markdown, so `FEATURES_OFF=tools` does not turn it
+off.
+
+**Referrer.** Every signed-in page (the `(app)` layout) carries
+`<meta name="referrer" content="same-origin">`: requests to other sites, a diagram's
+picture or a link click, send no `Referer`; same-origin requests keep it. The sign-in and
+password pages keep their own policy (`set-password` sends none at all).
+
+**PDF and QR tools.** They run in the browser only: no server action, no upload, no
+request carries a file or an entry (a unit test walks their imports, a browser test
+records the requests with sentinel data). They stay locked until the page is known to
+carry no analytics script. The PDF result is a new file of the kept pages: annotations
+other than web links, forms, bookmarks and layers are dropped, a file whose structure
+would bring other pages along is refused, but data shared with kept pages can remain, so
+the tool is not a way to remove confidential content.
 
 ## Upload hardening
 

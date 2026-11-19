@@ -207,6 +207,15 @@ describe("stripMarkdown", () => {
     );
   });
 
+  it("drops a mermaid diagram whole, keeps the code of other fences", () => {
+    expect(
+      stripMarkdown(
+        "New process:\n```mermaid\nflowchart TD\n  A[Goods] --> B{Complete?}\n```\nthen\n~~~ mermaid\nA-->B\n~~~\n```js\nx\n```",
+      ),
+    ).toBe("New process: then x");
+    expect(stripMarkdown("Open:\n```mermaid\nA-->B")).toBe("Open: A-->B");
+  });
+
   it("drops raw HTML tags and comments, not a lone angle bracket", () => {
     expect(stripMarkdown('<p onclick="x()">Hi</p><br/><!-- note -->there')).toBe("Hithere");
     expect(stripMarkdown("<script>alert(1)</script>")).toBe("alert(1)");

@@ -101,11 +101,11 @@ describe("/tools", () => {
   });
 
   it.each([null, "intern"])(
-    "leaves out the department tile for the missing or unknown role %j (fail-closed), the hub itself still reads",
+    "leaves out the PDF, QR and department tiles for the missing or unknown role %j (fail-closed, as their pages), the hub itself still reads",
     async (role) => {
       who.role = role;
       const tree = elements(await hub.default());
-      expect(hrefs(tree)).toEqual(["/tools/processes", "/tools/pdf", "/tools/qr"]);
+      expect(hrefs(tree)).toEqual(["/tools/processes"]);
       expect(has(tree, SectionUnavailablePage)).toBe(false);
     },
   );

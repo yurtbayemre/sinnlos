@@ -121,7 +121,8 @@ editor's, and a fence loads it; the fences draw as SVG in the preview and on the
 with no hydration error; a hostile diagram (an `%%{init}%%` asking for `securityLevel`
 "loose" and HTML labels, a label with a form, a picture, script and `onerror`, a click
 callback, a `javascript:` link, a `themeCSS` with a `url()`) runs nothing, keeps no
-handler attribute, shows its label markup as text and asks for nothing; a sequence message
+handler attribute, draws its hostile label empty (the form and the picture are removed)
+and asks for nothing; a sequence message
 with math (HTML whatever `htmlLabels` says) is drawn without the form, picture, table
 background, inline style, SVG fill and filter and srcset written beside it, and no attribute
 of it names the evil host; the picture of an image shape is the one request left and it

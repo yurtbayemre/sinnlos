@@ -34,12 +34,15 @@ export default async function ToolsPage() {
   if (isReadDenied(viewer.role, "processes")) {
     return <SectionUnavailablePage title={t("title")} description={t("description")} />;
   }
-  const tiles: Tile[] = [
-    { href: "/tools/processes", icon: Workflow, key: "processes" },
-    { href: "/tools/pdf", icon: FileText, key: "pdf" },
-    { href: "/tools/qr", icon: QrCode, key: "qr" },
-  ];
-  // Fail-closed, unlike the hub's own gate: no tile for a role that is missing or unknown.
+  const tiles: Tile[] = [{ href: "/tools/processes", icon: Workflow, key: "processes" }];
+  // Fail-closed, unlike the hub's own gate (the CMS decides the processes read): a role
+  // that is missing or unknown gets no tile its page would refuse.
+  if (canRead(viewer.role, "processes")) {
+    tiles.push(
+      { href: "/tools/pdf", icon: FileText, key: "pdf" },
+      { href: "/tools/qr", icon: QrCode, key: "qr" },
+    );
+  }
   if (canRead(viewer.role, "departments")) {
     tiles.push({ href: "/people/org-chart?view=departments", icon: Building2, key: "orgChart" });
   }
