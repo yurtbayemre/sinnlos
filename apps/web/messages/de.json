@@ -780,6 +780,7 @@
         "needOne": "Für diese Aktion wählen Sie genau eine Datei. Entfernen Sie die übrigen aus der Liste.",
         "inputTooBig": "Die gewählten Dateien sind zusammen größer als {size} MB. Wählen Sie weniger oder kleinere Dateien.",
         "tooManyPages": "Die Dateien haben zusammen mehr als {pages} Seiten. Wählen Sie weniger oder kürzere Dateien.",
+        "tooComplex": "Die Dateien sind zusammen zu komplex für die Bearbeitung im Browser (zu viele interne Objekte). Wählen Sie weniger oder einfachere Dateien.",
         "encrypted": "{name} ist verschlüsselt oder passwortgeschützt. Verschlüsselte PDFs werden nicht bearbeitet.",
         "broken": "{name} lässt sich nicht lesen. Die Datei ist beschädigt oder keine PDF-Datei.",
         "deleteAll": "Damit würden alle Seiten gelöscht. Mindestens eine Seite muss bleiben.",

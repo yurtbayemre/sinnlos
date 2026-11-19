@@ -180,12 +180,12 @@ Newest first. Older releases: [archive/deployment-history.md](archive/deployment
 - **Not switched by `tools`:** Mermaid diagrams in every Markdown body (a ` ```mermaid ` fence, drawn in the browser; without JavaScript the source shows) and the department view of the org chart (`/people/org-chart?view=departments`, staff only).
 - **Referrer:** by default, signed-in pages now send no `Referer` to other sites (`<meta name="referrer" content="same-origin">`); same-origin requests keep it. Elements with their own policy keep it: a lesson's YouTube video still sends the intranet's origin when it plays. The edge's `Referrer-Policy` header is unchanged. Details: [security.md](security.md#tools-and-diagrams).
 - **Analytics:** Plausible now loads only while **both** `secrets` and `tools` are off. With `secrets` on (the default), nothing changes.
-- **At the first boot:** `[sinnlos] version 1.0.0-rc.2` with the new revision. The cms creates the table `processes` and logs `[bootstrap] granted 42 permission(s) across intranet roles` and `[bootstrap] permission drift: none (report-only check of 238 managed actions)`. It logs no "revoked" line.
+- **At the first boot:** `[sinnlos] version 1.0.0-rc.2` with the new revision. The cms creates the table `processes` (with `[datetime] converted 3 column(s) to timestamptz: processes.*`) and logs `[bootstrap] granted 42 permission(s) across intranet roles` and `[bootstrap] permission drift: none (report-only check of 238 managed actions)`. It logs no "revoked" line.
 - **Rollback** to v1.0.0-rc.1, in this order:
   1. remove `tools` from `FEATURES_OFF` if it is there (rc.1 refuses the unknown name at the cms boot, at the web start and in `infra/deploy.sh`);
   2. retag both images to rc.1 (`c33f75dadfcc`), then `up -d --no-build web cms` ([Rollback](#rollback)).
 
-  The `processes` table and its rows stay (`DATABASE_FORCE_MIGRATION` stays off). Inert `api::process.*` permission rows can stay as well; they open nothing, because rc.1 has no such routes. rc.1 logs drift over 228 managed actions. No SQL step. Rolling forward again grants the actions and logs 238.
+  The `processes` table and its rows stay (`DATABASE_FORCE_MIGRATION` stays off). Inert `api::process.*` permission rows can stay as well; they open nothing, because rc.1 has no such routes. rc.1 logs drift over 228 managed actions. No SQL step. Each rc.1 boot silently removes some of these rows (Strapi's own sync; the rehearsal: 42 → 32 after one boot, 22 after two). Rolling forward again grants what is missing (`granted 10` after one rc.1 boot, `granted 20` after two) and logs drift over 238.
 
 **Upgrading to v1.0.0-rc.1 (release candidate).** The v0.36.0 code under the first release-candidate version: no required env, no edge change, no schema change, no new permission, no change in behaviour.
 

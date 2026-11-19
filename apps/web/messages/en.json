@@ -780,6 +780,7 @@
         "needOne": "This action takes exactly one file. Remove the others from the list.",
         "inputTooBig": "The chosen files together are larger than {size} MB. Choose fewer or smaller files.",
         "tooManyPages": "The files together have more than {pages} pages. Choose fewer or shorter files.",
+        "tooComplex": "The files together are too complex to process in the browser (too many internal objects). Choose fewer or simpler files.",
         "encrypted": "{name} is encrypted or password-protected. Encrypted PDFs are not processed.",
         "broken": "{name} cannot be read. The file is damaged or not a PDF.",
         "deleteAll": "That would delete every page. At least one page must stay.",

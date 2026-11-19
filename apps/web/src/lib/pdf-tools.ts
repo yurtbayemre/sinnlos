@@ -31,6 +31,13 @@
 export const PDF_MAX_INPUT_BYTES = 50 * 1024 * 1024;
 export const PDF_MAX_PAGES = 500;
 export const PDF_MAX_RESULT_BYTES = 100 * 1024 * 1024;
+/**
+ * The objects of all files together, checked after parsing. Bytes and pages do not bound
+ * the time: saving grows with about the square of the object count (rehearsal 2026-11-19:
+ * 250 000 small objects in 17.7 MiB froze the tab 49 s, 625 000 for minutes; scans near
+ * both limits took 1 s).
+ */
+export const PDF_MAX_OBJECTS = 100_000;
 
 export type RangeIssue =
   | { code: "empty" }
@@ -102,6 +109,7 @@ export type PdfIssue =
         | "needOne"
         | "inputTooBig"
         | "tooManyPages"
+        | "tooComplex"
         | "deleteAll"
         | "strayPages"
         | "resultTooBig";
@@ -286,6 +294,7 @@ export async function runPdfJob(
     const { PDFDocument, EncryptedPDFError, ParseSpeeds, degrees } = lib;
     const output = await PDFDocument.create();
     let totalPages = 0;
+    let totalObjects = 0;
     for (const [index, file] of files.entries()) {
       onProgress({ stage: "file", index, total: files.length, name: file.name });
       await nextTask();
@@ -320,6 +329,9 @@ export async function runPdfJob(
       // 2. The total pages, after parsing and before anything is copied.
       totalPages += count;
       if (totalPages > PDF_MAX_PAGES) return refuse({ code: "tooManyPages" });
+      // 2b. The total objects (the save time), before anything is copied.
+      totalObjects += source.context.enumerateIndirectObjects().length;
+      if (totalObjects > PDF_MAX_OBJECTS) return refuse({ code: "tooComplex" });
 
       // 3. The expanded selection, before copying (parsePageRanges caps it too).
       const selection = selectPages(job, count);

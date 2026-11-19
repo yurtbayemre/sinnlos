@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   PDF_MAX_INPUT_BYTES,
+  PDF_MAX_OBJECTS,
   PDF_MAX_PAGES,
   PDF_MAX_RESULT_BYTES,
   parsePageRanges,
@@ -263,6 +264,38 @@ describe("runPdfJob: refusals", () => {
       issue: { code: "tooManyPages" },
     });
   }, 30_000);
+
+  it("refuses by total objects across the files, before the file over the limit is copied or anything is saved", async () => {
+    const { PDFContext, PDFDocument } = await import("@cantoo/pdf-lib");
+    const a = await pdf(1, "a.pdf");
+    const b = await pdf(1, "b.pdf");
+    const real = PDFContext.prototype.enumerateIndirectObjects;
+    // Each file reports half the limit plus one: together they are one over it.
+    const count = vi
+      .spyOn(PDFContext.prototype, "enumerateIndirectObjects")
+      .mockImplementation(function (this: InstanceType<typeof PDFContext>) {
+        const objects = real.call(this);
+        return Array.from(
+          { length: PDF_MAX_OBJECTS / 2 + 1 },
+          (_, i) => objects[i % objects.length],
+        );
+      });
+    const copy = vi.spyOn(PDFDocument.prototype, "copyPages");
+    const save = vi.spyOn(PDFDocument.prototype, "save");
+    try {
+      expect(await runPdfJob(job({ kind: "merge", files: [a, b] }))).toEqual({
+        ok: false,
+        issue: { code: "tooComplex" },
+      });
+      // The first file alone is under the limit and copied; the second is refused first.
+      expect(copy).toHaveBeenCalledTimes(1);
+      expect(save).not.toHaveBeenCalled();
+    } finally {
+      count.mockRestore();
+      copy.mockRestore();
+      save.mockRestore();
+    }
+  });
 });
 
 /**
