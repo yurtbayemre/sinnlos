@@ -11,7 +11,7 @@
  */
 import { featuresOff, secretRoles, secretRolesLine } from "@sinnlos/domain";
 import { canonicalTimeZone, resolveAppTimeZone } from "./lib/plain-date";
-import { analyticsScript, plausibleScript } from "./lib/site-config";
+import { analyticsBlockers, analyticsScript, plausibleScript } from "./lib/site-config";
 
 /**
  * Datetime phase 2: the web renders every date with an explicit zone
@@ -57,6 +57,9 @@ export function register(): void {
   // The same line as the cms boot: the deploy compares the two.
   console.info(secretRolesLine(secretRoles(process.env)));
   if (plausibleScript(process.env) && !analyticsScript(process.env)) {
-    console.info("[site] Plausible is configured but not loaded while the module secrets is on");
+    // Names the module(s) that are really on: secrets, tools or both.
+    const on = analyticsBlockers(process.env);
+    const modules = on.length > 1 ? `modules ${on.join(" and ")} are` : `module ${on[0]} is`;
+    console.info(`[site] Plausible is configured but not loaded while the ${modules} on`);
   }
 }

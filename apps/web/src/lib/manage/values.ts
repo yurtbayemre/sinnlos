@@ -30,6 +30,7 @@ import {
   type EditableMedia,
   type EventEditable,
   type PollEditable,
+  type ProcessEditable,
   type QuickLinkEditable,
 } from "@sinnlos/domain";
 import { normalizeGuestAccess } from "@/lib/poll-guest-access";
@@ -129,6 +130,20 @@ export interface KpiValues {
   values: Record<string, string>;
 }
 
+/**
+ * A process (v1.1 "Tools"): the department (documentId, "" for the whole
+ * company), the plain-text summary and the BPMN 2.0 XML. The diagram is a
+ * long text the shared coercion would cut, so its own coercion keeps it
+ * whole and the payload rules refuse an excess.
+ */
+export interface ProcessValues {
+  title: string;
+  summary: string;
+  department: string;
+  /** BPMN 2.0 XML, as the modeler saved it or the file held it. */
+  diagram: string;
+}
+
 export interface PollValues {
   question: string;
   options: string[];
@@ -210,6 +225,19 @@ export function dutyPlanValuesFromEditable(editable: DutyPlanEditable): DutyPlan
     department: editable.department ?? "",
     shiftTemplates: (editable.shiftTemplates ?? []).map((template) => ({ ...template })),
     shifts: (editable.shifts ?? []).map((shift) => ({ ...shift })),
+  };
+}
+
+export function emptyProcessValues(department = "", diagram = ""): ProcessValues {
+  return { title: "", summary: "", department, diagram };
+}
+
+export function processValuesFromEditable(editable: ProcessEditable): ProcessValues {
+  return {
+    title: editable.title ?? "",
+    summary: editable.summary ?? "",
+    department: editable.department ?? "",
+    diagram: editable.diagram ?? "",
   };
 }
 
@@ -491,6 +519,21 @@ export function coerceKpiValues(raw: unknown): KpiValues {
         .filter((entry): entry is [string, string] => typeof entry[1] === "string")
         .slice(0, MAX_KPI_VALUES + 1),
     ),
+  };
+}
+
+/**
+ * The title and summary read like every text; the diagram is kept WHOLE: no
+ * slice at MAX_TEXT, because a cut XML would store a broken diagram without
+ * a word. An excess reaches the payload rules, which refuse it (tooLong).
+ */
+export function coerceProcessValues(raw: unknown): ProcessValues {
+  const r = isRecord(raw) ? raw : {};
+  return {
+    title: str(r.title),
+    summary: str(r.summary),
+    department: str(r.department).trim(),
+    diagram: typeof r.diagram === "string" ? r.diagram : "",
   };
 }
 

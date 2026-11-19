@@ -23,6 +23,7 @@ export const ACTIVITY_TARGETS = {
   "api::lesson.lesson": "lesson",
   "api::duty-plan.duty-plan": "dutyPlan",
   "api::kpi.kpi": "kpi",
+  "api::process.process": "process",
   "api::department.department": "department",
   "api::team.team": "team",
   "api::classified.classified": "classified",

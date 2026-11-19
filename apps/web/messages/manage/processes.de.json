@@ -1,0 +1,49 @@
+{
+  "title": "Prozesse",
+  "description": "Geschäftsprozesse als Diagramm: eine Beschreibung in Worten und das BPMN-Diagramm.",
+  "new": "Neuer Prozess",
+  "newDescription": "Wird als Entwurf gespeichert; unter „Werkzeuge“ erscheint er, sobald er veröffentlicht ist.",
+  "editTitle": "Prozess bearbeiten",
+  "emptyTitle": "Noch keine Prozesse",
+  "emptyHint": "Legen Sie den ersten an, zum Beispiel „Wareneingang“.",
+  "sections": {
+    "process": "Prozess",
+    "diagram": "Diagramm"
+  },
+  "fields": {
+    "title": {
+      "label": "Titel",
+      "hint": "Zum Beispiel „Wareneingang“ oder „Onboarding“."
+    },
+    "summary": {
+      "label": "Beschreibung",
+      "hint": "Beschreiben Sie die Schritte und die Verzweigungen in Worten, der Reihe nach. Das ist die Textfassung des Diagramms: Wer das Bild nicht sehen kann, liest sie.",
+      "required": "Bitte beschreiben Sie den Prozess in Worten.",
+      "tooLong": "Die Beschreibung darf höchstens 2.000 Zeichen lang sein."
+    },
+    "department": {
+      "label": "Abteilung",
+      "companyWide": "Gesamtes Unternehmen",
+      "hint": "Die Leitung und die Teamleitungen dieser Abteilung pflegen den Prozess ebenfalls."
+    },
+    "diagram": {
+      "label": "Diagramm",
+      "required": "Der Prozess braucht ein Diagramm.",
+      "invalid": "Das ist kein BPMN-2.0-Diagramm, das gespeichert werden kann.",
+      "tooLong": "Das Diagramm ist zu groß zum Speichern (höchstens 300.000 Zeichen und 700 KiB)."
+    }
+  },
+  "diagram": {
+    "canvasLabel": "Diagrammeditor",
+    "loading": "Der Diagrammeditor wird geladen…",
+    "loadFailed": "Das Diagramm konnte nicht geöffnet werden. Sie können es durch den Import einer Datei ersetzen.",
+    "import": "Eine .bpmn-Datei importieren",
+    "importHint": "Eine BPMN-2.0-Datei aus einem anderen Werkzeug. Sie ersetzt das Diagramm unten und wird beim Speichern abgelegt.",
+    "importTooLarge": "Diese Datei ist größer als 700 KiB und kann nicht importiert werden.",
+    "importInvalid": "Diese Datei ist kein BPMN-2.0-Diagramm, das gespeichert werden kann.",
+    "importFailed": "Die Datei konnte nicht gelesen werden.",
+    "imported": "Datei importiert. Speichern Sie, um sie zu behalten.",
+    "keyboardNote": "Diagramme zeichnen geht nur mit Maus oder Touch; Import und Textbeschreibung funktionieren per Tastatur.",
+    "storedNote": "Importierte und bearbeitete Diagramme werden im Intranet gespeichert, wenn Sie speichern."
+  }
+}

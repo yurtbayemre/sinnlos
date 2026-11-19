@@ -32,6 +32,7 @@ import {
   KUDOS_READER_ROLES,
   ORG_READER_ROLES,
   DUTY_READER_ROLES,
+  PROCESS_READER_ROLES,
   KPI_READER_ROLES,
   POLL_CREATOR_ROLES,
   READ_SECTIONS,
@@ -207,6 +208,7 @@ describe("read sections", () => {
     training: [TRAINING_ROLES, STAFF_AND_FALLBACK],
     duties: [DUTY_READER_ROLES, STAFF_AND_FALLBACK],
     kpis: [KPI_READER_ROLES, STAFF_AND_FALLBACK],
+    processes: [PROCESS_READER_ROLES, STAFF_AND_FALLBACK],
     secrets: [SECRET_SHARE_ROLES, STAFF],
   };
 
@@ -318,8 +320,9 @@ describe("capabilitiesFor", () => {
           expect(caps.authorScope[area], `${role} ${area}`).toBe(verbs.size > 0 ? "any" : null);
         } else if (
           (role === "department_head" && departmentAreas.includes(area)) ||
-          // Duty plans (v0.18): department heads and team leads, their own department.
-          (["department_head", "team_lead"].includes(role) && area === "dutyPlans")
+          // Duty plans (v0.18) and processes (v1.1): department heads and team leads, their own department.
+          (["department_head", "team_lead"].includes(role) &&
+            (area === "dutyPlans" || area === "processes"))
         ) {
           expect(caps.authorScope[area], `${role} ${area}`).toBe("ownDepartment");
           expect([...verbs].sort(), `${role} ${area}`).toEqual(

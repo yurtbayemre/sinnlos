@@ -45,7 +45,7 @@ export function k8Capabilities(
   const base = roles.capabilitiesFor(role);
   const moderator = holds(MODERATORS, role);
   const departmentAuthor = holds(DEPARTMENT_AUTHOR_ROLES, role);
-  // Duty plans (v0.18): team leads author them too, for their own department.
+  // Duty plans (v0.18) and processes (v1.1): team leads author them too, for their own department.
   const dutyAuthor = holds(DUTY_PLAN_AUTHOR_ROLES, role);
   const scheduler = holds(SCHEDULER_ROLES, role);
   const author = {} as Record<AuthoringArea, ReadonlySet<AuthoringVerb>>;
@@ -67,7 +67,7 @@ export function k8Capabilities(
         ? null
         : moderator
           ? "any"
-          : departmentAuthor || (dutyAuthor && area === "dutyPlans")
+          : departmentAuthor || (dutyAuthor && (area === "dutyPlans" || area === "processes"))
             ? "ownDepartment"
             : null;
   }

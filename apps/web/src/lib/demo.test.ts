@@ -92,6 +92,8 @@ const API_READS: Record<string, () => Promise<unknown>> = {
   "quickLinks.list": () => api.quickLinks.list(),
   "dutyPlans.list": () => api.dutyPlans.list(),
   "kpis.list": () => api.kpis.list(),
+  "processes.list": () => api.processes.list(),
+  "processes.one": () => api.processes.one("demoprocess0000000000001"),
   celebrations: () => api.celebrations(),
 };
 

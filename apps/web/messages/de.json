@@ -54,7 +54,8 @@
     "kpis": "Kennzahlen",
     "more": "Mehr",
     "moreSections": "Weitere Bereiche",
-    "secrets": "Geheimnisse"
+    "secrets": "Geheimnisse",
+    "tools": "Werkzeuge"
   },
   "auth": {
     "signIn": "Anmelden",
@@ -693,6 +694,33 @@
     "chartLabel": "Werte der letzten {count} Zeiträume",
     "missing": "nicht erfasst",
     "viewAll": "Alle Kennzahlen"
+  },
+  "tools": {
+    "title": "Werkzeuge",
+    "description": "Helfer für die tägliche Arbeit.",
+    "processes": {
+      "title": "Prozesse",
+      "description": "Geschäftsprozesse als Diagramm, jeweils mit einer Beschreibung in Worten."
+    }
+  },
+  "processes": {
+    "title": "Prozesse",
+    "description": "Wie etwas erledigt wird: jeder Prozess als Diagramm mit einer Beschreibung in Worten.",
+    "companyWide": "Gesamtes Unternehmen",
+    "empty": "Noch keine Prozesse veröffentlicht.",
+    "loadFailed": "Die Prozesse konnten gerade nicht geladen werden.",
+    "updated": "Aktualisiert am {date}",
+    "back": "Alle Prozesse",
+    "summaryHeading": "Beschreibung",
+    "diagramHeading": "Diagramm",
+    "diagramNote": "Das Diagramm ist ein Bild. Die Beschreibung darüber ist seine Textfassung.",
+    "diagramLabel": "Diagramm des Prozesses {title}",
+    "loadingDiagram": "Das Diagramm wird geladen…",
+    "diagramError": "Das Diagramm konnte nicht angezeigt werden. Sie können die Datei trotzdem herunterladen und in einem BPMN-Werkzeug öffnen.",
+    "noDiagram": "Dieser Prozess hat kein Diagramm.",
+    "downloadBpmn": ".bpmn herunterladen",
+    "downloadSvg": ".svg herunterladen",
+    "downloadFailed": "Der Download ist fehlgeschlagen. Bitte versuchen Sie es erneut."
   },
   "mfa": {
     "title": "Zwei-Faktor-Anmeldung einrichten",

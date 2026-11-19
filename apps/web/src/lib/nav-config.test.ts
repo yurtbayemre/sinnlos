@@ -95,6 +95,7 @@ describe("navItemsFor", () => {
   const READ_GATED = [
     "/duties",
     "/kpis",
+    "/tools",
     "/training",
     "/departments",
     "/teams",
@@ -165,6 +166,7 @@ describe("navItemsFor", () => {
       "kudos",
       "marketplace",
       "secrets",
+      "tools",
     ] as const);
     expect(navItemsFor("admin_role", off).map((item) => item.href)).toEqual([
       "/",

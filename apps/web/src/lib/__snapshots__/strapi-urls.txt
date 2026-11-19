@@ -74,6 +74,12 @@ GET http://cms.test/api/duty-plans?fields[0]=name&fields[1]=note&fields[2]=shift
 ## api.kpis.list
 GET http://cms.test/api/kpis?fields[0]=name&fields[1]=unit&fields[2]=description&fields[3]=period&fields[4]=aggregation&fields[5]=values&populate[department][fields][0]=name&populate[department][fields][1]=slug&sort[0]=name:asc&sort[1]=id:asc&pagination[page]=1&pagination[pageSize]=100 cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
 
+## api.processes.list
+GET http://cms.test/api/processes?fields[0]=title&fields[1]=summary&fields[2]=updatedAt&populate[department][fields][0]=name&populate[department][fields][1]=slug&sort[0]=title:asc&sort[1]=id:asc&pagination[page]=1&pagination[pageSize]=100 cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
+
+## api.processes.one
+GET http://cms.test/api/processes?filters[documentId][$eq]=k3m9x0000000000000000001&fields[0]=title&fields[1]=summary&fields[2]=diagram&fields[3]=updatedAt&populate[department][fields][0]=name&populate[department][fields][1]=slug&pagination[page]=1&pagination[pageSize]=1 cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
+
 ## api.celebrations
 GET http://cms.test/api/celebrations?window=30 cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
 

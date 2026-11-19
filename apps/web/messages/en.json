@@ -54,7 +54,8 @@
     "kpis": "KPIs",
     "more": "More",
     "moreSections": "More sections",
-    "secrets": "Secrets"
+    "secrets": "Secrets",
+    "tools": "Tools"
   },
   "auth": {
     "signIn": "Sign in",
@@ -693,6 +694,33 @@
     "chartLabel": "Values of the last {count} periods",
     "missing": "not reported",
     "viewAll": "All KPIs"
+  },
+  "tools": {
+    "title": "Tools",
+    "description": "Helpers for everyday work.",
+    "processes": {
+      "title": "Processes",
+      "description": "Business processes as diagrams, each with a description in words."
+    }
+  },
+  "processes": {
+    "title": "Processes",
+    "description": "How things get done: every process as a diagram with a description in words.",
+    "companyWide": "Whole company",
+    "empty": "No processes published yet.",
+    "loadFailed": "The processes could not be loaded right now.",
+    "updated": "Updated {date}",
+    "back": "All processes",
+    "summaryHeading": "Description",
+    "diagramHeading": "Diagram",
+    "diagramNote": "The diagram is a picture. The description above is its text version.",
+    "diagramLabel": "Diagram of the process {title}",
+    "loadingDiagram": "Loading the diagram…",
+    "diagramError": "The diagram could not be shown. You can still download the file and open it in a BPMN tool.",
+    "noDiagram": "This process has no diagram.",
+    "downloadBpmn": "Download .bpmn",
+    "downloadSvg": "Download .svg",
+    "downloadFailed": "The download failed. Please try again."
   },
   "mfa": {
     "title": "Set up two-factor sign-in",

@@ -122,7 +122,7 @@ describe("the /manage shell", () => {
 });
 
 describe("the landing", () => {
-  it("an editor: the nine area tiles, no reports and no Strapi links", async () => {
+  it("an editor: the ten area tiles, no reports and no Strapi links", async () => {
     const tree = elements(await ManagePage());
     expect(tileHrefs(tree).sort()).toEqual(
       [
@@ -135,6 +135,7 @@ describe("the landing", () => {
         "/manage/training",
         "/manage/duty-plans",
         "/manage/kpis",
+        "/manage/processes",
       ].sort(),
     );
     expect(hrefs(tree)).not.toContain("/manage/analytics");
@@ -160,7 +161,7 @@ describe("the landing", () => {
     expect(hrefs(tree).some((href) => href.includes("/admin/content-manager"))).toBe(false);
   });
 
-  it("a department head: announcements, events, documents, duty plans and KPIs only (§L1), never the wiki; the training report (v0.20)", async () => {
+  it("a department head: announcements, events, documents, duty plans, KPIs and processes only (§L1), never the wiki; the training report (v0.20)", async () => {
     viewerRef.current = viewer("department_head", ENG);
     const tree = elements(await ManagePage());
     expect(tileHrefs(tree).sort()).toEqual([
@@ -169,6 +170,7 @@ describe("the landing", () => {
       "/manage/duty-plans",
       "/manage/events",
       "/manage/kpis",
+      "/manage/processes",
       "/manage/training/report",
     ]);
     // Their counts come from their own lists; the wiki's page list is never asked.
@@ -182,6 +184,7 @@ describe("the landing", () => {
       "/api/duty-plans/authoring?status=published",
       "/api/events/authoring?status=published",
       "/api/kpis/authoring?status=published",
+      "/api/processes/authoring?status=published",
     ]);
     expect(publishedOnly(hrefs(tree))).toEqual([
       "/manage/announcements?status=published",
@@ -189,6 +192,7 @@ describe("the landing", () => {
       "/manage/duty-plans?status=published",
       "/manage/events?status=published",
       "/manage/kpis?status=published",
+      "/manage/processes?status=published",
     ]);
   });
 
@@ -218,12 +222,13 @@ describe("the landing", () => {
         "/api/courses/authoring?status=published",
         "/api/duty-plans/authoring?status=published",
         "/api/kpis/authoring?status=published",
+        "/api/processes/authoring?status=published",
       ].sort(),
     );
     const publishedCounts = tree.filter(
       (el) => el.type === StatCount && (el.props.count as { value: number }).value === 5,
     );
-    expect(publishedCounts).toHaveLength(9);
+    expect(publishedCounts).toHaveLength(10);
     // Polls have no status tabs and the wiki lists spaces: those counts are no link.
     const countLinks = hrefs(tree).filter((href) => href.includes("?status="));
     expect(publishedOnly(countLinks)).toEqual([
@@ -232,6 +237,7 @@ describe("the landing", () => {
       "/manage/duty-plans?status=published",
       "/manage/events?status=published",
       "/manage/kpis?status=published",
+      "/manage/processes?status=published",
       "/manage/quick-links?status=published",
       "/manage/training?status=published",
     ]);
@@ -430,7 +436,7 @@ describe("the wiki area (batch 16, lane 16C)", () => {
       viewerRef.current = viewer(role);
       expect(await redirectOf(() => ManageWikiPage({ searchParams }))).toBe("/");
     }
-    // Team leads have /manage for their duty plans (v0.18), not the wiki area.
+    // Team leads have /manage for their duty plans (v0.18) and processes (v1.1), not the wiki area.
     viewerRef.current = viewer("team_lead", ENG);
     expect(await redirectOf(() => ManageWikiPage({ searchParams }))).toBe("/manage");
     expect(strapiMock).not.toHaveBeenCalled();

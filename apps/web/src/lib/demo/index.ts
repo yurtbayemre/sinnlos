@@ -214,6 +214,7 @@ const ROUTES: [method: string, pattern: RegExp, handler: DemoHandler][] = [
   ["GET", /^\/api\/documents$/, ({ data, params }) => list(data.documents, params)],
   ["GET", /^\/api\/duty-plans$/, ({ data, params }) => list(data.dutyPlans, params)],
   ["GET", /^\/api\/kpis$/, ({ data, params }) => list(data.kpis, params)],
+  ["GET", /^\/api\/processes$/, ({ data, params }) => list(data.processes, params)],
   ["GET", /^\/api\/classifieds$/, ({ data, params }) => list(data.classifieds, params)],
   ["POST", /^\/api\/classifieds$/, write.createAd],
   ["PUT", /^\/api\/classifieds\/(\d+)$/, write.updateAd],

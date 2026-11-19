@@ -48,6 +48,7 @@ const COUNTS = {
     kudosGiven: 0,
     dutyPlans: 0,
     kpis: 0,
+    processes: 0,
     trainingReceipts: 4,
   },
 };

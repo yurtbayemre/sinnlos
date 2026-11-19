@@ -5,6 +5,7 @@ import {
   buildRevision,
   DEFAULT_SOURCE_URL,
   plausibleScript,
+  analyticsBlockers,
   analyticsScript,
   shortRevision,
   siteLinks,
@@ -82,17 +83,27 @@ describe("site config", () => {
     ).toEqual({ src, domain: "intranet.example.com" });
   });
 
-  it("renders no analytics script while the module secrets is on (v0.35)", () => {
+  it("renders no analytics script while the module secrets (v0.35) or tools (v1.1) is on", () => {
     const env = {
       PLAUSIBLE_SCRIPT_URL: "https://plausible.example.com/js/script.js",
       PLAUSIBLE_DOMAIN: "intranet.example.com",
     };
     expect(analyticsScript(env)).toBeNull();
     expect(analyticsScript({ ...env, FEATURES_OFF: "kudos" })).toBeNull();
-    expect(analyticsScript({ ...env, FEATURES_OFF: "kudos,secrets" })).toEqual(
+    // Only when BOTH are off does the script load.
+    expect(analyticsScript({ ...env, FEATURES_OFF: "secrets" })).toBeNull();
+    expect(analyticsScript({ ...env, FEATURES_OFF: "tools" })).toBeNull();
+    expect(analyticsScript({ ...env, FEATURES_OFF: "kudos,secrets,tools" })).toEqual(
       plausibleScript(env),
     );
-    expect(analyticsScript({ FEATURES_OFF: "secrets" })).toBeNull();
+    expect(analyticsScript({ FEATURES_OFF: "secrets,tools" })).toBeNull();
+  });
+
+  it("names the modules that block the script", () => {
+    expect(analyticsBlockers({})).toEqual(["secrets", "tools"]);
+    expect(analyticsBlockers({ FEATURES_OFF: "secrets" })).toEqual(["tools"]);
+    expect(analyticsBlockers({ FEATURES_OFF: "tools" })).toEqual(["secrets"]);
+    expect(analyticsBlockers({ FEATURES_OFF: "tools, secrets" })).toEqual([]);
   });
 });
 

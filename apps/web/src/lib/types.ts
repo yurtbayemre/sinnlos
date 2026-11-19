@@ -23,3 +23,4 @@ export type * from "./types/training";
 export type * from "./types/quick-links";
 export type * from "./types/duties";
 export type * from "./types/kpis";
+export type * from "./types/processes";

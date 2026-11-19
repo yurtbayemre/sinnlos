@@ -14,6 +14,7 @@ export const MANAGE_AREAS = [
   "courses",
   "dutyPlans",
   "kpis",
+  "processes",
 ] as const;
 
 export type ManageArea = (typeof MANAGE_AREAS)[number] | "lessons";
@@ -33,6 +34,7 @@ export const AREA_CAPABILITY: Readonly<Record<ManageArea, AuthoringArea>> = {
   lessons: "lessons",
   dutyPlans: "dutyPlans",
   kpis: "kpis",
+  processes: "processes",
 };
 
 /** The K7 authored type behind each typed area. */
@@ -46,6 +48,7 @@ export const AREA_TYPE: Readonly<Record<TypedArea, AuthoringType | TrainingAutho
   lessons: "lesson",
   dutyPlans: "dutyPlan",
   kpis: "kpi",
+  processes: "process",
 };
 
 /** The list page of each area (the wiki: its spaces). */
@@ -60,6 +63,7 @@ export const AREA_PATH: Readonly<Record<ManageArea, Route>> = {
   lessons: "/manage/training",
   dutyPlans: "/manage/duty-plans",
   kpis: "/manage/kpis",
+  processes: "/manage/processes",
 };
 
 /** The create page of each area (the wiki: a new space). */
@@ -74,6 +78,7 @@ export const AREA_NEW_PATH: Readonly<Record<ManageArea, Route>> = {
   lessons: "/manage/training",
   dutyPlans: "/manage/duty-plans/new",
   kpis: "/manage/kpis/new",
+  processes: "/manage/processes/new",
 };
 
 /** The page of one item: its editor (the wiki: the space's page tree). */
@@ -113,6 +118,7 @@ export const SCHEDULE_FIELDS: Readonly<
   lessons: ["publishAt"],
   dutyPlans: [],
   kpis: [],
+  processes: [],
 };
 
 /**
@@ -126,7 +132,7 @@ export function notifiesOnPublish(area: ManageArea): boolean {
 
 /**
  * Areas that carry an owner department and the department-author class
- * (§N2): announcements, events, documents, duty plans and KPIs.
+ * (§N2): announcements, events, documents, duty plans, KPIs and processes.
  */
 export function hasOwnerDepartment(area: TypedArea): boolean {
   return (
@@ -134,6 +140,7 @@ export function hasOwnerDepartment(area: TypedArea): boolean {
     area === "events" ||
     area === "documents" ||
     area === "dutyPlans" ||
-    area === "kpis"
+    area === "kpis" ||
+    area === "processes"
   );
 }

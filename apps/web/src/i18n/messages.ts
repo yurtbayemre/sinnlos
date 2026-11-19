@@ -30,6 +30,7 @@ export const MANAGE_MESSAGE_AREAS = [
   "activity",
   "dutyPlans",
   "kpis",
+  "processes",
   "users",
 ] as const;
 
@@ -56,6 +57,7 @@ const MANAGE: Readonly<Record<Locale, Readonly<Record<ManageMessageArea, () => J
     activity: () => import("../../messages/manage/activity.en.json"),
     dutyPlans: () => import("../../messages/manage/dutyPlans.en.json"),
     kpis: () => import("../../messages/manage/kpis.en.json"),
+    processes: () => import("../../messages/manage/processes.en.json"),
     users: () => import("../../messages/manage/users.en.json"),
   },
   de: {
@@ -71,6 +73,7 @@ const MANAGE: Readonly<Record<Locale, Readonly<Record<ManageMessageArea, () => J
     activity: () => import("../../messages/manage/activity.de.json"),
     dutyPlans: () => import("../../messages/manage/dutyPlans.de.json"),
     kpis: () => import("../../messages/manage/kpis.de.json"),
+    processes: () => import("../../messages/manage/processes.de.json"),
     users: () => import("../../messages/manage/users.de.json"),
   },
 };

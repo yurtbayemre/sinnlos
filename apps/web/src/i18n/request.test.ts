@@ -77,6 +77,7 @@ describe("i18n request config", () => {
         "kpis",
         "org",
         "polls",
+        "processes",
         "quickLinks",
         "training",
         "users",

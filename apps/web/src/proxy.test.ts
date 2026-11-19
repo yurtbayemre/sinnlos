@@ -396,4 +396,34 @@ describe("proxy() — switched-off modules and features", () => {
       );
     }
   });
+
+  it("rewrites the tools pages and the process editor with tools off, nothing else (v1.1)", async () => {
+    vi.stubEnv("FEATURES_OFF", "tools");
+    for (const path of [
+      "/tools",
+      "/tools/processes",
+      "/tools/processes/k3m9x0000000000000000001",
+      "/manage/processes",
+      "/manage/processes/new",
+      "/manage/processes/k3m9x0000000000000000001",
+    ]) {
+      expect(rewrittenTo(await proxy(request(path))), path).toBe(
+        "https://intranet.example.test/_switched-off",
+      );
+    }
+    // Whole segments only; the other areas, Markdown and the org chart stay.
+    for (const path of [
+      "/toolsx",
+      "/manage/processes-x",
+      "/manage/kpis",
+      "/people/org-chart",
+      "/wiki",
+    ]) {
+      expect(passes(await proxy(request(path))), path).toBe(true);
+    }
+    // On by default: the pages answer.
+    vi.stubEnv("FEATURES_OFF", "");
+    expect(passes(await proxy(request("/tools/processes")))).toBe(true);
+    expect(passes(await proxy(request("/manage/processes")))).toBe(true);
+  });
 });

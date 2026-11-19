@@ -25,6 +25,7 @@ import { classifiedById, listClassifieds, myClassifieds } from "@/lib/api/market
 import { listQuickLinks } from "@/lib/api/quick-links";
 import { listDutyPlans } from "@/lib/api/duties";
 import { listKpis } from "@/lib/api/kpis";
+import { listProcesses, processByDocumentId } from "@/lib/api/processes";
 
 export {
   strapi,
@@ -60,5 +61,6 @@ export const api = {
   quickLinks: { list: listQuickLinks },
   dutyPlans: { list: listDutyPlans },
   kpis: { list: listKpis },
+  processes: { list: listProcesses, one: processByDocumentId },
   celebrations: listCelebrations,
 };
