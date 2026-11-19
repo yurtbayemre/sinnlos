@@ -88,7 +88,16 @@ export default function DiagramModeler({
       },
       load: async (next) => {
         clearTimeout(timer);
-        await modeler.importXML(next);
+        // bpmn-js replaces its definitions before a render can still reject (a file
+        // without a BPMNDiagram): put the previous diagram back, or a save would store
+        // the refused one.
+        const previous = await save().catch(() => null);
+        try {
+          await modeler.importXML(next);
+        } catch (error) {
+          if (previous !== null) await modeler.importXML(previous).catch(() => undefined);
+          throw error;
+        }
         modeler.get<{ zoom(level: string): void }>("canvas").zoom("fit-viewport");
         edited = false;
         return save();

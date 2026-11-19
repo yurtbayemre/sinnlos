@@ -1,4 +1,4 @@
-import { MAX_PROCESS_DIAGRAM_BYTES, processDiagramCode } from "@sinnlos/domain";
+import { MAX_PROCESS_DIAGRAM_BYTES } from "@sinnlos/domain";
 
 /**
  * The browser side of a process diagram (v1.1 "Tools"): the empty diagram of
@@ -30,12 +30,6 @@ export const NEW_PROCESS_DIAGRAM = `<?xml version="1.0" encoding="UTF-8"?>
  */
 export function importFileTooLarge(file: { size: number }): boolean {
   return file.size > MAX_PROCESS_DIAGRAM_BYTES;
-}
-
-/** The refusal of an imported text (or null): the cms's own rules, before the editor draws it. */
-export function importTextCode(text: string): "tooLong" | "invalid" | "required" | null {
-  const code = processDiagramCode(text);
-  return code === "tooLong" || code === "invalid" || code === "required" ? code : null;
 }
 
 /** `name.bpmn` or `name.svg` for the download: the title as a plain file name. */

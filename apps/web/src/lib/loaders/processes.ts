@@ -1,5 +1,6 @@
 import { tryFetch } from "@/lib/safe-fetch";
 import { api } from "@/lib/strapi";
+import type { Process } from "@/lib/types";
 
 /** One published process as the readers show it (v1.1 "Tools"). */
 export interface ProcessView {
@@ -22,17 +23,21 @@ export interface ProcessesView {
   truncated: boolean;
 }
 
-/** The published processes by title, without their diagrams. */
-export async function loadProcesses(): Promise<ProcessesView> {
-  const res = await tryFetch(() => api.processes.list(), "processes");
-  if (res.failed || !res.data) return { processes: [], failed: true, truncated: false };
-  const processes = res.data.data.map((row) => ({
+function toView(row: Process): ProcessView {
+  return {
     documentId: row.documentId ?? String(row.id),
     title: row.title,
     summary: row.summary ?? "",
     updatedAt: row.updatedAt ?? null,
     department: row.department ? { name: row.department.name, slug: row.department.slug } : null,
-  }));
+  };
+}
+
+/** The published processes by title, without their diagrams. */
+export async function loadProcesses(): Promise<ProcessesView> {
+  const res = await tryFetch(() => api.processes.list(), "processes");
+  if (res.failed || !res.data) return { processes: [], failed: true, truncated: false };
+  const processes = res.data.data.map(toView);
   return { processes, failed: false, truncated: res.data.truncated };
 }
 
@@ -43,12 +48,5 @@ export async function loadProcesses(): Promise<ProcessesView> {
 export async function loadProcess(documentId: string): Promise<ProcessDetailView | null> {
   const row = (await api.processes.one(documentId)).data[0];
   if (!row) return null;
-  return {
-    documentId: row.documentId ?? String(row.id),
-    title: row.title,
-    summary: row.summary ?? "",
-    updatedAt: row.updatedAt ?? null,
-    department: row.department ? { name: row.department.name, slug: row.department.slug } : null,
-    diagram: row.diagram ?? "",
-  };
+  return { ...toView(row), diagram: row.diagram ?? "" };
 }

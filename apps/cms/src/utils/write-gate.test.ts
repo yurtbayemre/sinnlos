@@ -227,6 +227,60 @@ describe("the classifier the lock re-runs (amendment row A2)", () => {
   });
 });
 
+describe("processes (v1.1): heads and team leads, both twins, rechecked under the lock", () => {
+  const P = "api::process.process";
+  const LEAD = { id: 106, role: { id: 4, type: "team_lead" } };
+  const ownedProcess = (strapi: StrapiStub) =>
+    strapi.seedDocument(
+      P,
+      { title: "Goods receipt", department: { id: ENG.id }, ownerDepartment: { id: ENG.id } },
+      { status: "published" },
+    );
+
+  it("gives team leads and heads the department-author class on processes, not on KPIs", () => {
+    expect(roleClassFor(LEAD, P)).toBe("departmentAuthor");
+    expect(roleClassFor(HEAD, P)).toBe("departmentAuthor");
+    expect(roleClassFor(LEAD, "api::kpi.kpi")).toBeNull();
+    expect(roleClassFor(MEMBER, P)).toBeNull();
+  });
+
+  it("owns a process only when both twins match in department and owner", async () => {
+    const twins: [string, "draft" | "published", Record<string, unknown>][] = [
+      ["published moved away", "published", { department: { id: SALES.id } }],
+      ["published owned elsewhere", "published", { ownerDepartment: { id: SALES.id } }],
+      ["draft company-wide", "draft", { department: null }],
+      ["draft moderator-owned", "draft", { ownerDepartment: null }],
+    ];
+    const { strapi, host } = world();
+    const clean = ownedProcess(strapi);
+    expect(
+      departmentAuthorOwns(P, (await loadAuthoringRows(host, P, clean.documentId))!.rows, ENG),
+    ).toBe(true);
+    for (const [label, twin, change] of twins) {
+      const { strapi: s2, host: h2 } = world();
+      const seeded = ownedProcess(s2);
+      Object.assign(
+        s2.tables[P].find((row) => row.id === seeded[twin]?.id)!,
+        change,
+      );
+      const rows = (await loadAuthoringRows(h2, P, seeded.documentId))!.rows;
+      expect(departmentAuthorOwns(P, rows, ENG), label).toBe(false);
+    }
+  });
+
+  it("drops the class when the scope changes before the lock is taken", async () => {
+    const { strapi, host } = world();
+    const seeded = ownedProcess(strapi);
+    const lead = scopeClassifier(host, "departmentAuthor", ENG);
+    const target = { uid: P, documentId: seeded.documentId };
+    expect(await lead(target)).toBe("departmentAuthor");
+    // A moderator retargets the published twin meanwhile: the recheck under the lock refuses.
+    strapi.tables[P].find((row) => row.id === seeded.published?.id)!.department = { id: SALES.id };
+    expect(await lead(target)).toBeNull();
+    expect(await scopeClassifier(host, "moderator", null)(target)).toBe("moderator");
+  });
+});
+
 describe("global::can-author", () => {
   const gate = writeGate();
   const run = async (

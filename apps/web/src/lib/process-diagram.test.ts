@@ -1,11 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { MAX_PROCESS_DIAGRAM_BYTES, processDiagramCode } from "@sinnlos/domain";
-import {
-  NEW_PROCESS_DIAGRAM,
-  diagramFileName,
-  importFileTooLarge,
-  importTextCode,
-} from "./process-diagram";
+import { NEW_PROCESS_DIAGRAM, diagramFileName, importFileTooLarge } from "./process-diagram";
 
 /** The browser side of a process diagram: the empty diagram, the import checks, the file names. */
 describe("NEW_PROCESS_DIAGRAM", () => {
@@ -24,23 +19,6 @@ describe("importFileTooLarge: the size is checked before the file is read", () =
     expect(importFileTooLarge({ size: MAX_PROCESS_DIAGRAM_BYTES + 1 })).toBe(true);
     expect(importFileTooLarge({ size: 0 })).toBe(false);
     expect(importFileTooLarge({ size: 50 * 1024 * 1024 })).toBe(true);
-  });
-});
-
-describe("importTextCode: the cms's rules before the editor draws a file", () => {
-  it("lets a BPMN file through and names what is wrong with anything else", () => {
-    expect(importTextCode(NEW_PROCESS_DIAGRAM)).toBeNull();
-    expect(importTextCode("<html></html>")).toBe("invalid");
-    expect(importTextCode("   ")).toBe("required");
-    expect(importTextCode(`<!DOCTYPE x>${NEW_PROCESS_DIAGRAM}`)).toBe("invalid");
-    expect(
-      importTextCode(NEW_PROCESS_DIAGRAM.replace("<bpmn:process", "\u0001<bpmn:process")),
-    ).toBe("invalid");
-    const tooLong = NEW_PROCESS_DIAGRAM.replace(
-      "</bpmn:definitions>",
-      `<!--${"a".repeat(300_000)}--></bpmn:definitions>`,
-    );
-    expect(importTextCode(tooLong)).toBe("tooLong");
   });
 });
 

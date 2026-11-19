@@ -41,11 +41,13 @@ const isString = (value: unknown): value is string => typeof value === "string";
 /**
  * The attributes bpmn-js turns into paint (BpmnRenderUtil): bioc:fill, bioc:stroke,
  * color:background-color, color:border-color and color:color. Matched by their local
- * name, because a document chooses its own namespace prefix (zz:stroke works too); a
- * namespace declaration (xmlns:color="http://...") is no paint.
+ * name (after the last colon), because a document chooses its own namespace prefix:
+ * zz:stroke, and even the empty prefix of `xmlns:="…biocolor…"` + `:fill`, which
+ * bpmn-moddle 10.3.1 accepts as bioc:fill. A namespace declaration
+ * (xmlns:color="http://...") is no paint.
  */
 const PAINT_ATTRIBUTE =
-  /(?:^|\s)(?:(?!xmlns:)[A-Za-z_][\w.-]*:)?(?:fill|stroke|background-color|border-color|color)\s*=\s*(?:"([^"]*)"|'([^']*)')/g;
+  /(?:^|\s)(?!xmlns:)(?:[^\s=<>"'/]*:)?(?:fill|stroke|background-color|border-color|color)\s*=\s*(?:"([^"]*)"|'([^']*)')/g;
 /** A plain color: empty, hex, a name, or rgb()/hsl() of numbers; no escapes, no url(). */
 const PLAIN_COLOR = /^(?:#[0-9a-fA-F]{3,8}|[a-zA-Z]{1,30}|(?:rgb|hsl)a?\([0-9., %/]{1,40}\))?$/;
 

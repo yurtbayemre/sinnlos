@@ -229,6 +229,9 @@ describe("processDiagramCode: labels and handlers are text to bpmn-js, paint is 
     const refused = [
       `zz:stroke="url(http://evil.example/p.svg#a)"`,
       `zz:fill = "url( http://evil.example/p.svg#a )"`,
+      // the empty prefix (xmlns:="…biocolor…"): bpmn-moddle 10.3.1 reads it as bioc:fill
+      `:fill="url(https://evil.example/x.svg#a)"`,
+      `a:b:stroke="url(https://evil.example/x.svg#a)"`,
       `bioc:stroke="URL(http://evil.example/x)"`,
       // an XML character reference decodes to the letter u: the raw value is no plain color
       `bioc:stroke="&#117;rl(http://evil.example/x)"`,
@@ -270,6 +273,8 @@ describe("hasUnsafePaint", () => {
     hasUnsafePaint(`<a ${"fill ".repeat(60_000)}/>`);
     hasUnsafePaint(`<a fill=${" ".repeat(200_000)}"x"/>`);
     hasUnsafePaint(`<a ${'fill="red" '.repeat(20_000)}/>`);
+    hasUnsafePaint(`<a ${":".repeat(200_000)}/>`);
+    hasUnsafePaint(`<a ${"x ".repeat(100_000)}/>`);
     expect(Date.now() - started).toBeLessThan(2000);
   });
 });

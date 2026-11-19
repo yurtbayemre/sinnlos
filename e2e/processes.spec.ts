@@ -15,6 +15,8 @@ import { loadFixtures, signIn } from "./helpers";
  *     request it, in the viewer and in an exported .svg opened as a file), and labels
  *     and documentation with markup or handlers run no script and make no request;
  *   - the exported .svg, reopened as a file, makes no network request;
+ *   - a file bpmn-js refuses only while drawing it, imported after an edit, leaves the
+ *     edited diagram in place;
  *   - the keyboard path: import, description, save, publish and the canvas as a tab stop.
  */
 const NS = "http://www.omg.org/spec/BPMN/20100524/MODEL";
@@ -83,9 +85,22 @@ test("process-authoring-and-reading", async ({ page, browser }) => {
       mimeType: "application/xml",
       buffer: Buffer.from(diagram("Start", `bioc:stroke="url(${EVIL}/stroke.svg#a)"`)),
     });
-    await expect(
-      main.getByText("This file is not a BPMN 2.0 diagram that can be stored.", { exact: true }),
-    ).toBeVisible();
+    const refusedNote = main.getByText("This file is not a BPMN 2.0 diagram that can be stored.", {
+      exact: true,
+    });
+    await expect(refusedNote).toBeVisible();
+    // The empty namespace prefix: bpmn-moddle reads `:fill` under `xmlns:="…biocolor…"` as bioc:fill.
+    await importInput.setInputFiles({
+      name: "prefix.bpmn",
+      mimeType: "application/xml",
+      buffer: Buffer.from(
+        diagram("Start", `:fill="url(${EVIL}/fill.svg#a)"`).replace(
+          "xmlns:bioc=",
+          'xmlns:="http://bpmn.io/schema/bpmn/biocolor/1.0" xmlns:bioc=',
+        ),
+      ),
+    });
+    await expect(refusedNote).toBeVisible();
 
     await importInput.setInputFiles({
       name: "order.bpmn",
@@ -95,6 +110,22 @@ test("process-authoring-and-reading", async ({ page, browser }) => {
     await expect(main.getByText("File imported. Save to keep it.", { exact: true })).toBeVisible();
     await expect(main.getByText("Unsaved changes", { exact: true })).toBeVisible();
     await expectWatermark(page);
+
+    // An edit (delete the task), then a file bpmn-js refuses only while drawing it (no
+    // BPMNDiagram): the edited diagram stays, the refused one is never what is saved.
+    await main.locator('.djs-element[data-element-id="Check"]').click();
+    await page.keyboard.press("Delete");
+    await expect(main.locator('.djs-element[data-element-id="Check"]')).toHaveCount(0);
+    await importInput.setInputFiles({
+      name: "no-diagram.bpmn",
+      mimeType: "application/xml",
+      buffer: Buffer.from(
+        `<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="${NS}" id="Refused_1" targetNamespace="http://bpmn.io/schema/bpmn"><bpmn:process id="Refused_Process"><bpmn:task id="Refused_Task" /></bpmn:process></bpmn:definitions>`,
+      ),
+    });
+    await expect(refusedNote).toBeVisible();
+    await expect(main.locator('.djs-element[data-element-id="Start"]')).toHaveCount(1);
 
     await main.getByRole("button", { name: "Save draft", exact: true }).click();
     await expect(page).toHaveURL(/\/manage\/processes\/(?!new$)[^/]+$/);
@@ -111,16 +142,51 @@ test("process-authoring-and-reading", async ({ page, browser }) => {
     expect(dialogs).toEqual([]);
   });
 
-  await test.step("The keyboard path: the import field, the description and the canvas are tab stops", async () => {
-    await page.reload();
-    await main.getByLabel("Import a .bpmn file").focus();
-    await page.keyboard.press("Tab");
-    await expect(main.getByRole("group", { name: "Diagram editor", exact: true })).toBeFocused();
+  await test.step("The keyboard path: a process imported, described, saved and published by keyboard only", async () => {
+    await page.goto("/manage/processes/new");
     await expect(
       main.getByText(
         "Drawing diagrams needs a mouse or touch; import and the text description work by keyboard.",
       ),
     ).toBeVisible();
+    const title = main.getByRole("textbox", { name: "Title", exact: true });
+    await title.focus();
+    await page.keyboard.type("E2E Keyboard process");
+    await page.keyboard.press("Tab");
+    await expect(main.getByRole("textbox", { name: "Description", exact: true })).toBeFocused();
+    await page.keyboard.type("Typed by keyboard: one start event, nothing else.");
+
+    const importInput = main.getByLabel("Import a .bpmn file");
+    await importInput.focus();
+    const [chooser] = await Promise.all([
+      page.waitForEvent("filechooser"),
+      page.keyboard.press("Space"),
+    ]);
+    await chooser.setFiles({
+      name: "keyboard.bpmn",
+      mimeType: "application/xml",
+      buffer: Buffer.from(diagram("Keyboard start")),
+    });
+    await expect(main.getByText("File imported. Save to keep it.", { exact: true })).toBeVisible();
+    // The canvas follows the import field in the tab order.
+    await importInput.focus();
+    await page.keyboard.press("Tab");
+    await expect(main.getByRole("group", { name: "Diagram editor", exact: true })).toBeFocused();
+
+    await main.getByRole("button", { name: "Save draft", exact: true }).focus();
+    await page.keyboard.press("Enter");
+    await expect(page).toHaveURL(/\/manage\/processes\/(?!new$)[^/]+$/);
+    await expect(
+      page.getByRole("status").filter({ hasText: /^Saved as a draft\.$/ }),
+    ).toBeVisible();
+    await main.getByRole("button", { name: "Publish", exact: true }).focus();
+    await page.keyboard.press("Enter");
+    const confirm = page
+      .getByRole("dialog", { name: "Publish now?", exact: true })
+      .getByRole("button", { name: "Publish", exact: true });
+    await confirm.focus();
+    await page.keyboard.press("Enter");
+    await expect(page.getByRole("status").filter({ hasText: /^Published\.$/ })).toBeVisible();
   });
 
   await test.step("A member finds it under Tools, reads the description and sees the diagram with the watermark", async () => {
@@ -159,7 +225,11 @@ test("process-authoring-and-reading", async ({ page, browser }) => {
     expect(bpmnDownload.suggestedFilename()).toBe("e2e-goods-receipt.bpmn");
     const bpmnFile = join(dir, bpmnDownload.suggestedFilename());
     await bpmnDownload.saveAs(bpmnFile);
-    expect(readFileSync(bpmnFile, "utf8")).toContain(`xmlns:bpmn="${NS}"`);
+    const stored = readFileSync(bpmnFile, "utf8");
+    expect(stored).toContain(`xmlns:bpmn="${NS}"`);
+    expect(stored).toContain('id="Start"');
+    expect(stored).not.toContain('id="Check"');
+    expect(stored).not.toContain("Refused");
 
     const [svgDownload] = await Promise.all([
       readerPage.waitForEvent("download"),

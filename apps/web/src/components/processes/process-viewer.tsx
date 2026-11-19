@@ -15,14 +15,15 @@ import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { diagramFileName } from "@/lib/process-diagram";
 
-/** Saves `content` as a file the browser downloads; the object URL is revoked at once. */
+/** Saves `content` as a file the browser downloads; the object URL is revoked once it started. */
 function download(content: string, type: string, name: string) {
   const url = URL.createObjectURL(new Blob([content], { type }));
   const link = document.createElement("a");
   link.href = url;
   link.download = name;
   link.click();
-  URL.revokeObjectURL(url);
+  // Safari loses a download whose URL is revoked in the same task.
+  setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 
 /**

@@ -171,6 +171,17 @@ format`: a scanner posted to a page with a made-up Server Action id,
 
 Newest first. Older releases: [archive/deployment-history.md](archive/deployment-history.md).
 
+**Upgrading to the next release (Tools; in progress, v1.0.0-rc.2).** No required env, no edge change. The schema gains one table.
+
+- **New module `tools`** ("Tools"): the first tool is Processes (BPMN diagrams with a required description in words). Staff and `authenticated` read published processes, guests do not. Admins and editors author everywhere; department heads and team leads author for their own department. The module is **on after the upgrade**. To keep it off, add `tools` to `FEATURES_OFF` in `infra/.env` before the deploy.
+- **Analytics:** Plausible now loads only while **both** `secrets` and `tools` are off. With `secrets` on (the default), nothing changes.
+- **At the first boot:** the cms creates the table `processes` and logs `[bootstrap] granted 42 permission(s) across intranet roles` and `[bootstrap] permission drift: none (report-only check of 238 managed actions)`. It logs no "revoked" line.
+- **Rollback** to v1.0.0-rc.1, in this order:
+  1. remove `tools` from `FEATURES_OFF` if it is there (rc.1 refuses the unknown name at the cms boot, at the web start and in `infra/deploy.sh`);
+  2. retag both images to rc.1 (`c33f75dadfcc`), then `up -d --no-build web cms` ([Rollback](#rollback)).
+
+  The `processes` table and its rows stay (`DATABASE_FORCE_MIGRATION` stays off). Inert `api::process.*` permission rows can stay as well; they open nothing, because rc.1 has no such routes. rc.1 logs drift over 228 managed actions. No SQL step. Rolling forward again grants the actions and logs 238.
+
 **Upgrading to v1.0.0-rc.1 (release candidate).** The v0.36.0 code under the first release-candidate version: no required env, no edge change, no schema change, no new permission, no change in behaviour.
 
 - **From v0.36.0:** nothing to do. From an older release, follow the notes of every release you skip ([From v0.25.x directly](#from-v025x-directly)).

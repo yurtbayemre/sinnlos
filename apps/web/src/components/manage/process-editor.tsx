@@ -2,7 +2,7 @@
 
 import { useCallback, useMemo, useState } from "react";
 import { useTranslations } from "next-intl";
-import type { ProcessEditable } from "@sinnlos/domain";
+import { processDiagramCode, type ProcessEditable } from "@sinnlos/domain";
 import { DiagramModelerLazy } from "@/components/processes/diagram-modeler-lazy";
 import type { ModelerApi } from "@/components/processes/diagram-modeler";
 import type { AreaAccess } from "@/lib/manage/access";
@@ -20,7 +20,7 @@ import {
   type ProcessValues,
 } from "@/lib/manage/values";
 import type { DepartmentOption } from "@/lib/loaders/manage/options";
-import { NEW_PROCESS_DIAGRAM, importFileTooLarge, importTextCode } from "@/lib/process-diagram";
+import { NEW_PROCESS_DIAGRAM, importFileTooLarge } from "@/lib/process-diagram";
 import { cn } from "@/lib/utils";
 import { ConflictDialog, EditorStatus, FormAlert, useFieldError } from "./editor-chrome";
 import { BackToList, OptionsNotice, PinnedDepartment, Section } from "./editor-parts";
@@ -147,7 +147,8 @@ export function ProcessEditor({
     } catch {
       return setNote({ kind: "error", key: "importFailed" });
     }
-    const code = importTextCode(text);
+    // The cms's own rules, before the modeler draws the file.
+    const code = processDiagramCode(text);
     if (code !== null) {
       return setNote({
         kind: "error",
