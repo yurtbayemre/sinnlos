@@ -701,6 +701,76 @@
     "processes": {
       "title": "Prozesse",
       "description": "Geschäftsprozesse als Diagramm, jeweils mit einer Beschreibung in Worten."
+    },
+    "pdf": {
+      "title": "PDF-Werkzeuge",
+      "description": "PDFs zusammenfügen sowie Seiten auswählen, drehen und löschen, im Browser.",
+      "privacy": "Ihre Dateien und Eingaben werden nicht übertragen. Die Bearbeitung läuft in Ihrem Browser.",
+      "notice": "Das Ergebnis ist eine neue Datei aus den übernommenen Seiten. Formulare, Lesezeichen, Tags für die Barrierefreiheit, Signaturen und Dokumenteigenschaften werden nicht zugesagt und gehen in der Regel verloren. Dieses Werkzeug schwärzt nichts: Inhalte lassen sich damit nicht sicher unkenntlich machen.",
+      "limits": "Grenzen: zusammen höchstens {size} MB und {pages} Seiten. Verschlüsselte oder passwortgeschützte Dateien werden nicht bearbeitet.",
+      "mode": "Was möchten Sie tun?",
+      "modes": {
+        "merge": "Zusammenfügen",
+        "split": "Seiten auswählen",
+        "rotate": "Seiten drehen",
+        "delete": "Seiten löschen"
+      },
+      "modeHints": {
+        "merge": "Mehrere Dateien in der Reihenfolge der Liste zu einer Datei verbinden.",
+        "split": "Die genannten Seiten in dieser Reihenfolge in einer neuen Datei zusammenstellen.",
+        "rotate": "Die genannten Seiten um eine Vierteldrehung drehen.",
+        "delete": "Die genannten Seiten weglassen. Mindestens eine Seite muss bleiben."
+      },
+      "files": "PDF-Dateien",
+      "filesHintMany": "Sie können mehrere Dateien wählen und nacheinander weitere hinzufügen.",
+      "filesHintOne": "Wählen Sie eine Datei.",
+      "listLabel": "Gewählte Dateien",
+      "empty": "Noch keine Datei gewählt.",
+      "total": "{count, plural, one {# Datei} other {# Dateien}}, zusammen {size}",
+      "moveUp": "{name} nach oben",
+      "moveDown": "{name} nach unten",
+      "remove": "{name} entfernen",
+      "moved": "{name} steht jetzt an Position {position} von {total}.",
+      "removed": "{name} wurde entfernt.",
+      "ranges": "Seiten",
+      "rangesHints": {
+        "split": "Zum Beispiel 1-3, 5. Die Seiten stehen in dieser Reihenfolge in der neuen Datei.",
+        "rotate": "Zum Beispiel 1-3, 5. Leer lassen, um alle Seiten zu drehen.",
+        "delete": "Zum Beispiel 1-3, 5."
+      },
+      "turn": "Drehung",
+      "turnRight": "90° im Uhrzeigersinn",
+      "turnLeft": "90° gegen den Uhrzeigersinn",
+      "run": "Neue PDF erstellen",
+      "progressFile": "Datei {index} von {total} wird verarbeitet: {name}",
+      "progressSaving": "Das Ergebnis wird gespeichert…",
+      "done": "Fertig: {pages, plural, one {# Seite} other {# Seiten}}, {size}.",
+      "download": "{name} herunterladen",
+      "fileNames": {
+        "merge": "zusammengefuegt.pdf",
+        "split": "auswahl.pdf",
+        "rotate": "gedreht.pdf",
+        "delete": "ohne-geloeschte-seiten.pdf"
+      },
+      "errors": {
+        "needTwo": "Wählen Sie mindestens zwei Dateien zum Zusammenfügen.",
+        "needOne": "Für diese Aktion wählen Sie genau eine Datei. Entfernen Sie die übrigen aus der Liste.",
+        "inputTooBig": "Die gewählten Dateien sind zusammen größer als {size} MB. Wählen Sie weniger oder kleinere Dateien.",
+        "tooManyPages": "Die Dateien haben zusammen mehr als {pages} Seiten. Wählen Sie weniger oder kürzere Dateien.",
+        "encrypted": "{name} ist verschlüsselt oder passwortgeschützt. Verschlüsselte PDFs werden nicht bearbeitet.",
+        "broken": "{name} lässt sich nicht lesen. Die Datei ist beschädigt oder keine PDF-Datei.",
+        "deleteAll": "Damit würden alle Seiten gelöscht. Mindestens eine Seite muss bleiben.",
+        "resultTooBig": "Das Ergebnis wäre größer als {size} MB und wird nicht erstellt.",
+        "failed": "Das hat nicht geklappt. Bitte versuchen Sie es erneut."
+      },
+      "rangeErrors": {
+        "empty": "Geben Sie die Seiten an, zum Beispiel 1-3, 5.",
+        "syntax": "„{part}“ ist keine gültige Angabe. Erlaubt sind einzelne Seiten und Bereiche, durch Kommas getrennt, zum Beispiel 1-3, 5.",
+        "zero": "„{part}“: Die Seitenzählung beginnt bei 1.",
+        "reversed": "„{part}“: Ein Bereich beginnt mit der kleineren Seite, zum Beispiel 3-5.",
+        "beyond": "„{part}“: Die Datei hat nur {pageCount, plural, one {# Seite} other {# Seiten}}.",
+        "tooMany": "Es sind mehr als {max} Seiten ausgewählt."
+      }
     }
   },
   "processes": {

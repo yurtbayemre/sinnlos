@@ -84,6 +84,19 @@ leaves for its address; labels and documentation with markup run no script; the
 downloaded `.bpmn` and `.svg` are clean and the `.svg`, reopened as a file, makes no
 request; the canvas is a tab stop; a team lead reaches the editor, a member does not.
 
+The `pdf-merge`, `tools-send-nothing` and `pdf-ten-jobs-memory-guide` cases in
+`e2e/tools.spec.ts` (v1.1) cover the browser-only PDF page `/tools/pdf`. The PDFs are
+made at test time with the web app's own `@cantoo/pdf-lib` (resolved from `apps/web`).
+`pdf-merge` merges two files in the order the move buttons give (by keyboard, with the
+focus kept and the move announced), checks the downloaded file's page count and page
+order, and that an encrypted file, a range past the last page and a list of the wrong
+length are refused with a message. `tools-send-nothing` opens the tool by client-side
+navigation, merges a PDF that carries a sentinel string as plain text and requires that no
+request (URL, headers or body) carries it. `pdf-ten-jobs-memory-guide` runs ten jobs in a
+row and compares the JS heap after a forced collection with the first job: **a rough
+Chromium guide, not a gate** (the JS heap only, provisional threshold; the numbers are in
+the test annotations for the staging rehearsal).
+
 The `secret-sharing` case in `e2e/secrets.spec.ts` (v0.35) has the member send
 secrets to the team lead through `/secrets/new`. Every `/secrets` answer it
 can produce carries `Cache-Control` with `private` and `no-store`: the
@@ -162,6 +175,9 @@ pnpm test:e2e --grep training-exam-completion
 pnpm test:e2e --grep training-confirm-completion
 pnpm test:e2e --grep training-authoring
 pnpm test:e2e --grep process-authoring-and-reading
+pnpm test:e2e --grep pdf-merge
+pnpm test:e2e --grep tools-send-nothing
+pnpm test:e2e --grep pdf-ten-jobs-memory-guide
 pnpm test:e2e --grep secret-sharing
 pnpm test:e2e --grep secret-roles
 pnpm --filter @sinnlos/e2e test:live   # secret-live, live events on
