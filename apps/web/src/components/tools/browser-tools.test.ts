@@ -110,7 +110,7 @@ const BANNED_MODULES =
 const CHANNELS: Record<string, RegExp> = {
   request: /\bfetch\s*\(|XMLHttpRequest|sendBeacon|\bWebSocket\b|\bEventSource\b/,
   storage: /localStorage|sessionStorage|indexedDB|document\.cookie|cookieStore/,
-  url: /\blocation\s*(?:\.\s*(?:href|search|hash)\s*=(?!=)|\.\s*(?:assign|replace)\s*\(|=(?![=>]))|\bhistory\s*\.\s*(?:push|replace)State|\bwindow\s*\.\s*open\b|\bredirect\s*\(/,
+  url: /\blocation\s*(?:\.\s*(?:href|search|hash)\s*\+?=(?!=)|\.\s*(?:assign|replace)\s*\(|=(?![=>]))|\bhistory\s*\.\s*(?:push|replace)State|\bwindow\s*\.\s*open\b|\bredirect\s*\(/,
   image:
     /\bnew\s+(?:Image|Audio)\s*\(|createElement\(\s*["'](?:img|script|iframe|link|form|object|embed|video|audio|source)["']|\.src(?:set)?\s*=/,
   form: /\bFormData\b|\.submit\s*\(|\brequestSubmit\b|<form\b[^>]*\b(?:action|method)\s*=|\bformAction\b/,
@@ -119,7 +119,7 @@ const CHANNELS: Record<string, RegExp> = {
   // anchors with an href. (The one <img> and the download's `link.href` are checked apart.)
   element:
     /<(?:iframe|script|embed|video|audio|frame)\b|\bsrcSet\s*=|\bsetAttribute\(\s*["'](?:src|srcset|href|action|data|formaction)["']|<a\b[^>]*\bhref\s*=/,
-  anchor: /\.href\s*=(?!=)/,
+  anchor: /\.href\s*\+?=(?!=)/,
 };
 
 /** The one place that sets an anchor's href: the download's object URL (see below). */
@@ -178,6 +178,8 @@ describe("the guards themselves", () => {
     ["url", "location = target"],
     ["url", "location.hash = target"],
     ["url", "location.replace(target)"],
+    ["url", "location.search += token"],
+    ["url", "window.location.href += token"],
     ["url", "history.pushState({}, '', target)"],
     ["url", "window.open(target)"],
     ["image", "new Image().src = target"],
