@@ -1,27 +1,48 @@
 import mermaid from "mermaid";
 import { describe, expect, it } from "vitest";
-import { MERMAID_MAX_TEXT_SIZE, mermaidConfig, renderMermaid } from "./mermaid-render";
+import { MERMAID_MAX_TEXT_SIZE, mermaidConfig, namespaceIds } from "./mermaid-render";
 
 /**
  * The renderer's settings and the rule that a diagram cannot change them.
  * Mermaid draws SVG only in a browser (it measures text), so what a hostile
  * diagram does to the DOM is e2e/mermaid.spec.ts; here the config logic runs
  * in node: Mermaid merges a diagram's `%%{init}%%` directive and front matter
- * `config:` into its settings while it parses, and drops the `secure` keys
- * (securityLevel, startOnLoad, maxTextSize, suppressErrorRendering, maxEdges)
- * on the way.
+ * `config:` into its settings while it parses, and drops the `secure` keys on
+ * the way (at any depth: `flowchart.htmlLabels` as well as `htmlLabels`). The
+ * render queue is mermaid-render-queue.test.ts.
  */
 
 const FLOW = "flowchart TD\n  A --> B";
 
 describe("mermaidConfig", () => {
-  it("is strict, never scans the page, throws instead of drawing an error graph", () => {
+  it("is strict, never scans the page, throws instead of drawing an error graph, draws labels as text", () => {
     expect(mermaidConfig(false)).toEqual({
       startOnLoad: false,
       securityLevel: "strict",
       suppressErrorRendering: true,
+      htmlLabels: false,
+      flowchart: { htmlLabels: false },
+      secure: [
+        "secure",
+        "securityLevel",
+        "startOnLoad",
+        "maxTextSize",
+        "suppressErrorRendering",
+        "maxEdges",
+        "htmlLabels",
+        "themeCSS",
+        "fontFamily",
+        "altFontFamily",
+      ],
       theme: "default",
     });
+  });
+
+  it("keeps every key of the installed Mermaid's own secure list (passing `secure` replaces it)", () => {
+    expect(mermaidConfig(false).secure).toEqual(
+      expect.arrayContaining(mermaid.mermaidAPI.defaultConfig.secure ?? []),
+    );
+    expect(mermaid.mermaidAPI.defaultConfig.secure).toContain("securityLevel");
   });
 
   it("follows the app theme", () => {
@@ -84,16 +105,66 @@ describe("a diagram cannot change the settings", () => {
     );
     expect(config).not.toHaveProperty("dompurifyConfig");
   });
+
+  describe("HTML labels, theme CSS and fonts", () => {
+    const REENABLE = {
+      "an init directive": `%%{init: {"htmlLabels": true, "flowchart": {"htmlLabels": true}, "class": {"htmlLabels": true}}}%%\n${FLOW}`,
+      "an init directive for the flowchart only": `%%{init: {"flowchart": {"htmlLabels": true}}}%%\n${FLOW}`,
+      "a front matter config": `---\nconfig:\n  htmlLabels: true\n  flowchart:\n    htmlLabels: true\n---\n${FLOW}`,
+    };
+
+    it.each(Object.entries(REENABLE))("keeps labels as text against %s", async (_label, source) => {
+      const config = await configAfterParsing(source);
+      expect(config.htmlLabels).toBe(false);
+      expect(config.flowchart?.htmlLabels).toBe(false);
+      expect(config.class?.htmlLabels).not.toBe(true);
+    });
+
+    it("refuses a diagram's own CSS and fonts (a url() in them would be a request)", async () => {
+      const config = await configAfterParsing(
+        `%%{init: {"themeCSS": ".node{background:url(https://evil.example/x.png)}", "fontFamily": "evil", "altFontFamily": "evil"}}%%\n${FLOW}`,
+      );
+      expect(config.themeCSS).toBeUndefined();
+      expect(config.altFontFamily).toBeUndefined();
+      expect(config.fontFamily).toBe(mermaid.mermaidAPI.defaultConfig.fontFamily);
+    });
+  });
 });
 
-describe("renderMermaid", () => {
-  it("rejects a render whose block is gone, without loading or drawing anything", async () => {
-    await expect(renderMermaid(FLOW, false, AbortSignal.abort())).rejects.toMatchObject({
-      name: "AbortError",
-    });
-    // The queue goes on after a rejection.
-    await expect(renderMermaid(FLOW, true, AbortSignal.abort())).rejects.toMatchObject({
-      name: "AbortError",
-    });
+describe("namespaceIds", () => {
+  const ROOT = "sinnlosMermaid3";
+
+  it("prefixes the ids that carry no render id and leaves the others", () => {
+    const svg =
+      `<svg id="${ROOT}"><g id="${ROOT}-flowchart-A-0"></g><title id="chart-title-${ROOT}"></title>` +
+      '<line id="actor0" data-id="X"></line><g id="root-0"></g></svg>';
+    expect(namespaceIds(svg, ROOT)).toBe(
+      `<svg id="${ROOT}"><g id="${ROOT}-flowchart-A-0"></g><title id="chart-title-${ROOT}"></title>` +
+        `<line id="${ROOT}-actor0" data-id="X"></line><g id="${ROOT}-root-0"></g></svg>`,
+    );
+  });
+
+  it("follows the references to a renamed id, and only those", () => {
+    const svg =
+      '<g><linearGradient id="linearGradient-5"></linearGradient>' +
+      '<path stroke="url(#linearGradient-5)"></path><use href="#linearGradient-5"></use>' +
+      `<path fill="url(#${ROOT}-marker)"></path><path stroke="url(#other)"></path></g>`;
+    expect(namespaceIds(svg, ROOT)).toBe(
+      `<g><linearGradient id="${ROOT}-linearGradient-5"></linearGradient>` +
+        `<path stroke="url(#${ROOT}-linearGradient-5)"></path><use href="#${ROOT}-linearGradient-5"></use>` +
+        `<path fill="url(#${ROOT}-marker)"></path><path stroke="url(#other)"></path></g>`,
+    );
+  });
+
+  it("never touches a label's text", () => {
+    const svg = `<text>see id="actor0" and url(#actor0)</text><line id="actor0"></line>`;
+    expect(namespaceIds(svg, ROOT)).toBe(
+      `<text>see id="actor0" and url(#actor0)</text><line id="${ROOT}-actor0"></line>`,
+    );
+  });
+
+  it("is the identity on a svg whose ids all carry the render id", () => {
+    const svg = `<svg id="${ROOT}"><g id="${ROOT}-a"></g></svg>`;
+    expect(namespaceIds(svg, ROOT)).toBe(svg);
   });
 });
