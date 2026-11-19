@@ -193,6 +193,9 @@ export function mermaidConfig(dark: boolean): MermaidConfig {
       "fontFamily",
       "altFontFamily",
       "dompurifyConfig",
+      // Absolute marker URLs (page URL + #id) are dropped by the attribute hook, so a
+      // diagram may not switch them on: its arrowheads would vanish.
+      "arrowMarkerAbsolute",
     ],
     theme: dark ? "dark" : "default",
   };

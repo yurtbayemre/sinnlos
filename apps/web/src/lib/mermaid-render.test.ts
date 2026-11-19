@@ -43,6 +43,7 @@ describe("mermaidConfig", () => {
         "fontFamily",
         "altFontFamily",
         "dompurifyConfig",
+        "arrowMarkerAbsolute",
       ],
       theme: "default",
     });
@@ -179,6 +180,11 @@ describe("a diagram cannot change the settings", () => {
       expect(config.themeCSS).toBeUndefined();
       expect(config.altFontFamily).toBeUndefined();
       expect(config.fontFamily).toBe(mermaid.mermaidAPI.defaultConfig.fontFamily);
+    });
+
+    it("keeps arrow markers relative (the attribute hook drops absolute marker URLs)", async () => {
+      const config = await configAfterParsing(`%%{init: {"arrowMarkerAbsolute": true}}%%\n${FLOW}`);
+      expect(config.arrowMarkerAbsolute).not.toBe(true);
     });
   });
 });
