@@ -28,13 +28,6 @@ describe("the root viewport", () => {
   });
 });
 
-describe("the root referrer policy", () => {
-  it("sends no Referer to another origin and keeps it within this one", async () => {
-    // Next renders it as <meta name="referrer" content="same-origin">.
-    expect((await generateMetadata()).referrer).toBe("same-origin");
-  });
-});
-
 describe("the root branding", () => {
   afterEach(() => vi.unstubAllEnvs());
 
@@ -68,29 +61,51 @@ describe("the root branding", () => {
     warn.mockRestore();
   });
 
-  /** The <head> child of the rendered <html>, if any. */
-  async function headOf(): Promise<
-    ReactElement<{ children: ReactElement<{ children: string }> }> | undefined
+  /** The children of the rendered <html>'s <head>. */
+  async function headChildren(): Promise<
+    ReactElement<{ children?: string; name?: string; content?: string }>[]
   > {
     const html = (await RootLayout({ children: null })) as ReactElement<{ children: ReactNode }>;
-    const children = ([] as ReactNode[]).concat(html.props.children);
-    return children.find(
-      (child): child is ReactElement<{ children: ReactElement<{ children: string }> }> =>
-        isValidElement(child) && child.type === "head",
-    );
+    const head = ([] as ReactNode[])
+      .concat(html.props.children)
+      .find((child) => isValidElement(child) && child.type === "head") as
+      ReactElement<{ children: ReactNode }> | undefined;
+    expect(head).toBeDefined();
+    return ([] as ReactNode[]).concat(head!.props.children).filter(isValidElement) as ReactElement<{
+      children?: string;
+      name?: string;
+      content?: string;
+    }>[];
   }
 
   it("writes the accent style only for a valid SITE_ACCENT, from numbers only", async () => {
+    const styles = async () =>
+      (await headChildren())
+        .filter((child) => child.type === "style")
+        .map((child) => child.props.children);
     vi.stubEnv("SITE_ACCENT", "");
-    expect(await headOf()).toBeUndefined();
+    expect(await styles()).toEqual([]);
 
     vi.stubEnv("SITE_ACCENT", "#0f766e");
-    const css = (await headOf())!.props.children.props.children;
+    const [css] = await styles();
     expect(css).toMatch(/^:root\{[-a-z0-9:.% ;]+\}:root\.dark\{[-a-z0-9:.% ;]+\}$/);
 
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     vi.stubEnv("SITE_ACCENT", "#0f766e;}body{display:none");
-    expect(await headOf()).toBeUndefined();
+    expect(await styles()).toEqual([]);
     warn.mockRestore();
+  });
+
+  it("states the referrer policy in the first element of <head>, with or without branding", async () => {
+    // A request to another origin carries no Referer (a diagram's image shape fetches
+    // its picture with none of its own), one to this origin keeps it. A literal tag, not
+    // the metadata API: Next streams that after the page's content.
+    for (const accent of ["", "#0f766e"]) {
+      vi.stubEnv("SITE_ACCENT", accent);
+      const [first] = await headChildren();
+      expect(first.type).toBe("meta");
+      expect(first.props).toEqual({ name: "referrer", content: "same-origin" });
+    }
+    expect((await generateMetadata()).referrer).toBeUndefined(); // a page's own one (set-password) stays its own
   });
 });

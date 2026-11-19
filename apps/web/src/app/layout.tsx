@@ -16,19 +16,10 @@ const inter = Inter({ subsets: ["latin"], variable: "--font-inter", display: "sw
  * SITE_ICON_URL replaces the bundled icons. The bundled ones live in
  * public/, not in the app/ file conventions, because Next would always add a
  * convention favicon next to configured icons.
- *
- * `referrer: "same-origin"` (v1.1, Mermaid): a request to another origin
- * carries no Referer, one to this origin keeps it. The edge's header says
- * strict-origin-when-cross-origin, which would tell an external host the
- * intranet's origin; a diagram's image shape (`A@{ img: … }`) fetches its
- * picture before any sanitizer runs and has no referrerpolicy of its own, as
- * Markdown images have. The meta tag wins over the header. An element's own
- * referrerpolicy still wins over both (the YouTube iframe needs its origin).
  */
 export async function generateMetadata(): Promise<Metadata> {
   const { name, iconUrl } = brand(process.env);
   return {
-    referrer: "same-origin",
     title: {
       default: name ?? `${DEFAULT_SITE_NAME} Intranet`,
       // parseSiteName refuses a name with "%s": Next substitutes every one.
@@ -69,14 +60,23 @@ export default async function RootLayout({ children }: { children: React.ReactNo
 
   return (
     <html lang={locale} suppressHydrationWarning className={inter.variable}>
-      {/* SITE_ACCENT's verified tokens (lib/contrast.ts), built from numbers
-          only; unlayered, so they outrank the @layer base tokens of
-          globals.css. */}
-      {palette && (
-        <head>
-          <style>{paletteCss(palette)}</style>
-        </head>
-      )}
+      {/* The referrer policy of the whole app (v1.1, Mermaid): a request to another
+          origin carries no Referer, one to this origin keeps it. The edge's header
+          says strict-origin-when-cross-origin, which would tell an external host the
+          intranet's origin; a diagram's image shape (`A@{ img: … }`) fetches its
+          picture with no referrerpolicy of its own, as Markdown images have. A literal
+          tag in the first bytes of <head>, not the metadata API: Next streams that
+          after the page, and a request made before it would still send the origin.
+          The meta wins over the header; a page's own metadata `referrer` (set-password:
+          no-referrer) comes after it and replaces it; an element's own referrerpolicy
+          wins over both (the YouTube iframe needs its origin). */}
+      <head>
+        <meta name="referrer" content="same-origin" />
+        {/* SITE_ACCENT's verified tokens (lib/contrast.ts), built from numbers
+            only; unlayered, so they outrank the @layer base tokens of
+            globals.css. */}
+        {palette && <style>{paletteCss(palette)}</style>}
+      </head>
       <body className="font-sans antialiased">
         {/* Plausible (cookieless) only when the operator configures it
             (v0.26, M2) and the module secrets is off (v0.35); script.js
