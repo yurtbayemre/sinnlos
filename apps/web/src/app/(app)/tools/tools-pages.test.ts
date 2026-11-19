@@ -81,9 +81,14 @@ beforeEach(() => {
 });
 
 describe("/tools", () => {
-  it("offers the Processes tile and the org chart's department view to a staff role, without any request", async () => {
+  it("offers a tile per tool and the org chart's department view to a staff role, without any request", async () => {
     const tree = elements(await hub.default());
-    expect(hrefs(tree)).toEqual(["/tools/processes", "/people/org-chart?view=departments"]);
+    expect(hrefs(tree)).toEqual([
+      "/tools/processes",
+      "/tools/pdf",
+      "/tools/qr",
+      "/people/org-chart?view=departments",
+    ]);
     expect(has(tree, SectionUnavailablePage)).toBe(false);
     expect(listMock).not.toHaveBeenCalled();
   });
@@ -91,7 +96,7 @@ describe("/tools", () => {
   it("leaves out the department tile, and only that, for a viewer who may not read departments", async () => {
     who.denied.add("departments");
     const tree = elements(await hub.default());
-    expect(hrefs(tree)).toEqual(["/tools/processes"]);
+    expect(hrefs(tree)).toEqual(["/tools/processes", "/tools/pdf", "/tools/qr"]);
     expect(has(tree, SectionUnavailablePage)).toBe(false);
   });
 
@@ -100,7 +105,7 @@ describe("/tools", () => {
     async (role) => {
       who.role = role;
       const tree = elements(await hub.default());
-      expect(hrefs(tree)).toEqual(["/tools/processes"]);
+      expect(hrefs(tree)).toEqual(["/tools/processes", "/tools/pdf", "/tools/qr"]);
       expect(has(tree, SectionUnavailablePage)).toBe(false);
     },
   );

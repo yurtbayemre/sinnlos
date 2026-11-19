@@ -90,6 +90,30 @@ member count in nested lists, the view switch with `aria-current` and the URL as
 state. A guest gets the reporting-line chart without a switch and the "not available"
 explanation for `?view=departments`.
 
+The `pdf-merge`, `qr-png-and-svg`, `tools-send-nothing` and `pdf-ten-jobs-memory-gate`
+cases in `e2e/tools.spec.ts` (v1.1) cover the browser-only pages `/tools/pdf` and
+`/tools/qr`. The PDFs and the expected QR images are made at test time with the web app's
+own `@cantoo/pdf-lib` and `qrcode` (resolved from `apps/web`). `pdf-merge` merges two
+files in the order the move buttons give (by keyboard, with the focus kept and the move
+announced), checks the downloaded file's page count and page order, and that an encrypted
+file, a range past the last page and a list of the wrong length are refused with a
+message. `qr-png-and-svg` first changes the password while the code is still being made
+(the script requests are answered late) and requires that no code for the old input ever
+appears; it then makes a code for a link and downloads a real PNG at the chosen size and an
+SVG that equals `qrcode`'s own for the payload, checks that a Wi-Fi code's picture is
+named by its kind and not by the password, and that a line break in a field and too much
+data are refused with a message. `tools-send-nothing` first contaminates the open
+document with the Plausible script and global (as a tab has that was opened before
+`tools` was switched on), opens each tool by client-side navigation and requires that the
+tool's first field was disabled in that document every time it was looked at and is free
+only in the reloaded, clean one; then it merges a PDF that carries a sentinel string as
+plain text, makes a Wi-Fi code whose password is the sentinel, and requires that no request
+(URL, headers or body) carries it. `pdf-ten-jobs-memory-gate` runs ten jobs in a row and
+compares the JS heap after a forced collection with the first job: **a gate with a
+provisional threshold** (the JS heap only, so a retained Blob can slip past it; the
+threshold and the PDF limits are measured and adjusted in the staging rehearsal, the numbers
+are in the test annotations).
+
 The `secret-sharing` case in `e2e/secrets.spec.ts` (v0.35) has the member send
 secrets to the team lead through `/secrets/new`. Every `/secrets` answer it
 can produce carries `Cache-Control` with `private` and `no-store`: the
@@ -168,6 +192,10 @@ pnpm test:e2e --grep training-exam-completion
 pnpm test:e2e --grep training-confirm-completion
 pnpm test:e2e --grep training-authoring
 pnpm test:e2e --grep process-authoring-and-reading
+pnpm test:e2e --grep pdf-merge
+pnpm test:e2e --grep qr-png-and-svg
+pnpm test:e2e --grep tools-send-nothing
+pnpm test:e2e --grep pdf-ten-jobs-memory-gate
 pnpm test:e2e --grep secret-sharing
 pnpm test:e2e --grep secret-roles
 pnpm --filter @sinnlos/e2e test:live   # secret-live, live events on
