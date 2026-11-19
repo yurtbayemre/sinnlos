@@ -562,6 +562,12 @@
   "theme": {
     "toggle": "Toggle theme"
   },
+  "markdown": {
+    "mermaidDiagram": "Diagram",
+    "mermaidSource": "Show source",
+    "mermaidError": "This diagram could not be drawn. Its source is shown instead.",
+    "mermaidTooLong": "This diagram is too long to draw (more than 50,000 characters). Its source is shown instead."
+  },
   "errors": {
     "contentLoadFailed": "Some content couldn't be loaded",
     "cmsUnreachable": "The CMS is unreachable or returned an error. Content below may be incomplete — refresh once Strapi is back up.",

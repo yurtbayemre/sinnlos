@@ -18,8 +18,23 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   // The tab's own build revision; a stream hello with another one shows the
   // header's reload note (#214).
   return (
-    <LiveEventsProvider enabled={liveEnabled} revision={buildRevision(process.env)}>
-      <AppShell>{children}</AppShell>
-    </LiveEventsProvider>
+    <>
+      {/* The referrer policy of the signed-in app (v1.1, Mermaid): a request to
+          another origin carries no Referer, one to this origin keeps it. The
+          edge's header says strict-origin-when-cross-origin, which would tell an
+          external host the intranet's origin; a diagram's image shape
+          (`A@{ img: … }`) fetches its picture with no referrerpolicy of its own,
+          as Markdown images have, and every Markdown body is under this layout.
+          A literal tag, not the metadata API (Next streams that after the
+          page's content). Not in the root layout: a page of (auth) says its own
+          (set-password: no-referrer), and the tag that comes later in the
+          document wins, which at the root would be the root's. The meta wins
+          over the header; an element's own referrerpolicy wins over both (the
+          YouTube iframe needs its origin). React hoists the tag into <head>. */}
+      <meta name="referrer" content="same-origin" />
+      <LiveEventsProvider enabled={liveEnabled} revision={buildRevision(process.env)}>
+        <AppShell>{children}</AppShell>
+      </LiveEventsProvider>
+    </>
   );
 }

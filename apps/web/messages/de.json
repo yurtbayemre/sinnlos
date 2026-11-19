@@ -562,6 +562,12 @@
   "theme": {
     "toggle": "Design wechseln"
   },
+  "markdown": {
+    "mermaidDiagram": "Diagramm",
+    "mermaidSource": "Quelltext anzeigen",
+    "mermaidError": "Dieses Diagramm konnte nicht gezeichnet werden. Stattdessen steht sein Quelltext da.",
+    "mermaidTooLong": "Dieses Diagramm ist zu lang, um gezeichnet zu werden (mehr als 50.000 Zeichen). Stattdessen steht sein Quelltext da."
+  },
   "errors": {
     "contentLoadFailed": "Einige Inhalte konnten nicht geladen werden",
     "cmsUnreachable": "Das CMS ist nicht erreichbar oder hat einen Fehler zurückgegeben. Inhalte können unvollständig sein – aktualisieren Sie die Seite, sobald Strapi wieder verfügbar ist.",

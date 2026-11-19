@@ -50,6 +50,13 @@ describe("the root branding", () => {
     });
   });
 
+  it("leaves the referrer policy to the (app) layout and to a page's own metadata", async () => {
+    // A referrer meta here would come before a page's and be replaced by it, but a
+    // streamed one comes after: the (app) layout states the default (its test), and
+    // set-password says no-referrer for itself.
+    expect((await generateMetadata()).referrer).toBeUndefined();
+  });
+
   it("refuses a name with the title placeholder %s", async () => {
     // Next's resolver runs template.replace(/%s/g, pageTitle) over the whole
     // template, so "Acme %s" would show "Sign in · Acme Sign in".

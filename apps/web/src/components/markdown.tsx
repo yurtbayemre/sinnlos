@@ -5,6 +5,7 @@ import ReactMarkdown, { type Components, type ExtraProps, type Options } from "r
 import rehypeAutolinkHeadings from "rehype-autolink-headings";
 import rehypeSlug from "rehype-slug";
 import remarkGfm from "remark-gfm";
+import { MermaidBlock } from "@/components/mermaid-block";
 import { cn } from "@/lib/utils";
 import type { HastNode } from "@/lib/wiki-content";
 
@@ -28,13 +29,20 @@ import type { HastNode } from "@/lib/wiki-content";
  *     plain anchors, http(s) and protocol-relative links open in a new tab
  *     with rel="noopener noreferrer";
  *   - images: loading="lazy", decoding="async" and referrerPolicy
- *     "no-referrer" (an external image host learns no intranet URL).
+ *     "no-referrer" (an external image host learns no intranet URL);
+ *   - a ```mermaid fence is the one `pre` that is not rendered as is: it
+ *     becomes a MermaidBlock (client), which shows the very same
+ *     `<pre><code class="language-mermaid">` on the server and on the first
+ *     client render and draws the diagram after mount. It works wherever
+ *     this renderer is used and is part of Markdown, not of the `tools`
+ *     module. Every other fence renders exactly as before.
  *
  * Several bodies on one page (announcement cards) pass `idPrefix`: GFM
  * footnotes otherwise get the same ids in every body (user-content-fn-1),
  * and a card's footnote links would jump to the first card's notes.
  *
- * A server component (no hooks), usable from client components as well.
+ * A server component (no hooks), usable from client components as well; its
+ * only client piece is MermaidBlock.
  */
 
 /** How the renderer treats a link target after the urlTransform. */
@@ -122,7 +130,35 @@ function MarkdownImage(props: ImageProps) {
   );
 }
 
-const COMPONENTS: Components = { a: MarkdownLink, img: MarkdownImage };
+type PreProps = ComponentPropsWithoutRef<"pre"> & ExtraProps;
+
+/**
+ * The text of a ```mermaid fence, or null for every other `pre`: the fence is
+ * a `pre` whose only child is a `code` with the class `language-mermaid` and
+ * plain text inside (mdast-util-to-hast's shape).
+ */
+function mermaidSource(node: HastNode | undefined): string | null {
+  const code = node?.children?.length === 1 ? node.children[0] : undefined;
+  const classes = code?.properties?.className;
+  if (
+    code?.tagName !== "code" ||
+    !Array.isArray(classes) ||
+    !classes.includes("language-mermaid")
+  ) {
+    return null;
+  }
+  const parts = code.children ?? [];
+  return parts.every((part) => part.type === "text")
+    ? parts.map((part) => part.value).join("")
+    : null;
+}
+
+function MarkdownPre(props: PreProps) {
+  const source = mermaidSource(props.node);
+  return source === null ? <pre {...domProps(props)} /> : <MermaidBlock source={source} />;
+}
+
+const COMPONENTS: Components = { a: MarkdownLink, img: MarkdownImage, pre: MarkdownPre };
 
 /** A list of rehype plugins (with their options), as react-markdown takes it. */
 export type MarkdownRehypePlugins = NonNullable<Options["rehypePlugins"]>;
