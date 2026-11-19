@@ -66,7 +66,7 @@ describe.each(testEngines())("module and feature switches on %s", (engine) => {
         expect((await t.api(caller, path)).status, `${caller} ${path}`).toBe(404);
       }
     }
-    process.env.FEATURES_OFF = "training,polls,marketplace,duty-plans,kpis";
+    process.env.FEATURES_OFF = "training,polls,marketplace,duty-plans,kpis,tools";
     for (const path of [
       "/api/courses",
       "/api/lessons/x/player",
@@ -75,6 +75,8 @@ describe.each(testEngines())("module and feature switches on %s", (engine) => {
       "/api/classifieds",
       "/api/duty-plans",
       "/api/kpis",
+      "/api/processes",
+      "/api/processes/authoring",
     ]) {
       expect((await t.api("admin_role", path)).status, path).toBe(404);
     }

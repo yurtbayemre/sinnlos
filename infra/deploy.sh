@@ -347,7 +347,7 @@ preflight_scan() {
     BEGIN {
       n = split(fatal_keys, k, " "); for (i = 1; i <= n; i++) fatal[k[i]] = 1
       n = split(warn_keys, k, " "); for (i = 1; i <= n; i++) warn[k[i]] = 1
-      n = split("events training marketplace kudos celebrations polls duty-plans kpis secrets read-confirmations training-reports search-logging", k, " ")
+      n = split("events training marketplace kudos celebrations polls duty-plans kpis secrets tools read-confirmations training-reports search-logging", k, " ")
       for (i = 1; i <= n; i++) switch_name[k[i]] = 1
       staff_list = "admin_role,editor,department_head,team_lead,member"
       staff_count = split(staff_list, staff_order, ",")
@@ -1343,7 +1343,7 @@ if [[ -n "${boot_invalid_keys}" ]]; then
   echo "       TRAINING_EVIDENCE_RETENTION_YEARS: a whole number of years, 1 to 30 (unset: 3)." >&2
   echo "       SEARCH_LOG_RETENTION_DAYS: a whole number of days, 1 to 3650 (unset: 90)." >&2
   echo "       FEATURES_OFF: a comma list of events, training, marketplace, kudos, celebrations, polls," >&2
-  echo "       duty-plans, kpis, secrets, read-confirmations, training-reports, search-logging." >&2
+  echo "       duty-plans, kpis, secrets, tools, read-confirmations, training-reports, search-logging." >&2
   preflight_failed=1
 fi
 # v0.36.0: a bad secret-sharing role list refuses the cms boot and fails the

@@ -33,6 +33,7 @@ describe("authoring uid lists (K1)", () => {
       "api::lesson.lesson",
       "api::duty-plan.duty-plan",
       "api::kpi.kpi",
+      "api::process.process",
     ]);
     expect(DEPARTMENT_AUTHORED_UIDS).toEqual([
       "api::announcement.announcement",
@@ -40,6 +41,7 @@ describe("authoring uid lists (K1)", () => {
       "api::document.document",
       "api::duty-plan.duty-plan",
       "api::kpi.kpi",
+      "api::process.process",
     ]);
     expect(SCHEDULED_UIDS).toEqual([
       "api::announcement.announcement",
@@ -62,6 +64,7 @@ describe("authoring uid lists (K1)", () => {
       "api::team.team",
       "api::duty-plan.duty-plan",
       "api::kpi.kpi",
+      "api::process.process",
     ]);
     expect(AUDITED_UIDS).toEqual(GUARDED_UIDS);
   });

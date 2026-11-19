@@ -171,7 +171,7 @@ Eine Sicherung von vor einer Anonymisierung enthält die Person wieder vollstän
 
 `FEATURES_OFF` (eine Komma-Liste, für cms und web derselbe Wert; leer = alles an; ein unbekannter Wert verhindert den Start). Eine Änderung wirkt nach einem Neustart der Container.
 
-- **Module:** `events`, `training`, `marketplace`, `kudos`, `celebrations`, `polls`, `duty-plans`, `kpis`, `secrets`. Ein abgeschaltetes Modul verschwindet aus Navigation, Startseite, Verwaltung, Suche und Digest; das cms beantwortet seine Schnittstellen mit 404; geplante Veröffentlichungen, Benachrichtigungen und Erinnerungen ruhen. **Die Daten bleiben gespeichert**, ebenso ihre Löschfristen.
+- **Module:** `events`, `training`, `marketplace`, `kudos`, `celebrations`, `polls`, `duty-plans`, `kpis`, `secrets`, `tools`. Ein abgeschaltetes Modul verschwindet aus Navigation, Startseite, Verwaltung, Suche und Digest; das cms beantwortet seine Schnittstellen mit 404; geplante Veröffentlichungen, Benachrichtigungen und Erinnerungen ruhen. **Die Daten bleiben gespeichert**, ebenso ihre Löschfristen.
 - **Funktionen:**
   - `read-confirmations`: keine neuen Lesebestätigungen, keine Pflicht-Bestätigung beim Verfassen, der Bericht ist aus, auch Admins sehen nur ihre eigenen;
   - `training-reports`: kein Kursbericht und keine Lesezugriffe auf fremde Lernstände (auch nicht für Admins); Lernende sehen ihren eigenen Stand, der Einzelnachweis für Admins bleibt (Abschnitt 4);

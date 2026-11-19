@@ -8,6 +8,7 @@ import {
   EVENT_DEPARTMENT_AUTHOR_FIELDS,
   EVENT_MODERATOR_FIELDS,
   POLL_MODERATOR_FIELDS,
+  PROCESS_FIELDS,
   QUICK_LINK_MODERATOR_FIELDS,
   WIKI_FIELDS,
   TRAINING_FIELDS,
@@ -734,6 +735,7 @@ describe("WRITE_ALLOWLIST", () => {
         "api::lesson.lesson",
         "api::duty-plan.duty-plan",
         "api::kpi.kpi",
+        "api::process.process",
       ].sort(),
     );
   });
@@ -898,6 +900,7 @@ const POLL = "api::poll.poll";
 /** The authored types the attribute-coverage pin walks (the wiki since batch 16). */
 const DUTY_PLAN = "api::duty-plan.duty-plan";
 const KPI = "api::kpi.kpi";
+const PROCESS = "api::process.process";
 const V2_UIDS = [
   ANNOUNCEMENT,
   EVENT,
@@ -908,6 +911,7 @@ const V2_UIDS = [
   WIKI_PAGE_UID,
   DUTY_PLAN,
   KPI,
+  PROCESS,
 ];
 
 const ENG_DOC = "deng00000000000000000000";
@@ -1037,6 +1041,7 @@ describe("v2 rules: attribute coverage and field lists (§B1.7, §N6)", () => {
         departmentAuthor: DOCUMENT_DEPARTMENT_AUTHOR_FIELDS,
       },
       [POLL]: { moderator: POLL_MODERATOR_FIELDS },
+      [PROCESS]: { moderator: PROCESS_FIELDS, departmentAuthor: PROCESS_FIELDS },
     };
     for (const [uid, byClass] of Object.entries(lists)) {
       for (const action of ["create", "update"] as const) {
@@ -1080,6 +1085,12 @@ describe("v2 rules: attribute coverage and field lists (§B1.7, §N6)", () => {
         fieldsOf(uid, "update", DEPARTMENT_AUTHOR_CLASS),
       );
     }
+    expect(fieldsOf(PROCESS, "update", DEPARTMENT_AUTHOR_CLASS)).toEqual(
+      ["department", "diagram", "summary", "title"].sort(),
+    );
+    expect(fieldsOf(PROCESS, "create", DEPARTMENT_AUTHOR_CLASS)).toEqual(
+      fieldsOf(PROCESS, "update", DEPARTMENT_AUTHOR_CLASS),
+    );
     expect(writeRuleFor(QUICK_LINK, "create", DEPARTMENT_AUTHOR_CLASS)).toBeUndefined();
     expect(writeRuleFor(POLL, "update", DEPARTMENT_AUTHOR_CLASS)).toBeUndefined();
   });
@@ -1158,6 +1169,38 @@ describe("v2 value checks and codes", () => {
       keys: ["category", "icon", "order", "url"],
       codes: { category: "invalid", icon: "invalid", order: "invalid", url: "invalidUrl" },
     });
+  });
+
+  it("processes: a title, a summary of at most 2000 characters and a BPMN diagram", async () => {
+    const bpmn =
+      '<?xml version="1.0"?><bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"/>';
+    const processes = rule(PROCESS, "create", MODERATOR_CLASS);
+    const ok = await applyWriteRule(
+      { title: "Onboarding", summary: "Steps: 1, 2", diagram: bpmn },
+      processes,
+      v2Env(),
+    );
+    expect(ok).toMatchObject({ title: "Onboarding", summary: "Steps: 1, 2", diagram: bpmn });
+    const error = await refusal(
+      applyWriteRule(
+        { title: "x", summary: "s".repeat(2001), diagram: "<html/>" },
+        processes,
+        v2Env(),
+      ),
+    );
+    expect(error.details).toEqual({
+      keys: ["diagram", "summary"],
+      codes: { diagram: "invalid", summary: "tooLong" },
+    });
+    const blank = await refusal(applyWriteRule({ summary: " ", diagram: "" }, processes, v2Env()));
+    expect(blank.details).toEqual({
+      keys: ["diagram", "summary"],
+      codes: { diagram: "required", summary: "required" },
+    });
+    const owner = await refusal(
+      applyWriteRule({ ownerDepartment: 3, author: 1 }, processes, v2Env()),
+    );
+    expect(owner.details).toEqual({ keys: ["author", "ownerDepartment"] });
   });
 
   it("polls: 2-20 options of at most 200 characters, unique after trimming (plan item 2b)", async () => {

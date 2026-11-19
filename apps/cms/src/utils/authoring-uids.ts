@@ -38,6 +38,7 @@ export const DEPARTMENT_UID = "api::department.department";
 export const TEAM_UID = "api::team.team";
 export const DUTY_PLAN_UID = "api::duty-plan.duty-plan";
 export const KPI_UID = "api::kpi.kpi";
+export const PROCESS_UID = "api::process.process";
 const POLL = "api::poll.poll";
 
 /**
@@ -58,6 +59,7 @@ export const AUTHORED_UIDS: readonly string[] = [
   LESSON_UID,
   DUTY_PLAN_UID,
   KPI_UID,
+  PROCESS_UID,
 ];
 
 /** Department authors write these for their own department (amendment 1). */
@@ -67,16 +69,20 @@ export const DEPARTMENT_AUTHORED_UIDS: readonly string[] = [
   DOCUMENT_UID,
   DUTY_PLAN_UID,
   KPI_UID,
+  PROCESS_UID,
 ];
 
 /**
  * The role types that department-author `uid` for their own department:
- * department heads, and on duty plans team leads too (owner decision
- * 2026-10-20). Empty for every type outside DEPARTMENT_AUTHORED_UIDS.
+ * department heads, and on duty plans and processes team leads too (owner
+ * decisions 2026-10-20 and 2026-11-19). Empty for every type outside
+ * DEPARTMENT_AUTHORED_UIDS.
  */
 export function departmentAuthorRolesOf(uid: string): readonly RoleType[] {
   if (!DEPARTMENT_AUTHORED_UIDS.includes(uid)) return [];
-  return uid === DUTY_PLAN_UID ? DUTY_PLAN_AUTHOR_ROLES : DEPARTMENT_AUTHOR_ROLES;
+  return uid === DUTY_PLAN_UID || uid === PROCESS_UID
+    ? DUTY_PLAN_AUTHOR_ROLES
+    : DEPARTMENT_AUTHOR_ROLES;
 }
 
 /** `publishAt` + `scheduleError`; the scheduler's types (no poll). */
@@ -102,6 +108,7 @@ export const GUARDED_UIDS: readonly string[] = [
   TEAM_UID,
   DUTY_PLAN_UID,
   KPI_UID,
+  PROCESS_UID,
 ];
 
 /** One audit row per Document Service mutation (§H); the guarded set. */

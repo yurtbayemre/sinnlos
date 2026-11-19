@@ -51,6 +51,7 @@ export const CONTENT_TYPES = [
   "api::notification.notification",
   "api::poll.poll",
   "api::poll-vote.poll-vote",
+  "api::process.process",
   "api::quick-link.quick-link",
   "api::reaction.reaction",
   "api::search-log.search-log",
@@ -132,6 +133,7 @@ export const PERMISSION_MATRIX: Record<
     // NO poll-vote grants for any role (FX01): votes are cast and counted
     // only through the custom /polls/:id/vote and /results actions
     // (CUSTOM_ACTION_GRANTS); the generic /api/poll-votes routes are gone.
+    "api::process.process": ALL_ACTIONS,
     "api::quick-link.quick-link": ALL_ACTIONS,
     "api::search-log.search-log": ["create"],
     "api::reaction.reaction": [...READ_ACTIONS, "create", "delete"],
@@ -164,6 +166,7 @@ export const PERMISSION_MATRIX: Record<
     // any user's notification.
     "api::notification.notification": [...READ_ACTIONS, "delete"],
     "api::poll.poll": ALL_ACTIONS,
+    "api::process.process": ALL_ACTIONS,
     "api::quick-link.quick-link": ALL_ACTIONS,
     "api::course.course": [...READ_ACTIONS, "create", "update"],
     "api::lesson.lesson": [...READ_ACTIONS, "create", "update"],
@@ -195,6 +198,8 @@ export const PERMISSION_MATRIX: Record<
     "api::kudos.kudos": ["find", "findOne", "create"],
     "api::notification.notification": [...READ_ACTIONS, "delete"],
     "api::poll.poll": READ_ACTIONS,
+    // Processes (v1.1): their own department's, like duty plans and KPIs.
+    "api::process.process": DEPARTMENT_AUTHOR_WRITES,
     "api::quick-link.quick-link": READ_ACTIONS,
     "api::course.course": READ_ACTIONS,
     "api::lesson.lesson": READ_ACTIONS,
@@ -222,6 +227,9 @@ export const PERMISSION_MATRIX: Record<
     "api::kudos.kudos": ["find", "findOne", "create"],
     "api::notification.notification": [...READ_ACTIONS, "delete"],
     "api::poll.poll": READ_ACTIONS,
+    // Processes (v1.1, owner decision 2026-11-19): team leads author their own
+    // department's processes like duty plans (DUTY_PLAN_AUTHOR_ROLES).
+    "api::process.process": DEPARTMENT_AUTHOR_WRITES,
     "api::quick-link.quick-link": READ_ACTIONS,
     "api::course.course": READ_ACTIONS,
     "api::lesson.lesson": READ_ACTIONS,
@@ -248,6 +256,7 @@ export const PERMISSION_MATRIX: Record<
     "api::kudos.kudos": ["find", "findOne", "create"],
     "api::notification.notification": [...READ_ACTIONS, "delete"],
     "api::poll.poll": READ_ACTIONS,
+    "api::process.process": READ_ACTIONS,
     "api::quick-link.quick-link": READ_ACTIONS,
     "api::course.course": READ_ACTIONS,
     "api::lesson.lesson": READ_ACTIONS,
@@ -341,6 +350,7 @@ export const PERMISSION_MATRIX: Record<
     "api::kudos.kudos": ["find", "findOne", "create"],
     "api::notification.notification": READ_ACTIONS,
     "api::poll.poll": READ_ACTIONS,
+    "api::process.process": READ_ACTIONS,
     "api::quick-link.quick-link": READ_ACTIONS,
     "api::course.course": READ_ACTIONS,
     "api::lesson.lesson": READ_ACTIONS,
@@ -373,7 +383,7 @@ export const PERMISSION_MATRIX: Record<
 const AUTHORING_ACTIONS = ["publish", "unpublish", "discardDraft", "authoringList", "editable"];
 const POLL_AUTHORING_ACTIONS = ["authoringList", "editable"];
 const DEPARTMENT_AUTHORS: readonly MatrixRoleType[] = [...MODERATORS, ...DEPARTMENT_AUTHOR_ROLES];
-/** Duty plans (v0.18): moderators, department heads and team leads. */
+/** Duty plans (v0.18) and processes (v1.1): moderators, department heads and team leads. */
 const DUTY_PLAN_AUTHORS: readonly MatrixRoleType[] = [...MODERATORS, ...DUTY_PLAN_AUTHOR_ROLES];
 
 /**
@@ -424,6 +434,8 @@ export const AUTHORING_ACTION_GRANTS: Readonly<Record<string, readonly MatrixRol
   ...authoringGrants("api::document.document", AUTHORING_ACTIONS, DEPARTMENT_AUTHORS),
   ...authoringGrants("api::duty-plan.duty-plan", AUTHORING_ACTIONS, DUTY_PLAN_AUTHORS),
   ...authoringGrants("api::kpi.kpi", AUTHORING_ACTIONS, DEPARTMENT_AUTHORS),
+  // Processes (v1.1): authored like duty plans, by heads and leads of the department.
+  ...authoringGrants("api::process.process", AUTHORING_ACTIONS, DUTY_PLAN_AUTHORS),
   ...authoringGrants("api::quick-link.quick-link", AUTHORING_ACTIONS, MODERATORS),
   ...authoringGrants("api::poll.poll", POLL_AUTHORING_ACTIONS, MODERATORS),
   ...authoringGrants("api::wiki-space.wiki-space", WIKI_SPACE_ACTIONS, MODERATORS),

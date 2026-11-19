@@ -206,6 +206,16 @@ export interface KpiEditable extends EditableBase {
   ownerDepartment: OwnerDepartment | null;
 }
 
+/** A process (v1.1): the summary and the BPMN 2.0 XML (process.ts). */
+export interface ProcessEditable extends EditableBase {
+  title: string;
+  summary: string;
+  diagram: string;
+  /** The department (documentId), or null for a company-wide process. */
+  department: string | null;
+  ownerDepartment: OwnerDepartment | null;
+}
+
 export interface DocumentEditable extends EditableBase {
   title: string;
   description: string | null;
@@ -483,6 +493,7 @@ export type ActivityTargetUid =
   | "api::poll.poll"
   | "api::duty-plan.duty-plan"
   | "api::kpi.kpi"
+  | "api::process.process"
   | "api::wiki-space.wiki-space"
   | "api::wiki-page.wiki-page"
   | "api::course.course"

@@ -13,6 +13,7 @@ import {
   deleteHost,
   DUTY_PLAN,
   KPI,
+  PROCESS,
 } from "./targeting-flags.test.helper";
 import {
   ANNOUNCEMENT_TARGETING,
@@ -438,6 +439,16 @@ describe("delete-hook helpers", () => {
           publishedAt: null,
         },
       ],
+      // Processes (v1.1): like duty plans, the department decides the head's and the lead's class.
+      [PROCESS]: [
+        {
+          id: 1,
+          documentId: "proc-a",
+          department: { id: ENG },
+          ownerDepartment: { id: ENG },
+          publishedAt: null,
+        },
+      ],
       // Wiki pages (batch 16): the department decides the head's class, the team the lead's.
       [WIKI_PAGE]: [
         { id: 1, documentId: "wiki-a", department: { id: ENG }, publishedAt: null },
@@ -490,6 +501,7 @@ describe("delete-hook helpers", () => {
       { uid: EVENT, documentId: "ev-b" },
       { uid: EVENT, documentId: "ev-c" },
       { uid: KPI, documentId: "kpi-a" },
+      { uid: PROCESS, documentId: "proc-a" },
       { uid: WIKI_PAGE, documentId: "wiki-a" },
     ]);
     expect(await documentsLinking(asHost(strapi), TEAM_LINKED_DOCUMENTS, [PLATFORM], "x")).toEqual([
@@ -516,6 +528,7 @@ describe("delete-hook helpers", () => {
       [DOCUMENT]: [],
       [DUTY_PLAN]: [],
       [KPI]: [],
+      [PROCESS]: [],
       [WIKI_PAGE]: [],
     });
     const reads: unknown[] = [];

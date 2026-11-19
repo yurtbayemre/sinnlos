@@ -1419,7 +1419,7 @@ grant check).
   lesson-progress), `marketplace` (classified), `kudos` (kudos except
   `/celebrations`), `celebrations`, `polls` (poll, poll-vote),
   `duty-plans`, `kpis`, `secrets` (secret-share; its janitor, the
-  export and the anonymisation keep running).
+  export and the anonymisation keep running), `tools` (process; v1.1).
 - **Features:** `read-confirmations` (ack create; the admin read bypass
   ends; authoring refuses `requiresAck: true`), `training-reports` (both
   report routes; the admin read bypass on lesson-progress ends),

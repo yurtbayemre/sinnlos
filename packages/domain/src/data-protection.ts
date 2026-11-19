@@ -136,6 +136,7 @@ export const ANONYMISE_KEPT = [
   "kudosGiven",
   "dutyPlans",
   "kpis",
+  "processes",
   "trainingReceipts",
 ] as const;
 

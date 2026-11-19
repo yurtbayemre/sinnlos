@@ -28,6 +28,8 @@ import {
   kpiValuesCode,
   eventSpanCode,
   pollOptionsCode,
+  processDiagramCode,
+  processSummaryCode,
   samePollOptions,
   scheduleCodes,
   type AuthoringFieldCode,
@@ -42,6 +44,7 @@ import {
   DUTY_PLAN_UID,
   EVENT_UID,
   KPI_UID,
+  PROCESS_UID,
   QUICK_LINK_UID,
   DEPARTMENT_UID as DEPARTMENT,
   TEAM_UID as TEAM,
@@ -1021,6 +1024,37 @@ const KPI_RULES = {
   departmentAuthor: withCreate(KPI_DEPARTMENT_AUTHOR, "author", true),
 };
 
+// ---- v1.1: processes --------------------------------------------------------
+//
+// Like the duty plans, including team leads as department authors: a
+// moderator picks any department or none (company-wide) and ownerDepartment
+// follows it; a department author's process is their own department's. The
+// summary and the diagram (BPMN XML, @sinnlos/domain process.ts) are checked
+// by the same rules as in the lifecycle.
+
+const PROCESS_COMMON = {
+  title: value(checkRequiredString),
+  summary: value(processSummaryCode),
+  diagram: value(processDiagramCode),
+};
+
+const PROCESS_MODERATOR: WriteRule = {
+  fields: { ...PROCESS_COMMON, department: toOne("department") },
+  derivedFromMerged: { ownerDepartment: DUTY_PLAN_OWNER },
+};
+
+const PROCESS_DEPARTMENT_AUTHOR: WriteRule = {
+  fields: {
+    ...PROCESS_COMMON,
+    department: toOne("callerDepartment", { callerDepartmentOnCreate: true }),
+  },
+};
+
+const PROCESS_RULES = {
+  moderator: withCreate(PROCESS_MODERATOR, "author", false),
+  departmentAuthor: withCreate(PROCESS_DEPARTMENT_AUTHOR, "author", true),
+};
+
 /*
  * v2 follow-ups, kept OUT of the table on purpose until each has its own
  * batch and check:
@@ -1155,6 +1189,16 @@ export const WRITE_ALLOWLIST = {
       departmentAuthor: KPI_RULES.departmentAuthor.update,
     },
   },
+  [PROCESS_UID]: {
+    create: {
+      moderator: PROCESS_RULES.moderator.create,
+      departmentAuthor: PROCESS_RULES.departmentAuthor.create,
+    },
+    update: {
+      moderator: PROCESS_RULES.moderator.update,
+      departmentAuthor: PROCESS_RULES.departmentAuthor.update,
+    },
+  },
 } as const satisfies WriteAllowlist;
 
 /**
@@ -1218,6 +1262,11 @@ export const REFUSED_ATTRIBUTES: Readonly<Record<string, Readonly<Record<string,
       "derived ownership: the department author's department on create, a moderator's department",
   },
   [KPI_UID]: {
+    author: "ownership: the caller, set on create (callerFields)",
+    ownerDepartment:
+      "derived ownership: the department author's department on create, a moderator's department",
+  },
+  [PROCESS_UID]: {
     author: "ownership: the caller, set on create (callerFields)",
     ownerDepartment:
       "derived ownership: the department author's department on create, a moderator's department",

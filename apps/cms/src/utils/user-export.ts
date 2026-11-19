@@ -120,6 +120,7 @@ export const CONTENT_RELATIONS: readonly ExportRelation[] = [
   },
   { key: "dutyPlans", uid: "api::duty-plan.duty-plan", field: "author", select: ["name", ...DOC] },
   { key: "kpis", uid: "api::kpi.kpi", field: "author", select: ["name", ...DOC] },
+  { key: "processes", uid: "api::process.process", field: "author", select: ["title", ...DOC] },
   {
     key: "classifieds",
     uid: "api::classified.classified",

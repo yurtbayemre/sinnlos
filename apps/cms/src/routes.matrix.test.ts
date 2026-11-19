@@ -288,6 +288,7 @@ const QUICK_LINK = "api::quick-link.quick-link";
 const DOCUMENT = "api::document.document";
 const DUTY_PLAN = "api::duty-plan.duty-plan";
 const KPI = "api::kpi.kpi";
+const PROCESS = "api::process.process";
 const POLL = "api::poll.poll";
 const WIKI_SPACE = "api::wiki-space.wiki-space";
 const WIKI_PAGE = "api::wiki-page.wiki-page";
@@ -403,6 +404,13 @@ const GOLDEN: Record<string, PolicySpec[]> = {
   "api::kpi.kpi.update": canAuthor(KPI),
   "api::kpi.kpi.delete": ADMIN_OR_EDITOR,
   ...authoringRoutes(KPI, DP_INTENTS),
+
+  "api::process.process.find": ["global::published-only"],
+  "api::process.process.findOne": ["global::published-only"],
+  "api::process.process.create": canAuthor(PROCESS),
+  "api::process.process.update": canAuthor(PROCESS),
+  "api::process.process.delete": ADMIN_OR_EDITOR,
+  ...authoringRoutes(PROCESS, DP_INTENTS),
 
   "api::event.event.find": ["global::published-only"],
   "api::event.event.findOne": ["global::published-only"],
@@ -742,6 +750,14 @@ const WRITE_ALLOWLIST_ENFORCERS: Record<string, { policy: string; classes: reado
     policy: "global::can-author",
     classes: ["departmentAuthor", "moderator"],
   },
+  "api::process.process.create": {
+    policy: "global::can-author",
+    classes: ["departmentAuthor", "moderator"],
+  },
+  "api::process.process.update": {
+    policy: "global::can-author",
+    classes: ["departmentAuthor", "moderator"],
+  },
   "api::quick-link.quick-link.create": { policy: "global::can-author", classes: ["moderator"] },
   "api::quick-link.quick-link.update": { policy: "global::can-author", classes: ["moderator"] },
   "api::poll.poll.create": { policy: "global::can-author", classes: ["moderator"] },
@@ -960,6 +976,7 @@ describe("route → policy matrix (S01)", async () => {
           "/documents/authoring",
           "/duty-plans/authoring",
           "/kpis/authoring",
+          "/processes/authoring",
           "/polls/authoring",
           "/wiki-spaces/authoring",
           "/wiki-pages/authoring",
@@ -1334,7 +1351,7 @@ describe("route → policy matrix (S01)", async () => {
       for (const uid of AUTHORED_UIDS) {
         if (uid === WIKI_PAGE) continue; // can-edit-wiki's actions: the next test.
         const intents = intentsOf[uid] ?? DP_INTENTS;
-        // Department heads on every department-authored type, team leads on duty plans.
+        // Department heads on every department-authored type, team leads on duty plans and processes.
         const roles = [...MODERATORS, ...departmentAuthorRolesOf(uid)];
         for (const intent of intents) expected[`${uid}.${intent}`] = roles;
       }
@@ -1533,8 +1550,8 @@ describe("route → policy matrix (S01)", async () => {
     });
   });
 
-  describe("duty plans (v0.18, owner decision 2026-10-20)", () => {
-    it("team_lead authors duty plans and no other department-authored type", () => {
+  describe("duty plans (v0.18, owner decision 2026-10-20) and processes (v1.1, 2026-11-19)", () => {
+    it("team_lead authors duty plans and processes and no other department-authored type", () => {
       const grants = new Set(
         [...effectiveGrants("team_lead")].filter((action) => CUSTOM_ACTION_GRANTS[action] !== "*"),
       );
@@ -1544,25 +1561,27 @@ describe("route → policy matrix (S01)", async () => {
           .map((action) => splitAction(action)[1])
           .filter((action) => !["find", "findOne"].includes(action))
           .sort();
-      expect(authoring(DUTY_PLAN)).toEqual(
-        [
-          "authoringList",
-          "create",
-          "discardDraft",
-          "editable",
-          "publish",
-          "unpublish",
-          "update",
-        ].sort(),
-      );
+      for (const uid of [DUTY_PLAN, PROCESS]) {
+        expect(authoring(uid), uid).toEqual(
+          [
+            "authoringList",
+            "create",
+            "discardDraft",
+            "editable",
+            "publish",
+            "unpublish",
+            "update",
+          ].sort(),
+        );
+      }
       for (const uid of [ANNOUNCEMENT, EVENT, DOCUMENT, QUICK_LINK, POLL, KPI]) {
         expect(authoring(uid), uid).toEqual([]);
       }
     });
 
-    it("every staff role and authenticated read published plans and KPIs; guests do not", () => {
+    it("every staff role and authenticated read published plans, KPIs and processes; guests do not", () => {
       for (const role of matrixRoles) {
-        for (const uid of [DUTY_PLAN, KPI]) {
+        for (const uid of [DUTY_PLAN, KPI, PROCESS]) {
           expect(effectiveGrants(role).has(`${uid}.find`), `${role} ${uid}`).toBe(role !== "guest");
         }
       }

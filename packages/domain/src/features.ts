@@ -27,6 +27,7 @@ export const MODULE_NAMES = [
   "duty-plans",
   "kpis",
   "secrets",
+  "tools",
 ] as const;
 
 /** The features a `FEATURES_OFF` entry can switch off. */
