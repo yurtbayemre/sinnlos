@@ -1,6 +1,14 @@
+import { realpathSync } from "node:fs";
+import { createRequire } from "node:module";
+import { dirname, join } from "node:path";
 import mermaid from "mermaid";
 import { describe, expect, it } from "vitest";
-import { MERMAID_MAX_TEXT_SIZE, mermaidConfig, namespaceIds } from "./mermaid-render";
+import {
+  MERMAID_MAX_TEXT_SIZE,
+  dropResourceAttribute,
+  mermaidConfig,
+  namespaceIds,
+} from "./mermaid-render";
 
 /**
  * The renderer's settings and the rule that a diagram cannot change them.
@@ -42,8 +50,8 @@ describe("mermaidConfig", () => {
 
   it("has Mermaid's DOMPurify drop form controls and everything that loads or embeds, in every label", () => {
     // Labels are HTML whatever htmlLabels says in a few places (a sequence message with
-    // $$math$$, an architecture service's icon text, an event model's data), and
-    // DOMPurify keeps all of these by default. Browser check: e2e/mermaid.spec.ts.
+    // $$math$$, an event model's data), and DOMPurify keeps all of these by default.
+    // Browser check: e2e/mermaid.spec.ts.
     const { FORBID_TAGS, FORBID_ATTR } = mermaidConfig(false).dompurifyConfig ?? {};
     expect(FORBID_TAGS).toEqual(
       expect.arrayContaining([
@@ -72,8 +80,10 @@ describe("mermaidConfig", () => {
     );
     // Links stay: Markdown links go anywhere too.
     expect(FORBID_TAGS).not.toContain("a");
-    // An inline style="…url(…)" is a request that ignores the page's referrer policy.
-    expect(FORBID_ATTR).toEqual(["style"]);
+    // No attribute is forbidden by name: Mermaid's own markup (an icon's fill, KaTeX's
+    // \fcolorbox border) is styled by attributes; dropResourceAttribute drops the ones
+    // that load something.
+    expect(FORBID_ATTR).toBeUndefined();
   });
 
   it("keeps every key of the installed Mermaid's own secure list (passing `secure` replaces it)", () => {
@@ -208,5 +218,108 @@ describe("namespaceIds", () => {
   it("is the identity on a svg whose ids all carry the render id", () => {
     const svg = `<svg id="${ROOT}"><g id="${ROOT}-a"></g></svg>`;
     expect(namespaceIds(svg, ROOT)).toBe(svg);
+  });
+});
+
+describe("dropResourceAttribute", () => {
+  /** Whether the rule keeps an attribute: the hook's own `keepAttr` starts true. */
+  const kept = (nodeName: string, attrName: string, attrValue: string) => {
+    const data = { attrName, attrValue, keepAttr: true };
+    dropResourceAttribute({ nodeName }, data);
+    return data.keepAttr;
+  };
+
+  it.each([
+    ["a table's background", "TABLE", "background", "https://evil.example/x.png"],
+    ["a cell's background", "TD", "background", "https://evil.example/x.png"],
+    ["a srcset", "SPAN", "srcset", "https://evil.example/x.png 2x"],
+    ["a poster", "SPAN", "poster", "https://evil.example/x.png"],
+    ["an action", "SPAN", "action", "https://evil.example/f"],
+    ["a formaction", "SPAN", "formaction", "https://evil.example/f"],
+    ["a ping", "SPAN", "ping", "https://evil.example/p"],
+    ["a src", "span", "src", "https://evil.example/x.png"],
+    ["a src that is no fragment either", "span", "src", "data:image/png;base64,AAAA"],
+    ["an href on a non-link", "mi", "href", "https://evil.example/"],
+    ["an href on a use", "use", "href", "https://evil.example/s.svg#a"],
+    ["an xlink:href on a use", "use", "xlink:href", "https://evil.example/s.svg#a"],
+    ["an xlink:href on a feImage", "feImage", "xlink:href", "https://evil.example/x.png"],
+    ["an uppercase attribute name", "SPAN", "SRCSET", "https://evil.example/x.png"],
+    ["a style with a url()", "span", "style", "background:url(https://evil.example/x.png)"],
+    [
+      "a style with a quoted url()",
+      "span",
+      "style",
+      "background: URL( 'https://evil.example/x.png' )",
+    ],
+    ["a style with a data url()", "span", "style", "background:url(data:image/png;base64,AAAA)"],
+    [
+      "a style with an escaped url()",
+      "span",
+      "style",
+      "background:\\75 rl(https://evil.example/x)",
+    ],
+    [
+      "a style with a url() behind a comment",
+      "span",
+      "style",
+      "background:/**/url(https://e.example/x)",
+    ],
+    [
+      "a style with an image-set()",
+      "span",
+      "style",
+      'background:image-set("https://e.example/x.png" 1x)',
+    ],
+    ["a fill with a url()", "rect", "fill", "url(https://evil.example/p.svg#a)"],
+    ["a stroke with a url()", "rect", "stroke", "url(https://evil.example/p.svg#a)"],
+    ["a filter with a url()", "rect", "filter", "url(https://evil.example/f.svg#a)"],
+    ["a mask with a url()", "rect", "mask", "url(https://evil.example/m.svg#a)"],
+    ["a clip-path with a url()", "rect", "clip-path", "url(https://evil.example/c.svg#a)"],
+    ["a marker-end with a url()", "path", "marker-end", "url(https://evil.example/m.svg#a)"],
+    [
+      "a url() with a fragment first and another target after",
+      "rect",
+      "fill",
+      "url(#a) url(https://e.example/x)",
+    ],
+    ["a url() with a relative target", "rect", "fill", "url(/uploads/x.svg#a)"],
+    ["any other attribute with a url()", "span", "data-x", "url(https://evil.example/x)"],
+  ])("drops %s", (_label, nodeName, attrName, attrValue) => {
+    expect(kept(nodeName, attrName, attrValue)).toBe(false);
+  });
+
+  it.each([
+    ["a marker-end to an id", "path", "marker-end", "url(#sinnlosMermaid1_flowchart-v2-pointEnd)"],
+    ["a quoted fragment url()", "path", "marker-end", 'url("#a")'],
+    ["a single-quoted fragment url() with space", "path", "marker-end", "url( '#a' )"],
+    ["a gradient fill", "rect", "fill", "url(#sinnlosMermaid1-linearGradient-5)"],
+    ["a gradient stroke", "path", "stroke", "url(#g)"],
+    ["a clip-path to an id", "g", "clip-path", "url(#sinnlosMermaid1-clip-0)"],
+    ["a style with a fragment url()", "path", "style", "fill:url(#g);stroke:none"],
+    ["a style without any url()", "span", "style", "display: flex; align-items: center"],
+    ["a fill colour", "rect", "fill", "#9370db"],
+    ["a use of an id", "use", "href", "#sinnlosMermaid1-icon"],
+    ["an xlink:href to an id", "use", "xlink:href", "#sinnlosMermaid1-icon"],
+    ["a link", "a", "href", "https://example.com/page"],
+    ["a link in an SVG", "A", "xlink:href", "https://example.com/page"],
+    ["a native image shape's picture", "image", "href", "https://example.com/pic.png"],
+    ["an image's xlink:href", "image", "xlink:href", "https://example.com/pic.png"],
+    ["a class", "span", "class", "node default"],
+    ["a title", "span", "title", "Hello"],
+    ["path data", "path", "d", "M 0 0 L 10 10"],
+    ["a transform", "g", "transform", "translate(10, 20)"],
+    ["a width", "mtable", "width", "100%"],
+    ["a mathcolor", "mstyle", "mathcolor", "red"],
+  ])("keeps %s", (_label, nodeName, attrName, attrValue) => {
+    expect(kept(nodeName, attrName, attrValue)).toBe(true);
+  });
+
+  it("reaches the DOMPurify that Mermaid sanitizes with: both resolve to the very same file", () => {
+    // `dompurify` is one version in the tree, so the hook and Mermaid's own import are one
+    // module instance (the bundler dedupes by this real path).
+    const own = createRequire(import.meta.url);
+    const mermaidRoot = dirname(realpathSync(own.resolve("mermaid/package.json")));
+    const theirs = createRequire(join(mermaidRoot, "package.json")).resolve("dompurify");
+    expect(realpathSync(own.resolve("dompurify"))).toBe(realpathSync(theirs));
   });
 });

@@ -14,7 +14,9 @@ import type { MermaidConfig } from "mermaid";
  *     a front matter `config:` block cannot set a key in Mermaid's `secure`
  *     list (securityLevel, startOnLoad, maxTextSize, suppressErrorRendering,
  *     maxEdges), they are dropped before they merge;
- *   - no second sanitizer: the SVG string goes straight into React;
+ *   - no second sanitize pass: the SVG string goes straight into React. What
+ *     Mermaid's own DOMPurify lets through is narrowed in place (a config for
+ *     label text, one attribute hook; see `dropResourceAttribute`);
  *   - `suppressErrorRendering`: a diagram that does not parse throws and
  *     leaves no "bomb" error graph in <body> (Mermaid otherwise draws one
  *     and leaves its temporary element behind).
@@ -41,10 +43,13 @@ const MERMAID_SECURE_KEYS = [
  * What Mermaid's DOMPurify may not leave in label text (`sanitizeText` takes
  * this as `dompurifyConfig`, in place of its own `FORBID_TAGS: ["style"]`, so
  * `style` stays): form controls, and every element that loads or embeds
- * something. Not enough alone: DOMPurify keeps all of these by default, and
- * some labels are HTML whatever `htmlLabels` says (a sequence message with
- * `$$math$$`, an architecture service's icon text, an event model's data).
- * `a` stays: Markdown links go anywhere too.
+ * something. DOMPurify keeps all of these by default, and some labels are HTML
+ * whatever `htmlLabels` says (a sequence message with `$$math$$`, an event
+ * model's data). `a` stays: Markdown links go anywhere too. `image` goes from
+ * labels only: a native image shape (`A@{ img: … }`) is made by Mermaid itself,
+ * never passes through label text, and fetches its picture while it is drawn
+ * (the root referrer policy keeps the origin from it); `dropResourceAttribute`
+ * therefore leaves an `image`'s own address alone.
  */
 const FORBIDDEN_LABEL_TAGS = [
   "style",
@@ -76,6 +81,87 @@ const FORBIDDEN_LABEL_TAGS = [
 ];
 
 /**
+ * The part of DOMPurify's `uponSanitizeAttribute` event the rule reads and
+ * writes (`keepAttr = false` removes the attribute).
+ */
+export interface AttributeEvent {
+  attrName: string;
+  attrValue: string;
+  keepAttr?: boolean;
+}
+
+/** Attributes that make a browser fetch something, whatever they hold. */
+const RESOURCE_ATTRIBUTES = new Set([
+  "background",
+  "srcset",
+  "poster",
+  "action",
+  "formaction",
+  "ping",
+]);
+/** Attributes that name one address; only a `#fragment` stays inside the document. */
+const ADDRESS_ATTRIBUTES = new Set(["src", "href", "xlink:href"]);
+
+/** A CSS value as the browser reads it: escapes decoded, comments gone. */
+function cssText(value: string): string {
+  return value
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/\\([0-9a-f]{1,6})\s?/gi, (_, hex: string) =>
+      String.fromCodePoint(Math.min(parseInt(hex, 16), 0x10ffff)),
+    )
+    .replace(/\\(.)/gs, "$1");
+}
+
+/**
+ * DOMPurify keeps the attributes that load something (a table's `background`,
+ * `srcset`, a `style` or an SVG `fill`/`filter`/`mask`/`clip-path`/`marker-*`
+ * with a `url(...)`), whatever the tag allowlist says, and strict mode runs it
+ * over every label and over the whole SVG. This drops them all, in one place:
+ * `keepAttr = false` for
+ *   - `background`, `srcset`, `poster`, `action`, `formaction`, `ping`;
+ *   - `src`, `href` and `xlink:href` that are not a `#fragment`, except an
+ *     `a`'s link (DOMPurify's own scheme check applies to it, and following
+ *     a link is the reader's act) and an `image`'s own address (a native image
+ *     shape is made by Mermaid itself and fetched before any sanitizer runs);
+ *   - any attribute holding a `url(...)` with a target other than a
+ *     `#fragment`, or an `image-set(...)`: markers, gradients, clip paths and
+ *     filters that Mermaid draws point at `#ids` and stay.
+ * Generated styles and fills are untouched.
+ */
+export function dropResourceAttribute(node: { nodeName: string }, data: AttributeEvent): void {
+  const name = data.attrName.toLowerCase();
+  const tag = node.nodeName.toLowerCase();
+  if (tag === "a" && (name === "href" || name === "xlink:href")) return;
+  if (RESOURCE_ATTRIBUTES.has(name)) {
+    data.keepAttr = false;
+  } else if (ADDRESS_ATTRIBUTES.has(name)) {
+    if (tag !== "image" && !data.attrValue.trim().startsWith("#")) data.keepAttr = false;
+  } else {
+    const css = cssText(data.attrValue);
+    const pointsOut = [...css.matchAll(/url\(\s*(["']?)\s*(#?)/gi)].some(
+      (match) => match[2] === "",
+    );
+    if (pointsOut || /image-set\(/i.test(css)) data.keepAttr = false;
+  }
+}
+
+let hooked = false;
+
+/**
+ * Registers the rule once with the DOMPurify instance Mermaid sanitizes with:
+ * `dompurify` is one exact version in the tree (Mermaid's own), so both
+ * imports resolve to the same file and one module (pinned by a test). It is
+ * loaded here, not at the top: the library belongs to the lazy chunk. Nothing
+ * else of the web uses DOMPurify, so a global hook touches no other consumer.
+ */
+async function loadDomPurify(): Promise<void> {
+  const { default: DOMPurify } = await import("dompurify");
+  if (hooked) return;
+  hooked = true;
+  DOMPurify.addHook("uponSanitizeAttribute", dropResourceAttribute);
+}
+
+/**
  * The settings of every render; `startOnLoad` is Mermaid's scan of `.mermaid`
  * elements on page load.
  *
@@ -89,8 +175,8 @@ const FORBIDDEN_LABEL_TAGS = [
  * keys too, so `flowchart.htmlLabels` as well), `themeCSS`, the font keys and
  * `dompurifyConfig` join the keys no diagram can set (`dompurifyConfig` is no
  * config key of Mermaid yet, so a diagram's one is dropped today). Native
- * image shapes (`A@{ img: … }`) still fetch their picture; the root layout's
- * referrer policy is what keeps the intranet's address from it.
+ * image shapes (`A@{ img: … }`) still fetch their picture; the referrer policy
+ * of the (app) layout is what keeps the intranet's address from it.
  */
 export function mermaidConfig(dark: boolean): MermaidConfig {
   return {
@@ -99,7 +185,7 @@ export function mermaidConfig(dark: boolean): MermaidConfig {
     suppressErrorRendering: true,
     htmlLabels: false,
     flowchart: { htmlLabels: false },
-    dompurifyConfig: { FORBID_TAGS: FORBIDDEN_LABEL_TAGS, FORBID_ATTR: ["style"] },
+    dompurifyConfig: { FORBID_TAGS: FORBIDDEN_LABEL_TAGS },
     secure: [
       ...MERMAID_SECURE_KEYS,
       "htmlLabels",
@@ -161,7 +247,7 @@ let sequence = 0;
 export function renderMermaid(source: string, dark: boolean, signal: AbortSignal): Promise<string> {
   const step = async () => {
     signal.throwIfAborted();
-    const { default: mermaid } = await import("mermaid");
+    const [{ default: mermaid }] = await Promise.all([import("mermaid"), loadDomPurify()]);
     signal.throwIfAborted();
     mermaid.initialize(mermaidConfig(dark));
     const id = `sinnlosMermaid${++sequence}`;

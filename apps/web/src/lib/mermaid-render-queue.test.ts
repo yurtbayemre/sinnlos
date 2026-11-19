@@ -5,13 +5,16 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
  * the browser would otherwise be needed for. Every render must initialize with
  * its own theme right before it draws, never two at once (the theme is global
  * state), a failed render must not stop the ones after it, and a block that is
- * gone costs no render.
+ * gone costs no render. DOMPurify's attribute rule is registered once, before
+ * the first render.
  */
 const mermaid = vi.hoisted(() => ({
   initialize: vi.fn<(config: { theme: string; securityLevel: string }) => void>(),
   render: vi.fn<(id: string, source: string) => Promise<{ svg: string }>>(),
 }));
+const purify = vi.hoisted(() => ({ addHook: vi.fn<(name: string, hook: unknown) => void>() }));
 vi.mock("mermaid", () => ({ default: mermaid }));
+vi.mock("dompurify", () => ({ default: purify }));
 
 const FLOW = "flowchart TD\n  A --> B";
 const svgOf = (id: string) => `<svg id="${id}"><line id="actor0"></line></svg>`;
@@ -27,24 +30,44 @@ function pending() {
   return { done, finish, fail };
 }
 
+let mod: typeof import("./mermaid-render");
 let renderMermaid: typeof import("./mermaid-render").renderMermaid;
+/** How many hooks were registered when Mermaid was initialized for the first time. */
+let hooksAtFirstInitialize: number | undefined;
 /** Mermaid's calls in order, as "initialize:<theme>" and "render:<id>". */
 let calls: string[];
 
 beforeEach(async () => {
   vi.resetModules();
   calls = [];
+  hooksAtFirstInitialize = undefined;
+  purify.addHook.mockReset();
   mermaid.initialize.mockReset().mockImplementation((config) => {
+    hooksAtFirstInitialize ??= purify.addHook.mock.calls.length;
     calls.push(`initialize:${config.theme}`);
   });
   mermaid.render.mockReset().mockImplementation(async (id) => {
     calls.push(`render:${id}`);
     return { svg: svgOf(id) };
   });
-  ({ renderMermaid } = await import("./mermaid-render"));
+  mod = await import("./mermaid-render");
+  renderMermaid = mod.renderMermaid;
 });
 
 describe("renderMermaid", () => {
+  it("registers the attribute rule with DOMPurify once, before the first render", async () => {
+    await renderMermaid(FLOW, false, new AbortController().signal);
+    await renderMermaid(FLOW, true, new AbortController().signal);
+    await Promise.all([
+      renderMermaid(FLOW, false, new AbortController().signal),
+      renderMermaid(FLOW, false, new AbortController().signal),
+    ]);
+    expect(purify.addHook.mock.calls).toEqual([
+      ["uponSanitizeAttribute", mod.dropResourceAttribute],
+    ]);
+    expect(hooksAtFirstInitialize).toBe(1);
+  });
+
   it("initializes strictly with the render's own theme right before it draws", async () => {
     await renderMermaid(FLOW, false, new AbortController().signal);
     await renderMermaid(FLOW, true, new AbortController().signal);
