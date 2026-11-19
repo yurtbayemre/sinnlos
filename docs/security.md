@@ -1685,8 +1685,11 @@ off.
 
 **Referrer.** Every signed-in page (the `(app)` layout) carries
 `<meta name="referrer" content="same-origin">`: requests to other sites, a diagram's
-picture or a link click, send no `Referer`; same-origin requests keep it. The sign-in and
-password pages keep their own policy (`set-password` sends none at all).
+picture or a link click, send no `Referer` by default; same-origin requests keep it. An
+element with its own policy wins: the lesson video's YouTube iframe sets
+`strict-origin-when-cross-origin`, so playing it sends the intranet's origin (not the
+path) to YouTube, which needs it. The sign-in and password pages keep their own policy
+(`set-password` sends none at all).
 
 **PDF and QR tools.** They run in the browser only: no server action, no upload, no
 request carries a file or an entry (a unit test walks their imports, a browser test

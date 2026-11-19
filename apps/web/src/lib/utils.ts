@@ -100,8 +100,11 @@ export function stripMarkdown(
     // Escaped punctuation is literal text: kept out of every rule below.
     .replace(/\\([!-/:-@[-`{-~])/g, (_, ch: string) => hold(ch))
     // A closed mermaid fence is a diagram, not text: it goes whole (an unclosed one falls
-    // to the next rule).
-    .replace(/^[ \t]*(```|~~~)[ \t]*mermaid\b[\s\S]*?^[ \t]*\1[ \t]*$/gm, "")
+    // to the next rule). The closing fence is the same character, at least as long.
+    .replace(
+      /^[ \t]*(?:(`{3,})[ \t]*mermaid\b[\s\S]*?^[ \t]*\1`*|(~{3,})[ \t]*mermaid\b[\s\S]*?^[ \t]*\2~*)[ \t]*$/gm,
+      "",
+    )
     // Code fences: the fence lines go, the code stays.
     .replace(/^[ \t]*(?:```|~~~).*$/gm, "")
     // Code spans: the content, untouched by the rules below.

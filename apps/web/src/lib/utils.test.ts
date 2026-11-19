@@ -214,6 +214,11 @@ describe("stripMarkdown", () => {
       ),
     ).toBe("New process: then x");
     expect(stripMarkdown("Open:\n```mermaid\nA-->B")).toBe("Open: A-->B");
+    // A longer closing fence closes it; the prose after it stays.
+    expect(
+      stripMarkdown("```mermaid\nA-->B\n````\nThe office is closed on Friday.\n```js\nx\n```"),
+    ).toBe("The office is closed on Friday. x");
+    expect(stripMarkdown("````mermaid\nA-->B\n```\nstill code\n````\nafter")).toBe("after");
   });
 
   it("drops raw HTML tags and comments, not a lone angle bracket", () => {
