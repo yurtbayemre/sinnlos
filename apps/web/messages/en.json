@@ -54,7 +54,8 @@
     "kpis": "KPIs",
     "more": "More",
     "moreSections": "More sections",
-    "secrets": "Secrets"
+    "secrets": "Secrets",
+    "tools": "Tools"
   },
   "auth": {
     "signIn": "Sign in",
@@ -166,7 +167,20 @@
     "filterByDepartment": "Filter by department",
     "orgChartIssues": "{count, plural, one {# person is} other {# people are}} shown at the top level because a manager assignment is inconsistent (a loop, or someone set as their own manager). An admin can fix the manager under Manage → Users.",
     "orgCycle": "Manager chain loops back here",
-    "orgSelfManager": "Set as their own manager"
+    "orgSelfManager": "Set as their own manager",
+    "viewLabel": "View",
+    "viewReporting": "Reporting lines",
+    "viewDepartments": "Departments",
+    "deptHead": "Head",
+    "deptNoHead": "No head set",
+    "deptLead": "Team lead",
+    "deptNoLead": "No team lead set",
+    "deptMembers": "{count, plural, one {# member} other {# members}}",
+    "deptNoTeams": "No teams",
+    "deptUnassigned": "Teams without a department",
+    "deptEmptyTitle": "No departments yet",
+    "deptEmptyHint": "Admins create departments under Manage; they then show up here.",
+    "deptTruncated": "List truncated: there are more departments or teams than are loaded here. Some are missing from this view."
   },
   "events": {
     "title": "Events",
@@ -548,6 +562,12 @@
   "theme": {
     "toggle": "Toggle theme"
   },
+  "markdown": {
+    "mermaidDiagram": "Diagram",
+    "mermaidSource": "Show source",
+    "mermaidError": "This diagram could not be drawn. Its source is shown instead.",
+    "mermaidTooLong": "This diagram is too long to draw (more than 50,000 characters). Its source is shown instead."
+  },
   "errors": {
     "contentLoadFailed": "Some content couldn't be loaded",
     "cmsUnreachable": "The CMS is unreachable or returned an error. Content below may be incomplete — refresh once Strapi is back up.",
@@ -693,6 +713,160 @@
     "chartLabel": "Values of the last {count} periods",
     "missing": "not reported",
     "viewAll": "All KPIs"
+  },
+  "tools": {
+    "title": "Tools",
+    "description": "Helpers for everyday work.",
+    "processes": {
+      "title": "Processes",
+      "description": "Business processes as diagrams, each with a description in words."
+    },
+    "orgChart": {
+      "title": "Departments in the org chart",
+      "description": "Departments with their head, teams, team leads and member counts at a glance."
+    },
+    "pdf": {
+      "title": "PDF tools",
+      "description": "Merge PDFs, and pick, rotate or delete pages, in your browser.",
+      "privacy": "Your files and entries are not transmitted. They are processed in your browser.",
+      "notice": "The result is a new file made of the pages that are kept. Every annotation except web links is removed (comments, highlights, stamps, ink, form fields); bookmarks, links inside the document, layers, accessibility tags, signatures and document properties are lost too, and none of it is promised. This tool does not black out anything and is not a way to remove confidential content: pages you remove leave the page tree, but data they share with kept pages (fonts, images and other resources) may remain in the file.",
+      "limits": "Limits: at most {size} MB and {pages} pages in total. Encrypted or password-protected files are not processed.",
+      "mode": "What do you want to do?",
+      "modes": {
+        "merge": "Merge",
+        "split": "Pick pages",
+        "rotate": "Rotate pages",
+        "delete": "Delete pages"
+      },
+      "modeHints": {
+        "merge": "Join several files into one, in the order of the list.",
+        "split": "Put the pages you name into a new file, in that order.",
+        "rotate": "Turn the pages you name by a quarter turn.",
+        "delete": "Leave out the pages you name. At least one page must stay."
+      },
+      "files": "PDF files",
+      "filesHintMany": "You can choose several files, and add more one after another.",
+      "filesHintOne": "Choose one file.",
+      "listLabel": "Chosen files",
+      "empty": "No file chosen yet.",
+      "total": "{count, plural, one {# file} other {# files}}, {size} in total",
+      "moveUp": "Move {name} up",
+      "moveDown": "Move {name} down",
+      "remove": "Remove {name}",
+      "moved": "{name} is now at position {position} of {total}.",
+      "removed": "{name} was removed.",
+      "ranges": "Pages",
+      "rangesHints": {
+        "split": "For example 1-3, 5. The pages appear in this order in the new file.",
+        "rotate": "For example 1-3, 5. Leave empty to turn every page.",
+        "delete": "For example 1-3, 5."
+      },
+      "turn": "Rotation",
+      "turnRight": "90° clockwise",
+      "turnLeft": "90° counter-clockwise",
+      "run": "Create new PDF",
+      "progressFile": "Processing file {index} of {total}: {name}",
+      "progressSaving": "Saving the result…",
+      "done": "Done: {pages, plural, one {# page} other {# pages}}, {size}.",
+      "download": "Download {name}",
+      "fileNames": {
+        "merge": "merged.pdf",
+        "split": "selection.pdf",
+        "rotate": "rotated.pdf",
+        "delete": "pages-deleted.pdf"
+      },
+      "errors": {
+        "needTwo": "Choose at least two files to merge.",
+        "needOne": "This action takes exactly one file. Remove the others from the list.",
+        "inputTooBig": "The chosen files together are larger than {size} MB. Choose fewer or smaller files.",
+        "tooManyPages": "The files together have more than {pages} pages. Choose fewer or shorter files.",
+        "tooComplex": "The files together are too complex to process in the browser (too many internal objects). Choose fewer or simpler files.",
+        "encrypted": "{name} is encrypted or password-protected. Encrypted PDFs are not processed.",
+        "broken": "{name} cannot be read. The file is damaged or not a PDF.",
+        "deleteAll": "That would delete every page. At least one page must stay.",
+        "strayPages": "The structure of this file would bring extra pages into the result (for example through references from a kept page to other pages). It is not created.",
+        "resultTooBig": "The result would be larger than {size} MB and is not created.",
+        "failed": "That did not work. Please try again."
+      },
+      "rangeErrors": {
+        "empty": "Enter the pages, for example 1-3, 5.",
+        "syntax": "“{part}” is not valid. Use single pages and ranges separated by commas, for example 1-3, 5.",
+        "zero": "“{part}”: Pages are counted from 1.",
+        "reversed": "“{part}”: A range starts with the smaller page, for example 3-5.",
+        "beyond": "“{part}”: The file has only {pageCount, plural, one {# page} other {# pages}}.",
+        "tooMany": "More than {max} pages are selected."
+      }
+    },
+    "qr": {
+      "title": "QR code",
+      "description": "Make QR codes for links, Wi-Fi logins and contacts, in your browser.",
+      "privacy": "Your entries are not transmitted or stored. The code is made in your browser.",
+      "notice": "The code holds your entries as plain text: anyone who sees or scans it can read them, a Wi-Fi password included.",
+      "kind": "Content",
+      "kinds": {
+        "text": "Link or text",
+        "wifi": "Wi-Fi",
+        "contact": "Contact"
+      },
+      "text": "The link or text",
+      "textHint": "A link starting with https:// opens in the browser when it is scanned.",
+      "ssid": "Network name (SSID)",
+      "password": "Password",
+      "security": "Encryption",
+      "securities": {
+        "WPA": "WPA, WPA2 or WPA3",
+        "WEP": "WEP",
+        "nopass": "None (open network)"
+      },
+      "givenName": "First name",
+      "familyName": "Last name",
+      "phone": "Phone",
+      "email": "Email",
+      "contactHint": "A first or a last name is enough; phone and email are optional.",
+      "size": "Size",
+      "sizes": {
+        "small": "Small (256 pixels)",
+        "medium": "Medium (512 pixels)",
+        "large": "Large (1024 pixels)"
+      },
+      "generate": "Create QR code",
+      "generated": "The QR code was created.",
+      "alt": {
+        "text": "QR code for a link or text",
+        "wifi": "QR code for a Wi-Fi login",
+        "contact": "QR code for a contact card"
+      },
+      "downloadPng": "Download as PNG",
+      "downloadSvg": "Download as SVG",
+      "errors": {
+        "empty": "Enter a link or text.",
+        "ssidMissing": "Enter the network name.",
+        "passwordMissing": "Enter the password, or choose “None (open network)”.",
+        "nameMissing": "Enter a first or a last name.",
+        "controlCharacter": "The entry contains a line break or a control character. That is not allowed in this field.",
+        "tooMuchData": "That is too much data for a QR code. Shorten the entry.",
+        "failed": "That did not work. Please try again."
+      }
+    }
+  },
+  "processes": {
+    "title": "Processes",
+    "description": "How things get done: every process as a diagram with a description in words.",
+    "companyWide": "Whole company",
+    "empty": "No processes published yet.",
+    "loadFailed": "The processes could not be loaded right now.",
+    "updated": "Updated {date}",
+    "back": "All processes",
+    "summaryHeading": "Description",
+    "diagramHeading": "Diagram",
+    "diagramNote": "The diagram is a picture. The description above is its text version.",
+    "diagramLabel": "Diagram of the process {title}",
+    "loadingDiagram": "Loading the diagram…",
+    "diagramError": "The diagram could not be shown. You can still download the file and open it in a BPMN tool.",
+    "noDiagram": "This process has no diagram.",
+    "downloadBpmn": "Download .bpmn",
+    "downloadSvg": "Download .svg",
+    "downloadFailed": "The download failed. Please try again."
   },
   "mfa": {
     "title": "Set up two-factor sign-in",

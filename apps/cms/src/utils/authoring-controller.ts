@@ -35,6 +35,7 @@ import {
   QUICK_LINK_UID,
   DUTY_PLAN_UID,
   KPI_UID,
+  PROCESS_UID,
   WIKI_PAGE_UID,
   WIKI_SPACE_UID,
 } from "./authoring-uids";
@@ -222,6 +223,16 @@ export const AUTHORING_SPECS: Readonly<Record<string, AuthoringSpec>> = {
     type: "kpi",
     statusMode: AUTHORING_STATUS_MODES.kpi,
     labelField: "name",
+    authorField: "author",
+    scheduled: false,
+    unpublishScheduled: false,
+    flagColumns: [],
+  },
+  [PROCESS_UID]: {
+    uid: PROCESS_UID,
+    type: "process",
+    statusMode: AUTHORING_STATUS_MODES.process,
+    labelField: "title",
     authorField: "author",
     scheduled: false,
     unpublishScheduled: false,
@@ -799,6 +810,14 @@ export async function editableFields(
         ownerDepartment: ownerOf(draft),
       };
     }
+    case PROCESS_UID:
+      return {
+        title: text(draft.title) ?? "",
+        summary: text(draft.summary) ?? "",
+        diagram: text(draft.diagram) ?? "",
+        department: documentIdOf(draft.department),
+        ownerDepartment: ownerOf(draft),
+      };
     default:
       throw new Error(`authoring controller: no editable shape for ${uid}`);
   }

@@ -33,6 +33,7 @@ const AREAS = [
   "courses",
   "dutyPlans",
   "kpis",
+  "processes",
 ];
 
 const ENG = { documentId: "deptengineering000000000" };
@@ -60,7 +61,7 @@ describe("areaAccess with batch 15's capabilities (K8)", () => {
     }
   });
 
-  it("department heads: announcements, events, documents, duty plans and KPIs of their department, no schedule or delete", () => {
+  it("department heads: announcements, events, documents, duty plans, KPIs and processes of their department, no schedule or delete", () => {
     const caps = k8Capabilities(roles, "department_head");
     expect(manageAreasFor(caps)).toEqual([
       "announcements",
@@ -68,8 +69,16 @@ describe("areaAccess with batch 15's capabilities (K8)", () => {
       "documents",
       "dutyPlans",
       "kpis",
+      "processes",
     ]);
-    for (const area of ["announcements", "events", "documents", "dutyPlans", "kpis"] as const) {
+    for (const area of [
+      "announcements",
+      "events",
+      "documents",
+      "dutyPlans",
+      "kpis",
+      "processes",
+    ] as const) {
       expect(areaAccess(caps, area)).toEqual({
         area,
         verbs: ["create", "edit", "publish", "unpublish", "discard"],
@@ -85,16 +94,19 @@ describe("areaAccess with batch 15's capabilities (K8)", () => {
     expect(canDo(access, "delete")).toBe(false);
   });
 
-  it("team leads: the duty plans of their department only (v0.18)", () => {
+  it("team leads: the duty plans (v0.18) and processes (v1.1) of their department only", () => {
     const caps = k8Capabilities(roles, "team_lead");
-    expect(manageAreasFor(caps)).toEqual(["dutyPlans"]);
-    expect(areaAccess(caps, "dutyPlans")).toEqual({
-      area: "dutyPlans",
-      verbs: ["create", "edit", "publish", "unpublish", "discard"],
-      scope: "ownDepartment",
-      roleClass: "departmentAuthor",
-    });
+    expect(manageAreasFor(caps)).toEqual(["dutyPlans", "processes"]);
+    for (const area of ["dutyPlans", "processes"] as const) {
+      expect(areaAccess(caps, area)).toEqual({
+        area,
+        verbs: ["create", "edit", "publish", "unpublish", "discard"],
+        scope: "ownDepartment",
+        roleClass: "departmentAuthor",
+      });
+    }
     expect(areaAccess(caps, "announcements")).toBeNull();
+    expect(areaAccess(caps, "kpis")).toBeNull();
   });
 
   it.each(["member", "guest", "authenticated", null, "Editor"])("%s authors nothing", (role) => {
@@ -138,8 +150,9 @@ describe("areaAccess with lib/roles.ts's own values", () => {
       "documents",
       "dutyPlans",
       "kpis",
+      "processes",
     ]);
-    expect(manageAreasFor(roles.capabilitiesFor("team_lead"))).toEqual(["dutyPlans"]);
+    expect(manageAreasFor(roles.capabilitiesFor("team_lead"))).toEqual(["dutyPlans", "processes"]);
     expect(areaAccess(editor, "announcements")?.verbs).toEqual(
       ["create", "edit", "publish", "unpublish", "schedule", "discard", "delete"].filter((verb) =>
         editor.author.announcements.has(verb as roles.AuthoringVerb),
@@ -161,6 +174,7 @@ describe("the areas", () => {
       "course",
       "dutyPlan",
       "kpi",
+      "process",
     ]);
     expect(MANAGE_AREAS.map((area) => AREA_CAPABILITY[area])).toEqual([
       "announcements",
@@ -172,6 +186,7 @@ describe("the areas", () => {
       "courses",
       "dutyPlans",
       "kpis",
+      "processes",
     ]);
     for (const area of MANAGE_AREAS) {
       expect(roles.AUTHORING_AREAS).toContain(AREA_CAPABILITY[area]);
@@ -187,6 +202,10 @@ describe("the areas", () => {
     expect(SCHEDULE_FIELDS.wiki).toEqual(["publishAt"]);
     expect(hasOwnerDepartment("documents")).toBe(true);
     expect(hasOwnerDepartment("quickLinks")).toBe(false);
+    expect(hasOwnerDepartment("processes")).toBe(true);
+    expect(AREA_PATH.processes).toBe("/manage/processes");
+    expect(AREA_NEW_PATH.processes).toBe("/manage/processes/new");
+    expect(SCHEDULE_FIELDS.processes).toEqual([]);
     expect(AREA_PATH.quickLinks).toBe("/manage/quick-links");
     expect(AREA_NEW_PATH.polls).toBe("/manage/polls/new");
     expect(areaItemPath("events", "evnt00000000000000000001")).toBe(

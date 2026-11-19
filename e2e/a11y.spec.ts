@@ -98,7 +98,7 @@ async function as(context: () => Promise<BrowserContext>, account: Account): Pro
 
 test("a11y-member", async ({ browser }) => {
   const fixtures = loadFixtures();
-  test.setTimeout(60_000);
+  test.setTimeout(90_000);
   const page = await as(() => browser.newContext(), fixtures.users.member);
   const main = page.getByRole("main");
 
@@ -145,6 +145,21 @@ test("a11y-member", async ({ browser }) => {
     await expect(pasta).toHaveAttribute("aria-pressed", "true");
     await expect(main.getByText("Your vote", { exact: true })).toBeVisible();
     await scan(page, "poll voted");
+  });
+
+  await test.step("Tools (v1.1): the hub, the PDF and QR pages, the department view", async () => {
+    for (const [path, state] of [
+      ["/tools", "tools hub"],
+      ["/tools/pdf", "pdf tool"],
+      ["/tools/qr", "qr tool"],
+      ["/people/org-chart?view=departments", "org chart departments"],
+    ] as const) {
+      await page.goto(path);
+      await expect(main.getByRole("heading", { level: 1 })).toBeVisible();
+      // The PDF and QR fields unlock once the clean-document check is done.
+      if (path.startsWith("/tools/")) await expect(main.locator("input").first()).toBeEnabled();
+      await scan(page, state);
+    }
   });
 
   await page.context().close();

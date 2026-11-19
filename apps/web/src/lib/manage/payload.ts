@@ -49,7 +49,10 @@ import {
   MAX_DUTY_SHIFTS,
   KPI_AGGREGATIONS,
   KPI_PERIODS,
+  MAX_PROCESS_REQUEST_BYTES,
   kpiValuesCode,
+  processDiagramCode,
+  processSummaryCode,
   type KpiValues as KpiNumbers,
   dutyShiftsCode,
   dutyTemplatesCode,
@@ -84,6 +87,7 @@ import type {
   KpiValues,
   EventValues,
   PollValues,
+  ProcessValues,
   QuickLinkValues,
   ScheduleValues,
 } from "./values";
@@ -599,6 +603,39 @@ export function buildKpiPayload(
   ctx: PayloadContext,
 ): BuiltPayload {
   const { data, fields } = buildFields("kpi", KPI_RULES, values, initial, ctx);
+  return done(data, fields);
+}
+
+/**
+ * A process (v1.1 "Tools"). A department author's department is their own
+ * (the form shows it fixed). The diagram is checked by the cms's own rules
+ * and never cut; the whole serialised request must also fit under
+ * MAX_PROCESS_REQUEST_BYTES (koa-body refuses 1 MiB with a bare 413), so an
+ * over-large request is refused HERE with the diagram's tooLong, unsent.
+ */
+const PROCESS_RULES: readonly FieldRule<ProcessValues>[] = [
+  { key: "title", inputs: ["title"], convert: (v) => checked(v.title.trim(), checkRequiredString) },
+  {
+    key: "summary",
+    inputs: ["summary"],
+    convert: (v) => checked(v.summary.trim(), processSummaryCode),
+  },
+  { key: "department", inputs: ["department"], convert: (v) => ({ value: v.department || null }) },
+  { key: "diagram", inputs: ["diagram"], convert: (v) => checked(v.diagram, processDiagramCode) },
+];
+
+export function buildProcessPayload(
+  values: ProcessValues,
+  initial: ProcessValues | null,
+  ctx: PayloadContext,
+): BuiltPayload {
+  const { data, fields } = buildFields("process", PROCESS_RULES, values, initial, ctx);
+  if (
+    Object.keys(fields).length === 0 &&
+    new TextEncoder().encode(JSON.stringify({ data })).length > MAX_PROCESS_REQUEST_BYTES
+  ) {
+    fields.diagram = "tooLong";
+  }
   return done(data, fields);
 }
 

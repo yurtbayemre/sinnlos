@@ -6,6 +6,7 @@ import {
   DUTY_PLAN_UID,
   EVENT_UID,
   KPI_UID,
+  PROCESS_UID,
   WIKI_PAGE_UID,
 } from "./authoring-uids";
 import {
@@ -162,6 +163,8 @@ export const DEPARTMENT_LINKED_DOCUMENTS: readonly { uid: string; attributes: st
   { uid: DUTY_PLAN_UID, attributes: ["department", "ownerDepartment"] },
   // A KPI's departmentAuthor class (v0.19).
   { uid: KPI_UID, attributes: ["department", "ownerDepartment"] },
+  // A process's departmentAuthor class (v1.1).
+  { uid: PROCESS_UID, attributes: ["department", "ownerDepartment"] },
   // The page's departmentHead class (batch 16, S16).
   { uid: WIKI_PAGE_UID, attributes: ["department"] },
 ];

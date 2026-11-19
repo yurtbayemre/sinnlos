@@ -246,6 +246,7 @@ describe("MoreSheetLinks", () => {
       "/marketplace",
       "/polls",
       "/documents",
+      "/tools",
       "/secrets",
     ]);
     const admin = render(
@@ -305,7 +306,7 @@ describe("pending feedback (UI05)", () => {
         onChoose() {},
       }),
     );
-    expect(pendingDots(sheet)).toBe(11);
+    expect(pendingDots(sheet)).toBe(12);
   });
 });
 

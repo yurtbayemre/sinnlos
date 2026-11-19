@@ -63,6 +63,7 @@ const DRAFT_AND_PUBLISH: Readonly<Record<string, boolean>> = {
   "api::notification.notification": false,
   "api::poll.poll": true,
   "api::poll-vote.poll-vote": false,
+  "api::process.process": true,
   "api::quick-link.quick-link": true,
   "api::reaction.reaction": false,
   "api::search-log.search-log": false,

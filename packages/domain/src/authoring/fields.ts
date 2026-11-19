@@ -36,6 +36,7 @@ export const AUTHORING_TYPES = [
   "poll",
   "dutyPlan",
   "kpi",
+  "process",
 ] as const;
 
 export type AuthoringType = (typeof AUTHORING_TYPES)[number];
@@ -52,6 +53,7 @@ export const DEPARTMENT_AUTHORED_TYPES: readonly AuthoringType[] = [
   "document",
   "dutyPlan",
   "kpi",
+  "process",
 ];
 
 export const ANNOUNCEMENT_MODERATOR_FIELDS = [
@@ -154,6 +156,12 @@ export const KPI_FIELDS = [
   "values",
 ] as const;
 
+/**
+ * Processes (v1.1): both classes write the same keys. A department author's
+ * `department` is pinned to their own department by the server.
+ */
+export const PROCESS_FIELDS = ["title", "summary", "diagram", "department"] as const;
+
 export const POLL_MODERATOR_FIELDS = [
   "question",
   "options",
@@ -184,6 +192,7 @@ export const AUTHORING_FIELDS: Readonly<
   poll: { moderator: POLL_MODERATOR_FIELDS },
   dutyPlan: { moderator: DUTY_PLAN_FIELDS, departmentAuthor: DUTY_PLAN_FIELDS },
   kpi: { moderator: KPI_FIELDS, departmentAuthor: KPI_FIELDS },
+  process: { moderator: PROCESS_FIELDS, departmentAuthor: PROCESS_FIELDS },
 };
 
 /**
@@ -202,6 +211,7 @@ export const TARGETING_KEYS: Readonly<Record<AuthoringType, readonly string[]>> 
   poll: ["departments"],
   dutyPlan: [],
   kpi: [],
+  process: [],
 };
 
 /** The `enumeration` values the forms offer (the schemas' enums, pinned by the cms tests). */

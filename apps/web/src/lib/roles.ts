@@ -141,6 +141,9 @@ export const DUTY_READER_ROLES: ReadonlySet<string> = roleSet(...STAFF_AND_FALLB
 /** kpi.find (v0.19): every staff role and `authenticated`; guests none. */
 export const KPI_READER_ROLES: ReadonlySet<string> = roleSet(...STAFF_AND_FALLBACK);
 
+/** process.find (v1.1): every staff role and `authenticated`; guests none. */
+export const PROCESS_READER_ROLES: ReadonlySet<string> = roleSet(...STAFF_AND_FALLBACK);
+
 /** kudos.find: the kudos wall. */
 export const KUDOS_READER_ROLES: ReadonlySet<string> = roleSet(...STAFF_AND_FALLBACK);
 
@@ -239,6 +242,7 @@ export type ReadSection =
   | "training"
   | "duties"
   | "kpis"
+  | "processes"
   | "secrets";
 
 export const READ_SECTIONS: Readonly<Record<ReadSection, ReadonlySet<string>>> = Object.freeze({
@@ -252,6 +256,7 @@ export const READ_SECTIONS: Readonly<Record<ReadSection, ReadonlySet<string>>> =
   training: TRAINING_ROLES,
   duties: DUTY_READER_ROLES,
   kpis: KPI_READER_ROLES,
+  processes: PROCESS_READER_ROLES,
   secrets: SECRET_SHARE_ROLES,
 });
 
@@ -287,7 +292,8 @@ export type AuthoringArea =
   | "courses"
   | "lessons"
   | "dutyPlans"
-  | "kpis";
+  | "kpis"
+  | "processes";
 
 export type AuthoringVerb =
   "create" | "edit" | "publish" | "unpublish" | "schedule" | "discard" | "delete";
@@ -306,6 +312,7 @@ export const AUTHORING_AREAS: readonly AuthoringArea[] = [
   "lessons",
   "dutyPlans",
   "kpis",
+  "processes",
 ];
 
 export interface Capabilities {
@@ -374,6 +381,8 @@ const MODERATOR_AUTHORING: Readonly<Record<AuthoringArea, readonly AuthoringVerb
   dutyPlans: ["create", "edit", "publish", "unpublish", "discard", "delete"],
   // KPIs (v0.19): figures entered by hand, no schedule.
   kpis: ["create", "edit", "publish", "unpublish", "discard", "delete"],
+  // Processes (v1.1): a diagram is saved as it is, no schedule.
+  processes: ["create", "edit", "publish", "unpublish", "discard", "delete"],
 };
 
 /**
@@ -393,6 +402,7 @@ const DEPARTMENT_AUTHOR_AUTHORING: Readonly<
   documents: ["create", "edit", "publish", "unpublish", "discard"],
   dutyPlans: ["create", "edit", "publish", "unpublish", "discard"],
   kpis: ["create", "edit", "publish", "unpublish", "discard"],
+  processes: ["create", "edit", "publish", "unpublish", "discard"],
 };
 
 /** wiki-page create: moderators, department heads and team leads. */
@@ -415,9 +425,9 @@ const MODERATOR_ROLES: ReadonlySet<string> = roleSet(...MODERATORS);
 const DEPARTMENT_AUTHOR_ROLE_SET: ReadonlySet<string> = roleSet(...DEPARTMENT_AUTHOR_ROLES);
 
 /**
- * Who department-authors each area: department heads, and on duty plans
- * team leads too (owner decision 2026-10-20, @sinnlos/domain
- * DEPARTMENT_AUTHOR_ROLES_OF). An area without an entry has none.
+ * Who department-authors each area: department heads, and on duty plans and
+ * processes team leads too (owner decisions 2026-10-20 and 2026-11-19,
+ * @sinnlos/domain DEPARTMENT_AUTHOR_ROLES_OF). An area without an entry has none.
  */
 const DEPARTMENT_AUTHOR_ROLES_BY_AREA: Readonly<
   Partial<Record<AuthoringArea, ReadonlySet<string>>>
@@ -427,6 +437,7 @@ const DEPARTMENT_AUTHOR_ROLES_BY_AREA: Readonly<
   documents: DEPARTMENT_AUTHOR_ROLE_SET,
   dutyPlans: roleSet(...DUTY_PLAN_AUTHOR_ROLES),
   kpis: DEPARTMENT_AUTHOR_ROLE_SET,
+  processes: roleSet(...DUTY_PLAN_AUTHOR_ROLES),
 };
 
 /** The roles that may schedule (`publishAt`, `unpublishAt`; §D rule 1, §L2). */

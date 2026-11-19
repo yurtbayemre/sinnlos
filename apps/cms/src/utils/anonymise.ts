@@ -81,7 +81,7 @@ import { reportRunFailure } from "../cron/run-context";
  * second `anonymise` audit row (detail `notifications …`) records it; its
  * failure is only logged.
  * Business content (announcements, wiki, documents, events, polls,
- * comments, kudos they gave, duty plans, KPIs) stays with the neutral name;
+ * comments, kudos they gave, duty plans, KPIs, processes) stays with the neutral name;
  * training receipts stay under their retention (utils/training-evidence.ts).
  *
  * AFTER THE COMMIT, whatever step 2 did, the avatar file goes through one
@@ -174,6 +174,7 @@ const KEPT_BY_RELATION: Readonly<
   kudosGiven: { uid: "api::kudos.kudos", field: "from" },
   dutyPlans: { uid: "api::duty-plan.duty-plan", field: "author", documents: true },
   kpis: { uid: "api::kpi.kpi", field: "author", documents: true },
+  processes: { uid: "api::process.process", field: "author", documents: true },
   trainingReceipts: { uid: "api::lesson-progress.lesson-progress", field: "user" },
 };
 

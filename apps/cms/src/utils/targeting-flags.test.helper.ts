@@ -36,6 +36,7 @@ export const TEAM = "api::team.team";
 export const WIKI_PAGE = "api::wiki-page.wiki-page";
 export const DUTY_PLAN = "api::duty-plan.duty-plan";
 export const KPI = "api::kpi.kpi";
+export const PROCESS = "api::process.process";
 export const COURSE = "api::course.course";
 
 interface LinkSpec {
@@ -55,6 +56,18 @@ export const LINK_TABLES: Record<string, Record<string, LinkSpec>> = {
     ownerDepartment: {
       table: "kpis_owner_department_lnk",
       rowColumn: "kpi_id",
+      targetColumn: "department_id",
+    },
+  },
+  [PROCESS]: {
+    department: {
+      table: "processes_department_lnk",
+      rowColumn: "process_id",
+      targetColumn: "department_id",
+    },
+    ownerDepartment: {
+      table: "processes_owner_department_lnk",
+      rowColumn: "process_id",
       targetColumn: "department_id",
     },
   },

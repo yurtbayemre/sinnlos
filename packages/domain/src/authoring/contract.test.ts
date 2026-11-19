@@ -104,7 +104,7 @@ describe("codes", () => {
 });
 
 describe("field lists per class (§N6)", () => {
-  it("covers the seven types; department authors only on announcement, event, document, duty plan, kpi", () => {
+  it("covers the eight types; department authors only on announcement, event, document, duty plan, kpi, process", () => {
     expect([...AUTHORING_TYPES]).toEqual([
       "announcement",
       "event",
@@ -113,6 +113,7 @@ describe("field lists per class (§N6)", () => {
       "poll",
       "dutyPlan",
       "kpi",
+      "process",
     ]);
     for (const type of AUTHORING_TYPES) {
       expect(AUTHORING_FIELDS[type].moderator, type).toBeDefined();
@@ -205,6 +206,7 @@ describe("route table (§B3)", () => {
       poll: "polls",
       dutyPlan: "duty-plans",
       kpi: "kpis",
+      process: "processes",
     });
     expect(AUTHORING_STATUS_MODES.poll).toBe("alwaysPublished");
     for (const type of [
@@ -214,13 +216,16 @@ describe("route table (§B3)", () => {
       "document",
       "dutyPlan",
       "kpi",
+      "process",
     ] as const) {
       expect(AUTHORING_STATUS_MODES[type]).toBe("explicit");
     }
   });
 
-  it("lets team leads author duty plans only, next to department heads (owner decision 2026-10-20)", () => {
-    expect([...DEPARTMENT_AUTHOR_ROLES_OF.dutyPlan]).toEqual(["department_head", "team_lead"]);
+  it("lets team leads author duty plans and processes only, next to department heads (owner decisions 2026-10-20 and 2026-11-19)", () => {
+    for (const type of ["dutyPlan", "process"] as const) {
+      expect([...DEPARTMENT_AUTHOR_ROLES_OF[type]], type).toEqual(["department_head", "team_lead"]);
+    }
     for (const type of ["announcement", "event", "document", "kpi"] as const) {
       expect([...DEPARTMENT_AUTHOR_ROLES_OF[type]], type).toEqual(["department_head"]);
     }

@@ -111,18 +111,27 @@ describe("APP_TIME_ZONE in the web", () => {
     }
   });
 
-  it("register() says once that Plausible stays off while the module secrets is on (v0.35)", () => {
+  it("register() says why Plausible stays off: the module secrets (v0.35), tools (v1.1) or both", () => {
     const info = vi.spyOn(console, "info").mockImplementation(() => {});
-    const line = "[site] Plausible is configured but not loaded while the module secrets is on";
+    const line = (modules: string) =>
+      `[site] Plausible is configured but not loaded while the ${modules} on`;
     vi.stubEnv("APP_TIME_ZONE", "Europe/Berlin");
-    vi.stubEnv("FEATURES_OFF", "");
     vi.stubEnv("PLAUSIBLE_SCRIPT_URL", "https://plausible.example.com/js/script.js");
     vi.stubEnv("PLAUSIBLE_DOMAIN", "intranet.example.com");
-    register();
-    expect(info).toHaveBeenCalledWith(line);
+    for (const [off, said] of [
+      ["", "modules secrets and tools are"],
+      // The startup line names the module that is really on.
+      ["secrets", "module tools is"],
+      ["tools", "module secrets is"],
+    ] as const) {
+      info.mockClear();
+      vi.stubEnv("FEATURES_OFF", off);
+      register();
+      expect(info, off).toHaveBeenCalledWith(line(said));
+    }
     info.mockClear();
-    vi.stubEnv("FEATURES_OFF", "secrets");
+    vi.stubEnv("FEATURES_OFF", "secrets,tools");
     register();
-    expect(info).not.toHaveBeenCalledWith(line);
+    expect(info.mock.calls.some(([text]) => String(text).startsWith("[site]"))).toBe(false);
   });
 });

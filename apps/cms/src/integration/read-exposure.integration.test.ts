@@ -100,6 +100,13 @@ function draftAndPublishTypes(deps: Dependencies): DpType[] {
       data: (label) => ({ question: label, options: ["yes", "no"], visibleToGuests: true }),
     },
     {
+      uid: "api::process.process",
+      plural: "processes",
+      field: "title",
+      guestReads: false,
+      data: (label) => ({ title: label, summary: "A process summary" }),
+    },
+    {
       uid: "api::quick-link.quick-link",
       plural: "quick-links",
       field: "label",

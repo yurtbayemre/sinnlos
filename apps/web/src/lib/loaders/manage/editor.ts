@@ -8,6 +8,7 @@ import type {
   KpiEditable,
   EventEditable,
   PollEditable,
+  ProcessEditable,
   QuickLinkEditable,
 } from "@sinnlos/domain";
 import { fetchEditable } from "@/lib/api/manage/authoring";
@@ -60,7 +61,9 @@ export type EditableOf<A extends TypedArea> = A extends "courses"
               ? DutyPlanEditable
               : A extends "kpis"
                 ? KpiEditable
-                : QuickLinkEditable;
+                : A extends "processes"
+                  ? ProcessEditable
+                  : QuickLinkEditable;
 
 export type EditorLoad<T> =
   { state: "ok"; editable: T } | { state: "notFound" } | { state: "failed" };

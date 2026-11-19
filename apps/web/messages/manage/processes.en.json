@@ -1,0 +1,49 @@
+{
+  "title": "Processes",
+  "description": "Business processes as diagrams: a description in words and the BPMN diagram.",
+  "new": "New process",
+  "newDescription": "Saved as a draft; it appears under “Tools” once it is published.",
+  "editTitle": "Edit process",
+  "emptyTitle": "No processes yet",
+  "emptyHint": "Create the first one, for example “Goods receipt”.",
+  "sections": {
+    "process": "Process",
+    "diagram": "Diagram"
+  },
+  "fields": {
+    "title": {
+      "label": "Title",
+      "hint": "For example “Goods receipt” or “Onboarding”."
+    },
+    "summary": {
+      "label": "Description",
+      "hint": "Describe the steps and the branches in words, in order. This is the text version of the diagram: readers who cannot see the picture rely on it.",
+      "required": "Please describe the process in words.",
+      "tooLong": "The description may have at most 2,000 characters."
+    },
+    "department": {
+      "label": "Department",
+      "companyWide": "Whole company",
+      "hint": "That department's head and team leads maintain the process too."
+    },
+    "diagram": {
+      "label": "Diagram",
+      "required": "The process needs a diagram.",
+      "invalid": "This is not a BPMN 2.0 diagram that can be stored.",
+      "tooLong": "The diagram is too large to save (at most 300,000 characters and 700 KiB)."
+    }
+  },
+  "diagram": {
+    "canvasLabel": "Diagram editor",
+    "loading": "Loading the diagram editor…",
+    "loadFailed": "The diagram could not be opened. You can replace it by importing a file.",
+    "import": "Import a .bpmn file",
+    "importHint": "A BPMN 2.0 file made with another tool. It replaces the diagram below and is stored when you save.",
+    "importTooLarge": "This file is larger than 700 KiB and cannot be imported.",
+    "importInvalid": "This file is not a BPMN 2.0 diagram that can be stored.",
+    "importFailed": "The file could not be read.",
+    "imported": "File imported. Save to keep it.",
+    "keyboardNote": "Drawing diagrams needs a mouse or touch; import and the text description work by keyboard.",
+    "storedNote": "Imported and edited diagrams are stored in the intranet when you save."
+  }
+}

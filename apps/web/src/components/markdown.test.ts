@@ -1,7 +1,9 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import { NextIntlClientProvider } from "next-intl";
 import { describe, expect, it } from "vitest";
 import { rehypeWikiToc } from "@/lib/wiki-content";
+import en from "../../messages/en.json";
 import { Markdown, markdownLinkKind } from "./markdown";
 
 /**
@@ -268,6 +270,105 @@ describe("Markdown: footnote ids (several bodies on one page)", () => {
     expect(ids).toContain("footnote-label");
     expect(ids).toContain("a-footnote-label");
     expect(elementsNamed(html, "h2")[0].attrs.id).toBe("footnote-label");
+  });
+});
+
+describe("Markdown: code fences", () => {
+  const WRAPPER = (inner: string) =>
+    `<div class="prose prose-slate max-w-none dark:prose-invert">${inner}</div>`;
+
+  it.each([
+    [
+      "a fence with a language",
+      "```js\nconst a = 1;\n```",
+      '<pre><code class="language-js">const a = 1;\n</code></pre>',
+    ],
+    ["a fence without a language", "```\nplain\n```", "<pre><code>plain\n</code></pre>"],
+    [
+      "a tilde fence with a title",
+      '~~~py title="x"\nx\n~~~',
+      '<pre><code class="language-py">x\n</code></pre>',
+    ],
+    ["an indented block", "    indented", "<pre><code>indented\n</code></pre>"],
+    [
+      "a language that only starts like mermaid",
+      "```mermaidx\nx\n```",
+      '<pre><code class="language-mermaidx">x\n</code></pre>',
+    ],
+    [
+      "mermaid as the second word of the info string",
+      "```js mermaid\nx\n```",
+      '<pre><code class="language-js">x\n</code></pre>',
+    ],
+    [
+      "an upper-case Mermaid",
+      "```Mermaid\nx\n```",
+      '<pre><code class="language-Mermaid">x\n</code></pre>',
+    ],
+  ])("renders %s exactly as before (a plain pre and code)", (_label, markdown, expected) => {
+    expect(render(markdown)).toBe(WRAPPER(expected));
+  });
+
+  it("leaves inline code and a raw <pre> alone", () => {
+    expect(render("a `mermaid` b")).toBe(WRAPPER("<p>a <code>mermaid</code> b</p>"));
+    expect(render("<pre>raw</pre>")).toBe(WRAPPER("&lt;pre&gt;raw&lt;/pre&gt;"));
+  });
+
+  describe("a mermaid fence", () => {
+    const FENCE = "```mermaid\nflowchart TD\n  A --> B\n```";
+
+    it("is, on the server, the very markup of any other fence (nothing to hydrate differently, the source without JavaScript)", () => {
+      const asJs = render(FENCE.replace("mermaid", "js"));
+      expect(render(FENCE)).toBe(asJs.replace("language-js", "language-mermaid"));
+      expect(render(FENCE)).toBe(
+        WRAPPER('<pre><code class="language-mermaid">flowchart TD\n  A --&gt; B\n</code></pre>'),
+      );
+    });
+
+    it("is also found inside a list and a quote", () => {
+      const html = render(
+        "- item\n\n  ```mermaid\n  graph TD\n  ```\n\n> ```mermaid\n> graph LR\n> ```",
+      );
+      expect(html).toContain('<pre><code class="language-mermaid">graph TD\n</code></pre>');
+      expect(html).toContain('<pre><code class="language-mermaid">graph LR\n</code></pre>');
+    });
+
+    it("keeps hostile content in it text, never an element", () => {
+      const html = render(
+        '```mermaid\nA["<img src=x onerror=alert(1)><script>alert(2)</script>"]\n```',
+      );
+      expect(elementsNamed(html, "img")).toEqual([]);
+      expect(elementsNamed(html, "script")).toEqual([]);
+      expectNoHandlers(html);
+      expect(html).toContain("&lt;script&gt;");
+    });
+
+    it("leaves the fences around it as they were", () => {
+      const html = render(`\`\`\`js\nlet a;\n\`\`\`\n\n${FENCE}\n\n\`\`\`\nplain\n\`\`\``);
+      expect(html).toBe(
+        WRAPPER(
+          '<pre><code class="language-js">let a;\n</code></pre>\n' +
+            '<pre><code class="language-mermaid">flowchart TD\n  A --&gt; B\n</code></pre>\n' +
+            "<pre><code>plain\n</code></pre>",
+        ),
+      );
+    });
+
+    it("over Mermaid's size limit stays the source with a hint, and is never drawn", () => {
+      const long = "A-->B\n".repeat(10_000); // 60 000 characters
+      const html = renderToStaticMarkup(
+        // eslint-disable-next-line react/no-children-prop -- a .test.ts has no JSX, and createElement's types want the provider's required children in the props
+        createElement(NextIntlClientProvider, {
+          locale: "en",
+          messages: en,
+          children: createElement(Markdown, null, `\`\`\`mermaid\n${long}\`\`\``),
+        }),
+      );
+      expect(html).toContain('<pre><code class="language-mermaid">A--&gt;B');
+      expect(html).toContain(
+        '<p class="text-sm text-muted-foreground">This diagram is too long to draw (more than 50,000 characters). Its source is shown instead.</p>',
+      );
+    });
   });
 });
 

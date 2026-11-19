@@ -54,6 +54,7 @@ const UID_OF: Record<AuthoringType, string> = {
   poll: "api::poll.poll",
   dutyPlan: "api::duty-plan.duty-plan",
   kpi: "api::kpi.kpi",
+  process: "api::process.process",
 };
 
 const apiName = (uid: string) => uid.split("::")[1].split(".")[0];

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { buildDutyPlanPayload, type PayloadContext } from "./payload";
 import { coerceDutyPlanValues, emptyDutyPlanValues, type DutyPlanValues } from "./values";
 
@@ -9,6 +9,14 @@ import { coerceDutyPlanValues, emptyDutyPlanValues, type DutyPlanValues } from "
  * shared rules' codes on their field.
  */
 const NOW = Date.parse("2026-10-20T10:00:00.000Z");
+
+// The payload rules also read the wall clock (a plan's "unchanged" check prunes old
+// shifts against `new Date()`): pin it, or the fixtures age out four weeks after NOW.
+beforeAll(() => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(NOW);
+});
+afterAll(() => vi.useRealTimers());
 const ENG = "deptengineering000000000";
 
 const ctx = (overrides: Partial<PayloadContext> = {}): PayloadContext => ({

@@ -62,10 +62,11 @@ export const MODERATORS: readonly RoleType[] = [ADMIN, "editor"];
 export const DEPARTMENT_AUTHOR_ROLES: readonly RoleType[] = ["department_head"];
 
 /**
- * The department authors of duty plans (owner decision 2026-10-20): team
- * leads maintain the shift plans of their department too. Only for this
- * type: DEPARTMENT_AUTHOR_ROLES stays the set for announcements, events and
- * documents.
+ * The department authors of duty plans (owner decision 2026-10-20) and of
+ * processes (2026-11-19): team leads maintain the shift plans and the
+ * process diagrams of their department too. Only for these types:
+ * DEPARTMENT_AUTHOR_ROLES stays the set for announcements, events, documents
+ * and KPIs.
  */
 export const DUTY_PLAN_AUTHOR_ROLES: readonly RoleType[] = ["department_head", "team_lead"];
 
@@ -80,6 +81,7 @@ export const DEPARTMENT_AUTHOR_ROLES_OF: Readonly<Record<AuthoringType, readonly
   document: DEPARTMENT_AUTHOR_ROLES,
   dutyPlan: DUTY_PLAN_AUTHOR_ROLES,
   kpi: DEPARTMENT_AUTHOR_ROLES,
+  process: DUTY_PLAN_AUTHOR_ROLES,
   quickLink: [],
   poll: [],
 };

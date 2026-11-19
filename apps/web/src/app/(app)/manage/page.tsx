@@ -13,6 +13,7 @@ import {
   Link2,
   Lock,
   TrendingUp,
+  Workflow,
   Megaphone,
   Shield,
   Users,
@@ -54,6 +55,7 @@ const AREA_ICONS: Readonly<Record<Exclude<ManageArea, "lessons">, LucideIcon>> =
   courses: GraduationCap,
   dutyPlans: CalendarClock,
   kpis: TrendingUp,
+  processes: Workflow,
 };
 
 const ROLE_COLORS = [

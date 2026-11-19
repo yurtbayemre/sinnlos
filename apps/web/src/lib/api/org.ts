@@ -9,8 +9,12 @@ import { strapi, type StrapiListResponse } from "@/lib/strapi/client";
 import { strapiQuery, withQuery } from "@/lib/strapi/query";
 import type { Department, Team, UserLite } from "@/lib/types";
 
-/** A user as the list populates deliver it: display name and job title, no contact field. */
-export type UserName = Pick<UserLite, "id" | "displayName" | "jobTitle">;
+/**
+ * A user as the list populates deliver it: display name and job title, no
+ * contact field. `username` is the name to show when the optional display
+ * name is blank (displayNameOf); only the head and the lead carry it.
+ */
+export type UserName = Pick<UserLite, "id" | "displayName" | "jobTitle" | "username">;
 
 /** A department as a plain `populate[...]=true` delivers it: own fields, no relations. */
 export type DepartmentRow = Omit<Department, "head" | "members" | "teams" | "headerImage">;
@@ -52,7 +56,7 @@ export function listDepartments(): Promise<WalkResult<DepartmentListItem>> {
         withQuery(
           "/api/departments",
           strapiQuery()
-            .populateFields("head", ["displayName", "jobTitle"])
+            .populateFields("head", ["displayName", "jobTitle", "username"])
             .populate("teams")
             .sort(["name:asc", "id:asc"])
             .page(page, 100),
@@ -108,7 +112,7 @@ export function listTeams(): Promise<WalkResult<TeamListItem>> {
           "/api/teams",
           strapiQuery()
             .populate("department")
-            .populateFields("lead", ["displayName", "jobTitle"])
+            .populateFields("lead", ["displayName", "jobTitle", "username"])
             .populateFields("members", ["displayName", "jobTitle"])
             .sort(["name:asc", "id:asc"])
             .page(page, 100),

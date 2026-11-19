@@ -3,6 +3,7 @@ import { demoClock } from "./clock";
 import { demoDocuments } from "./documents";
 import { demoDuties } from "./duties";
 import { demoKpis } from "./kpis";
+import { demoProcesses } from "./processes";
 import { demoEvents } from "./events";
 import { demoKudos } from "./kudos";
 import { demoMarketplace } from "./marketplace";
@@ -31,6 +32,7 @@ export function createDemoData(zone: string, now: Date = new Date()) {
     ...demoDocuments(users, clock),
     ...demoDuties(users, clock),
     ...demoKpis(clock),
+    ...demoProcesses(clock),
     ...demoMarketplace(users, clock),
     ...demoNotifications(users, clock),
     ...demoTraining(clock),

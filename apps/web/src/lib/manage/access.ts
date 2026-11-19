@@ -69,6 +69,7 @@ const AREA_MODULE: Readonly<Partial<Record<ManageArea, ModuleName>>> = {
   lessons: "training",
   dutyPlans: "duty-plans",
   kpis: "kpis",
+  processes: "tools",
 };
 
 /** Whether FEATURES_OFF switches the area's module off (its pages answer 404 then). */

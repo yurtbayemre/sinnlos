@@ -44,6 +44,10 @@
     "kpis": {
       "title": "KPIs",
       "description": "Record department figures, for example cubic metres loaded or orders completed."
+    },
+    "processes": {
+      "title": "Processes",
+      "description": "Draw or import business processes as BPMN diagrams, with a description in words."
     }
   },
   "counts": {

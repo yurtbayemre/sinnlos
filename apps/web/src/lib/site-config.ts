@@ -84,13 +84,21 @@ export function plausibleScript(env: Env): { src: string; domain: string } | nul
 }
 
 /**
- * The analytics script the root layout renders: none while the module
- * `secrets` is on (v0.35, plan §3.10). A third-party script must not share
- * a document with a revealed secret, and client navigation keeps a script
- * loaded on any page alive into /secrets, so it stays off on every page.
+ * The modules that keep the analytics script off while they are on: `secrets`
+ * (v0.35, plan §3.10) and `tools` (v1.1: the PDF and QR pages promise that
+ * files and entries are not transmitted). A third-party script must not share
+ * a document with a revealed secret or a browser tool's data, and client
+ * navigation keeps a script loaded on any page alive into them, so it stays
+ * off on every page.
  */
+export function analyticsBlockers(env: Env): ("secrets" | "tools")[] {
+  const off = featuresOff(env);
+  return (["secrets", "tools"] as const).filter((module) => !off.has(module));
+}
+
+/** The analytics script the root layout renders: only while both modules above are off. */
 export function analyticsScript(env: Env): { src: string; domain: string } | null {
-  return featuresOff(env).has("secrets") ? plausibleScript(env) : null;
+  return analyticsBlockers(env).length === 0 ? plausibleScript(env) : null;
 }
 
 /**

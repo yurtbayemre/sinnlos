@@ -30,6 +30,7 @@ export const MANAGE_MESSAGE_AREAS = [
   "activity",
   "dutyPlans",
   "kpis",
+  "processes",
   "users",
 ] as const;
 
@@ -56,6 +57,7 @@ const MANAGE: Readonly<Record<Locale, Readonly<Record<ManageMessageArea, () => J
     activity: () => import("../../messages/manage/activity.en.json"),
     dutyPlans: () => import("../../messages/manage/dutyPlans.en.json"),
     kpis: () => import("../../messages/manage/kpis.en.json"),
+    processes: () => import("../../messages/manage/processes.en.json"),
     users: () => import("../../messages/manage/users.en.json"),
   },
   de: {
@@ -71,6 +73,7 @@ const MANAGE: Readonly<Record<Locale, Readonly<Record<ManageMessageArea, () => J
     activity: () => import("../../messages/manage/activity.de.json"),
     dutyPlans: () => import("../../messages/manage/dutyPlans.de.json"),
     kpis: () => import("../../messages/manage/kpis.de.json"),
+    processes: () => import("../../messages/manage/processes.de.json"),
     users: () => import("../../messages/manage/users.de.json"),
   },
 };
@@ -87,6 +90,25 @@ export function withManageMessages<
     throw new Error("[i18n] the base catalog must not define `manage` (messages/manage/*)");
   }
   return { ...base, manage: { ...areas } };
+}
+
+/**
+ * The namespaces only the /tools pages read in the browser (PdfTool, QrTool,
+ * ProcessViewer; the pages themselves translate on the server, from the whole
+ * catalog). The root provider leaves them out of every page's payload (6.3 KB raw,
+ * about 2 KB gzipped, of every page); app/(app)/tools/layout.tsx hands the subtree the
+ * whole catalog. tools-messages.test.ts pins that no client component outside
+ * /tools reads them.
+ */
+export const TOOLS_MESSAGE_NAMESPACES = ["tools", "processes"] as const;
+
+/** `messages` without the namespaces of {@link TOOLS_MESSAGE_NAMESPACES}. */
+export function withoutToolsMessages<T extends object>(
+  messages: T,
+): Omit<T, (typeof TOOLS_MESSAGE_NAMESPACES)[number]> {
+  const rest = { ...messages } as Record<string, unknown>;
+  for (const namespace of TOOLS_MESSAGE_NAMESPACES) delete rest[namespace];
+  return rest as Omit<T, (typeof TOOLS_MESSAGE_NAMESPACES)[number]>;
 }
 
 /** The merged catalog of `locale`. */

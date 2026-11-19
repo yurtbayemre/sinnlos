@@ -25,6 +25,7 @@ import type manageOrg from "../messages/manage/org.en.json";
 import type manageActivity from "../messages/manage/activity.en.json";
 import type manageDutyPlans from "../messages/manage/dutyPlans.en.json";
 import type manageKpis from "../messages/manage/kpis.en.json";
+import type manageProcesses from "../messages/manage/processes.en.json";
 import type manageUsers from "../messages/manage/users.en.json";
 import type { Locale as AppLocale } from "@/i18n/locale";
 
@@ -45,6 +46,7 @@ interface ManageMessages {
   activity: typeof manageActivity;
   dutyPlans: typeof manageDutyPlans;
   kpis: typeof manageKpis;
+  processes: typeof manageProcesses;
   users: typeof manageUsers;
 }
 

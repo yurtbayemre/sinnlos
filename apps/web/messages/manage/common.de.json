@@ -44,6 +44,10 @@
     "kpis": {
       "title": "Kennzahlen",
       "description": "Kennzahlen der Abteilungen erfassen, zum Beispiel verladene Kubikmeter oder abgeschlossene Aufträge."
+    },
+    "processes": {
+      "title": "Prozesse",
+      "description": "Geschäftsprozesse als BPMN-Diagramm zeichnen oder importieren, mit einer Beschreibung in Worten."
     }
   },
   "counts": {

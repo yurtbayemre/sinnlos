@@ -1,7 +1,7 @@
 /**
  * FEATURES_OFF in the web (v0.28, S2 + M11; deep-dive v028-contract-a1.md).
  * One env list switches modules (events, training, marketplace, kudos,
- * celebrations, polls, duty-plans, kpis, secrets) and features (read-confirmations,
+ * celebrations, polls, duty-plans, kpis, secrets, tools) and features (read-confirmations,
  * training-reports, search-logging) off; the cms and the web read the same
  * value through the same parser (@sinnlos/domain features.ts).
  *
@@ -47,6 +47,8 @@ const PATH_SWITCHES: readonly (readonly [prefix: string, name: SwitchName])[] = 
   ["/kpis", "kpis"],
   ["/manage/kpis", "kpis"],
   ["/secrets", "secrets"],
+  ["/tools", "tools"],
+  ["/manage/processes", "tools"],
 ];
 
 /** The first switch in `off` that `pathname` belongs to, or null. */

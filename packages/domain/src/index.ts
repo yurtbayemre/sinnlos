@@ -29,6 +29,7 @@ export * from "./kpi.js";
 export * from "./kudos.js";
 export * from "./plain-date.js";
 export * from "./poll-close.js";
+export * from "./process.js";
 export * from "./roles.js";
 export * from "./search.js";
 export * from "./secret-share.js";

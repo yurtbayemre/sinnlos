@@ -113,6 +113,7 @@ const A = {
   department: "api::department.department",
   dutyPlan: "api::duty-plan.duty-plan",
   kpi: "api::kpi.kpi",
+  process: "api::process.process",
   eventRsvp: "api::event-rsvp.event-rsvp",
   kudos: "api::kudos.kudos",
   lesson: "api::lesson.lesson",
@@ -256,6 +257,7 @@ const SECTION_READS: Record<ReadSection, string[]> = {
   marketplace: [`${A.classified}.find`, `${A.classified}.findOne`],
   duties: [`${A.dutyPlan}.find`, `${A.dutyPlan}.findOne`],
   kpis: [`${A.kpi}.find`, `${A.kpi}.findOne`],
+  processes: [`${A.process}.find`, `${A.process}.findOne`],
   secrets: ["api::secret-share.secret-share.list", "api::secret-share.secret-share.findOne"],
   training: [
     `${A.course}.find`,
@@ -338,6 +340,15 @@ const AUTHORING_GRANTS: Record<AuthoringArea, Partial<Record<AuthoringVerb, stri
       discard: `${A.kpi}.discardDraft`,
       delete: `${A.kpi}.delete`,
     },
+    // Processes (v1.1): no schedule either; authored like the duty plans.
+    processes: {
+      create: `${A.process}.create`,
+      edit: `${A.process}.update`,
+      publish: `${A.process}.publish`,
+      unpublish: `${A.process}.unpublish`,
+      discard: `${A.process}.discardDraft`,
+      delete: `${A.process}.delete`,
+    },
   };
 })();
 
@@ -380,8 +391,11 @@ describe("capabilitiesFor = the cms grants (decision 06 §L2)", () => {
       } else if (MODERATORS.includes(role)) {
         expect(caps.authorScope[area], area).toBe("any");
       } else {
-        // Batch 15: "ownDepartment" exactly for the department authors (team leads on duty plans).
-        const authors = area === "dutyPlans" ? DUTY_PLAN_AUTHOR_ROLES : DEPARTMENT_AUTHOR_ROLES;
+        // Batch 15: "ownDepartment" exactly for the department authors (team leads on duty plans and processes).
+        const authors =
+          area === "dutyPlans" || area === "processes"
+            ? DUTY_PLAN_AUTHOR_ROLES
+            : DEPARTMENT_AUTHOR_ROLES;
         expect(authors, `${role} authors ${area}`).toContain(role);
         expect(caps.authorScope[area], area).toBe("ownDepartment");
       }

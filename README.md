@@ -78,6 +78,12 @@ Further reading:
   colleague, stored encrypted, opened once with "Show and delete" and then
   deleted; at most 24 hours; no admin view of the text
   ([security model](./docs/security.md#secret-sharing)).
+- **Tools** (v1.0.0-rc.2, module `tools`): **processes** as BPMN diagrams
+  (bpmn-js, with a required description in words; authored like duty plans),
+  and **PDF tools** (merge, pick, rotate, delete pages) and a **QR code**
+  generator that work in the browser only. **Mermaid diagrams** in every
+  Markdown body, and a **department view** of the org chart
+  ([security model](./docs/security.md#tools-and-diagrams)).
 - **Authoring in the web** at `/manage`: editors and admins write
   announcements, events, polls, quick links and documents (with the file
   upload) with drafts, a preview, scheduled publishing and a check for
@@ -173,6 +179,7 @@ rules are in
 | `quick-link`      | Dashboard link, company-wide or for selected departments; written at `/manage/quick-links` or in the admin             |
 | `duty-plan`       | Duty plan: who is on duty when (shift templates and shifts); written at `/manage/duty-plans`                           |
 | `kpi`             | Department KPI: name, unit, rhythm (month, quarter, year), values entered by hand; written at `/manage/kpis`           |
+| `process`         | Business process: summary and BPMN 2.0 diagram; read at `/tools/processes`, written at `/manage/processes`             |
 | `course`          | Training course with ordered lessons, `mandatory` flag and completion mode; authoring API and Strapi panel             |
 | `lesson`          | One lesson: Markdown body, YouTube video, optional quiz                                                                |
 | `lesson-progress` | Completion receipt per user and lesson                                                                                 |
@@ -244,6 +251,7 @@ Content types: `C` = create, `R` = find + findOne, `U` = update,
 | `notification`    | RD           | RD       | RD                | RD          | RD       | R       | R               |
 | `poll`            | CRUD         | CRUD     | R                 | R           | R        | R       | R               |
 | `poll-vote`       | —            | —        | —                 | —           | —        | —       | —               |
+| `process`         | CRUD         | CRUD     | CRU               | CRU         | R        | —       | R               |
 | `quick-link`      | CRUD         | CRUD     | R                 | R           | R        | R       | R               |
 | `reaction`        | CRD          | CRD      | CRD               | CRD         | CRD      | R       | CR              |
 | `search-log`      | C            | C        | C                 | C           | C        | C       | C               |
@@ -294,6 +302,11 @@ Custom actions and plugin routes (`✓` = granted, `—` = not granted):
 | `api::kpi.kpi.discardDraft`                        | `POST /api/kpis/:id/discard-draft`              | ✓            | ✓        | ✓                 | —           | —        | —       | —               |
 | `api::kpi.kpi.authoringList`                       | `GET /api/kpis/authoring`                       | ✓            | ✓        | ✓                 | —           | —        | —       | —               |
 | `api::kpi.kpi.editable`                            | `GET /api/kpis/:id/editable`                    | ✓            | ✓        | ✓                 | —           | —        | —       | —               |
+| `api::process.process.publish`                     | `POST /api/processes/:id/publish`               | ✓            | ✓        | ✓                 | ✓           | —        | —       | —               |
+| `api::process.process.unpublish`                   | `POST /api/processes/:id/unpublish`             | ✓            | ✓        | ✓                 | ✓           | —        | —       | —               |
+| `api::process.process.discardDraft`                | `POST /api/processes/:id/discard-draft`         | ✓            | ✓        | ✓                 | ✓           | —        | —       | —               |
+| `api::process.process.authoringList`               | `GET /api/processes/authoring`                  | ✓            | ✓        | ✓                 | ✓           | —        | —       | —               |
+| `api::process.process.editable`                    | `GET /api/processes/:id/editable`               | ✓            | ✓        | ✓                 | ✓           | —        | —       | —               |
 | `api::quick-link.quick-link.publish`               | `POST /api/quick-links/:id/publish`             | ✓            | ✓        | —                 | —           | —        | —       | —               |
 | `api::quick-link.quick-link.unpublish`             | `POST /api/quick-links/:id/unpublish`           | ✓            | ✓        | —                 | —           | —        | —       | —               |
 | `api::quick-link.quick-link.discardDraft`          | `POST /api/quick-links/:id/discard-draft`       | ✓            | ✓        | —                 | —           | —        | —       | —               |
@@ -466,7 +479,12 @@ The cms trusts the `X-Forwarded-For` header the edge sets, so the edge must over
 
 ## Accessibility
 
-Each release checks the main screens for WCAG 2.1 A and AA with axe in the browser tests ([e2e/a11y.spec.ts](./e2e/a11y.spec.ts)), in light and dark mode. The screens are: sign-in and the second factor, the dashboard, search, an editor form, a lesson with its quiz, kudos and polls. A manual keyboard and zoom pass covers the same paths.
+Each release checks the main screens for WCAG 2.1 A and AA with axe in the browser tests ([e2e/a11y.spec.ts](./e2e/a11y.spec.ts)), in light and dark mode. The screens are: sign-in and the second factor, the dashboard, search, an editor form, a lesson with its quiz, kudos and polls, the Tools hub, the PDF and QR tools and the org chart's department view. A manual keyboard and zoom pass covers the same paths.
+
+Known limits:
+
+- **Process diagrams (Tools, BPMN):** drawing a diagram needs a mouse or touch. Importing a `.bpmn` file, writing the description, saving and publishing work by keyboard. Every process has a required description in words, which is the reading alternative to the diagram.
+- **Mermaid diagrams in Markdown:** the drawn diagram is a picture with the label "Diagramm"; its source text stays one disclosure ("Quelltext anzeigen") away.
 
 This is a test, not a conformance claim. Please report a barrier as an issue.
 
